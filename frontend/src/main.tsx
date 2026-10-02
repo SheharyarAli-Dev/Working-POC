@@ -6,10 +6,9 @@ import { Phase01Hero } from './components/Phase01Hero';
 import { CavrModule } from './components/CavrModule';
 import { SableModule } from './components/SableModule';
 import { SatraModule } from './components/SatraModule';
-import { RunWorkflowModule } from './components/RunWorkflowModule';
-import { Package, Network, ShieldCheck, Workflow } from 'lucide-react';
+import { Package, Network, ShieldCheck } from 'lucide-react';
 
-type TabType = 'CAVR' | 'SABLE' | 'SATRA' | 'RUN_WORKFLOW';
+type TabType = 'CAVR' | 'SABLE' | 'SATRA';
 
 function App() {
   const [activeTab, setActiveTab] = useState<TabType>('CAVR');
@@ -62,14 +61,6 @@ function App() {
               <span>SATRA</span>
             </button>
 
-            <button
-              className={`tab-btn ${activeTab === 'RUN_WORKFLOW' ? 'active' : ''}`}
-              onClick={() => setActiveTab('RUN_WORKFLOW')}
-              id="tab-run-workflow"
-            >
-              <Workflow size={17} />
-              <span>RUN WORKFLOW</span>
-            </button>
           </div>
 
           {/* Tab Views */}
@@ -77,7 +68,6 @@ function App() {
             {activeTab === 'CAVR' && <CavrModule />}
             {activeTab === 'SABLE' && <SableModule />}
             {activeTab === 'SATRA' && <SatraModule />}
-            {activeTab === 'RUN_WORKFLOW' && <RunWorkflowModule />}
           </div>
         </section>
 
