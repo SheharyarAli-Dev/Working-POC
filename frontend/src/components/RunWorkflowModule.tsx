@@ -15,6 +15,7 @@ export const RunWorkflowModule: React.FC = () => {
   const [scenarios, setScenarios] = useState<Scenario[]>([]);
   const [selectedScenario, setSelectedScenario] = useState<string>('safe');
   const [currentRun, setCurrentRun] = useState<any>(null);
+  const [moduleEvidence, setModuleEvidence] = useState<any[]>([]);
   const [events, setEvents] = useState<any[]>([]);
   const [loading, setLoading] = useState<boolean>(false);
 
@@ -29,6 +30,10 @@ export const RunWorkflowModule: React.FC = () => {
       .then((runs) => {
         if (runs && runs.length > 0) {
           setCurrentRun(runs[0]);
+          fetch(`/api/runs/${runs[0].run_id}/evidence`)
+            .then((r) => r.ok ? r.json() : [])
+            .then((evidence) => setModuleEvidence(evidence))
+            .catch(() => setModuleEvidence([]));
         }
       })
       .catch((e) => console.error(e));
@@ -48,6 +53,7 @@ export const RunWorkflowModule: React.FC = () => {
       if (res.ok) {
         const run = await res.json();
         setCurrentRun(run);
+        setModuleEvidence([]);
         pollRun(run.run_id);
       }
     } catch (err) {
@@ -62,14 +68,15 @@ export const RunWorkflowModule: React.FC = () => {
     const interval = setInterval(async () => {
       count++;
       try {
-        const [rRes, evRes] = await Promise.all([
+        const [rRes, evRes, evidenceRes] = await Promise.all([
           fetch(`/api/runs/${runId}`),
-          fetch(`/api/runs/${runId}/events`)
+          fetch(`/api/runs/${runId}/events`),
+          fetch(`/api/runs/${runId}/evidence`)
         ]);
         if (rRes.ok) {
           const runData = await rRes.json();
           setCurrentRun(runData);
-          if (runData.lifecycle === 'COMPLETED' || count > 20) {
+          if (['COMPLETE', 'ERROR', 'INTERRUPTED'].includes(runData.lifecycle) || count > 120) {
             clearInterval(interval);
           }
         }
@@ -77,6 +84,7 @@ export const RunWorkflowModule: React.FC = () => {
           const evData = await evRes.json();
           setEvents(evData);
         }
+        if (evidenceRes.ok) setModuleEvidence(await evidenceRes.json());
       } catch (e) {
         clearInterval(interval);
       }
@@ -86,6 +94,13 @@ export const RunWorkflowModule: React.FC = () => {
   const decision = currentRun?.final_decision || 'ACCEPT';
   const isAccept = decision === 'ACCEPT';
   const isBlock = decision === 'BLOCK';
+  const sableEvidence = [...moduleEvidence].reverse().find((e) => e.analyzer === 'SABLE' && !e.stale);
+  const sableStatus = sableEvidence?.status ?? 'PENDING';
+  const sableSnapshotIntegrityValid = Boolean(sableEvidence && sableEvidence.integrity_valid &&
+    sableEvidence.candidate_snapshot === currentRun?.candidate_snapshot);
+  const sableBadge = !sableEvidence ? 'PENDING' : !sableSnapshotIntegrityValid ? 'STALE / INVALID' :
+    sableStatus === 'PRESERVED' || sableStatus === 'NOT_APPLICABLE' ? `${sableStatus} → ACCEPTABLE` :
+    sableStatus === 'REGRESSED' ? 'REGRESSED → BLOCKING' : `${sableStatus} → REVIEW`;
 
   return (
     <div className="workflow-module-container">
@@ -170,12 +185,15 @@ export const RunWorkflowModule: React.FC = () => {
           <div className="b-header">
             <span className="b-icon green"><Network size={16} /></span>
             <strong>SABLE GATE</strong>
-            <span className={`badge ${selectedScenario.includes('sable_regressed') || selectedScenario.includes('sable_widened') ? 'bad' : 'good'}`}>
-              {selectedScenario.includes('sable_regressed') || selectedScenario.includes('sable_widened') ? 'REGRESSED → BLOCK' : 'PRESERVED → ACCEPT'}
+            <span className={`badge ${!sableEvidence || !sableSnapshotIntegrityValid ? 'warn' : sableStatus === 'REGRESSED' ? 'bad' : sableStatus === 'PRESERVED' || sableStatus === 'NOT_APPLICABLE' ? 'good' : 'warn'}`}>
+              {sableBadge}
             </span>
           </div>
-          <p>Terraform cloud resources &amp; least-privilege IAM boundary attribution.</p>
-          <div className="b-meta">Obligation: S3-APPROLE-CUSTOMERDATA</div>
+          <p>Shared evidence for local Terraform modules, S3 buckets, and inline IAM role policies.</p>
+          <div className="b-meta">Status: {sableStatus} · {sableSnapshotIntegrityValid ? 'evidence present; snapshot and integrity checks pass' : sableEvidence ? 'snapshot or integrity check failed' : 'awaiting shared evidence'}</div>
+          {sableEvidence && <div className="b-meta">Snapshot: <code>{sableEvidence.candidate_snapshot?.slice(0, 12)}…</code> · Input: <code>{sableEvidence.input_hash?.slice(0, 12)}…</code></div>}
+          {sableEvidence?.details?.reason && <div className="b-meta">Reason: {sableEvidence.details.reason}</div>}
+          <div className="b-meta">Final gate: {currentRun?.final_decision ?? 'REVIEW'} · {currentRun?.reasons?.join(' · ') || 'Waiting for current module evidence'}</div>
         </div>
 
         <div className="boundary-card">

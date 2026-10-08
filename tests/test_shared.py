@@ -28,6 +28,18 @@ def test_final_matrix(a,b,c,expected):
     evidence=[{'analyzer':m,'status':s,'candidate_snapshot':'s','input_hash':m} for m,s in zip(('CAVR','SATRA','SABLE'),(a,b,c))]
     assert decide(['CAVR','SATRA','SABLE'],evidence,'s',{m:m for m in ('CAVR','SATRA','SABLE')})[0]==expected
 
+@pytest.mark.parametrize('status,expected',[
+    ('PRESERVED','ACCEPT'),('NOT_APPLICABLE','ACCEPT'),('REGRESSED','BLOCK'),('UNKNOWN','REVIEW')])
+def test_sable_final_gate_statuses(status,expected):
+    evidence=[{'analyzer':'SABLE','status':status,'candidate_snapshot':'s','input_hash':'i','integrity_valid':True}]
+    assert decide(['SABLE'],evidence,'s',{'SABLE':'i'})[0]==expected
+
+@pytest.mark.parametrize('patch',[
+    {'candidate_snapshot':'old'},{'input_hash':'old'},{'integrity_valid':False},{'stale':True}])
+def test_sable_final_gate_rejects_untrusted_evidence(patch):
+    evidence=[{'analyzer':'SABLE','status':'PRESERVED','candidate_snapshot':'s','input_hash':'i','integrity_valid':True,**patch}]
+    assert decide(['SABLE'],evidence,'s',{'SABLE':'i'})[0]=='REVIEW'
+
 @pytest.mark.parametrize('patch',[{'stale':True},{'candidate_snapshot':'old'},{'input_hash':'old'},{'integrity_valid':False}])
 def test_gate_refuses_stale(patch):
     e={'analyzer':'CAVR','status':'VERIFIED','candidate_snapshot':'s','input_hash':'i',**patch}

@@ -1,0 +1,29 @@
+name: SABLE shared assurance
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  sable-shared:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: python -m pip install -r requirements.txt
+      - name: Run focused SABLE and shared-gate tests
+        run: >-
+          python -m pytest -q
+          tests/test_modules.py::test_sable_real_hcl
+          tests/test_modules.py::test_sable_unknown_parse_and_disabled
+          tests/test_modules.py::test_sable_unsupported_iam_stays_unknown
+          tests/test_modules.py::test_sable_unsupported_terraform_stays_unknown
+          tests/test_modules.py::test_sable_unverified_baseline_and_empty_baseline
+          tests/test_shared.py::test_final_matrix
+          tests/test_shared.py::test_sable_final_gate_statuses
+          tests/test_shared.py::test_sable_final_gate_rejects_untrusted_evidence
+          tests/test_sable_isolation.py
+          tests/test_integration.py::test_shared_sable_evidence_drives_final_gate

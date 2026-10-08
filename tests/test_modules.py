@@ -93,7 +93,41 @@ def test_sable_real_hcl(scenario,case,wanted):
 
 def test_sable_unknown_parse_and_disabled(scenario,service):
     r,c=scenario();(c.path/'infra/main.tf').write_text('resource "broken" {');assert sable(c,lambda *a:None)[0]=='UNKNOWN'
-    service.change_threats(record_id='SABLE-S3IAM-001',enabled=False);c=ContextService(r.candidate_workspace,r.baseline_workspace,service.threats.snapshot());assert sable(c,lambda *a:None)[0]=='UNKNOWN'
+    service.change_threats(record_id='SABLE-S3IAM-001',enabled=False);c=ContextService(r.candidate_workspace,r.baseline_workspace,service.threats.snapshot())
+    status,details,_=sable(c,lambda *a:None)
+    assert status=='UNKNOWN' and 'SABLE-S3IAM-001' in details['missing_rules']
+
+def test_sable_unsupported_iam_stays_unknown(scenario):
+    _,c=scenario('sable_preserved')
+    policy=c.path/'infra/main.tf'
+    text=policy.read_text()
+    text=text.replace('Action = ["s3:GetObject", "s3:PutObject"], Resource = ["${module.storage.active_arn}/*"]',
+                      'Action = ["s3:GetObject", "s3:PutObject"], Condition = { Bool = { "aws:SecureTransport" = "true" } }, Resource = ["${module.storage.active_arn}/*"]')
+    policy.write_text(text)
+    status,details,_=sable(c,lambda *a:None)
+    assert status=='UNKNOWN',details
+    assert not details['projected_authorization']['known']
+
+def test_sable_unsupported_terraform_stays_unknown(scenario):
+    _,c=scenario('sable_preserved')
+    main=c.path/'infra/main.tf'
+    main.write_text(main.read_text()+'\nmodule "multi_storage" { source = "./modules/storage" count = 2 }\n')
+    status,details,_=sable(c,lambda *a:None)
+    assert status=='UNKNOWN',details
+    assert any('Module instances need plan expansion' in error for error in details['parse_errors'])
+
+def test_sable_unverified_baseline_and_empty_baseline(scenario):
+    r,c=scenario('sable_preserved')
+    baseline_policy=Path(r.baseline_workspace)/'infra/main.tf'
+    baseline_policy.write_text(baseline_policy.read_text().replace('s3:PutObject','s3:ListBucket'))
+    status,details,_=sable(c,lambda *a:None)
+    assert status=='UNKNOWN',details
+    assert details['baseline_verification']['holds'] is False
+
+    for file in (Path(r.baseline_workspace)/'infra').rglob('*.tf'):
+        file.unlink()
+    status,details,_=sable(c,lambda *a:None)
+    assert status=='NOT_APPLICABLE',details
 
 def test_satra_scc_and_inconclusive(scenario,service,tmp_path):
     r,c=scenario();assert build(c)['expected_status']==403

@@ -1,7 +1,8 @@
 from pathlib import Path
 import pytest
-from backend.orchestrator.hashing import snapshot
+from backend.orchestrator.hashing import snapshot,files
 from backend.orchestrator.service import Service
+from backend.orchestrator.context_service import ContextService
 pytestmark=pytest.mark.integration
 
 def current(svc,run,module):return [e for e in svc.store.evidence(run.run_id) if e['analyzer']==module and not e['stale']][-1]
@@ -51,3 +52,30 @@ def test_gateway_and_knowledge_revocation(integration_runs):
     svc.change_threats(record_id='TRIG-ENV',enabled=True);svc.analyze(r.run_id)
     assert svc.store.run(r.run_id).final_decision=='ACCEPT'
     assert len(svc.store.evidence(r.run_id))>before
+
+@pytest.mark.parametrize('scenario,status,decision',[
+    ('sable_preserved','PRESERVED','ACCEPT'),
+    ('sable_regressed','REGRESSED','BLOCK'),
+    ('sable_unknown','UNKNOWN','REVIEW'),
+])
+def test_shared_sable_evidence_drives_final_gate(tmp_path,scenario,status,decision):
+    svc=Service(tmp_path/'runtime')
+    run=svc.create(scenario)
+    # Keep this integration run focused on the shared SABLE path so CI does not
+    # need to execute unrelated CAVR/SATRA analyzers.
+    candidate=Path(run.candidate_workspace)
+    for relative in files(candidate):
+        if relative!='policy.json' and not relative.startswith('infra/'):
+            (candidate/relative).unlink()
+    svc.analyze(run.run_id)
+    run=svc.store.run(run.run_id)
+    rows=[e for e in svc.store.evidence(run.run_id) if e['analyzer']=='SABLE' and not e['stale']]
+    assert rows, 'shared orchestrator did not publish SABLE evidence'
+    evidence=rows[-1]
+    context=ContextService(run.candidate_workspace,run.baseline_workspace,svc.threats.snapshot())
+    assert 'SABLE' in run.applicable
+    assert evidence['status']==status
+    assert evidence['candidate_snapshot']==run.candidate_snapshot
+    assert evidence['input_hash']==context.input_hash('SABLE')
+    assert evidence['integrity_valid']
+    assert run.final_decision==decision,run.reasons
