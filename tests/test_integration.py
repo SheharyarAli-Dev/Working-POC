@@ -70,8 +70,15 @@ def test_shared_sable_evidence_drives_final_gate(tmp_path,scenario,status,decisi
             (candidate/relative).unlink()
     svc.analyze(run.run_id)
     run=svc.store.run(run.run_id)
-    rows=[e for e in svc.store.evidence(run.run_id) if e['analyzer']=='SABLE' and not e['stale']]
-    assert rows, 'shared orchestrator did not publish SABLE evidence'
+    published_evidence=svc.store.evidence(run.run_id)
+    rows=[e for e in published_evidence if e['analyzer']=='SABLE' and not e['stale']]
+    assert rows, (
+        'shared orchestrator did not publish SABLE evidence; '
+        f'lifecycle={run.lifecycle!r}; error={run.error!r}; '
+        f'applicable={run.applicable!r}; '
+        f'emitted_events={svc.store.events(run.run_id)!r}; '
+        f'published_evidence={published_evidence!r}'
+    )
     evidence=rows[-1]
     context=ContextService(run.candidate_workspace,run.baseline_workspace,svc.threats.snapshot())
     assert 'SABLE' in run.applicable
