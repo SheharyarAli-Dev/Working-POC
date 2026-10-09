@@ -89,6 +89,7 @@ def test_repair_constraints():
 def test_sable_real_hcl(scenario,case,wanted):
     _,c=scenario(case);status,d,_=sable(c,lambda *a:None);assert status==wanted,d
     assert not d['parse_errors'];assert d['baseline_verification']['holds']
+    if wanted in ('PRESERVED','REGRESSED'):assert d['projected_authorization']['known'] is True
     if case=='sable_regressed':assert any(v['local_predicate'] for v in d['candidate_only']) and not d['projected_authorization']['holds']
 
 def test_sable_unknown_parse_and_disabled(scenario,service):
@@ -107,6 +108,42 @@ def test_sable_unsupported_iam_stays_unknown(scenario):
     status,details,_=sable(c,lambda *a:None)
     assert status=='UNKNOWN',details
     assert not details['projected_authorization']['known']
+
+def test_sable_unresolved_role_binding_with_valid_policy_is_unknown(scenario):
+    _,c=scenario('sable_preserved')
+    main=c.path/'infra/main.tf'
+    main.write_text(main.read_text()+'''\nresource "aws_iam_role_policy" "dynamic_extra" {
+  role = var.additional_role
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{ Effect = "Allow", Action = ["s3:*"], Resource = ["*"] }]
+  })
+}
+''')
+    status,details,_=sable(c,lambda *a:None)
+    assert status=='UNKNOWN',details
+    authorization=details['projected_authorization']
+    assert not authorization['known']
+    assert authorization['grants'], 'the known valid policy should still be represented'
+    assert any('aws_iam_role_policy.dynamic_extra: role binding unresolved' in item for item in authorization['unknown'])
+
+def test_sable_explicitly_unrelated_role_binding_is_ignored(scenario):
+    _,c=scenario('sable_preserved')
+    main=c.path/'infra/main.tf'
+    main.write_text(main.read_text()+'''\nresource "aws_iam_role" "other" {
+  name = "invoicehub-unrelated-role"
+  assume_role_policy = jsonencode({ Version = "2012-10-17", Statement = [{ Effect = "Allow", Principal = { Service = "ecs-tasks.amazonaws.com" }, Action = "sts:AssumeRole" }] })
+}
+resource "aws_iam_role_policy" "other_role" {
+  role = aws_iam_role.other.id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{ Effect = "Allow", Action = ["s3:*"], Resource = ["*"] }]
+  })
+}
+''')
+    status,details,_=sable(c,lambda *a:None)
+    assert status=='PRESERVED',details
 
 def test_sable_unsupported_terraform_stays_unknown(scenario):
     _,c=scenario('sable_preserved')
