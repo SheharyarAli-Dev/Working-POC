@@ -26,4 +26,5 @@ jobs:
           tests/test_shared.py::test_sable_final_gate_statuses
           tests/test_shared.py::test_sable_final_gate_rejects_untrusted_evidence
           tests/test_sable_isolation.py
+          tests/test_integration.py::test_git_diff_handles_non_utf8_fixture_content
           tests/test_integration.py::test_shared_sable_evidence_drives_final_gate

@@ -3,9 +3,19 @@ import pytest
 from backend.orchestrator.hashing import snapshot,files
 from backend.orchestrator.service import Service
 from backend.orchestrator.context_service import ContextService
+from backend.integrations.git_adapter import diff,init_repo
 pytestmark=pytest.mark.integration
 
 def current(svc,run,module):return [e for e in svc.store.evidence(run.run_id) if e['analyzer']==module and not e['stale']][-1]
+
+def test_git_diff_handles_non_utf8_fixture_content(tmp_path):
+    repo=tmp_path/'repo';(repo/'fixtures').mkdir(parents=True)
+    pdf=repo/'fixtures'/'invoice.pdf'
+    pdf.write_bytes(b'%PDF-1.3\r\n%\xe2\xe3\xcf\xd3\r\n')
+    baseline=init_repo(repo)
+    pdf.unlink()
+    output=diff(repo,baseline)
+    assert 'fixtures/invoice.pdf' in output
 
 def test_safe_accepts_exact_clean_reconstruction(integration_runs):
     svc,runs=integration_runs;r=runs['safe'];assert r.final_decision=='ACCEPT',r.model_dump();assert r.clean_commit
