@@ -18,8 +18,11 @@ jobs:
         run: >-
           python -m pytest -q
           tests/test_modules.py::test_sable_real_hcl
+          tests/test_modules.py::test_sable_refactor_and_correspondence_cases
           tests/test_modules.py::test_sable_unknown_parse_and_disabled
           tests/test_modules.py::test_sable_unsupported_iam_stays_unknown
+          tests/test_modules.py::test_sable_unresolved_role_binding_with_valid_policy_is_unknown
+          tests/test_modules.py::test_sable_explicitly_unrelated_role_binding_is_ignored
           tests/test_modules.py::test_sable_unsupported_terraform_stays_unknown
           tests/test_modules.py::test_sable_unverified_baseline_and_empty_baseline
           tests/test_shared.py::test_final_matrix

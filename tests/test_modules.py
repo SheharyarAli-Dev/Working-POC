@@ -1,4 +1,5 @@
 from pathlib import Path
+from types import SimpleNamespace
 import pytest
 from backend.cavr.analyzer import analyze as cavr
 from backend.cavr.trigger_discovery import scan
@@ -11,6 +12,7 @@ from backend.satra.test_validator import preflight,killed,judge
 from backend.integrations.osv_adapter import OSV
 from backend.config import ROOT
 from backend.orchestrator.context_service import ContextService
+from backend.sable.fixtures.scenarios import SCENARIOS as SABLE_FIXTURES
 
 
 def test_cavr_safe_cache_and_advisory(service,scenario,tmp_path):
@@ -165,6 +167,38 @@ def test_sable_unverified_baseline_and_empty_baseline(scenario):
         file.unlink()
     status,details,_=sable(c,lambda *a:None)
     assert status=='NOT_APPLICABLE',details
+
+@pytest.mark.parametrize('case,wanted',[
+    ('rename_with_moved','PRESERVED'),
+    ('rename_no_moved','PRESERVED'),
+    ('move_into_module','PRESERVED'),
+    ('ambiguous_resolved_by_moved','PRESERVED'),
+    ('policy_rewrite_wrong_target','REGRESSED'),
+    ('replacement_wrong_bucket','UNKNOWN'),
+    ('ambiguous_set_three_candidates','UNKNOWN'),
+])
+def test_sable_refactor_and_correspondence_cases(tmp_path,scenario,case,wanted):
+    _,source=scenario('sable_preserved')
+    fixture=SABLE_FIXTURES[case]
+    baseline=tmp_path/'baseline'/'infra';candidate=tmp_path/'candidate'/'infra'
+    for root,files in ((baseline,fixture['baseline_tf']),(candidate,fixture['candidate_tf'])):
+        for relative,content in files.items():
+            path=root/relative;path.parent.mkdir(parents=True,exist_ok=True);path.write_text(content)
+    obligation=fixture['obligation']
+    policy={'infrastructure':{'principal':obligation['principal'],'protected_asset':obligation['protected_asset'],'actions':obligation['actions']}}
+    context=SimpleNamespace(path=candidate.parent,baseline=baseline.parent,policy=policy,knowledge=source.knowledge)
+    status,details,_=sable(context,lambda *a:None)
+    assert status==wanted,details
+    if wanted=='PRESERVED':
+        assert details['baseline_verification']['holds']
+        assert details['successor']
+        assert details['projected_authorization']['holds']
+    elif wanted=='REGRESSED':
+        assert details['successor']
+        assert details['projected_authorization']['known']
+        assert not details['projected_authorization']['holds']
+    else:
+        assert details['successor'] is None
 
 def test_satra_scc_and_inconclusive(scenario,service,tmp_path):
     r,c=scenario();assert build(c)['expected_status']==403
