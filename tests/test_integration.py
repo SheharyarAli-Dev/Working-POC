@@ -57,6 +57,7 @@ def test_gateway_and_knowledge_revocation(integration_runs):
     ('sable_preserved','PRESERVED','ACCEPT'),
     ('sable_regressed','REGRESSED','BLOCK'),
     ('sable_unknown','UNKNOWN','REVIEW'),
+    ('sable_unresolved_role_binding','UNKNOWN','REVIEW'),
 ])
 def test_shared_sable_evidence_drives_final_gate(tmp_path,scenario,status,decision):
     svc=Service(tmp_path/'runtime')
@@ -79,3 +80,8 @@ def test_shared_sable_evidence_drives_final_gate(tmp_path,scenario,status,decisi
     assert evidence['input_hash']==context.input_hash('SABLE')
     assert evidence['integrity_valid']
     assert run.final_decision==decision,run.reasons
+    if scenario=='sable_unresolved_role_binding':
+        assert run.applicable==['SABLE']
+        assert 'SABLE: UNKNOWN' in run.reasons
+        assert any('aws_iam_role_policy.dynamic_extra: role binding unresolved' in item for item in evidence['details']['projected_authorization']['unknown'])
+        assert evidence['details']['projected_authorization']['grants']
