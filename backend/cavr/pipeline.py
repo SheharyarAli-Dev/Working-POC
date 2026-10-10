@@ -24,9 +24,10 @@ Rules of the verdict:
 - UNRESOLVED when anything is unknown: the request, the policy, the network, a dependency
   that is not pinned, a project that cannot be read, a package the project never uses, code
   the scan cannot read. Nothing unknown ever becomes VERIFIED.
-- A sensitive sink in a wheel is evidence, not a failure, unless the contract denies its
-  capability and the project's call sites can reach it. Then the verdict is UNRESOLVED and
-  carries `escalation: "deep analysis required (M2)"`.
+- A sensitive sink in a wheel is evidence, not a failure, unless the contract does not allow
+  its capability outright (it is denied, or granted only for a scope the scan cannot check)
+  and the project's call sites can reach it. Then the verdict is UNRESOLVED and carries
+  `escalation: "deep analysis required (M2)"`.
 - Only the analysis of stage 8 is cached, and only when it is VERIFIED or REJECTED. The
   advisory result is never cached: a cached VERIFIED becomes REJECTED the day OSV lists the
   version, and VERIFIED again if the advisory is withdrawn.
@@ -64,7 +65,7 @@ from backend.orchestrator.hashing import digest
 from backend.threat_repo.behavior_rules import python_sinks
 from backend.threat_repo.repository import seeds
 
-PIPELINE_VERSION = "cavr-pipeline/1"
+PIPELINE_VERSION = "cavr-pipeline/2"  # /2: the sink judgement changed after the review of steps 9-11
 ESCALATION = "deep analysis required (M2)"
 LOCKFILE_NAME = "dependencies.lock.json"
 PASSED = ("verdict", "ALL_CHECKS_PASSED")

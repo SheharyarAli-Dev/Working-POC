@@ -355,9 +355,38 @@ version (through `dep_tree`); NFC duplicate names; `ast_scan` not-scanned findin
 Decided in step 11: a missing lockfile stays "no lockfile" and is stated in the verdict (`lockfile.present`).
 Still open after step 11: `_chunks` slow-drip deadline -> M2; removed option lines of an edit -> step 12;
 `test_cavr_advisories.py` test name and `manifest_parser.py` docstring -> next change to each file.
-Found in step 11 and not fixed: the pypdf proof (`fast_gate.disabled_jbig2_sinks` plus the conditions in
-`reachability.py`) does not cover pages decoded after the `with apply_configuration(...)` block ends. -> Maryam.
-The cavr-reviewer batch pass over `657098a..HEAD` (steps 9-11) has not run yet.
+Found in step 11: the pypdf proof did not cover pages decoded after the `with apply_configuration(...)` block
+ends. **Handled in the batch 9-11 review fix:** the reader must stay inside the guard block
+(`test_pages_read_after_the_guard_block_are_unresolved_and_escalated`). What remains: an object taken from the
+reader (a page, a stream) and used after the block is not followed. -> Maryam / M2.
+
+Found in the batch 9-11 review (2026-10-10, MINOR items, all derived by reading) and deliberately not fixed there:
+
+- `reachability.py`: other ways to import at run time do not make every sink reachable (`importlib.__import__`,
+  `importlib.util` / `machinery`, `runpy`, `pkgutil`, writes to `sys.path` / `__path__` / `sys.modules`). -> M2.
+- `pipeline.py`: a second requirement for the same release in one request is skipped, so its extras and `--hash`
+  are never checked. Merge them or return UNRESOLVED. -> step 12.
+- `pipeline._log`: `requested` is built outside the `try`, so a caller-made record with a non-list `command` raises;
+  the full command (which may hold index-URL credentials) is stored in `verdict_log`. Redact it. -> step 12.
+- `pipeline._verify_package`: a consistent cache row whose JSON lacks `scan` / `reachability` gives `INTERNAL_ERROR`
+  on every run. Treat it as a miss. -> step 12.
+- `skipped_directories` is not in the verdict: any directory holding `pyvenv.cfg`, any dot-directory and
+  `node_modules` are invisible to the contract and the proof; `.pyw`, notebooks and scripts without a suffix are not
+  read. Put the list in the evidence and the limitations. -> step 13.
+- `context_extractor._Uses`: aliases are per file and the last binding wins in `ast.walk` order, so a nested import
+  can re-attribute every call in the file. -> M2 (scopes).
+- `context_extractor`: a reference in an annotation or under `TYPE_CHECKING` counts as call-site authority. -> M2.
+- `tests/test_cavr_contract.py`: `test_digest_changes_when_a_new_call_site_appears` and
+  `test_digest_changes_when_a_call_site_moves_or_is_removed` would still pass if call sites were dropped from the
+  digest, because `sources_digest` changes anyway. -> next change to the file.
+- Nice-to-have test: two requirements for one release in one request (see the second item). -> step 12.
+- Style: assigned lambdas and long lines in `pipeline.py` and `context_extractor.py`;
+  `capability_contract._entry_modules` is a nested one-liner that is hard to explain line by line. -> next change
+  to each file.
+- Outside this diff: the seed sink list is small (`subprocess.call` / `check_output`, `os.popen`, `os.exec*` and
+  `sock.connect` on an instance are not sinks), so "0 denied sinks" is weak evidence. `backend/threat_repo/seed/`
+  is not in this branch's scope; state it as a limitation in the report. -> Maryam.
+- The fix commit for this review has not been reviewed again.
 
 ## Verification
 
@@ -381,9 +410,9 @@ The cavr-reviewer batch pass over `657098a..HEAD` (steps 9-11) has not run yet.
 - [x] 6 C3 transitive tree + subtree digest (committed 2026-10-10, `3cb1a35`; batch review fix in the next commit)
 - [x] 7 C3 OSV ranges (committed 2026-10-10, `b7c98cf`; batch review fix in the next commit)
 - [x] 8 C3 AST scan (committed 2026-10-10, `c72b56a`; batch review fix in the next commit)
-- [x] 9 C4 capability contract (2026-10-10; hash in the batch 9-11 review commit)
-- [x] 10 verdict cache (2026-10-10; hash in the batch 9-11 review commit)
-- [x] 11 pipeline (2026-10-10; committed, cavr-reviewer pass for steps 9-11 NOT yet run)
+- [x] 9 C4 capability contract (committed 2026-10-10, `a188cb6`; batch review fix in the next commit)
+- [x] 10 verdict cache (committed 2026-10-10, `d8e6367`)
+- [x] 11 pipeline (committed 2026-10-10, `c5c0ef4`; batch review fixes in the next commit)
 - [ ] 12 pip wrapper
 - [ ] 13 dashboard API
 - [ ] 14 orchestrator analyzer
