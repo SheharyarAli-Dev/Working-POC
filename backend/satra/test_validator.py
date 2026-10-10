@@ -57,19 +57,35 @@ def check_static_test_integrity(base_test_text, cand_test_text, file_name="tests
 
 
 def run_tests_in_worktree(worktree_dir, test_targets):
-    cmd = [
-        sys.executable, "-m", "pytest", "-q", "-o", "addopts=",
-        *test_targets
-    ]
+    """Run pytest on a worktree inside the hardened sandbox (network none, read-only root,
+    cap-drop ALL, resource limits). Host execution is refused unless SATRA_ALLOW_HOST_EXEC=1."""
+    engine = shutil.which("docker")
+    if engine:
+        with tempfile.TemporaryDirectory(prefix="satra-run-") as tmp:
+            work = Path(tmp) / "project"
+            shutil.copytree(worktree_dir, work, ignore=shutil.ignore_patterns(".git", "__pycache__"))
+            user_flag = ["-u", "%d:%d" % (os.getuid(), os.getgid())] if hasattr(os, "getuid") else []
+            cmd = [engine, "run", "--rm", *user_flag, "--network", "none", "--read-only",
+                   "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
+                   "--memory", "512m", "--cpus", "1", "--pids-limit", "64",
+                   "--tmpfs", "/tmp:rw,nosuid,size=64m", "-v", str(work) + ":/work:rw", "-w", "/work",
+                   "-e", "PYTHONDONTWRITEBYTECODE=1", "-e", "PYTHONPATH=/work",
+                   "asent-sandbox:local", "python", "-m", "pytest", "-q", "-o", "addopts=", "-p", "no:cacheprovider",
+                   *test_targets]
+            try:
+                proc = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+            except subprocess.TimeoutExpired:
+                return {"exit_code": None, "stdout": "", "passed": False, "backend": "docker", "reason": "timeout"}
+            return {"exit_code": proc.returncode, "stdout": proc.stdout, "passed": proc.returncode == 0, "backend": "docker"}
+    if os.environ.get("SATRA_ALLOW_HOST_EXEC") != "1":
+        return {"exit_code": None, "stdout": "", "passed": False, "backend": "none",
+                "reason": "Docker unavailable; refusing to execute untrusted code on the host"}
+    cmd = [sys.executable, "-m", "pytest", "-q", "-o", "addopts=", *test_targets]
     env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
     env["PYTHONPATH"] = str(worktree_dir)
     env["PYTHONDONTWRITEBYTECODE"] = "1"
     proc = subprocess.run(cmd, cwd=str(worktree_dir), env=env, capture_output=True, text=True, timeout=30)
-    return {
-        "exit_code": proc.returncode,
-        "stdout": proc.stdout,
-        "passed": proc.returncode == 0
-    }
+    return {"exit_code": proc.returncode, "stdout": proc.stdout, "passed": proc.returncode == 0, "backend": "host-optin"}
 
 
 def judge_counterfactual_oracles(baseline_dir, candidate_dir, operator_name="MUT_AUTHZ_IDOR_RETURN_TRUE"):
