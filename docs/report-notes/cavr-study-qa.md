@@ -269,3 +269,72 @@ list has no version ranges to check. Measured on 2026-10-10:
 So delegating would turn the safe scenario from VERIFIED into UNRESOLVED and fail
 `tests/test_modules.py::test_cavr_safe_cache_and_advisory`, which the plan says to ask about first.
 The four options (A-D) are in `cavr-report-notes.md`, section "Step 14"; the decision is open.
+
+## Batch E — demo polish: chips, timeline, metrics, advisory lists, tampered wheel (2026-10-11)
+
+Six commits, `384ec4f` to `cdbfa27`, and one review fix commit after them. Recorded outputs of the six cases are in `docs/cavr-demo.md`.
+
+### Q1. How do the six chips on the page reach the real pipeline?
+
+The page no longer knows any package name. `CavrModule.tsx` asks `GET /api/cavr/scenarios` and draws one chip per
+entry (`cavr/ScenarioChips.tsx`). A click calls `runScenario`, which sends `POST /api/cavr/run?scenario=<id>`.
+In `backend/cavr/api.py`, `run_scenario_endpoint` looks the id up in `SCENARIOS`, builds
+`pip install <package>==<version>` and starts `run_verification`, which calls the same `verify_request` as the pip wrapper.
+The page then reads the events of the run and `GET /api/cavr/proof/<run id>`.
+
+Example: chip "4. left-pad 1.0 (not allowed)" -> `pip install left-pad==1.0` -> BLOCK `NOT_ON_ALLOWLIST` in 2.17 ms,
+nothing downloaded (`test_left_pad_is_blocked_as_not_on_the_allowlist_before_any_download`).
+Chip 2 is the same request as chip 1. It is a cache hit only because chip 1 stored an analysis; clicked first it is a miss.
+`expected_status` in `SCENARIOS` is text for the chip and is never used to decide anything.
+
+### Q2. How does the page show "—" for something that was not computed?
+
+The backend says what was computed. `api.stage_summary(verdict)` returns six stages (capture, gate, artifact, cache,
+analysis, verdict). Each has a list of `{label, value}` copied from the verdict, and `ran`, which is true when at least
+one value is not `None`. It is served as `stages` in the proof. The same rule holds in the tabs: "no sink call found"
+is printed only when a sink judgement exists, and an advisory count only when OSV answered (`api._affected_count`).
+The page prints every value through `shown()` in `cavr/types.ts`: `None` becomes `NOT_COMPUTED`, the dash.
+`cavr/ExpandableStep.tsx` draws one stage; a stage with `ran: false` says "did not run".
+
+Example: for the BLOCK of `left-pad`, stages artifact, cache and analysis have `ran: false` and only dashes; the proof
+drawer shows a dash for both hashes and for the hash result. Before, it printed "VERIFIED MATCH" for every run.
+There is no time per stage because the pipeline measures only `fast_gate_ms` for the whole request.
+
+### Q3. Why is `fast_gate_ms` reported per verdict, and what is `NOT_REACHED`?
+
+One median over all logged verdicts was 2.72 ms on the first demo run, because half the rows were BLOCKs that take
+about 2 ms and download nothing. `pipeline.metrics(store)` now groups the times of `verdict_log` three ways:
+by status (VERIFIED / REJECTED / BLOCK / UNRESOLVED), by cache lookup, and by the pair. Each group has `count`,
+`p50`, `p95` (nearest rank, `_nearest_rank`). A group with no rows has `None`, shown as a dash, not 0.
+
+The cache lookup of a request is written to the log by `pipeline.cache_lookup_of`: `HIT` (every package's analysis
+came from the cache), `MISS` (a package reached the lookup and was not served from it), `NOT_REACHED` (a BLOCK or a
+failed download: nothing was looked up). So there are two hit rates: hits / all verdicts, and hits / (hits + misses).
+A `MISS` does not mean the scan ran: `pypdf==5.1.0` is a MISS that OSV rejects before the scan.
+
+Example from the recorded run: VERIFIED p50 3912.65 ms over 3 requests; BLOCK 2.17 ms over 1; 2 hits of 4 lookups.
+
+### Q4. How is a list of 97 advisories shown?
+
+As the count and the first three ids, with the whole list one click or one option away.
+`advisories.summarise_ids(ids)` makes `A, B, C and 94 more`; `FIRST_IDS = 3`. It is used in the reason of
+`check_advisories`, in the wrapper line (`pip_shim._render_package`) and in `resolution.advisory_summary` of the API.
+The evidence is never shortened: `affected` in the verdict still holds all 97 with aliases and fixed versions.
+
+Where the whole list is: on the page, the "OSV advisories" card in the Overview tab (`cavr/AdvisoryList.tsx`) has a
+closed section "Show all 97 advisories" and a link to the proof JSON; in the terminal, `--cavr-json`.
+Example: `advisories: pypdf 5.1.0 KNOWN_VULNERABILITY: 97 advisories: GHSA-23w6-3w8w-8484, GHSA-248m-82v9-q6g6,
+GHSA-2q4j-m29v-hq73 and 94 more (every id: --cavr-json)`.
+
+### Q5. Why can the tampered-wheel case no longer delete the genuine pypdf wheel?
+
+Because it no longer works in the same directory. After a hash mismatch `pypi_client.fetch_artifact` keeps the bad
+file as `<name>.rejected` and removes an older file of the same name from that directory (it is not what the registry
+serves now). The demo run used the real quarantine, so that older file was the genuine wheel of case 1.
+Now `api.demo_quarantine_dir(condition)` gives a demo run its own directory, `<quarantine>-demo/tampered_wheel/`,
+and `verify_dashboard_request` passes it to the pipeline. The tampered file is the demo's own download.
+
+Example (recorded): the genuine wheel has SHA-256 `7e5d6e73…8d14` before and after case 5, with the same modification
+time and inode; the rejected file `a52a19f9…e7b9` is in `quarantine-demo/tampered_wheel/`.
+Test: `test_a_tampered_run_in_the_middle_of_a_real_run_does_not_change_the_real_verdict` (before the fix the real run
+ended UNRESOLVED `ARTIFACT_CHANGED`).
