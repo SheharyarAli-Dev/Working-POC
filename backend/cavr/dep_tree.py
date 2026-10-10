@@ -90,11 +90,12 @@ def build_tree(name, version, lockfile, quarantine_dir, transport=None, environm
                 if child not in pending:
                     pending.append(child)
 
-    nodes, edges, excluded = [], [], []
+    nodes, edges, excluded, failed = [], [], [], []
     for key in sorted(loaded):
-        node, node_problems = loaded[key]
+        node, node_problems, failure = loaded[key]
         problems += node_problems
         if node is None:
+            failed.append(failure)
             continue
         nodes.append({**node, "extras": sorted(extras_for[key])})
         node_edges, node_excluded, child_problems, _ = expansions[key]
@@ -103,7 +104,8 @@ def build_tree(name, version, lockfile, quarantine_dir, transport=None, environm
         problems += child_problems
     problems.sort(key=lambda p: (p["node"], p["requirement"] or "", p["rule"]))
     fields.update(nodes=nodes, edges=sorted(edges, key=lambda e: (e["parent"], e["child"], e["requirement"])),
-                  excluded=sorted(excluded, key=lambda e: (e["parent"], e["requirement"])), problems=problems)
+                  excluded=sorted(excluded, key=lambda e: (e["parent"], e["requirement"])), problems=problems,
+                  failed_nodes=failed)
 
     worst = next((p for p in problems if p["result"] == "REJECTED"), None) or (problems[0] if problems else None)
     if worst:
@@ -137,10 +139,10 @@ def _canonical(version: str) -> str:
 # --- internals ---------------------------------------------------------------
 
 def _tree(outcome, rule, reason, root=None, environment=None, nodes=None, edges=None, excluded=None, problems=None,
-          subtree_digest=None) -> dict:
+          failed_nodes=None, subtree_digest=None) -> dict:
     return {"result": outcome, "rule": rule, "reason": reason, "root": root, "environment": environment or {},
             "nodes": nodes or [], "edges": edges or [], "excluded": excluded or [], "problems": problems or [],
-            "subtree_digest": subtree_digest}
+            "failed_nodes": failed_nodes or [], "subtree_digest": subtree_digest}
 
 
 def _label(key) -> str:
@@ -177,14 +179,20 @@ def _pins(lockfile):
 
 
 def _load(key, pins, quarantine_dir, transport, env):
-    """Download, hash and read one node. Returns (node or None, problems)."""
+    """Download, hash and read one node.
+
+    Returns (node, problems, None), or (None, problems, failure) when the node could not be
+    used; `failure` keeps the full result of the step that stopped it, as evidence.
+    """
     name, version = key
     artifact = fetch_artifact(name, version, quarantine_dir, transport=transport)
     if artifact["result"] != "OK":
-        return None, [_problem(key, "artifact", artifact["result"], artifact["rule"], artifact["reason"])]
+        return (None, [_problem(key, "artifact", artifact["result"], artifact["rule"], artifact["reason"])],
+                {"node": _label(key), "artifact": artifact, "metadata": None})
     metadata = read_wheel(artifact["path"], name, version)
     if metadata["result"] != "OK":
-        return None, [_problem(key, "metadata", metadata["result"], metadata["rule"], metadata["reason"])]
+        return (None, [_problem(key, "metadata", metadata["result"], metadata["rule"], metadata["reason"])],
+                {"node": _label(key), "artifact": artifact, "metadata": metadata})
     problems = []
 
     locked = [sha256 for locked_version, sha256 in pins.get(name, []) if locked_version == Version(version) and sha256]
@@ -208,7 +216,7 @@ def _load(key, pins, quarantine_dir, transport, env):
             "lockfile_sha256": artifact["sha256"] if locked and artifact["sha256"] in locked else None,
             "import_names": metadata["import_names"], "native_files": metadata["native_files"],
             "artifact": artifact, "metadata": metadata}
-    return node, problems
+    return node, problems, None
 
 
 def _expand(key, node, extras, pins, env, known):

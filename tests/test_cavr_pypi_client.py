@@ -440,3 +440,80 @@ def test_recorded_response_is_the_real_registry_shape():
     wheel = next(entry for entry in response["urls"] if entry["packagetype"] == "bdist_wheel")
     assert wheel["digests"]["sha256"] == PYPDF_SHA256 == sha256_file(PYPDF_WHEEL)
     assert response["info"]["yanked"] is False
+
+
+# --- items deferred from the batch 4-8 review, handled in plan step 11 ----------------------------------------
+
+def test_registry_listing_the_same_wheel_twice_is_unresolved_not_a_crash(tmp_path):
+    index, wheel, response = one_release(tmp_path)
+    response["urls"].append(dict(response["urls"][0]))
+    serve(index, "demo", "1.0", response)
+    result = fetch_artifact("demo", "1.0", tmp_path / "quarantine", transport=index)
+    assert outcome(result) == ("UNRESOLVED", "REGISTRY_INVALID") and "more than once" in result["reason"]
+    assert index.downloads() == []
+
+
+def test_wheel_filename_with_a_nul_byte_is_unresolved_not_a_crash(tmp_path):
+    index, wheel, response = one_release(tmp_path)
+    response["urls"][0]["filename"] = "demo-1.0-py3-none-any\x00.whl"
+    serve(index, "demo", "1.0", response)
+    result = fetch_artifact("demo", "1.0", tmp_path / "quarantine", transport=index)
+    assert outcome(result) == ("UNRESOLVED", "REGISTRY_INVALID") and index.downloads() == []
+
+
+@pytest.mark.parametrize("name, version", [("demo\n", "1.0"), ("demo", "1.0\n"), ("demo\n\n", "1.0")])
+def test_name_or_version_with_a_trailing_newline_is_not_a_request(tmp_path, name, version):
+    index, _, _ = one_release(tmp_path)
+    # The version check already ignores surrounding white space (packaging does); the name check must not.
+    expected = ("OK", "HASH_MATCH") if name == "demo" else ("UNRESOLVED", "INVALID_REQUEST")
+    assert outcome(fetch_artifact(name, version, tmp_path / "quarantine", transport=index)) == expected
+
+
+def test_good_file_from_an_earlier_run_does_not_stay_beside_a_rejected_one(tmp_path):
+    index, wheel, response = one_release(tmp_path)
+    assert outcome(fetch_artifact("demo", "1.0", tmp_path / "quarantine", transport=index)) == ("OK", "HASH_MATCH")
+    assert quarantined(tmp_path) == [wheel.name]
+    index.routes[response["urls"][0]["url"]] = wheel.read_bytes() + b"tampered"
+    assert outcome(fetch_artifact("demo", "1.0", tmp_path / "quarantine", transport=index)) == ("REJECTED", "HASH_MISMATCH")
+    assert quarantined(tmp_path) == [wheel.name + ".rejected"]
+
+
+def http_transport(handler):
+    import httpx
+    return pypi_client.HttpxTransport(timeout=1.0, transport=httpx.MockTransport(handler))
+
+
+def test_httpx_transport_streams_a_200_body():
+    import httpx
+    body = bytes(range(256)) * 1000
+    transport = http_transport(lambda request: httpx.Response(200, content=body))
+    assert b"".join(transport.stream("https://pypi.org/pypi/demo/1.0/json")) == body
+
+
+@pytest.mark.parametrize("status", [301, 302, 403, 404, 500])
+def test_httpx_transport_does_not_follow_redirects_and_refuses_other_statuses(status):
+    import httpx
+    seen = []
+
+    def handler(request):
+        seen.append(str(request.url))
+        return httpx.Response(status, headers={"Location": "https://example.invalid/elsewhere"}, content=b"body")
+
+    with pytest.raises(TransportError) as raised:
+        list(http_transport(handler).stream("https://pypi.org/pypi/demo/1.0/json"))
+    assert raised.value.status == status and seen == ["https://pypi.org/pypi/demo/1.0/json"]
+
+
+def test_httpx_transport_turns_network_errors_into_transport_errors(tmp_path):
+    import httpx
+
+    def handler(request):
+        raise httpx.ConnectError("network is unreachable")
+
+    with pytest.raises(TransportError) as raised:
+        list(http_transport(handler).stream("https://pypi.org/pypi/demo/1.0/json"))
+    assert raised.value.status is None
+    result = fetch_artifact("demo", "1.0", tmp_path / "quarantine", transport=http_transport(handler))
+    assert outcome(result) == ("UNRESOLVED", "REGISTRY_UNAVAILABLE")
+    result = fetch_artifact("demo", "1.0", tmp_path / "quarantine", transport=http_transport(lambda request: httpx.Response(404)))
+    assert outcome(result) == ("UNRESOLVED", "RELEASE_NOT_FOUND")

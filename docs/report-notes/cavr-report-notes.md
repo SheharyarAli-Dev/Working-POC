@@ -1806,3 +1806,116 @@ Run on 2026-10-10:
    Each row carries a digest of its content and is checked against its own key; an edited row is ignored. The digest is not secret, so a full rewrite is possible for someone with database access; that is why a hit still re-checks the artifact hash and OSV.
 3. **Why is UNRESOLVED not cached?**
    It means the answer is not known (for example the network was down). Caching it would keep answering "unknown" after the cause is gone.
+
+## Step 11 — single verify_request pipeline (2026-10-10)
+
+Plan commit 11, `feat(cavr): single verify_request pipeline`.
+Review: NOT DONE. The session's usage limit was reached after this commit; the cavr-reviewer batch pass over steps 9-11 has not run.
+
+### Ch 6 Implementation
+
+| File | Function / constant | What it does |
+|---|---|---|
+| `backend/cavr/pipeline.py` (new, 347 lines) | `verify_request(request, project_dir, policy, store, *, transport, quarantine_dir, advisory_cache_dir, live_advisories, osv, knowledge, environment, lockfile_name)` | Runs the nine stages in the plan's order and returns `status` (VERIFIED / REJECTED / UNRESOLVED / BLOCK), `stage`, `rule`, `reason`, `fast_gate_ms`, `cache_hit`, `escalated`, `escalation`, `request`, `gate`, `lockfile`, `project`, `packages`, `policy_version`, `analyzer_version`, `logged`. |
+| | `_verify_package` | Stages 3-9 for one permitted requirement: `build_tree`, contract, cache `lookup`, `check_advisories` for every tree node, then the cached analysis or `_analyse`. |
+| | `_analyse` | Re-hashes each wheel in quarantine, `scan_wheel` on every tree node, `judge_sinks`. This result is what is cached. |
+| | `analyzer_version(knowledge)` | `cavr-pipeline/1;cavr-ast-scan/1;rules:<digest of the sink rules>`; the 8th key field. |
+| | `metrics(store)` | Verdict count, cache hits, hit rate, p50 / p95 of `fast_gate_ms` (nearest rank), counts by status, from the verdict log. |
+| | `ESCALATION` | `"deep analysis required (M2)"`. |
+| `backend/cavr/reachability.py` (new, 274 lines) | `judge_sinks(nodes, scans, contract, context)` | Each sink gets ALLOWED, GUARD_DISABLED, UNREACHABLE or REACHABLE; any REACHABLE -> UNRESOLVED `SINK_REACHABLE`. |
+| | `import_graph`, `module_name`, `_closure` | Import graph over all wheels of the tree; the closure from the contract's `entry_modules`. |
+| | `_pypdf_proof`, `_unseen_use`, `_guard_problem`, `ProjectSources` | Calls `fast_gate.disabled_jbig2_sinks` (not edited) through an adapter and accepts its answer only under two extra conditions (see Defects). |
+| `backend/cavr/storage.py` | table `verdict_log`, `record_verdict`, `get_verdict_log` | One row per `verify_request` call. |
+| `backend/cavr/dep_tree.py` | `failed_nodes` in the tree result | Keeps the full download / metadata result of a node that failed (the evidence of a hash mismatch). |
+| `backend/cavr/ast_scan.py` | `.pyw` scanned; `NOT_SCANNED` finding -> UNRESOLVED `CODE_NOT_SCANNED`; star imports in `_alias_pass`; `not_scanned_files` | Deferred items of the batch 4-8 review. |
+| `backend/cavr/pypi_client.py` | `select_wheel` (duplicate filename, NUL -> `REGISTRY_INVALID`), `NAME.fullmatch`, `HttpxTransport(transport=)`, stale good file removed on `HASH_MISMATCH` | Deferred items. |
+| `backend/cavr/wheel_meta.py` | NFC + casefold in the duplicate-name check, `NAME.fullmatch` | Deferred items. |
+| `backend/cavr/requirement_gate.py` | `load_json_file` catches `RecursionError`; docstring reworded | Deferred items. |
+| Tests | `test_cavr_pipeline.py` (new, 626 lines, 43 functions), `test_cavr_reachability.py` (new, 304 lines, 18 functions), additions in `test_cavr_ast_scan.py`, `test_cavr_pypi_client.py`, `test_cavr_wheel_meta.py`, `test_cavr_requirement_gate.py`, `test_cavr_dep_tree.py`, `test_cavr_live.py`, helpers in `test_cavr_support.py` | |
+
+Key algorithm, verdict of one package: tree REJECTED -> REJECTED; any advisory REJECTED -> REJECTED (also on a cache hit and also when the contract is unknown); tree / request-hash / contract / advisory unknown -> UNRESOLVED; cache hit -> the stored analysis; otherwise scan + sink judgement, stored if VERIFIED or REJECTED.
+
+### Design decisions
+
+| Decision | Alternatives considered | Why |
+|---|---|---|
+| Only the scan + sink analysis is cached; the advisory result never is | Cache the final verdict | A cached REJECTED-by-OSV would stay after the advisory is withdrawn; a cached VERIFIED must turn REJECTED when OSV changes. |
+| OSV is asked for every node of the tree, and before the UNRESOLVED checks | Root only; stop at the first unknown | A vulnerable dependency, or a vulnerable package the project does not import yet, is REJECTED rather than UNRESOLVED. |
+| "Call-site path" = import closure from the contract's entry modules | Every sink reachable once the package is used; a real call graph | Over-approximates what importing can run, needs no execution, and leaves a real "unreachable" class (a `cli.py` nobody imports). A dynamic import in reached code makes everything reachable. |
+| The pypdf guard is accepted only with two extra conditions | Trust `disabled_jbig2_sinks` alone | On its own it accepts five project shapes where a reader is unguarded (tests below). The plan says not to edit it, so the conditions are added around it. |
+| `build_tree` does stages 3 and 4 together | Download the root twice | One download per file; the root's download result is still reported as stage `artifact`. |
+| A fault inside a stage -> UNRESOLVED `INTERNAL_ERROR` | Let it raise | Unknown must never become a pass, and the caller always gets the metric fields. |
+| A project without a lockfile is allowed (stated in `lockfile.present`) | Require a lockfile | `pip install` in a new project is a normal M1 case; any dependency then makes the tree UNRESOLVED. Open for Maryam. |
+| Hit rate = hits / all logged verdicts | hits / verdicts that reached the lookup | Simple and stated; a BLOCK counts as "not a hit". |
+
+### Requirements covered
+
+No `FR-CAVR-NN` identifiers exist in this repository; IDs are from `RequirementsTab.tsx` (Maryam to confirm).
+
+| ID | Title | What this step covers | Acceptance check |
+|---|---|---|---|
+| FR-2 | Requirement Gate Enforcement | BLOCK before any download | `test_gate_block_makes_zero_downloads` (7) |
+| FR-3 | Capability Contract Inference | Sinks judged against the contract | `test_sink_allowed_by_the_policy_is_evidence`, `test_reachable_denied_sink_is_unresolved_and_escalated` |
+| FR-6 | Fail-Closed Security Policy | Network loss, unknown advisories, unread project, stage fault -> UNRESOLVED | `test_registry_unreachable_is_unresolved`, `test_advisories_unavailable_is_unresolved`, `test_a_fault_inside_a_stage_is_unresolved_not_an_exception` |
+| none listed | CLAUDE.md "Output VERIFIED / REJECTED / UNRESOLVED with evidence"; plan fields `fast_gate_ms`, `cache_hit`, `escalated` | One path, evidence per stage, metric fields on every status | `test_pypdf_6_19_0_is_verified_with_the_guard_evidence`, `test_metric_fields_are_present_on_every_status` |
+
+### Ch 7 Test cases
+
+Run on 2026-10-10:
+
+- `.venv/bin/python -m pytest tests/test_cavr_*.py -q` -> 968 passed, 5 skipped (838 + 130 new).
+- `.venv/bin/python -m pytest -q` -> 1026 passed, 7 failed, 5 skipped (the same 7 baseline tests).
+- `CAVR_LIVE=1 … tests/test_cavr_live.py` -> 5 passed, including the whole pipeline against the real PyPI and OSV.
+- Fault injection, one line at a time, files restored: 11 faults in `reachability.py` and 13 in `pipeline.py` (gate result ignored, OSV ignored on a hit, unresolved contract / advisories / tree / scan ignored, no re-hash before the scan, no escalation, request hash ignored, contract digest not in the key, dependencies not OSV-checked, proof conditions removed, dynamic import not widening, ...). Every one made at least one test fail.
+- The tests of the deferred fixes were run against the previously committed modules: 24 failed there, all pass now (the 7 `HttpxTransport` cases failed only because the `transport=` argument did not exist).
+
+| Test ID | Purpose | Input | Expected | Result |
+|---|---|---|---|---|
+| `test_pypdf_6_19_0_is_verified_with_the_guard_evidence` | End to end | Real pypdf wheel + recorded registry JSON, InvoiceHub `app/`, recorded OSV answer | VERIFIED; SHA-256 `7e5d6e73…8d14`; sinks `pypdf/filters.py:774`, `:804` GUARD_DISABLED; proof accepted; stored under the 8-field key | pass |
+| `test_the_same_project_with_a_reader_outside_the_guard_is_unresolved_and_escalated` | Guard removed | The same project plus an unguarded `PdfReader` | UNRESOLVED `SINK_REACHABLE`; `escalation` set, `escalated: true`; nothing cached | pass |
+| `test_verified_then_guard_removed_is_not_served_from_the_cache` | Cache safety | VERIFIED run, then `jbig2dec_binary=None` changed | UNRESOLVED, `cache_hit: false` | pass |
+| `test_gate_block_makes_zero_downloads` (7), `test_missing_or_invalid_policy_is_unresolved_with_zero_downloads` (3), `test_requests_that_cannot_be_captured_are_unresolved_with_zero_downloads` (11) | Before any download | Denylist, not allowlisted, unpinned, not in lockfile; no policy; non-pip command, URL, custom index, missing `-r` file | BLOCK / UNRESOLVED; the index was never asked | pass |
+| `test_one_flipped_byte_is_rejected` | Hash | One bit of the served wheel flipped | REJECTED `HASH_MISMATCH`; file kept as `.rejected`; no scan, no cache row | pass |
+| `test_known_vulnerability_is_rejected_with_the_advisory_id`, `..._even_when_the_project_never_imports_the_package`, `test_vulnerable_dependency_rejects_the_request` | OSV | tmp-built wheels with `SYNTH-` advisories | REJECTED `KNOWN_VULNERABILITY` with the id | pass |
+| `test_registry_unreachable_is_unresolved`, `test_download_cut_off_is_unresolved`, `test_advisories_unavailable_is_unresolved`, `test_everything_offline_is_unresolved_not_an_exception` | Network loss | Transport errors; no advisory data | UNRESOLVED | pass |
+| `test_second_run_is_a_cache_hit_that_still_checks_osv` | Cache hit | Two runs | Second: `cache_hit: true`; scan ran once, OSV asked twice, artifact hashed twice | pass |
+| `test_cached_verified_turns_rejected_when_the_advisory_data_changes`, `test_cache_hit_with_advisories_unavailable_is_unresolved` | Hit + OSV | Advisory added after a VERIFIED; advisory data removed | REJECTED with `cache_hit: true`, back to VERIFIED when it is withdrawn; UNRESOLVED | pass |
+| `test_policy_change_is_a_cache_miss`, `test_rule_change_is_a_cache_miss`, `test_another_project_does_not_share_the_verdict`, `test_tampered_cache_row_is_ignored_and_the_package_is_analysed_again`, `test_without_a_store_every_run_is_a_full_analysis` | Cache misses | Policy, sink rules, project, row edited, no store | Miss; full analysis | pass |
+| `test_metric_fields_are_present_on_every_status`, `test_verdicts_are_logged_and_the_report_numbers_come_from_the_log` | Metrics | One verdict of each status; 4 logged runs | Three fields everywhere, same keys; hit rate 0.5, p50 / p95 from the log | pass |
+| `test_unreachable_sink_is_evidence_and_the_package_is_verified`, `test_native_code_is_unresolved_without_escalation`, `test_artifact_changed_between_hashing_and_scanning_is_unresolved`, `test_unpinned_dependency_makes_the_tree_unresolved`, `test_lockfile_hash_that_differs_from_the_download_is_unresolved`, `test_project_without_a_lockfile`, `test_project_that_cannot_be_read_is_unresolved`, `test_local_version_is_unresolved_before_any_download` | Edge cases | As named | VERIFIED with UNREACHABLE evidence; otherwise UNRESOLVED with the stage's rule | pass |
+| `test_several_requirements_the_worst_one_decides`, `test_requirements_file_with_the_right_hash_and_with_a_wrong_one`, `test_requirements_edit_*` (2), `test_bad_requirements_snapshots_are_unresolved_not_an_exception` (5), `test_a_captured_record_can_be_passed_in` | Request forms | Two packages; `--hash`; edits; bad snapshots | Worst status wins; `REQUEST_HASH_MISMATCH`; `NOTHING_TO_VERIFY`; `CAPTURE_FAILED` | pass |
+| `test_verifying_does_not_install_or_run_the_package` | No execution | A module that creates a marker when imported | No marker, not importable; marker appears when really run | pass |
+| `test_cavr_reachability.py` (18 functions, 46 cases) | Sink judgement | Module names, import graph, entry modules, dependency sinks, dynamic import, unreadable wheel, the pypdf proof | As named | pass |
+| `test_the_proof_is_refused_when_the_project_enters_pypdf_in_a_way_the_guard_does_not_see` (5) | Reused guard is too lenient | `pypdf.PdfReader(p)` in another file; `PdfReader as R`; `PdfWriter(clone_from=p)`; `FACTORY = PdfReader`; nested guards + one unguarded reader | `disabled_jbig2_sinks` alone returns `[774, 804]`; the pipeline does not accept it -> UNRESOLVED | pass |
+
+### Defects found and fixed
+
+| # | Found by | Finding | Outcome |
+|---|---|---|---|
+| 1 | Reading `fast_gate.disabled_jbig2_sinks` | It matches only the text `PdfReader(` and counts a reader once per enclosing guard, so it reports the sinks as disabled for five kinds of project that have an unguarded entry into pypdf | Not edited (plan). `reachability.py` accepts the proof only when every contract use of pypdf is a bare `PdfReader(...)` / `apply_configuration(...)` call and its own AST check finds every reader inside exactly the `jbig2dec_binary=None` guard. 5 tests show the difference |
+| 2 | Tests | `dep_tree` dropped the download result of a failed node, so a hash mismatch had no SHA-256 in the evidence | `failed_nodes` added |
+| 3 | Deferred review items | 10 items of the batch 1-3 and 4-8 reviews marked "-> step 11" | Fixed with tests (listed in `docs/cavr-m1-plan.md`) |
+
+### Known limitations / deferred
+
+- **The pypdf proof is about where the reader is created.** A page decoded after the `with` block has ended is not covered; the project would still be VERIFIED. Not fixed; to be decided by Maryam (stricter proof or M2).
+- The import closure cannot see imports built at run time other than `__import__` / `importlib.import_module`, nor `exec` of a string (that is itself a sink).
+- A root requirement's marker is ignored (the package is verified whether or not the marker applies).
+- Every run downloads the tree again; the cache saves the scan, not the network.
+- Still deferred: the download deadline under a slow drip (`pypi_client._chunks`), removed option lines of a requirements edit, the test-name item in `test_cavr_advisories.py`, the `manifest_parser.py` docstring.
+- `api.py` and `analyzer.py` do not call the pipeline yet (steps 13, 14); the pip wrapper is step 12.
+
+### Tool disclosure (Ch 8.7)
+
+- **Generated by Claude Code:** `pipeline.py`, `reachability.py`, the changes in the other modules, all tests, these notes, the commit.
+- **Reviewed / changed by Maryam:** nothing yet. The cavr-reviewer pass for steps 9-11 has not run.
+- **Verified by:** the pytest runs, the live run and the 24 fault injections above.
+
+### Supervisor Q&A prep
+
+1. **Why is pypdf VERIFIED although it calls `subprocess.run`?**
+   The contract denies process execution, so the two calls are judged by reachability. The project creates every reader inside `apply_configuration(jbig2dec_binary=None)`, and pypdf's decoder returns before the call when that setting is None; that proof is in the evidence. Remove the guard and the verdict is UNRESOLVED with an escalation.
+2. **What does a cache hit skip, and what does it not skip?**
+   It skips the AST scan and the sink judgement. The download, the SHA-256 check, the tree, the contract and the OSV query run every time, because the first four make the key and advisories change.
+3. **How are the report numbers produced?**
+   Every call writes one row (status, `fast_gate_ms`, `cache_hit`, `escalated`) to `verdict_log`; `pipeline.metrics(store)` computes the hit rate and the p50 / p95 from those rows.

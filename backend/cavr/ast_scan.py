@@ -23,6 +23,9 @@ The result says whether the scan covered all code in the wheel:
     PTH_EXECUTES_CODE          a `.pth` file has `import` lines; Python runs them at
                                every interpreter start, with no call site               -> UNRESOLVED
     COMPILED_CODE_NOT_SCANNED  native extensions or `.pyc` files: no source to parse     -> UNRESOLVED
+    CODE_NOT_SCANNED           an archive inside the wheel (`.zip`, `.egg`, `.whl`,
+                               `.pyz`) or a `*.data/scripts/` file that is not `.py`:
+                               it may hold code and is not read                         -> UNRESOLVED
     SCAN_COMPLETE              every `.py` file was parsed and scanned                   -> OK
 
 OK does not mean "safe": the sinks and triggers found are evidence, and the pipeline judges
@@ -51,9 +54,11 @@ PARSE_ERRORS = (SyntaxError, ValueError, RecursionError, MemoryError)
 # When more than one applies, the first in this order becomes the rule of the result.
 INCOMPLETE = {"SOURCE_TOO_LARGE": "SCAN_BUDGET", "PARSE_ERROR": "SOURCE_NOT_PARSED",
               "PTH_EXECUTABLE": "PTH_EXECUTES_CODE", "NATIVE_EXTENSION": "COMPILED_CODE_NOT_SCANNED",
-              "BYTECODE_ONLY": "COMPILED_CODE_NOT_SCANNED"}
-OWN_COVERAGE = ("; import aliases of sinks resolved per module; .pth import lines scanned; "
-                "native extensions and .pyc files not scanned")
+              "BYTECODE_ONLY": "COMPILED_CODE_NOT_SCANNED", "NOT_SCANNED": "CODE_NOT_SCANNED"}
+SOURCE_SUFFIXES = (".py", ".pyw")
+NESTED_ARCHIVES = (".zip", ".egg", ".whl", ".pyz")
+OWN_COVERAGE = ("; import aliases and star imports of sinks resolved per module; .pth import lines scanned; "
+                "native extensions, .pyc files, nested archives and non-.py scripts not scanned")
 
 
 def scan_wheel(path, knowledge=None) -> dict:
@@ -89,13 +94,15 @@ def _scan(archive: zipfile.ZipFile, fields: dict, knowledge: dict) -> None:
     infos = sorted((info for info in check_entries(archive) if not info.is_dir()), key=lambda info: info.filename)
     findings, sinks, triggers, dynamic, parse_errors, scanned, pth_files = [], [], [], [], [], [], []
     total = 0
-    fields.update(rules_digest=digest(rules), python_files=sum(info.filename.endswith(".py") for info in infos),
+    fields.update(rules_digest=digest(rules), python_files=sum(info.filename.endswith(SOURCE_SUFFIXES) for info in infos),
                   findings=findings, sinks=sinks, triggers=triggers, dynamic_code=dynamic, parse_errors=parse_errors,
                   files_scanned=scanned, pth_files=pth_files,
                   native_files=[info.filename for info in infos if NATIVE.search(info.filename)],
                   bytecode_files=[info.filename for info in infos if info.filename.lower().endswith(".pyc")])
     findings += [_finding("NATIVE_EXTENSION", name, None, "native code; there is no source to parse") for name in fields["native_files"]]
     findings += [_finding("BYTECODE_ONLY", name, None, "compiled bytecode; the source is not checked against it") for name in fields["bytecode_files"]]
+    fields["not_scanned_files"] = [info.filename for info in infos if _not_scanned(info.filename)]
+    findings += [_finding("NOT_SCANNED", name, None, _not_scanned(name)) for name in fields["not_scanned_files"]]
     try:
         fields["coverage"] = scan({}, knowledge)["coverage"] + OWN_COVERAGE
     except Exception:
@@ -124,7 +131,7 @@ def _scan(archive: zipfile.ZipFile, fields: dict, knowledge: dict) -> None:
 
     for info in infos:
         name = info.filename
-        if name.endswith(".py"):
+        if name.endswith(SOURCE_SUFFIXES):
             if info.file_size > MAX_SOURCE_BYTES or total + info.file_size > MAX_TOTAL_SOURCE_BYTES:
                 findings.append(_finding("SOURCE_TOO_LARGE", name, None,
                                          f"{info.file_size} bytes; over the scan budget "
@@ -171,7 +178,7 @@ def _scan(archive: zipfile.ZipFile, fields: dict, knowledge: dict) -> None:
 
 def _alias_pass(name: str, tree: ast.AST, rules: dict):
     """Sinks reached through an import alias, and dynamic-code calls, in one parsed module."""
-    aliases = {}
+    aliases, star_modules = {}, []
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for alias in node.names:
@@ -179,7 +186,10 @@ def _alias_pass(name: str, tree: ast.AST, rules: dict):
                     aliases[alias.asname] = alias.name
         elif isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
             for alias in node.names:
-                aliases[alias.asname or alias.name] = f"{node.module}.{alias.name}"
+                if alias.name == "*":
+                    star_modules.append(node.module)
+                else:
+                    aliases[alias.asname or alias.name] = f"{node.module}.{alias.name}"
     extra_sinks, dynamic_calls = [], []
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
@@ -189,6 +199,9 @@ def _alias_pass(name: str, tree: ast.AST, rules: dict):
             continue
         head, _, rest = written.partition(".")
         resolved = aliases[head] + ("." + rest if rest else "") if head in aliases else written
+        if head not in aliases and not rest:
+            # `from os import *` binds `system`: a bare name is tried against every star-imported module.
+            resolved = next((f"{module}.{written}" for module in star_modules if f"{module}.{written}" in rules), written)
         if resolved.startswith("builtins."):
             resolved = resolved[len("builtins."):]
         if resolved in rules and written not in rules:
@@ -210,6 +223,16 @@ def _dotted(node):
     return ".".join([node.id, *reversed(parts)])
 
 
+def _not_scanned(name: str):
+    """Why an entry that may hold code is not read by the scan, as text; None for every other entry."""
+    parts = name.split("/")
+    if name.lower().endswith(NESTED_ARCHIVES):
+        return "an archive inside the wheel; its content is not read"
+    if parts[0].endswith(".data") and len(parts) > 2 and parts[1] == "scripts" and not name.endswith(SOURCE_SUFFIXES):
+        return "an installed script that is not a .py file; it is not read"
+    return None
+
+
 def _decode(data: bytes, name: str, parse_errors: list, findings: list):
     """Source text using the file's declared encoding (PEP 263), or None with a PARSE_ERROR finding."""
     try:
@@ -228,9 +251,10 @@ def _finding(kind: str, file: str, line, detail: str) -> dict:
 
 def _result(outcome, rule, reason, path=None, rules_digest=None, python_files=0, files_scanned=None, bytes_scanned=0,
             findings=None, sinks=None, triggers=None, dynamic_code=None, parse_errors=None, native_files=None,
-            bytecode_files=None, pth_files=None, coverage=None) -> dict:
+            bytecode_files=None, pth_files=None, not_scanned_files=None, coverage=None) -> dict:
     return {"result": outcome, "rule": rule, "reason": reason, "path": path, "analyzer_version": ANALYZER_VERSION,
             "rules_digest": rules_digest, "python_files": python_files, "files_scanned": files_scanned or [],
             "bytes_scanned": bytes_scanned, "findings": findings or [], "sinks": sinks or [], "triggers": triggers or [],
             "dynamic_code": dynamic_code or [], "parse_errors": parse_errors or [], "native_files": native_files or [],
-            "bytecode_files": bytecode_files or [], "pth_files": pth_files or [], "coverage": coverage}
+            "bytecode_files": bytecode_files or [], "pth_files": pth_files or [],
+            "not_scanned_files": not_scanned_files or [], "coverage": coverage}

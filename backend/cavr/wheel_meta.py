@@ -25,6 +25,7 @@ import csv
 import io
 import re
 import stat
+import unicodedata
 import zipfile
 import zlib
 from email.parser import HeaderParser
@@ -97,9 +98,11 @@ def check_entries(archive: zipfile.ZipFile) -> list[zipfile.ZipInfo]:
             raise WheelProblem("REJECTED", "UNSAFE_PATH", f"entry is a symbolic link: {name!r}")
         if info.flag_bits & 0x1:
             raise WheelProblem("UNRESOLVED", "NOT_A_WHEEL", f"entry is encrypted: {name!r}")
-        if name.lower() in seen:
+        # The same name for a file system that ignores case or stores names in one Unicode form.
+        folded = unicodedata.normalize("NFC", name).casefold()
+        if folded in seen:
             raise WheelProblem("UNRESOLVED", "DUPLICATE_ENTRY", f"two entries are named {name!r} (ignoring case)")
-        seen.add(name.lower())
+        seen.add(folded)
     return infos
 
 
@@ -129,7 +132,7 @@ def _read(archive: zipfile.ZipFile, fields: dict, expected_name, expected_versio
     # METADATA: name, version, dependencies.
     metadata = _headers(read_member(archive, by_name[f"{dist_info}/METADATA"]), "METADATA", "METADATA_INVALID")
     name, version = _single(metadata, "Name"), _single(metadata, "Version")
-    if not NAME.match(name):
+    if not NAME.fullmatch(name):
         raise WheelProblem("UNRESOLVED", "METADATA_INVALID", f"METADATA Name is not a package name: {name!r}")
     parsed_version = _version(version, "METADATA Version")
     fields.update(name=canonicalize_name(name), metadata_name=name, version=version,
