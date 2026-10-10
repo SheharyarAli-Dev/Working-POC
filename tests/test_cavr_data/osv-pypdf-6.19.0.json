@@ -1,0 +1,14 @@
+{
+ "advisory_count": 0,
+ "note": "Real OSV response, recorded once and stored unchanged: an empty object, which is how OSV answers when it knows no advisory for the version.",
+ "query": {
+  "package": {
+   "ecosystem": "PyPI",
+   "name": "pypdf"
+  },
+  "version": "6.19.0"
+ },
+ "recorded_at": "2026-10-10",
+ "response": {},
+ "source": "https://api.osv.dev/v1/query"
+}
