@@ -91,7 +91,7 @@ def fetch_artifact(name, version, quarantine_dir, transport=None, max_bytes: int
     def result(outcome, rule, reason, **more):
         return _result(outcome, rule, reason, **{**fields, **more})
 
-    problem = _request_problem(name, version)
+    problem = request_problem(name, version)
     if problem:
         return result("UNRESOLVED", "INVALID_REQUEST", problem)
     name, version = canonicalize_name(name), version.strip()
@@ -217,7 +217,7 @@ def _result(outcome, rule, reason, name=None, version=None, registry_url=None, f
             "registry_size": registry_size, "sha256": sha256, "size": size, "path": path}
 
 
-def _request_problem(name, version) -> str | None:
+def request_problem(name, version) -> str | None:
     if not isinstance(name, str) or not NAME.match(name):
         return f"not a package name: {name!r}"
     if not isinstance(version, str):

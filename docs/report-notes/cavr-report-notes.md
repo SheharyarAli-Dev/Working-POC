@@ -1160,3 +1160,121 @@ Run on 2026-10-10:
 3. **Why does the import name matter?**
    The project writes `import yaml`, the package is called `PyYAML`. Step 9 needs the wheel's own list
    (`top_level.txt` or RECORD) to connect project imports to the distribution that was verified.
+
+## Step 6 — C3 transitive tree and subtree digest (2026-10-10)
+
+Plan commit 6, `feat(cavr): C3 transitive tree and subtree digest`.
+Review: REVIEW_LINE_STEP_6
+
+### Ch 6 Implementation
+
+| File | Function / constant | What it does |
+|---|---|---|
+| `backend/cavr/dep_tree.py` (new, 232 lines) | `build_tree(name, version, lockfile, quarantine_dir, transport=None, environment=None, extras=())` | Builds the tree under one pinned requirement. Returns `result` (OK / REJECTED / UNRESOLVED), `rule`, `reason`, `root`, `environment`, `nodes`, `edges`, `excluded`, `problems`, `subtree_digest`. |
+| | `subtree_digest(root, nodes, edges)` | `hashing.digest` of `{"root", "nodes": sorted set of (name, version, sha256), "edges": sorted set of (parent name, parent version, child name, child version)}`. |
+| | `_load(key, pins, …)` | One node: `fetch_artifact` (step 4), `read_wheel` (step 5), then the lockfile hash and `Requires-Python` checks. |
+| | `_expand(key, node, extras, pins, env)` | One node's `Requires-Dist` lines: evaluate the marker, then pin the child from the lockfile. Returns edges, excluded lines, problems, children. |
+| | `_pins(lockfile)` | Lockfile -> `{canonical name: [(Version, sha256)]}` for PyPI entries; uses `requirement_gate.lockfile_problems`. |
+| | `MAX_NODES` 200 | Tree budget. |
+| `backend/cavr/pypi_client.py` | `request_problem` | Renamed from `_request_problem` (now also called by `dep_tree.py`). No behaviour change. |
+| `tests/test_cavr_dep_tree.py` (new, 399 lines) | | 35 test functions, 38 cases. |
+| `docs/cavr-m1-plan.md` | | Progress box 6 ticked. |
+
+Key algorithm, `build_tree`:
+
+1. Work list starts with the root; always take the smallest (name, version) next. A node is loaded once (`loaded`), so a cycle ends.
+2. `_load`: download + SHA-256, then METADATA. A failure is recorded as a problem and that node is not expanded.
+3. `_expand`: a line whose marker is false for this interpreter (with `extra = ""` and each extra asked for by a parent) goes to `excluded`. Otherwise the child must have exactly one lockfile version that satisfies the line; else `CHILD_NOT_PINNED` / `CHILD_PIN_CONFLICT`.
+4. If a node is reached again with new extras, it is expanded again (not downloaded again).
+5. Any REJECTED problem -> REJECTED; else any problem -> UNRESOLVED; else OK with the subtree digest.
+
+### Design decisions
+
+| Decision | Alternatives considered | Why |
+|---|---|---|
+| Children pinned from the project lockfile (approved plan change) | Take the newest version on PyPI that fits; run pip's resolver | "Newest that fits" is a guess and changes over time. The resolver (`pip install --dry-run --report`) is the accurate answer and is named as future work in the module docstring. |
+| An exact `==` in `Requires-Dist` is still not a pin without the lockfile | Accept `leaf==1.0` from the parent's metadata | The pin must come from the project, not from the package being judged. |
+| Visit all nodes, then decide (REJECTED before UNRESOLVED) | Stop at the first problem | The verdict does not depend on visiting order, and a tampered leaf is not reported as a mere timeout elsewhere (`test_rejected_wins_over_unresolved`). |
+| Lockfile hash differs from the downloaded file -> UNRESOLVED | REJECTED | The lockfile has one hash per package; a release can have several wheels, so the lock may pin another platform's file. The registry digest mismatch (step 4) is the REJECTED case. Open for Maryam: make it REJECTED once the lockfile lists all files. |
+| Extras: off for the root, on for a child exactly as its parent asks | Ignore all extras (plan wording "extras off"); UNRESOLVED on any extra | pip installs `mid[fast]`'s extra dependencies; leaving them out would verify a smaller tree than the one installed. |
+| `Requires-Python` not satisfied -> UNRESOLVED | Ignore | pip would refuse the wheel; the tree is for an interpreter that cannot use it. |
+| Digest over sorted sets of nodes and edges, plus the root | Hash a nested tree; hash only the nodes | A nested tree cannot represent a cycle. Nodes alone miss a changed edge (`test_subtree_digest_covers_the_edges_not_only_the_nodes`). The root is included so that the same set seen from another root is a different subtree. |
+| Markers evaluated for the running interpreter, with an `environment` override | Evaluate for a configured target | Same choice as wheel selection in step 4; the override makes the rule testable for other platforms. |
+
+### Requirements covered
+
+No `FR-CAVR-NN` identifiers exist in this repository; IDs are from `RequirementsTab.tsx` (Maryam to confirm).
+
+| ID | Title | What this step covers | Acceptance check |
+|---|---|---|---|
+| none listed | CLAUDE.md goal C3, "transitive tree from real metadata" and the `subtree digest` cache-key field | Tree from each wheel's real `Requires-Dist`; every node hashed | `test_three_level_tree`, `test_every_node_is_downloaded_and_hashed`, `test_subtree_digest_changes_when_a_leafs_bytes_change` |
+| FR-6 | Fail-Closed Security Policy | Unpinned child, invalid lockfile, unreachable node -> UNRESOLVED | `test_child_missing_from_the_lockfile_is_unresolved`, `test_invalid_lockfile_is_unresolved_before_any_download`, `test_network_loss_on_a_leaf_is_unresolved` |
+
+### Ch 7 Test cases
+
+Run on 2026-10-10:
+
+- `.venv/bin/python -m pytest tests/test_cavr_*.py -q` -> 544 passed, 2 skipped (506 + 38 new).
+- `.venv/bin/python -m pytest -q` -> 602 passed, 7 failed, 2 skipped (the same 7 baseline tests).
+- `CAVR_LIVE=1 … tests/test_cavr_live.py` -> 2 passed (after the `request_problem` rename).
+- The tests were written before `dep_tree.py` and first run after it; all 38 passed on that run.
+
+| Test ID | Purpose | Input | Expected | Result |
+|---|---|---|---|---|
+| `test_three_level_tree` | tmp-built 3-level tree | `app 1.0 -> mid>=1,<2 -> leaf`, lockfile `mid==1.5`, `leaf==2.0` | OK; 3 nodes; 2 edges; 64-hex digest | pass |
+| `test_every_node_is_downloaded_and_hashed` | Every node through step 4 | Same | 3 downloads; each node's `sha256` = digest of its file | pass |
+| `test_subtree_digest_changes_when_a_leafs_bytes_change` | Digest sensitivity | Same tree, leaf source gains one line | Root and mid hashes equal, leaf hash and subtree digest differ | pass |
+| `test_subtree_digest_covers_the_edges_not_only_the_nodes` | Edges and root in the digest | Same nodes, edge `app->c` replaced by `b->c`; another root; reversed input | Different; different; equal | pass |
+| `test_subtree_digest_is_stable_and_does_not_depend_on_requires_dist_order`, `test_cycle_digest_is_the_same_from_two_runs` | Stability | Two runs; `Requires-Dist` order swapped | Same digest; same sorted nodes and edges | pass |
+| `test_dependency_cycle_terminates` | Cycle | `a->b->c->a`, `c->c` | OK; 3 nodes; 4 edges; 3 downloads | pass |
+| `test_marker_excluded_dependency_is_not_followed_and_needs_no_pin`, `test_the_same_dependency_is_followed_when_its_marker_holds` | Markers | `win-only==1.0; sys_platform == "win32"` on linux / win32 | Excluded, never requested; on win32 UNRESOLVED `CHILD_NOT_PINNED` | pass |
+| `test_extras_are_off_for_the_root`, `test_extra_asked_for_by_a_parent_turns_on_the_childs_extra_dependencies`, `test_extra_that_arrives_after_the_node_was_first_seen_is_still_applied` | Extras | `extra == "fast"` line on the root; `mid[fast]`; `mid` first plain then `[fast]` | Excluded; `speedup` followed and `docs-tool` excluded; `speedup` followed, 5 downloads | pass |
+| `test_real_pypdf_wheel_has_no_dependencies_on_this_interpreter` | Real wheel | pypdf wheel + `demo_project/InvoiceHub/dependencies.lock.json` | OK; 1 node with `7e5d6e73…`; lockfile hash equal; 23 lines excluded | pass |
+| `test_real_pypdf_wheel_on_python_3_10_needs_typing_extensions_pinned` | Real marker | Same wheel, `python_version` 3.10 | UNRESOLVED `CHILD_NOT_PINNED` (typing-extensions) | pass |
+| `test_child_missing_from_the_lockfile_is_unresolved`, `test_child_without_any_lockfile_is_unresolved` | Unpinned child | `leaf>=1` not in the lockfile; `leaf==1.0` with no lockfile | UNRESOLVED `CHILD_NOT_PINNED`; no digest; leaf not downloaded | pass |
+| `test_lockfile_version_outside_the_childs_specifier_is_unresolved`, `test_two_lockfile_versions_that_both_fit_are_unresolved`, `test_two_lockfile_versions_of_which_one_fits_is_pinned` | Pin rules | `leaf>=2` vs lock 1.0; lock 1.0 and 2.0 for `leaf`; for `leaf<2` | `CHILD_PIN_CONFLICT`; `CHILD_NOT_PINNED`; OK with 1.0 | pass |
+| `test_lockfile_names_are_matched_canonically_and_other_ecosystems_are_ignored` | Names | `Left_Pad` vs lock `left.PAD`; an `npm` entry | left-pad pinned; npm-thing not pinned | pass |
+| `test_invalid_lockfile_is_unresolved_before_any_download` (4) | Bad lockfile | list; `packages` a string; entry without version; invalid version | UNRESOLVED `LOCKFILE_INVALID`; zero calls | pass |
+| `test_tampered_leaf_rejects_the_whole_tree`, `test_tampered_root_is_rejected` | Hash per node | One byte flipped in leaf / root | REJECTED `HASH_MISMATCH`; problem names the node | pass |
+| `test_network_loss_on_a_leaf_is_unresolved`, `test_rejected_wins_over_unresolved` | Mixed failures | Timeout on leaf; timeout on `aaa` + tampered `zzz` | UNRESOLVED; REJECTED with both problems listed | pass |
+| `test_leaf_wheel_whose_metadata_names_another_package_is_rejected`, `test_leaf_wheel_without_metadata_is_unresolved` | Step 5 per node | Leaf METADATA says `other`; leaf without METADATA | REJECTED `METADATA_MISMATCH`; UNRESOLVED `METADATA_MISSING` | pass |
+| `test_lockfile_hash_that_differs_from_the_downloaded_file_is_unresolved`, `test_lockfile_hash_that_matches_is_recorded` | Lockfile hash | lock sha `000…0`; the real sha in upper case | UNRESOLVED `LOCKFILE_HASH_MISMATCH`; OK with `lockfile_sha256` | pass |
+| `test_wheel_that_needs_a_newer_python_is_unresolved`, `test_unparseable_requires_python_is_unresolved` | Requires-Python | `>=3.99`; `whatever` | UNRESOLVED `PYTHON_INCOMPATIBLE` | pass |
+| `test_node_budget`, `test_invalid_root_is_unresolved`, `test_root_without_dependencies_needs_no_lockfile`, `test_every_result_has_the_same_keys` | Budget / shape | `MAX_NODES` 2; bad root; a root with no dependencies and no lockfile | `TREE_BUDGET` after 2 downloads; `INVALID_REQUEST`; OK; same keys | pass |
+
+### Defects found and fixed
+
+None found by the tests in this step.
+
+### Known limitations / deferred
+
+- The tree is as good as the lockfile: a child missing from it is UNRESOLVED even when PyPI has an
+  obvious single candidate. Resolver-accurate pins (`pip install --dry-run --report`) are future work.
+- Markers and `Requires-Python` are evaluated for the interpreter that runs CAVR. -> step 12.
+- Root extras (`pip install pkg[extra]`) are supported by the `extras` argument but nothing passes it
+  yet. -> step 11.
+- If the lockfile pins another version of the root's own name and a cycle leads back to that name, the
+  tree contains both versions; pip would report a conflict. Not detected.
+- Nodes are downloaded one after the other; no parallel downloads, no reuse of files already in quarantine.
+- The lockfile's own `edges` list is not compared with the edges found in the wheels.
+- The full step 4 and step 5 results are kept in every node (`artifact`, `metadata`), so the tree is large
+  for big dependency sets. -> trim in step 11 if needed.
+
+### Tool disclosure (Ch 8.7)
+
+- **Generated by Claude Code:** `dep_tree.py`, `tests/test_cavr_dep_tree.py`, the rename in `pypi_client.py`, these notes, the commit.
+- **Reviewed / changed by Maryam:** nothing yet. Two choices go beyond the plan's wording and need her
+  decision: child extras are followed (plan: "extras off"), and a lockfile hash mismatch is UNRESOLVED.
+- **Verified by:** the pytest runs above.
+
+### Supervisor Q&A prep
+
+1. **What is the subtree digest and why is it in the cache key?**
+   One SHA-256 over every (name, version, file hash) reachable from the package plus the edges. If any
+   dependency's bytes change, the digest changes and a cached verdict no longer matches
+   (`test_subtree_digest_changes_when_a_leafs_bytes_change`).
+2. **How do you handle a dependency cycle?**
+   Each (name, version) is loaded once; the edge back is still recorded. The digest is over sorted sets,
+   not a recursive walk, so `a->b->a` gives the same digest on every run.
+3. **Why UNRESOLVED when a dependency is not in the lockfile, instead of picking the newest version?**
+   CAVR would be verifying a version it guessed, and pip might install another. Unknown -> UNRESOLVED.
