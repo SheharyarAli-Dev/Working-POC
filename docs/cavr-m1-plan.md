@@ -275,6 +275,37 @@ Found in commit 0b (2026-10-10, `521c414`) and deliberately not fixed there:
   file in a `--network none` container would also leave no event (read from the code, not run; docker
   and podman modes were not executed). No code change now. -> M2 sandbox.
 
+Found in the batch 1-3 review (2026-10-10, MINOR items) and deliberately not fixed there:
+
+- Gate, local versions: `a==1.0+local` is expected to satisfy the allowlist entry `a==1.0` (PEP 440;
+  read from the rules, not run). Block local versions or pin the behaviour with a test. -> step 4.
+- Gate decisions carry the version as written (`"1"` for `a==1`), not normalised. It feeds the cache
+  key. -> step 10.
+- `check_requirement_gate` builds `f"{name}=={version}"`, so a version string containing a marker
+  (`2.31.0; python_version > "1"`) is PERMITTED while `api.py` keeps the raw string. -> step 13.
+- `requirement_gate.py` module docstring says PERMITTED is returned "from exactly one place";
+  `evaluate_capture` has two more. Reword. -> next change to the file.
+- `load_json_file` does not catch `RecursionError` from a deeply nested JSON file. -> step 11.
+- A lockfile path that is given but missing skips the lockfile rule, so deleting the lockfile turns the
+  rule off. Documented and tested; to be decided in step 11.
+- `api.py` shows an UNRESOLVED gate result as `policy_state = "REJECTED"`. Fail-closed but mislabelled.
+  No automated test covers the `api.py` gate change. -> step 13.
+- `capture.py`: no depth or total-file limit on nested `-r`; a long chain can raise `RecursionError`
+  and diamond includes are re-read. Add a cap that records an error. -> step 12.
+- `capture.py`: `-r` accepts any absolute path and unparseable lines are copied into `errors[].raw`, so
+  `-r <a secrets file>` would put its lines into evidence. Truncate `raw` or restrict includes to the
+  project directory. -> step 12.
+- `capture.py`: a FIFO or device named by `-r` blocks on open. Check `is_file()` first. -> step 12.
+- `parse_pip_command(None)` raises `TypeError` instead of returning an error record. -> step 12.
+- `capture_requirements_edit` raises `ValueError`/`KeyError` on bad snapshots; the caller must catch
+  it. -> step 11.
+- `manifest_parser.py` docstring says the diff "is `detect_manifest_changes`"; the code calls `_diff`
+  (which `detect_manifest_changes` also calls). Reword. -> next change to the file.
+- Removed option lines in a requirements edit (for example `--require-hashes` deleted) are not in
+  `changes`. -> step 11.
+- Nice-to-have capture tests: `pip install a==1 && pip install b==1`, `PIP_INDEX_URL=x pip install a==1`,
+  the `--` separator, `-r https://...`, `-qr reqs.txt`. By reading, all fail closed. -> step 12.
+
 ## Verification
 
 - `.venv/bin/python -m pytest -q` before every commit (offline).
@@ -289,9 +320,9 @@ Found in commit 0b (2026-10-10, `521c414`) and deliberately not fixed there:
 
 - [x] 0 refuse host execution of unpinned package source (committed 2026-10-10, `3be14db`)
 - [x] 0b accept either monitor mode in `test_controlled_dormant_execution` (committed 2026-10-10, `521c414`)
-- [x] 1 C1 pip command capture (committed 2026-10-10)
-- [x] 2 C1 requirements.txt edit capture (committed 2026-10-10)
-- [x] 3 C2 fail-closed requirement gate (committed 2026-10-10)
+- [x] 1 C1 pip command capture (committed 2026-10-10, `73f7892`; batch review fixes in the next commit)
+- [x] 2 C1 requirements.txt edit capture (committed 2026-10-10, `4c053b6`; batch review fixes in the next commit)
+- [x] 3 C2 fail-closed requirement gate (committed 2026-10-10, `c018f30`; batch review fixes in the next commit)
 - [ ] 4 C3 PyPI fetch + SHA-256
 - [ ] 5 C3 wheel metadata
 - [ ] 6 C3 transitive tree + subtree digest

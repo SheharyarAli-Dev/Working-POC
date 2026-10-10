@@ -180,12 +180,12 @@ def evaluate_capture(record, policy, lockfile=None) -> dict:
         decision = evaluate_requirement("", policy)
         decision["decisions"] = []
         return decision
-    if not isinstance(record, dict):
-        record = {}
-    requirements = record.get("requirements")
-    if not isinstance(requirements, list):
-        requirements = []
-    decisions = [evaluate_requirement(requirement, policy, lockfile) for requirement in requirements]
+    if not isinstance(record, dict) or not isinstance(record.get("requirements"), list):
+        return _malformed_capture(policy, "the capture record has no list of requirements")
+    decisions = [evaluate_requirement(requirement, policy, lockfile) for requirement in record["requirements"]]
+    # The record is input, like the requirement itself: `complete` only counts when the record
+    # also lists no unsupported entries and no errors.
+    complete = record.get("complete") is True and record.get("unsupported") == [] and record.get("errors") == []
 
     def overall(result, rule, reason, evidence=None):
         decision = _decision(result, rule, reason, policy_version=policy_version(policy), evidence=evidence)
@@ -195,15 +195,25 @@ def evaluate_capture(record, policy, lockfile=None) -> dict:
     blocked = next((d for d in decisions if d["result"] == "BLOCK"), None)
     if blocked:
         return overall("BLOCK", blocked["rule"], blocked["reason"], blocked["evidence"])
-    if record.get("complete") is not True:
+    if not complete:
         return overall("UNRESOLVED", "CAPTURE_INCOMPLETE", "the request was not fully captured",
-                       {"unsupported": record.get("unsupported", []), "errors": record.get("errors", [])})
+                       {"unsupported": record.get("unsupported"), "errors": record.get("errors")})
     unresolved = next((d for d in decisions if d["result"] != "PERMITTED"), None)
     if unresolved:
         return overall("UNRESOLVED", unresolved["rule"], unresolved["reason"], unresolved["evidence"])
     if not decisions:
+        # Only an edit can legitimately ask for nothing (lines were removed, or only comments changed).
+        if record.get("source") != "requirements_edit":
+            return overall("UNRESOLVED", "CAPTURE_INCOMPLETE", "the request names no requirement")
         return overall("PERMITTED", "NOTHING_TO_VERIFY", "no requirement was added or changed")
     return overall("PERMITTED", "ALLOWED", f"all {len(decisions)} requirements are permitted")
+
+
+def _malformed_capture(policy, reason: str) -> dict:
+    """UNRESOLVED result for a capture record that cannot be judged at all."""
+    decision = _decision("UNRESOLVED", "CAPTURE_INCOMPLETE", reason, policy_version=policy_version(policy))
+    decision["decisions"] = []
+    return decision
 
 
 def load_json_file(path):

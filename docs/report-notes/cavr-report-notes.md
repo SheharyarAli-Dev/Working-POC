@@ -365,7 +365,7 @@ Reviewed by cavr-reviewer (2 passes); verdict: fix first, BLOCKERs fixed; test c
 ## Step 1 — C1 parse pip install commands into capture records (2026-10-10)
 
 Plan commit 1, `feat(cavr): C1 parse pip install commands into capture records`.
-Review: REVIEW_LINE_STEP_1
+Reviewed by cavr-reviewer (1 batch pass over steps 1-3); verdict: fix first; no BLOCKER in this step's own code (`conflicting_requirements` changed for the step 2 BLOCKER); 5 MINOR open.
 
 ### Ch 6 Implementation
 
@@ -520,7 +520,7 @@ All in `tests/test_cavr_capture.py`. Run on 2026-10-10:
 ## Step 2 — C1 capture requirements.txt edits (2026-10-10)
 
 Plan commit 2, `feat(cavr): C1 capture requirements.txt edits`.
-Review: REVIEW_LINE_STEP_2
+Reviewed by cavr-reviewer (1 batch pass over steps 1-3); verdict: fix first; 1 BLOCKER, fixed in the batch fix commit; 3 MINOR open.
 
 ### Ch 6 Implementation
 
@@ -661,7 +661,7 @@ No test failed during this step.
 ## Step 3 — C2 fail-closed requirement gate (2026-10-10)
 
 Plan commit 3, `feat(cavr): C2 fail-closed requirement gate`.
-Review: REVIEW_LINE_STEP_3
+Reviewed by cavr-reviewer (1 batch pass over steps 1-3); verdict: fix first; 1 BLOCKER, fixed in the batch fix commit; 8 MINOR open.
 
 ### Ch 6 Implementation
 
@@ -833,3 +833,93 @@ All in `tests/test_cavr_requirement_gate.py`. Run on 2026-10-10:
 3. **What is `policy_version` for?**
    It is the SHA-256 of the policy as canonical JSON and is one of the 8 fields of the verdict-cache key
    (step 10). If the policy changes in any way, old cached verdicts no longer match.
+
+## Steps 1-3 — batch review fixes (2026-10-10)
+
+The fix commit after `c018f30`, `fix(cavr): close two fail-open paths found in the batch review`.
+Steps 1-3 were committed as `73f7892`, `4c053b6`, `c018f30`. The sections above describe the code as
+committed there; this section lists what the fix commit changed. The fixes have not been reviewed again.
+
+### Ch 6 Implementation
+
+| File | Function | Change |
+|---|---|---|
+| `backend/cavr/requirement_gate.py` (307 -> 317 lines) | `evaluate_capture` | (a) A record that is not a dict, or whose `requirements` is not a list, is UNRESOLVED `CAPTURE_INCOMPLETE` (before: treated as an empty list). (b) Completeness is computed in the gate: `complete is True` and `unsupported == []` and `errors == []` (before: the `complete` flag alone). (c) A record with no requirements is PERMITTED `NOTHING_TO_VERIFY` only when `source == "requirements_edit"`; otherwise UNRESOLVED. |
+| | `_malformed_capture` | New. Builds the UNRESOLVED result for (a). |
+| `backend/cavr/capture.py` (427 -> 426 lines) | `conflicting_requirements(requirements, fields=("specifier",))` | Entries are now grouped by (canonical name, marker); before, every entry with a marker was skipped. New `fields` argument: which fields must be equal. |
+| `backend/cavr/manifest_parser.py` (165 -> 167 lines) | `read_manifest` | Calls `conflicting_requirements` with `("specifier", "extras", "hashes")`, so two lines for the same (name, marker) that differ in any of the three are an error. |
+| `tests/test_cavr_capture.py`, `tests/test_cavr_manifest.py`, `tests/test_cavr_requirement_gate.py` | | +1, +3, +6 test functions (+1, +6, +18 cases). |
+| `docs/cavr-m1-plan.md` | | Commit hashes in the progress list; the 16 MINOR items under "Known issues deferred". |
+
+### Design decisions
+
+| Decision | Alternatives considered | Why |
+|---|---|---|
+| The gate recomputes completeness from `unsupported` and `errors` | Trust `complete` | Same reason the gate re-parses `name` + `specifier`: the record is input. A missing `unsupported` or `errors` key also counts as incomplete. |
+| Empty request is PERMITTED only for a requirements edit | PERMITTED for any complete record | A pip command always names something; an empty one means the record is wrong. An edit can really add nothing. |
+| Differing duplicate lines are an error; identical ones are not | Error for every duplicate; make the diff keep all lines | Identical lines lose nothing when the diff keeps one. Keeping every line would need a different diff key and is not needed to fail closed. |
+| For a pip command only the specifier is compared | Compare extras and hashes there too | `pip install a==1 a[x]==1` is a normal command and both entries stay in `requirements`; nothing is hidden there. Only the edit diff collapses lines. |
+
+### Requirements covered
+
+FR-6 (Fail-Closed Security Policy, ID from `RequirementsTab.tsx`, Maryam to confirm): a malformed capture
+record and a hidden duplicate line now give UNRESOLVED. Acceptance checks:
+`test_capture_whose_requirements_are_not_a_list_is_unresolved`,
+`test_differing_lines_for_the_same_requirement_are_an_error`.
+
+### Ch 7 Test cases
+
+Run on 2026-10-10 after the fixes:
+
+- `.venv/bin/python -m pytest tests/test_cavr_*.py -q` -> 367 passed (`test_cavr_capture.py` 103, `test_cavr_manifest.py` 46, `test_cavr_requirement_gate.py` 136, plus the 82 older cases).
+- `.venv/bin/python -m pytest -q` -> 425 passed, 7 failed (the same 7 baseline tests).
+- Before the fixes the 25 new cases were run against the committed code: 21 failed, 4 passed (the 4 that
+  check behaviour that was already right: 2 non-dict records, identical duplicates, one error per name).
+
+| Test ID | Purpose | Input | Expected | Result |
+|---|---|---|---|---|
+| `test_capture_whose_requirements_are_not_a_list_is_unresolved` (7) | Malformed record | `requirements` a tuple / `None` / a string / missing; record a list / a string | UNRESOLVED `CAPTURE_INCOMPLETE`; no decisions | pass |
+| `test_gate_from_files_does_not_permit_a_record_with_a_string_of_requirements` | Same, through files | `requirements: "evil-pkg==1"` | UNRESOLVED | pass |
+| `test_complete_flag_is_not_trusted_when_the_record_lists_problems` (4) | Forged `complete` | `complete: True` with a non-empty `unsupported` / `errors`, or with `None` / a string there | UNRESOLVED `CAPTURE_INCOMPLETE` | pass |
+| `test_capture_without_its_problem_lists_is_unresolved` (2) | Missing keys | `unsupported` or `errors` deleted | UNRESOLVED | pass |
+| `test_empty_capture_is_permitted_only_for_a_requirements_edit` (3) | Empty request | `source` `pip_command` / `None` / other, then `requirements_edit` | UNRESOLVED, then `NOTHING_TO_VERIFY` | pass |
+| `test_edit_with_a_hidden_duplicate_line_is_not_permitted` | End to end | file gains `a==2.0; M` above the old `a==1.0; M` | UNRESOLVED (was PERMITTED) | pass |
+| `test_differing_lines_for_the_same_requirement_are_an_error` (4) | Hidden line | same (name, marker) with a different version / extras / hash; `a==1` + `A==1 --hash` | One error "conflicting" naming lines 1 and 2; `complete` false | pass |
+| `test_identical_duplicate_lines_are_not_an_error` | No false alarm | `a==1`, `A==1`, `b==2`, `b==2` | No error; ADDED b | pass |
+| `test_read_manifest_reports_one_error_per_duplicated_requirement` | One error per name | `a==1`, `a==2`, `a==3` | 1 error | pass |
+| `test_conflicting_pins_under_the_same_marker_are_an_error` | pip `-r` file | two `a` pins under one marker | Error "conflicting" | pass |
+
+### Defects found and fixed
+
+| # | Found by | Finding | Outcome |
+|---|---|---|---|
+| 1 | cavr-reviewer (BLOCKER, step 3) | `evaluate_capture` returned PERMITTED `NOTHING_TO_VERIFY` for a record whose `requirements` was not a list, e.g. `{"requirements": ("zzz==1",), "complete": True}`, and trusted `complete: True` on a record that listed unsupported entries | Fixed |
+| 2 | cavr-reviewer (BLOCKER, step 2) | The edit diff keeps one line per (name, marker), and conflicts were not checked for lines with a marker or for extras/hash differences. A new line such as `a==2.0; M` placed above the old `a==1.0; M` was in the file but in no part of the record, with `complete: True` | Fixed |
+
+The reviewer derived both from reading the code; they were reproduced here as failing tests before the fix.
+
+### Known limitations / deferred
+
+The 16 MINOR items of the review are listed in `docs/cavr-m1-plan.md` under "Known issues deferred"
+(found in the batch 1-3 review). None was fixed in this commit.
+
+### Tool disclosure (Ch 8.7)
+
+- **Generated by Claude Code:** the review (the read-only `cavr-reviewer` subagent), the two fixes, the
+  25 new test cases, these notes, the commit.
+- **Reviewed / decided by Maryam:** nothing in this commit yet. The fixes were made without a stop, as
+  the `/cavr-batch` command says for BLOCKERs.
+- **Verified by:** the pytest runs above. The reviewer did not see the fixes.
+
+### Supervisor Q&A prep
+
+1. **The gate re-parses the requirement because the record is input. Does it trust anything else in the record?**
+   After this fix, no decision rests on a flag alone: `requirements` must be a list, and `complete`
+   counts only when `unsupported` and `errors` are both empty lists.
+2. **Two lines for the same package under the same marker: which one is verified?**
+   If they are identical, the one line. If they differ in version, extras or hash, neither is silently
+   chosen: the record gets an error and is not complete, so the answer is UNRESOLVED.
+3. **An edit that only removes lines is permitted without verifying anything. Is that safe?**
+   Nothing new is installed by it, so there is nothing for CAVR to download and check. Removing a
+   `--hash` on a kept line is reported as MODIFIED. Removing an option line such as `--require-hashes`
+   is not reported yet; it is in the deferred list.

@@ -403,3 +403,10 @@ def test_parse_requirement_kinds():
     assert parse_requirement("git+https://example.invalid/a.git")["kind"] == "unsupported"
     assert parse_requirement("not a requirement")["kind"] == "error"
     assert parse_requirement("")["kind"] == "error"
+
+
+def test_conflicting_pins_under_the_same_marker_are_an_error(tmp_path):
+    (tmp_path / "reqs.txt").write_text('a==1; python_version >= "3"\na==2; python_version >= "3"\n')
+    record = parse_pip_command("pip install -r reqs.txt", cwd=tmp_path)
+    assert any("conflicting" in r for r in reasons(record, "errors"))
+    assert record["complete"] is False

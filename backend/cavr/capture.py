@@ -218,21 +218,20 @@ def _finish(record: dict) -> dict:
     return record
 
 
-def conflicting_requirements(requirements: list[dict]) -> list[dict]:
-    """One error per name that is asked for with two different specifiers.
+def conflicting_requirements(requirements: list[dict], fields: tuple = ("specifier",)) -> list[dict]:
+    """One error per requirement that is asked for twice with different `fields`.
 
-    Requirements with a marker are left out: `a==1; python_version<"3.8"` next to
-    `a==2; python_version>="3.8"` is a normal pattern, not a conflict.
+    Two entries are the same requirement when the canonical name and the marker are equal, so
+    `a==1; python_version<"3.8"` next to `a==2; python_version>="3.8"` is not a conflict.
     """
-    seen: dict[str, dict] = {}
-    reported: set[str] = set()
+    seen: dict[tuple, dict] = {}
+    reported: set[tuple] = set()
     errors: list[dict] = []
     for req in requirements:
-        if req["marker"]:
-            continue
-        first = seen.setdefault(req["canonical_name"], req)
-        if first["specifier"] != req["specifier"] and req["canonical_name"] not in reported:
-            reported.add(req["canonical_name"])
+        key = (req["canonical_name"], req["marker"])
+        first = seen.setdefault(key, req)
+        if key not in reported and any(first[field] != req[field] for field in fields):
+            reported.add(key)
             errors.append({"raw": f"{first['raw']}, {req['raw']}",
                            "reason": f"conflicting requirements for {req['canonical_name']}",
                            "origin": f"{first['origin']}, {req['origin']}"})
