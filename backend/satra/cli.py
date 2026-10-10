@@ -2,7 +2,7 @@ import argparse
 import json
 import sys
 
-from backend.satra import ingest, diff_localizer, security_contract
+from backend.satra import ingest, diff_localizer, security_contract, test_validator
 from backend.satra.settings import load_settings
 
 
@@ -90,6 +90,39 @@ def command_localize(arguments):
         ingest.release_run_dirs(run_handle)
 
 
+def command_judge(arguments):
+    settings = load_settings()
+    repo_dir = ingest.ensure_repository(settings)
+    if arguments.sha is None:
+        print("error: --sha is required", file=sys.stderr)
+        return 2
+    change_set = ingest.ingest_commit(repo_dir, arguments.sha)
+    run_handle = ingest.prepare_run_dirs(settings, repo_dir, change_set)
+    try:
+        res = test_validator.judge_counterfactual_oracles(
+            run_handle["baseline"],
+            run_handle["candidate"],
+            operator_name=arguments.operator
+        )
+        if arguments.json:
+            print(json.dumps({"sha": change_set["sha"], **res}, indent=2))
+        else:
+            print(f"sha:       {change_set['sha']}")
+            print(f"verdict:   {res['verdict']}")
+            print(f"reason:    {res['reason']}")
+            km = res["kill_matrix"]
+            print(f"operator:  {km['operator']}")
+            print(f"base ok:   {km['baseline_healthy']}")
+            print(f"survived:  {km['candidate_mutant_survived']}")
+            if km["integrity_findings"]:
+                print("test integrity findings:")
+                for f in km["integrity_findings"]:
+                    print(f"  - [{f['category']}] {f['file']}:{f['line']} -> {f['detail']}")
+        return 0
+    finally:
+        ingest.release_run_dirs(run_handle)
+
+
 def build_parser():
     parser = argparse.ArgumentParser(prog="satra")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -105,6 +138,12 @@ def build_parser():
     loc.add_argument("--sha", required=True)
     loc.add_argument("--json", action="store_true")
     loc.set_defaults(handler=command_localize)
+
+    jdg = sub.add_parser("judge")
+    jdg.add_argument("--sha", required=True)
+    jdg.add_argument("--operator", default="MUT_AUTHZ_IDOR_RETURN_TRUE")
+    jdg.add_argument("--json", action="store_true")
+    jdg.set_defaults(handler=command_judge)
 
     return parser
 
