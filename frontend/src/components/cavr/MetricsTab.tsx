@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { CavrRunState } from './types';
+import { CavrRunState, NOT_COMPUTED } from './types';
 import { BarChart3, PieChart, Clock, History } from 'lucide-react';
 
 interface MetricsTabProps {
@@ -31,8 +31,8 @@ export const MetricsTab: React.FC<MetricsTabProps> = ({ state }) => {
 
   const total: number = metrics.verdicts || 0;
   const byStatus: Record<string, number> = metrics.by_status || {};
-  const hitRate = metrics.cache_hit_rate == null ? 'n/a' : `${(metrics.cache_hit_rate * 100).toFixed(1)}%`;
-  const ms = (value: any) => (value == null ? 'n/a' : `${value} ms`);
+  const hitRate = metrics.cache_hit_rate == null ? NOT_COMPUTED : `${(metrics.cache_hit_rate * 100).toFixed(1)}%`;
+  const ms = (value: any) => (value == null ? NOT_COMPUTED : `${value} ms`);
   const segment: Record<string, string> = { VERIFIED: 'allow', REJECTED: 'block', BLOCK: 'block', UNRESOLVED: 'review' };
 
   return (

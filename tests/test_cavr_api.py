@@ -166,7 +166,7 @@ def test_pypdf_6_19_0_is_verified_for_the_shipped_project_and_policy(dashboard):
     assert "not a claim that the package is safe" in decided["honesty_wording"]
     proof = api.get_proof(run_id)
     assert proof["cavr_verdict"] == verdict and proof["hash_comparison"] == {
-        "declared_or_expected": PYPDF_SHA256, "actual_sha256": PYPDF_SHA256, "matches": True}
+        "declared_or_expected": PYPDF_SHA256, "actual_sha256": PYPDF_SHA256, "rule": "HASH_MATCH", "matches": True}
     assert proof["docker_command"] == api.NOT_RUN and proof["counterfactual_runs"] == []
     assert len(dashboard.index.downloads()) == 1
 
@@ -192,7 +192,8 @@ def test_denylisted_name_is_blocked_before_any_download(dashboard):
     assert (gate["result"], gate["matched_rule"], gate["rule_checked"]) == ("BLOCK", "DENYLIST", "Explicit project denylist")
     decided = dashboard.payload(run_id, "verdict_computed")
     assert (decided["verdict"], decided["policy_state"]) == ("BLOCK", "BLOCK") and "Nothing was downloaded" in decided["honesty_wording"]
-    assert api.get_proof(run_id)["hash_comparison"] == {"declared_or_expected": None, "actual_sha256": None, "matches": None}
+    assert api.get_proof(run_id)["hash_comparison"] == {"declared_or_expected": None, "actual_sha256": None, "rule": None,
+                                                        "matches": None}
     certificate = api.RUN_CERTIFICATES[run_id]
     assert (certificate["status"], certificate["verdict"], certificate["rule"]) == ("BLOCK", "BLOCK", "DENYLIST")
     assert "Nothing was downloaded" in certificate["bounded_trust_claim"]
@@ -209,6 +210,7 @@ def test_tampered_wheel_is_rejected_on_the_hash_of_the_bytes_that_arrived(dashbo
     proof = api.get_proof(run_id)
     comparison = proof["hash_comparison"]
     assert comparison["declared_or_expected"] == PYPDF_SHA256 != comparison["actual_sha256"] and comparison["matches"] is False
+    assert comparison["rule"] == "HASH_MISMATCH"
     assert proof["demo_condition"] == {"id": "tampered_wheel", "description": api.CONDITIONS["tampered_wheel"]}
     # The file kept in quarantine is the real wheel with exactly one bit changed, and its hash is the one reported.
     artifact = verdict["packages"][0]["evidence"]["artifact"]
@@ -232,6 +234,9 @@ def test_network_off_is_unresolved_and_the_real_transport_is_never_asked(dashboa
     decided = dashboard.payload(run_id, "verdict_computed")
     assert (decided["verdict"], decided["policy_state"]) == ("NEEDS_REVIEW", "UNRESOLVED")
     assert "Unknown is not treated as a pass" in decided["honesty_wording"]
+    # No hash was computed, so the comparison says "not computed" (None), not "does not match".
+    assert api.get_proof(run_id)["hash_comparison"] == {"declared_or_expected": None, "actual_sha256": None,
+                                                        "rule": "REGISTRY_UNAVAILABLE", "matches": None}
 
 
 def test_what_the_pipeline_is_given_under_each_condition(dashboard, monkeypatch):
@@ -270,6 +275,108 @@ def test_runs_under_a_demo_condition_are_not_in_the_log_the_cache_or_the_metrics
     assert len(dashboard.store.get_verdict_log()) == 1 and len(dashboard.store.list_cached_verdicts()) == 1
     dashboard.run("network_off")
     assert api.get_metrics()["verdicts"] == 1 and api.get_metrics()["by_status"] == {"VERIFIED": 1}
+
+
+# --- the page's timeline: which stage ran and what it computed -------------------------------------------------
+
+STAGE_IDS = ["capture", "gate", "artifact", "cache", "analysis", "verdict"]
+
+
+def stages(run_id):
+    listed = api.get_proof(run_id)["stages"]
+    assert [stage["id"] for stage in listed] == STAGE_IDS and all(stage["title"] for stage in listed)
+    return {stage["id"]: stage for stage in listed}
+
+
+def values(stage):
+    return {item["label"]: item["value"] for item in stage["values"]}
+
+
+def ran(by_id):
+    return [stage_id for stage_id in STAGE_IDS if by_id[stage_id]["ran"]]
+
+
+def test_timeline_of_a_verified_run_copies_the_verdict(dashboard):
+    run_id, verdict = dashboard.run("verified")
+    by_id = stages(run_id)
+    evidence = verdict["packages"][0]["evidence"]
+    assert ran(by_id) == STAGE_IDS
+    assert values(by_id["capture"]) == {"source": verdict["request"]["source"], "requirements captured": 1, "complete": True}
+    assert values(by_id["gate"]) == {"result": "PERMITTED", "rule": "ALLOWED", "policy version": verdict["policy_version"]}
+    assert values(by_id["artifact"]) == {
+        "hash check": "HASH_MATCH", "file": "pypdf-6.19.0-py3-none-any.whl", "sha256 of the download": PYPDF_SHA256,
+        "registry sha256": PYPDF_SHA256, "dependency tree": "TREE_BUILT", "files in the tree": 1,
+        "advisories": "NO_KNOWN_VULNERABILITY", "advisories that affect it": 0}
+    assert values(by_id["cache"]) == {"lookup": "MISS", "stored": True, "key": verdict["packages"][0]["cache"]["key"]}
+    assert values(by_id["analysis"]) == {
+        "contract": "CONTRACT_INFERRED", "call sites": 4, "AST scan": "SCAN_COMPLETE", "Python files scanned": 59,
+        "sink judgement": evidence["reachability"]["rule"], "sink calls judged": 2, "analysis from the cache": False}
+    assert values(by_id["verdict"]) == {
+        "status": "VERIFIED", "decided at": "verdict / ALL_CHECKS_PASSED", "fast_gate_ms": verdict["fast_gate_ms"],
+        "cache_hit": False, "escalated": False, "escalation": None}
+    # A second run: the lookup is a hit and the analysis is the stored one.
+    by_id = stages(dashboard.run("verified_again")[0])
+    assert values(by_id["cache"])["lookup"] == "HIT" and values(by_id["cache"])["stored"] is False
+    assert values(by_id["analysis"])["analysis from the cache"] is True and values(by_id["verdict"])["cache_hit"] is True
+
+
+@pytest.mark.parametrize("scenario, expected_ran", [
+    ("not_on_allowlist", ["capture", "gate", "verdict"]),
+    ("tampered_wheel", ["capture", "gate", "artifact", "verdict"]),
+    ("network_off", ["capture", "gate", "artifact", "verdict"]),
+    ("known_vulnerable", ["capture", "gate", "artifact", "cache", "analysis", "verdict"]),
+])
+def test_a_stage_that_did_not_run_has_no_value_at_all(dashboard, scenario, expected_ran):
+    by_id = stages(dashboard.run(scenario)[0])
+    assert ran(by_id) == expected_ran
+    for stage_id in STAGE_IDS:
+        if stage_id not in expected_ran:
+            assert set(values(by_id[stage_id]).values()) == {None}, stage_id
+
+
+def test_timeline_values_of_the_failing_scenarios(dashboard):
+    blocked = stages(dashboard.run("not_on_allowlist")[0])
+    assert values(blocked["gate"])["result"] == "BLOCK" and values(blocked["gate"])["rule"] == "NOT_ON_ALLOWLIST"
+    assert values(blocked["verdict"])["decided at"] == "gate / NOT_ON_ALLOWLIST"
+    tampered = values(stages(dashboard.run("tampered_wheel")[0])["artifact"])
+    assert tampered["hash check"] == "HASH_MISMATCH" and tampered["registry sha256"] == PYPDF_SHA256 != tampered["sha256 of the download"]
+    offline = values(stages(dashboard.run("network_off")[0])["artifact"])
+    assert offline["hash check"] == "REGISTRY_UNAVAILABLE" and offline["sha256 of the download"] is None and offline["file"] is None
+    vulnerable = stages(dashboard.run("known_vulnerable")[0])
+    assert values(vulnerable["artifact"])["advisories"] == "KNOWN_VULNERABILITY"
+    assert values(vulnerable["artifact"])["advisories that affect it"] == 97
+    # The contract was inferred and the cache was looked up, but the scan never ran: OSV rejected the request first.
+    analysis = values(vulnerable["analysis"])
+    assert analysis["contract"] == "CONTRACT_INFERRED" and analysis["AST scan"] is None and analysis["sink judgement"] is None
+    assert analysis["Python files scanned"] is None and analysis["sink calls judged"] is None
+
+
+def test_no_stage_carries_a_time_of_its_own(dashboard):
+    """The pipeline measures one time per request (`fast_gate_ms`). The timeline must not show a time per stage."""
+    by_id = stages(dashboard.run("verified")[0])
+    labels = [item["label"] for stage in by_id.values() for item in stage["values"]]
+    assert [label for label in labels if "ms" in label or "time" in label.lower()] == ["fast_gate_ms"]
+    assert all(set(stage) == {"id", "title", "ran", "values"} for stage in by_id.values())
+
+
+@pytest.mark.parametrize("verdict", [{}, {"status": "UNRESOLVED", "packages": [{}]}, {"request": 7, "gate": "x", "packages": "y"},
+                                     {"status": "VERIFIED", "packages": [{"evidence": {"artifact": 3, "advisories": [None], "scan": "z"}}]}])
+def test_timeline_of_a_verdict_without_evidence_claims_nothing(verdict):
+    listed = api.stage_summary(verdict)
+    assert [stage["id"] for stage in listed] == STAGE_IDS
+    computed = {item["label"]: item["value"] for stage in listed[:-1] for item in stage["values"] if item["value"] is not None}
+    assert computed == {} and not any(stage["ran"] for stage in listed[:-1])
+    assert values(listed[-1])["status"] == verdict.get("status")
+
+
+def test_a_pipeline_fault_shows_only_the_verdict_stage(dashboard, monkeypatch):
+    def broken(*args, **kwargs):
+        raise RuntimeError("disk on fire")
+
+    monkeypatch.setattr(api, "verify_request", broken)
+    by_id = stages(dashboard.run("verified")[0])
+    assert ran(by_id) == ["verdict"] and values(by_id["verdict"])["fast_gate_ms"] is None
+    assert values(by_id["verdict"])["decided at"] == "internal / INTERNAL_ERROR"
 
 
 # --- a condition or a scenario name can never improve a verdict ------------------------------------------------
