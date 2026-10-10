@@ -24,6 +24,7 @@ satra_router = APIRouter(prefix="/api/satra")
 
 # Run state storage
 RUN_QUEUES: dict[str, list[asyncio.Queue]] = {}
+RUN_HISTORY: dict[str, list[dict]] = {}
 RUN_EVIDENCE: dict[str, dict] = {}
 RUN_PROOFS: dict[str, dict] = {}
 AUDIT_LOGS: list[dict] = []
@@ -41,6 +42,7 @@ class RunRequest(BaseModel):
     branch: str = "main"
     auto_repair: bool = True
     retry_attempt: int = 1
+    commit_sha: str | None = None  # when set, a REAL run is executed against Threat-Repository
 
 class ApproveRecommitRequest(BaseModel):
     run_id: str
@@ -55,6 +57,7 @@ def publish_satra_event(run_id: str, event_type: str, data: dict):
         "timestamp": time.time(),
         "data": data
     }
+    RUN_HISTORY.setdefault(run_id, []).append(payload)
     if run_id in RUN_QUEUES:
         for q in RUN_QUEUES[run_id]:
             q.put_nowait(payload)
@@ -477,9 +480,20 @@ async def create_satra_run(req: RunRequest):
     run_id = f"satra-run-{hashlib.sha256(f'{req.scenario}-{time.time()}'.encode()).hexdigest()[:8]}"
     RUN_QUEUES[run_id] = []
 
+    if req.commit_sha:
+        from backend.satra.live_pipeline import run_live_pipeline
+        run_id = f"satra-live-{req.commit_sha[:7]}-{int(time.time())}"
+        RUN_QUEUES[run_id] = []
+        asyncio.create_task(run_live_pipeline(
+            run_id, req.commit_sha, publish_satra_event,
+            lambda rid, rec: RUN_EVIDENCE.__setitem__(rid, rec),
+            lambda rid, rec: RUN_PROOFS.__setitem__(rid, rec)))
+        return {"run_id": run_id, "mode": "live", "status": "QUEUED",
+                "stream_url": f"/api/satra/runs/{run_id}/events"}
+
     scenario_data = SCENARIOS.get(req.scenario, SCENARIOS["clean_safe"])
 
-    # Launch background evaluation
+    # Launch background evaluation (SIMULATED fixture run - not real engine output)
     asyncio.create_task(run_satra_pipeline(run_id, req, scenario_data))
 
     return {
@@ -495,6 +509,8 @@ async def stream_satra_events(run_id: str, request: Request):
     queue: asyncio.Queue = asyncio.Queue()
     if run_id not in RUN_QUEUES:
         RUN_QUEUES[run_id] = []
+    for past in RUN_HISTORY.get(run_id, []):
+        queue.put_nowait(past)
     RUN_QUEUES[run_id].append(queue)
 
     async def event_generator() -> AsyncGenerator[str, None]:
@@ -535,6 +551,21 @@ def satra_recommit_approve(req: ApproveRecommitRequest):
         raise HTTPException(404, "Run evidence not found")
     if evidence.get("decision") != "ACCEPTED":
         raise HTTPException(400, "Recommit is only permitted for ACCEPTED runs")
+
+    if evidence.get("simulated") is False:
+        from backend.satra.settings import load_settings
+        from backend.satra.ingest import ensure_repository
+        from backend.satra.recommit import create_verified_repair_branch, push_repair_branch_if_allowed
+        settings = load_settings()
+        repo_dir = ensure_repository(settings)
+        made = create_verified_repair_branch(repo_dir, evidence["commit"], req.run_id, [])
+        pushed = push_repair_branch_if_allowed(repo_dir, made["branch"], settings)
+        entry = {"run_id": req.run_id, "timestamp": time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime()),
+                 "operator": req.user, "action": "APPROVE_LOCAL_BRANCH", "branch": made["branch"],
+                 "pushed": pushed["pushed"], "note": pushed.get("reason", "pushed"), "message": made["commit_message"]}
+        AUDIT_LOGS.append(entry)
+        return {"status": "APPROVED_LOCAL_BRANCH", "branch": made["branch"], "pushed": pushed["pushed"],
+                "audit_entry": entry}
 
     timestamp = time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime())
     branch_name = req.branch
@@ -920,6 +951,7 @@ Disallowed: os, subprocess, requests, network, file writes
         # Store complete evidence and proof
         RUN_EVIDENCE[run_id] = {
             "run_id": run_id,
+            "simulated": True,
             "timestamp": time.time(),
             "scenario": req.scenario,
             "repository": f"{req.owner}/{req.repo}",

@@ -61,7 +61,7 @@ export const SatraModule: React.FC = () => {
   const [explainSimply, setExplainSimply] = useState(false);
   const [activeWorkflowBox, setActiveWorkflowBox] = useState<'none' | 'dict' | 'action' | 'env'>('none');
   const [isRunning, setIsRunning] = useState(false);
-  const [selectedScenario, setSelectedScenario] = useState<string>('clean_safe');
+  const [selectedScenario, setSelectedScenario] = useState<string>('live');
 
   const toggleDictionaryBottom = () => {
     setShowDictionaryBottomPanel(prev => {
@@ -210,7 +210,8 @@ export const SatraModule: React.FC = () => {
           repo: 'invoicehub-secure',
           branch: 'main',
           auto_repair: true,
-          retry_attempt: retryAttempt
+          retry_attempt: retryAttempt,
+          commit_sha: scenarioKey === 'live' ? selectedRealCommitSha : undefined
         })
       });
 
@@ -522,7 +523,8 @@ export const SatraModule: React.FC = () => {
                   color: 'var(--ink-primary)'
                 }}
               >
-                <option value="clean_safe">1. Clean legitimate change (ACCEPTED)</option>
+                <option value="live">LIVE · real commit from Threat-Repository (executed)</option>
+                <option value="clean_safe">[SIMULATED] 1. Clean legitimate change (ACCEPTED)</option>
                 <option value="idor_bypass">2. Authorization bypass / IDOR (REPAIR -&gt; ACCEPTED)</option>
                 <option value="repo_specific">3. Repository-specific bug (Ollama Test -&gt; ACCEPTED)</option>
                 <option value="bad_repair">4. Bad repair (RETRY_AVAILABLE -&gt; Loop)</option>
@@ -554,6 +556,23 @@ export const SatraModule: React.FC = () => {
             </button>
           </div>
         </div>
+
+        {selectedScenario === 'live' && (
+          <div style={{ marginBottom: '16px' }}>
+            <SatraCommitPicker
+              commits={realCommits}
+              selectedSha={selectedRealCommitSha}
+              onSelectCommit={setSelectedRealCommitSha}
+              loading={loadingCommits}
+              onRefresh={fetchRealCommits}
+            />
+          </div>
+        )}
+        {selectedScenario !== 'live' && (
+          <div style={{ marginBottom: '12px', fontSize: '11px', fontWeight: 700, color: '#b45309' }}>
+            SIMULATED fixture scenario — not produced by the real engine. Choose LIVE for executed results.
+          </div>
+        )}
 
         {/* Live Step Status Bar */}
         <div style={{ 
