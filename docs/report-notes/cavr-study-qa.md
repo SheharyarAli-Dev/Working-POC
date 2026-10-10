@@ -66,3 +66,80 @@ UNRESOLVED.
    Example: adding `a==2.0; python_version >= "3"` above the existing `a==1.0; python_version >= "3"`
    showed no change and `complete: True`. Two differing lines for the same package are now an error,
    so the result is UNRESOLVED.
+
+## Batch B — steps 4-8: C3 fast gate on real PyPI artifacts (2026-10-10)
+
+Each stage answers OK, REJECTED or UNRESOLVED. VERIFIED is the final verdict of the whole pipeline
+(plan step 11, not built yet): it needs every stage to answer OK.
+
+### Q1. How does CAVR download a package from PyPI and prove the file is genuine?
+
+`fetch_artifact` in `backend/cavr/pypi_client.py`.
+
+1. It asks PyPI for the release description: `https://pypi.org/pypi/{name}/{version}/json`. That lists
+   every file of the release with its SHA-256.
+2. `select_wheel` picks the wheel that fits this Python. The file URL must be on
+   `https://files.pythonhosted.org`.
+3. It downloads the wheel into a quarantine folder, with a size cap and a time limit.
+4. `_sha256_of_file` reads the saved file back and computes its SHA-256.
+5. That hash is compared with the one PyPI listed. One changed byte gives a different hash.
+
+- OK: the real `pypdf-6.19.0` wheel hashes to `7e5d6e73…e48d14`, the same as PyPI's value.
+- REJECTED (`HASH_MISMATCH`): the same wheel with one bit flipped; it is kept as `….whl.rejected`.
+- UNRESOLVED: a timeout, a yanked release, or a release with only a `.tar.gz` (`NO_WHEEL`).
+
+### Q2. How does CAVR build the dependency tree?
+
+`build_tree` in `backend/cavr/dep_tree.py`, using `read_wheel` in `backend/cavr/wheel_meta.py`.
+
+1. Start with the requested package. Download and hash it (Q1).
+2. `read_wheel` opens the wheel as a zip (nothing is extracted) and reads its `METADATA` file. The
+   `Requires-Dist` lines there are the package's own list of dependencies.
+3. A line with a condition that is false on this machine (for example `sys_platform == "win32"` on
+   Linux) is skipped and recorded under `excluded`.
+4. Each remaining dependency is pinned to the one version in the project lockfile, then steps 1-4
+   repeat for it. A package is loaded once, so a cycle ends.
+5. `subtree_digest` makes one SHA-256 over all (name, version, file hash) entries plus the edges.
+
+- OK: `app 1.0 -> mid 1.5 -> leaf 2.0`, all three in the lockfile and all three hashes match.
+- REJECTED: the same tree with the `leaf` wheel tampered; one bad node rejects the whole tree.
+- UNRESOLVED (`CHILD_NOT_PINNED`): `app` needs `leaf>=1` and the lockfile has no `leaf`.
+
+### Q3. How does the OSV check decide a version is affected?
+
+`check_advisories` and `match_advisory` in `backend/cavr/advisories.py`.
+
+1. It asks OSV (live, or a saved answer at most 30 days old) for advisories about this name and version.
+2. Each advisory has ranges written as events: `introduced` starts the affected range, `fixed` ends
+   it (the fixed version itself is safe), `last_affected` ends it (that version is still affected).
+3. `match_advisory` walks the events with `package_records.affected` and says AFFECTED, NOT_AFFECTED
+   or UNKNOWN.
+4. Any AFFECTED advisory rejects the package. If nothing is affected but something is UNKNOWN, or
+   there is no usable answer, the result is UNRESOLVED.
+
+Example range: introduced `0`, fixed `6.19.0`. Then `6.18.1` is affected and `6.19.0` is not.
+
+- OK (`NO_KNOWN_VULNERABILITY`): pypdf 6.19.0; OSV returned no advisory (recorded 2026-10-10).
+- REJECTED (`KNOWN_VULNERABILITY`): pypdf 5.1.0; 97 advisories, for example `GHSA-php9-fj8v-98fj`.
+- UNRESOLVED: offline with no saved answer, a saved answer 31 days old, or an advisory with only a
+  GIT commit range (`RANGE_UNSUPPORTED`).
+
+### Q4. What does the AST scan look for?
+
+`scan_wheel` in `backend/cavr/ast_scan.py`. It reads the code as text and never runs it.
+
+1. Every `.py` file in the wheel is parsed into a syntax tree with Python's `ast` module.
+2. Sinks: calls that can do something sensitive, from the threat-repository rules, such as
+   `subprocess.run`, `os.system`, `socket.create_connection`, `eval`. Also when hidden behind an
+   import alias (`from subprocess import run`).
+3. Triggers: an `if` that depends on an environment variable or a file existing and has a sink
+   inside, for example `if os.getenv("DEPLOY_ENV") == "prod": socket.create_connection(...)`.
+4. Things it cannot read: files with syntax errors, native code (`.so`, `.pyd`), `.pyc` files, and
+   `.pth` files with `import` lines (Python runs those at every start).
+
+The result says whether all the code was read, not whether it is safe. The sinks are evidence that
+step 11 will judge against the project's own call sites.
+
+- OK (`SCAN_COMPLETE`): pypdf 6.19.0; 59 files read, 2 sinks listed (`pypdf/filters.py` lines 774, 804).
+- REJECTED (`UNSAFE_PATH`): a wheel with an entry named `../evil.py`.
+- UNRESOLVED: a file with a syntax error, or a wheel containing a `.so` (`COMPILED_CODE_NOT_SCANNED`).
