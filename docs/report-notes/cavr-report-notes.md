@@ -1396,3 +1396,122 @@ Run on 2026-10-10:
 3. **What happens offline?**
    The adapter's dated cache is used if it is at most 30 days old and its digest still matches.
    Otherwise the result is UNRESOLVED; CAVR never reports "no vulnerabilities" without an OSV answer.
+
+## Step 8 — C3 light AST risk scan of wheel sources (2026-10-10)
+
+Plan commit 8, `feat(cavr): C3 light AST risk scan of wheel sources`.
+Review: REVIEW_LINE_STEP_8
+
+### Ch 6 Implementation
+
+| File | Function / constant | What it does |
+|---|---|---|
+| `backend/cavr/ast_scan.py` (new, 227 lines) | `scan_wheel(path, knowledge=None)` | Reads every `.py` entry of the wheel, parses it with `ast`, runs `trigger_discovery.scan` (imported, not edited) on it, and reports what it could not cover. Returns `result` (OK / UNRESOLVED / REJECTED), `rule`, `reason`, `analyzer_version`, `rules_digest`, `python_files`, `files_scanned`, `bytes_scanned`, `findings`, `sinks`, `triggers`, `dynamic_code`, `parse_errors`, `native_files`, `bytecode_files`, `pth_files`, `coverage`. |
+| | `_scan` | The body: archive checks (`wheel_meta.check_entries`), per-file decode + parse + rule scan, `.pth` handling, sorting, findings. |
+| | `_alias_pass(name, tree, rules)` | Per module: maps import aliases (`import socket as s`, `from subprocess import run`) to full names and reports sink calls the literal rule scan misses (`via_alias: true`), plus `compile` / `__import__` / `importlib.import_module` calls. |
+| | `_decode` | Source bytes -> text using the PEP 263 encoding (`tokenize.detect_encoding`). |
+| | `ANALYZER_VERSION` `"cavr-ast-scan/1"`, `MAX_SOURCE_BYTES` 5 MiB, `MAX_TOTAL_SOURCE_BYTES` 100 MiB, `INCOMPLETE` | Version for the cache key; budgets; finding kind -> rule, in priority order. |
+| `backend/cavr/wheel_meta.py` | `WheelProblem` | Renamed from `_Stop` (now also caught by `ast_scan.py`). No behaviour change. |
+| `tests/test_cavr_ast_scan.py` (new, 280 lines) | | 27 test functions, 42 cases. |
+| `docs/cavr-m1-plan.md` | | Progress box 8 ticked. |
+
+Key algorithm, `scan_wheel`:
+
+1. `check_entries` (step 5): budget and path rules first; a zip bomb is never decompressed.
+2. Every `.py` entry, in name order: over budget -> `SOURCE_TOO_LARGE`; decode; `ast.parse`; `scan({name: source})`; `_alias_pass`. A failure in any of these is a `PARSE_ERROR` finding for that file only.
+3. `.pth` files: lines starting with `import` are code that Python runs at start-up -> `PTH_EXECUTABLE`, and those lines are scanned like a source file (line numbers kept). Path-only `.pth` -> `PTH_FILE`.
+4. Native files (`.so/.pyd/.dll/.dylib`) -> `NATIVE_EXTENSION`; `.pyc` -> `BYTECODE_ONLY`.
+5. Result: UNRESOLVED when any finding means "not covered" (`SCAN_BUDGET`, `SOURCE_NOT_PARSED`, `PTH_EXECUTES_CODE`, `COMPILED_CODE_NOT_SCANNED`, first in that order); otherwise OK `SCAN_COMPLETE`. Sinks, triggers and dynamic-code calls never change the result.
+
+### Design decisions
+
+| Decision | Alternatives considered | Why |
+|---|---|---|
+| `result` answers "was all code covered?", not "is it safe?" | REJECTED/UNRESOLVED as soon as a sink is found | The plan judges sinks by reachability in step 11 (pypdf has two `subprocess.run` calls and must still reach VERIFIED). The scan only supplies the evidence. |
+| Native extension / `.pyc` -> UNRESOLVED | List it and stay OK | An AST scan cannot see compiled code; saying "complete" would be claiming knowledge CAVR does not have. Cost: packages with native wheels are UNRESOLVED in M1. Open for Maryam. |
+| Executable `.pth` -> UNRESOLVED, and its code is scanned | Treat it as an ordinary file | It runs at every interpreter start without any call site, so the call-site reachability rule of step 11 cannot clear it. |
+| One file at a time through `scan` | One `scan` call with all sources | `scan` only catches `SyntaxError`; any other failure on one file would lose the whole wheel. Per file, the others are still scanned (`test_scanner_crash_on_one_file_is_unresolved_not_an_exception`). |
+| Alias pass added here, `trigger_discovery.py` untouched | Edit `scan`; no alias handling | The plan says import, do not edit. Without it `from subprocess import run; run(...)` is not a sink and the wheel would look clean. |
+| `compile`, `__import__`, `importlib.import_module` are findings only | UNRESOLVED on any of them | They are common in honest code; they are recorded so the pipeline and a reader can see them. `exec` and `eval` are already rule sinks. |
+| `rules_digest` in the result | Analyzer version alone | The sink list comes from the threat repository; a rule change must invalidate cached verdicts (step 10). |
+| Sorted output, no timings | Report scan time | The same wheel gives an identical result dict (`test_same_wheel_gives_the_same_result`). |
+
+### Requirements covered
+
+No `FR-CAVR-NN` identifiers exist in this repository; IDs are from `RequirementsTab.tsx` (Maryam to confirm).
+
+| ID | Title | What this step covers | Acceptance check |
+|---|---|---|---|
+| none listed | CLAUDE.md goal C3, "light AST risk scan" | Sink calls and gated branches in real wheel sources | `test_pypdf_wheel_scan`, `test_env_gated_socket_is_a_trigger_and_a_sink`, `test_sink_called_through_an_import_alias_is_still_found` |
+| FR-6 | Fail-Closed Security Policy | Unparseable source, native code, executable `.pth` -> UNRESOLVED | `test_syntax_error_is_an_explicit_finding_and_unresolved`, `test_so_present_is_an_explicit_finding_and_unresolved`, `test_pth_file_that_executes_code_is_unresolved_and_its_code_is_scanned` |
+| NFR-2 | (deterministic AST, no LLM; title to confirm) | Pure `ast`; same input -> same output | `test_same_wheel_gives_the_same_result` |
+
+### Ch 7 Test cases
+
+Run on 2026-10-10:
+
+- `.venv/bin/python -m pytest tests/test_cavr_*.py -q` -> 663 passed, 4 skipped (621 + 42 new).
+- `.venv/bin/python -m pytest -q` -> 721 passed, 7 failed, 4 skipped (the same 7 baseline tests).
+- `CAVR_LIVE=1 … tests/test_cavr_live.py` -> 4 passed.
+- Before `ast_scan.py` existed the test file failed at import (1 collection error); all 42 passed on the first run with the code.
+
+| Test ID | Purpose | Input | Expected | Result |
+|---|---|---|---|---|
+| `test_clean_module_has_no_findings`, `test_wheel_without_python_files_is_complete_and_empty` | Clean module | A module that only uses `json`; a wheel with no `.py` | OK `SCAN_COMPLETE`; no findings | pass |
+| `test_env_gated_socket_is_a_trigger_and_a_sink` | Env-gated socket | `if os.getenv("DEPLOY_ENV") == "prod": socket.create_connection(...)` | OK; 1 sink (line 7, `NETWORK_CONNECT`); 1 trigger (line 6, input `DEPLOY_ENV`) | pass |
+| `test_ungated_sinks_are_listed_with_their_capability` | Plain sinks | `os.system`, `subprocess.run`, `eval` | 3 sinks with `PROCESS_CREATE` / `NATIVE_EXEC` | pass |
+| `test_sink_called_through_an_import_alias_is_still_found` (7) | Aliases | `import socket as s`; `from subprocess import run`; `from os import system as sh`; `import urllib.request as r`; `from urllib import request`; alias inside a function; `builtins.exec` | The real sink name, right line, `via_alias: true` | pass |
+| `test_a_local_function_with_a_sink_like_name_is_not_a_sink` | No false alarm | A local `run()` and `system` class, no imports | No sinks | pass |
+| `test_dynamic_import_and_compile_are_reported` | Dynamic code | `importlib.import_module`, `__import__`, `compile` | 3 `DYNAMIC_CODE` findings; result OK | pass |
+| `test_pypdf_wheel_scan` | Real wheel | `artifacts/pypdf-6.19.0-py3-none-any.whl` | OK; 59 Python files; 2 sinks: `pypdf/filters.py` lines 774 and 804, `subprocess.run`; no triggers, parse errors, native or `.pth` files | pass |
+| `test_syntax_error_is_an_explicit_finding_and_unresolved` | Syntax error | One broken file between two good ones | UNRESOLVED `SOURCE_NOT_PARSED`; the good files are still scanned | pass |
+| `test_source_that_cannot_be_parsed_is_unresolved` (5) | Other unparseable | NUL byte; invalid UTF-8; unknown codec; Python 2 `print`; 5000 nested parentheses | UNRESOLVED `SOURCE_NOT_PARSED` | pass |
+| `test_source_with_a_declared_encoding_is_decoded_with_it` | Encoding | latin-1 source with a coding line | OK; sink on line 4 | pass |
+| `test_so_present_is_an_explicit_finding_and_unresolved`, `test_other_compiled_files_are_unresolved_too` (6) | `.so` present | `.so`; `.pyd`, `.dll`, `.dylib`, `libz.so.1`, `.pyc` | UNRESOLVED `COMPILED_CODE_NOT_SCANNED`; `NATIVE_EXTENSION` finding | pass |
+| `test_pth_file_that_executes_code_is_unresolved_and_its_code_is_scanned`, `test_pth_file_with_only_paths_is_a_finding_but_the_scan_is_complete`, `test_pth_import_line_that_does_not_parse_is_unresolved` | `.pth` | `import os; os.system('id')` on line 3; paths only (one line starts with `important_dir`); a broken import line | `PTH_EXECUTES_CODE` with the sink at line 3; OK with `PTH_FILE`; `SOURCE_NOT_PARSED` | pass |
+| `test_several_problems_are_all_listed_and_the_rule_is_the_first_in_order` | Priority | Broken file + `.so` + executable `.pth` | All three findings; rule `SOURCE_NOT_PARSED` | pass |
+| `test_source_file_over_the_size_budget_is_unresolved`, `test_total_source_budget` | Budgets | Per-file budget 50 bytes; total budget 30 bytes | UNRESOLVED `SCAN_BUDGET` | pass |
+| `test_not_a_wheel_is_unresolved`, `test_archive_checks_of_step_5_apply`, `test_zip_bomb_is_not_decompressed` | Archive | Not a zip / missing / `None`; a `../evil.py` entry; 30 MiB of `#` in one `.py` | `NOT_A_WHEEL`; REJECTED `UNSAFE_PATH`; `ZIP_BUDGET` with 0 bytes scanned | pass |
+| `test_scanner_crash_on_one_file_is_unresolved_not_an_exception` | Isolation | `scan` made to raise for one file | UNRESOLVED; the other file's sink is reported | pass |
+| `test_scanning_does_not_execute_the_package` | No execution | A module that would create a marker file; a `.pth` importing it | Marker file does not exist | pass |
+| `test_same_wheel_gives_the_same_result`, `test_rules_digest_changes_with_the_rules`, `test_every_result_has_the_same_keys` | Determinism / shape | Two scans; empty rule set | Equal dicts, sorted sinks; different digest and no sinks; same keys | pass |
+
+### Defects found and fixed
+
+None found by the tests in this step. One simplification after the first green run: `bytes_scanned` is now
+simply the total size of the files in `files_scanned`.
+
+### Known limitations / deferred
+
+- Syntactic only: no data flow and no call graph. A sink reached through `getattr`, a re-export in another
+  module, a string passed to `exec`, or a method on an object (`sock.connect(...)`) is not found.
+- A sink found through an alias inside a gated branch is reported as a sink but not as a trigger.
+- A local name that shadows an imported sink name is still reported (errs to "found").
+- Native wheels are always UNRESOLVED in M1; so is any package shipping a `.pyc` or a test file with
+  deliberate syntax errors. Deep analysis is M2.
+- The verdict rule for the findings (contract and reachability, `fast_gate.disabled_jbig2_sinks`) is not
+  here. -> step 11. `DYNAMIC_CODE` findings have no consumer yet. -> step 11.
+- Only the wheel given is scanned; the pipeline must call this for every tree node. -> step 11.
+- Parsing uses the interpreter that runs CAVR: syntax newer than it is a parse error.
+
+### Tool disclosure (Ch 8.7)
+
+- **Generated by Claude Code:** `ast_scan.py`, `tests/test_cavr_ast_scan.py`, the rename in `wheel_meta.py`, these notes, the commit.
+- **Reviewed / changed by Maryam:** nothing yet; the batch ran without stops. Open for her: native code and
+  executable `.pth` are UNRESOLVED here rather than plain findings.
+- **Verified by:** the pytest runs above; the pypdf numbers (59 files, sinks at `pypdf/filters.py:774` and `:804`)
+  were first obtained by running `trigger_discovery.scan` directly on the wheel's sources.
+
+### Supervisor Q&A prep
+
+1. **The scan finds `subprocess.run` in pypdf. Why is pypdf not rejected?**
+   The scan result only says the code was fully read. Whether a sink matters is decided later from the
+   project's call sites: for pypdf the two calls are behind a configuration guard that the project
+   disables (`fast_gate.disabled_jbig2_sinks`), so they are evidence, not a failure (plan step 11).
+2. **What can a "light" AST scan not see?**
+   Compiled code, code built at run time, and calls it cannot name syntactically. Compiled code and
+   executable `.pth` lines make the result UNRESOLVED; the rest is listed under `coverage` and in the
+   limitations, and is the reason deep analysis exists as M2.
+3. **Does scanning run any package code?**
+   No. Files are read from the zip into memory and given to `ast.parse`; nothing is imported or
+   extracted (`test_scanning_does_not_execute_the_package`).

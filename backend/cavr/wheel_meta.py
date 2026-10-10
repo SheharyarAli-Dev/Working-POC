@@ -47,7 +47,7 @@ EXTENSION_MODULE = re.compile(r"\.(so|pyd)$", re.IGNORECASE)
 ZIP_ERRORS = (zipfile.BadZipFile, zipfile.LargeZipFile, zlib.error, OSError, EOFError, RuntimeError, NotImplementedError)
 
 
-class _Stop(Exception):
+class WheelProblem(Exception):
     """Ends `read_wheel` with a result other than OK."""
 
     def __init__(self, outcome: str, rule: str, reason: str):
@@ -65,7 +65,7 @@ def read_wheel(path, expected_name=None, expected_version=None) -> dict:
     try:
         with zipfile.ZipFile(Path(path)) as archive:
             _read(archive, fields, expected_name, expected_version)
-    except _Stop as stop:
+    except WheelProblem as stop:
         return _result(stop.outcome, stop.rule, stop.reason, **fields)
     except ZIP_ERRORS + (TypeError, ValueError) as exc:
         return _result("UNRESOLVED", "NOT_A_WHEEL", f"cannot read the file as a wheel: {exc}", **fields)
@@ -73,41 +73,41 @@ def read_wheel(path, expected_name=None, expected_version=None) -> dict:
 
 
 def check_entries(archive: zipfile.ZipFile) -> list[zipfile.ZipInfo]:
-    """The entries of an open zip, after the budget and path checks. Raises `_Stop` on a problem.
+    """The entries of an open zip, after the budget and path checks. Raises `WheelProblem` on a problem.
 
     The sizes are the ones declared in the zip directory; `zipfile` never returns more than the
     declared size for an entry, so the budget also bounds what can be read afterwards.
     """
     infos = archive.infolist()
     if len(infos) > MAX_ENTRIES:
-        raise _Stop("UNRESOLVED", "ZIP_BUDGET", f"{len(infos)} entries; the budget is {MAX_ENTRIES}")
+        raise WheelProblem("UNRESOLVED", "ZIP_BUDGET", f"{len(infos)} entries; the budget is {MAX_ENTRIES}")
     total = sum(info.file_size for info in infos)
     if total > MAX_TOTAL_UNCOMPRESSED:
-        raise _Stop("UNRESOLVED", "ZIP_BUDGET", f"{total} uncompressed bytes; the budget is {MAX_TOTAL_UNCOMPRESSED}")
+        raise WheelProblem("UNRESOLVED", "ZIP_BUDGET", f"{total} uncompressed bytes; the budget is {MAX_TOTAL_UNCOMPRESSED}")
     compressed = sum(info.compress_size for info in infos)
     if total > RATIO_FLOOR_BYTES and total > MAX_RATIO * max(compressed, 1):
-        raise _Stop("UNRESOLVED", "ZIP_BUDGET",
+        raise WheelProblem("UNRESOLVED", "ZIP_BUDGET",
                     f"compression ratio {total // max(compressed, 1)}:1 is over the budget of {MAX_RATIO}:1")
     seen = set()
     for info in infos:
         name = info.filename
         if _unsafe_path(name):
-            raise _Stop("REJECTED", "UNSAFE_PATH", f"entry would be written outside the install directory: {name!r}")
+            raise WheelProblem("REJECTED", "UNSAFE_PATH", f"entry would be written outside the install directory: {name!r}")
         if stat.S_ISLNK(info.external_attr >> 16):
-            raise _Stop("REJECTED", "UNSAFE_PATH", f"entry is a symbolic link: {name!r}")
+            raise WheelProblem("REJECTED", "UNSAFE_PATH", f"entry is a symbolic link: {name!r}")
         if info.flag_bits & 0x1:
-            raise _Stop("UNRESOLVED", "NOT_A_WHEEL", f"entry is encrypted: {name!r}")
+            raise WheelProblem("UNRESOLVED", "NOT_A_WHEEL", f"entry is encrypted: {name!r}")
         if name.lower() in seen:
-            raise _Stop("UNRESOLVED", "DUPLICATE_ENTRY", f"two entries are named {name!r} (ignoring case)")
+            raise WheelProblem("UNRESOLVED", "DUPLICATE_ENTRY", f"two entries are named {name!r} (ignoring case)")
         seen.add(name.lower())
     return infos
 
 
 def read_member(archive: zipfile.ZipFile, info: zipfile.ZipInfo, limit: int | None = None) -> bytes:
-    """The bytes of one checked entry, or `_Stop` when it is larger than `limit`."""
+    """The bytes of one checked entry, or `WheelProblem` when it is larger than `limit`."""
     limit = MAX_MEMBER_BYTES if limit is None else limit
     if info.file_size > limit:
-        raise _Stop("UNRESOLVED", "ZIP_BUDGET", f"{info.filename} is {info.file_size} bytes; the budget is {limit}")
+        raise WheelProblem("UNRESOLVED", "ZIP_BUDGET", f"{info.filename} is {info.file_size} bytes; the budget is {limit}")
     return archive.read(info)
 
 
@@ -121,16 +121,16 @@ def _read(archive: zipfile.ZipFile, fields: dict, expected_name, expected_versio
 
     dist_infos = sorted({name.split("/")[0] for name in by_name if "/" in name and name.split("/")[0].endswith(".dist-info")})
     if len(dist_infos) > 1:
-        raise _Stop("UNRESOLVED", "DIST_INFO_AMBIGUOUS", f"more than one dist-info directory: {dist_infos}")
+        raise WheelProblem("UNRESOLVED", "DIST_INFO_AMBIGUOUS", f"more than one dist-info directory: {dist_infos}")
     if not dist_infos or f"{dist_infos[0]}/METADATA" not in by_name:
-        raise _Stop("UNRESOLVED", "METADATA_MISSING", "the wheel has no top-level *.dist-info/METADATA")
+        raise WheelProblem("UNRESOLVED", "METADATA_MISSING", "the wheel has no top-level *.dist-info/METADATA")
     dist_info = fields["dist_info"] = dist_infos[0]
 
     # METADATA: name, version, dependencies.
     metadata = _headers(read_member(archive, by_name[f"{dist_info}/METADATA"]), "METADATA", "METADATA_INVALID")
     name, version = _single(metadata, "Name"), _single(metadata, "Version")
     if not NAME.match(name):
-        raise _Stop("UNRESOLVED", "METADATA_INVALID", f"METADATA Name is not a package name: {name!r}")
+        raise WheelProblem("UNRESOLVED", "METADATA_INVALID", f"METADATA Name is not a package name: {name!r}")
     parsed_version = _version(version, "METADATA Version")
     fields.update(name=canonicalize_name(name), metadata_name=name, version=version,
                   requires_python=metadata.get("Requires-Python"),
@@ -140,18 +140,18 @@ def _read(archive: zipfile.ZipFile, fields: dict, expected_name, expected_versio
     # The same identity three times: the request, the dist-info directory, METADATA.
     stem_name, _, stem_version = dist_info[:-len(".dist-info")].rpartition("-")
     if canonicalize_name(stem_name) != fields["name"] or _version(stem_version, "dist-info version", "") != parsed_version:
-        raise _Stop("REJECTED", "METADATA_MISMATCH",
+        raise WheelProblem("REJECTED", "METADATA_MISMATCH",
                     f"METADATA says {name} {version} but its directory is {dist_info}")
     if expected_name is not None and canonicalize_name(str(expected_name)) != fields["name"]:
-        raise _Stop("REJECTED", "METADATA_MISMATCH", f"asked for {expected_name}, the wheel's METADATA says {name}")
+        raise WheelProblem("REJECTED", "METADATA_MISMATCH", f"asked for {expected_name}, the wheel's METADATA says {name}")
     if expected_version is not None and _version(str(expected_version), "expected version") != parsed_version:
-        raise _Stop("REJECTED", "METADATA_MISMATCH",
+        raise WheelProblem("REJECTED", "METADATA_MISMATCH",
                     f"asked for {fields['name']} {expected_version}, the wheel's METADATA says {version}")
     fields["requires_dist"] = requires
 
     # WHEEL: tags.
     if f"{dist_info}/WHEEL" not in by_name:
-        raise _Stop("UNRESOLVED", "NOT_A_WHEEL", f"{dist_info}/WHEEL is missing")
+        raise WheelProblem("UNRESOLVED", "NOT_A_WHEEL", f"{dist_info}/WHEEL is missing")
     wheel = _headers(read_member(archive, by_name[f"{dist_info}/WHEEL"]), "WHEEL", "NOT_A_WHEEL")
     fields.update(wheel_tags=sorted(wheel.get_all("Tag") or []),
                   root_is_purelib=str(wheel.get("Root-Is-Purelib", "")).strip().lower() == "true")
@@ -167,7 +167,7 @@ def _read(archive: zipfile.ZipFile, fields: dict, expected_name, expected_versio
         try:
             listed = [row[0] for row in csv.reader(io.StringIO(text)) if row]
         except csv.Error as exc:
-            raise _Stop("UNRESOLVED", "METADATA_INVALID", f"RECORD cannot be parsed: {exc}")
+            raise WheelProblem("UNRESOLVED", "METADATA_INVALID", f"RECORD cannot be parsed: {exc}")
         declared, source = _import_names(listed), "RECORD"
     fields.update(import_names=declared, import_names_source=source,
                   undeclared_import_names=sorted(set(in_archive) - set(declared)),
@@ -199,7 +199,7 @@ def _text(data: bytes, what: str) -> str:
     try:
         return data.decode("utf-8")
     except UnicodeDecodeError as exc:
-        raise _Stop("UNRESOLVED", "METADATA_INVALID", f"{what} is not UTF-8: {exc}")
+        raise WheelProblem("UNRESOLVED", "METADATA_INVALID", f"{what} is not UTF-8: {exc}")
 
 
 def _headers(data: bytes, what: str, rule: str):
@@ -207,33 +207,33 @@ def _headers(data: bytes, what: str, rule: str):
     try:
         return HeaderParser().parsestr(data.decode("utf-8"))
     except UnicodeDecodeError as exc:
-        raise _Stop("UNRESOLVED", rule, f"{what} is not UTF-8: {exc}")
+        raise WheelProblem("UNRESOLVED", rule, f"{what} is not UTF-8: {exc}")
 
 
 def _single(metadata, field: str) -> str:
     values = metadata.get_all(field) or []
     if len(values) != 1 or not str(values[0]).strip():
-        raise _Stop("UNRESOLVED", "METADATA_INVALID", f"METADATA must have exactly one {field}; found {len(values)}")
+        raise WheelProblem("UNRESOLVED", "METADATA_INVALID", f"METADATA must have exactly one {field}; found {len(values)}")
     return str(values[0]).strip()
 
 
 def _version(text: str, what: str, rule: str = "METADATA_INVALID"):
-    """A parsed version; `_Stop` when it is not one. With `rule=""` an unparseable version is returned as None."""
+    """A parsed version; `WheelProblem` when it is not one. With `rule=""` an unparseable version is returned as None."""
     try:
         return Version(text)
     except InvalidVersion:
         if not rule:
             return None
-        raise _Stop("UNRESOLVED", rule, f"{what} is not a version: {text!r}")
+        raise WheelProblem("UNRESOLVED", rule, f"{what} is not a version: {text!r}")
 
 
 def _requirement(line: str) -> dict:
     try:
         requirement = Requirement(str(line))
     except InvalidRequirement as exc:
-        raise _Stop("UNRESOLVED", "METADATA_INVALID", f"Requires-Dist cannot be parsed: {line!r} ({str(exc).splitlines()[0]})")
+        raise WheelProblem("UNRESOLVED", "METADATA_INVALID", f"Requires-Dist cannot be parsed: {line!r} ({str(exc).splitlines()[0]})")
     if requirement.url:
-        raise _Stop("UNRESOLVED", "METADATA_INVALID", f"Requires-Dist points at a URL, which is not verified: {line!r}")
+        raise WheelProblem("UNRESOLVED", "METADATA_INVALID", f"Requires-Dist points at a URL, which is not verified: {line!r}")
     return {"raw": str(line).strip(), "name": requirement.name, "canonical_name": canonicalize_name(requirement.name),
             "specifier": str(requirement.specifier), "marker": str(requirement.marker) if requirement.marker else None,
             "extras": sorted(requirement.extras)}
