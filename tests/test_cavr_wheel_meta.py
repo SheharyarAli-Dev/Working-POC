@@ -155,6 +155,25 @@ def test_unusable_metadata_is_unresolved(tmp_path, metadata):
     assert outcome(read_wheel(build_wheel(tmp_path, "demo", "1.0", metadata=metadata))) == ("UNRESOLVED", "METADATA_INVALID")
 
 
+def test_a_line_that_is_not_a_header_inside_the_header_block_is_unresolved(tmp_path):
+    # The parser would stop at the second line and silently drop the dependency after it.
+    metadata = "Metadata-Version: 2.1\nName: demo\nVersion: 1.0\nthis is not a header\nRequires-Dist: hidden==1\n"
+    result = read_wheel(build_wheel(tmp_path, "demo", "1.0", metadata=metadata), "demo", "1.0")
+    assert outcome(result) == ("UNRESOLVED", "METADATA_INVALID")
+    assert "MissingHeaderBodySeparatorDefect" in result["reason"] and result["requires_dist"] == []
+
+
+def test_malformed_wheel_file_is_unresolved(tmp_path):
+    wheel = build_wheel(tmp_path, "demo", "1.0")
+    broken = tmp_path / "broken" / wheel.name
+    broken.parent.mkdir()
+    with zipfile.ZipFile(wheel) as source, zipfile.ZipFile(broken, "w") as target:
+        for info in source.infolist():
+            data = source.read(info)
+            target.writestr(info, b"Wheel-Version: 1.0\nnot a header\nTag: py3-none-any\n" if info.filename.endswith("/WHEEL") else data)
+    assert outcome(read_wheel(broken, "demo", "1.0")) == ("UNRESOLVED", "NOT_A_WHEEL")
+
+
 def test_requires_dist_after_the_header_block_is_not_a_dependency(tmp_path):
     # Core metadata ends at the first blank line; the rest is the description.
     metadata = "Metadata-Version: 2.1\nName: demo\nVersion: 1.0\n\nRequires-Dist: sneaky==1\n"

@@ -15,7 +15,7 @@ from pydantic import BaseModel, Field
 from backend.config import DATA, ROOT
 from backend.cavr.storage import CavrStorage
 from backend.cavr.fixtures.scenarios import SCENARIOS, get_scenarios_list
-from backend.cavr.requirement_gate import check_requirement_gate
+from backend.cavr.requirement_gate import POLICY_PATH, check_requirement_gate, load_json_file
 from backend.cavr.context_extractor import extract_project_context
 from backend.cavr.capability_contract import infer_capability_contract
 from backend.cavr.resolver import resolve_package
@@ -593,7 +593,8 @@ async def execute_full_cavr_pipeline(
     proj_context = extract_project_context()
     
     # P4: Capability Contract Inference
-    contract = infer_capability_contract(pkg_name, proj_context)
+    # No wheel on this path until plan step 13: the rows come from the policy, the call-site authority is unknown.
+    contract = infer_capability_contract(pkg_name, proj_context, load_json_file(POLICY_PATH))
 
     # P6: Trigger Discovery
     triggers_info = discover_triggers(source_code, filename=f"{pkg_name}.py")
