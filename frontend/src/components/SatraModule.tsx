@@ -366,6 +366,9 @@ export const SatraModule: React.FC = () => {
           .then(r => r.json())
           .then(p => setProofData(p))
           .catch(err => console.error(err));
+        setTimeout(() => {
+          document.getElementById('satra-decision-section')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }, 300);
       });
 
       eventSource.addEventListener('run_error', (e: any) => {
@@ -963,8 +966,8 @@ export const SatraModule: React.FC = () => {
                 <span style={{
                   fontSize: '9.5px',
                   fontFamily: 'monospace',
-                  background: containerLifecycle === 'running' ? '#064e3b' : '#1e293b',
-                  color: containerLifecycle === 'running' ? '#6ee7b7' : '#94a3b8',
+                  background: containerLifecycle === 'completed' ? '#064e3b' : (containerLifecycle === 'running' ? '#854d0e' : '#1e293b'),
+                  color: containerLifecycle === 'completed' ? '#6ee7b7' : (containerLifecycle === 'running' ? '#fef08a' : '#94a3b8'),
                   padding: '3px 8px',
                   borderRadius: '4px'
                 }}>
@@ -1087,7 +1090,9 @@ export const SatraModule: React.FC = () => {
 
         {/* 9. DECISION CARD */}
         {decisionData && (
-          <div style={{
+          <div 
+            id="satra-decision-section"
+            style={{
             background: decisionData.decision === 'ACCEPTED' ? '#f0fdf4' : (decisionData.decision === 'RETRY_AVAILABLE' ? '#fffbeb' : '#fef2f2'),
             border: '1px solid',
             borderColor: decisionData.decision === 'ACCEPTED' ? '#86efac' : (decisionData.decision === 'RETRY_AVAILABLE' ? '#fde68a' : '#fca5a5'),
