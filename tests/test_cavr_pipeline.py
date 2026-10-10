@@ -464,13 +464,31 @@ def test_reachable_denied_sink_is_unresolved_and_escalated(world):
     assert verdict["escalation"] == ESCALATION and verdict["escalated"] is True and world.cache_rows() == []
 
 
-def test_sink_allowed_by_the_policy_is_evidence(world):
-    world.policy.update(project_task_description="Billing dashboard", allowed_scopes=["NETWORK_CONNECT:billing.example.com"])
+def test_sink_granted_without_a_scope_limit_is_evidence(world):
+    world.policy.update(project_task_description="Billing dashboard", allowed_scopes=["NETWORK_CONNECT:*"])
     world.add("demo", "1.0", {"demo/__init__.py": NETWORK + "\n\ndef run():\n    return 1\n"})
     world.write("app/uses_demo.py", USES_DEMO)
     verdict = world.verify("pip install demo==1.0")
     assert outcome(verdict) == ("VERIFIED", "verdict", "ALL_CHECKS_PASSED"), verdict["reason"]
     assert [s["verdict"] for s in only(verdict)["evidence"]["reachability"]["sinks"]] == ["ALLOWED"]
+
+
+def test_sink_under_a_scoped_grant_is_unresolved_and_escalated(world):
+    world.policy.update(project_task_description="Billing dashboard", allowed_scopes=["NETWORK_CONNECT:billing.example.com"])
+    world.add("demo", "1.0", {"demo/__init__.py": NETWORK + "\n\ndef run():\n    return 1\n"})
+    world.write("app/uses_demo.py", USES_DEMO)
+    verdict = world.verify("pip install demo==1.0")
+    assert outcome(verdict) == ("UNRESOLVED", "reachability", "SINK_REACHABLE") and verdict["escalated"] is True
+
+
+def test_pages_read_after_the_guard_block_are_unresolved_and_escalated(world):
+    """pypdf decodes a page when it is read, so a reader that leaves the block is not covered by the guard."""
+    world.write("app/pdf_adapter.py", "from pypdf import PdfReader, apply_configuration\n\n\ndef extract(path):\n"
+                "    with apply_configuration(jbig2dec_binary=None):\n        reader = PdfReader(path)\n"
+                "    return [page.extract_text() for page in reader.pages]\n")
+    verdict = world.verify()
+    assert outcome(verdict) == ("UNRESOLVED", "reachability", "SINK_REACHABLE") and verdict["escalation"] == ESCALATION
+    assert "used outside the guard" in only(verdict)["evidence"]["reachability"]["proofs"][0]["reason"]
 
 
 def test_native_code_is_unresolved_without_escalation(world):

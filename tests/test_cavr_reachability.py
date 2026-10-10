@@ -121,15 +121,29 @@ def test_importing_a_submodule_directly_is_an_entry(tmp_path):
         assert outcome(direct) == ("UNRESOLVED", "SINK_REACHABLE"), source
 
 
-def test_a_sink_whose_capability_the_contract_allows_is_evidence(tmp_path):
+def test_a_sink_whose_capability_is_granted_without_a_scope_limit_is_evidence(tmp_path):
     files = {"demo/__init__.py": NETWORK}
-    policy = {"project_task_description": "Billing dashboard", "allowed_scopes": ["NETWORK_CONNECT:billing.example.com"]}
+    policy = {"project_task_description": "Billing dashboard", "allowed_scopes": ["NETWORK_CONNECT:*"]}
     result = judge(tmp_path, [("demo", "1.0", files)], {"app.py": "import demo\ndemo.send(b'')\n"}, policy)
     assert outcome(result) == ("OK", "NO_DENIED_SINK_REACHABLE")
     assert verdicts(result) == [("demo/__init__.py", 5, "ALLOWED")]
     # The same wheel and project under a policy that does not grant it.
     denied = judge(tmp_path / "denied", [("demo", "1.0", files)], {"app.py": "import demo\ndemo.send(b'')\n"})
     assert outcome(denied) == ("UNRESOLVED", "SINK_REACHABLE")
+
+
+def test_a_grant_limited_to_a_scope_does_not_clear_a_sink(tmp_path):
+    """Review BLOCKER 1: the scan cannot tell where a call connects to, so a scoped grant proves nothing about it."""
+    files = {"demo/__init__.py": NETWORK}  # connects to example.invalid
+    policy = {"project_task_description": "Billing dashboard", "allowed_scopes": ["NETWORK_CONNECT:billing.example.com"]}
+    result = judge(tmp_path, [("demo", "1.0", files)], {"app.py": "import demo\ndemo.send(b'')\n"}, policy)
+    assert outcome(result) == ("UNRESOLVED", "SINK_REACHABLE")
+    assert verdicts(result) == [("demo/__init__.py", 5, "REACHABLE")]
+    assert "billing.example.com" in result["sinks"][0]["why"]
+    # A sink the project cannot reach is still only evidence.
+    files = {"demo/__init__.py": "def run():\n    return 1\n", "demo/cli.py": NETWORK}
+    quiet = judge(tmp_path / "quiet", [("demo", "1.0", files)], {"app.py": "import demo\ndemo.run()\n"}, policy)
+    assert outcome(quiet) == ("OK", "NO_DENIED_SINK_REACHABLE")
 
 
 def test_no_sinks_at_all(tmp_path):
@@ -148,6 +162,61 @@ def test_sink_in_a_dependency_is_reached_through_the_root(tmp_path):
                    {"app.py": "import top\ntop.run()\n"})
     assert outcome(unused) == ("OK", "NO_DENIED_SINK_REACHABLE")
     assert [(s["package"], s["verdict"]) for s in unused["sinks"]] == [("helper", "UNREACHABLE")]
+
+
+def test_dependency_that_the_project_imports_directly_is_an_entry(tmp_path):
+    """Review BLOCKER 2: the root never imports `helper`, but the project does."""
+    root = {"top/__init__.py": "def run():\n    return 1\n"}
+    used = {"helper/__init__.py": "import os\n\n\ndef work():\n    os.system('id')\n"}
+    for number, source in enumerate(("import top\nimport helper\ntop.run()\nhelper.work()\n",
+                                     "import top\nfrom helper import work\ntop.run()\nwork()\n",
+                                     "import top\nfrom helper import *\ntop.run()\n")):
+        result = judge(tmp_path / f"p{number}", [("top", "1.0", root), ("helper", "2.0", used)], {"app.py": source})
+        assert outcome(result) == ("UNRESOLVED", "SINK_REACHABLE"), source
+        assert [(s["package"], s["verdict"]) for s in result["sinks"]] == [("helper", "REACHABLE")]
+        assert "helper" in result["entry_modules"]
+
+
+def test_no_entry_module_in_the_wheels_means_nothing_can_be_called_unreachable(tmp_path):
+    """Review BLOCKER 3: top_level.txt says `nice`, the code is at `_src/nice/`, and a .pth line adds `_src` to the path."""
+    files = {"_src/nice/__init__.py": NETWORK, "x.pth": "_src\n"}
+    wheel = build_wheel(tmp_path / "w", "nice", "1.0", files=files, top_level="nice\n")
+    nodes = [node(wheel, "nice", "1.0")]
+    context = extract_project_context(project(tmp_path, {"app.py": "import nice\nnice.send(b'')\n"}))
+    contract = infer_capability_contract(nodes[0]["metadata"], context, POLICY)
+    assert contract["result"] == "OK" and contract["entry_modules"] == ["nice", "nice.send"]
+    scans = [scan_wheel(wheel)]
+    assert scans[0]["rule"] == "SCAN_COMPLETE"
+    result = judge_sinks(nodes, scans, contract, context)
+    assert outcome(result) == ("UNRESOLVED", "SINK_REACHABLE") and verdicts(result) == [("_src/nice/__init__.py", 5, "REACHABLE")]
+    # The same without the .pth file: still no module the project imports is a module of the wheel.
+    files = {"_src/nice/__init__.py": NETWORK}
+    wheel = build_wheel(tmp_path / "w2", "nice", "1.0", files=files, top_level="nice\n")
+    nodes = [node(wheel, "nice", "1.0")]
+    result = judge_sinks(nodes, [scan_wheel(wheel)], contract, context)
+    assert outcome(result) == ("UNRESOLVED", "SINK_REACHABLE") and result["entry_modules"] == []
+    assert "none of the modules the project imports" in result["sinks"][0]["why"]
+
+
+def test_a_pth_path_line_makes_every_sink_reachable(tmp_path):
+    """With a path added by a .pth file, a module's name in the archive is not the name it is imported by."""
+    files = {"demo/__init__.py": "import extra\n\n\ndef run():\n    return 1\n", "_vendor/extra.py": NETWORK, "demo.pth": "_vendor\n"}
+    result = judge(tmp_path, [("demo", "1.0", files)], {"app.py": "import demo\ndemo.run()\n"})
+    assert outcome(result) == ("UNRESOLVED", "SINK_REACHABLE")
+    assert verdicts(result) == [("_vendor/extra.py", 5, "REACHABLE")]
+    assert [(w["file"], w["call"]) for w in result["widened_by"]] == [("demo.pth", "import path added by a .pth file")]
+    # Without the .pth line `extra` is not importable from the wheel, and the file is not reached.
+    del files["demo.pth"]
+    quiet = judge(tmp_path / "quiet", [("demo", "1.0", files)], {"app.py": "import demo\ndemo.run()\n"})
+    assert outcome(quiet) == ("OK", "NO_DENIED_SINK_REACHABLE")
+
+
+@pytest.mark.parametrize("name", ["sitecustomize", "usercustomize"])
+def test_modules_python_runs_at_start_up_are_always_reached(tmp_path, name):
+    files = {"demo/__init__.py": "def run():\n    return 1\n", f"{name}.py": "import os\nos.system('id')\n"}
+    result = judge(tmp_path, [("demo", "1.0", files)], {"app.py": "import demo\ndemo.run()\n"})
+    assert outcome(result) == ("UNRESOLVED", "SINK_REACHABLE")
+    assert verdicts(result) == [(f"{name}.py", 2, "REACHABLE")] and name in result["entry_modules"]
 
 
 def test_a_dynamic_import_in_reached_code_makes_every_sink_reachable(tmp_path):
@@ -302,3 +371,91 @@ def test_file_changed_after_the_context_was_read_refuses_the_proof(tmp_path):
     (root / "app" / "pdf.py").write_text(GUARDED + "\n\ndef quick(path):\n    return PdfReader(path)\n")
     result = judge_sinks(nodes, [pypdf_scan()], contract, context)
     assert result["proofs"][0]["accepted"] is False and outcome(result) == ("UNRESOLVED", "SINK_REACHABLE")
+
+
+# --- review of steps 9-11: project shapes for which the proof was accepted and must not be ------------------------
+
+READER_AFTER_THE_BLOCK = '''from pypdf import PdfReader, apply_configuration
+
+
+def extract(path):
+    with apply_configuration(jbig2dec_binary=None):
+        reader = PdfReader(path)
+    return [page.extract_text() for page in reader.pages]
+'''
+HELPER = "from pypdf import PdfReader, apply_configuration\n"
+STILL_REFUSED = {
+    # BLOCKER 4a: a guard that is not pypdf's.
+    "local do-nothing apply_configuration": {"app/pdf.py": "from contextlib import contextmanager\nfrom pypdf import PdfReader\n\n\n"
+        "@contextmanager\ndef apply_configuration(**settings):\n    yield\n\n\ndef extract(p):\n"
+        "    with apply_configuration(jbig2dec_binary=None):\n        reader = PdfReader(p)\n        return len(reader.pages)\n"},
+    "apply_configuration from another package": {"app/pdf.py": "from other import apply_configuration\nfrom pypdf import PdfReader\n\n\n"
+        "def extract(p):\n    with apply_configuration(jbig2dec_binary=None):\n        reader = PdfReader(p)\n        return len(reader.pages)\n"},
+    "pypdf guard hidden by a local function of the same name": {"app/pdf.py": GUARDED + "\n\ndef apply_configuration(**settings):\n    return open('x')\n"},
+    # BLOCKER 4b: the reader re-exported by a project module.
+    "reader re-exported, attribute call": {"app/pdf.py": GUARDED, "app/main.py": "from app import pdf\n\n\ndef quick(p):\n    return pdf.PdfReader(p)\n"},
+    "reader re-exported, aliased": {"app/pdf.py": GUARDED, "app/main.py": "from app.pdf import PdfReader as R\n\n\ndef quick(p):\n    return R(p)\n"},
+    "reader re-exported, star import": {"app/pdf.py": GUARDED, "app/main.py": "from app.pdf import *\n\n\ndef quick(p):\n    return PdfReader(p)\n"},
+    "names that cannot be traced to pypdf": {"app/pdf.py": GUARDED, "app/main.py": "from app.pdf import *\n\n\ndef count(p):\n"
+        "    with apply_configuration(jbig2dec_binary=None):\n        reader = PdfReader(p)\n        return len(reader.pages)\n"},
+    # BLOCKER 4d: written inside the block, run after it.
+    "reader in a lambda": {"app/pdf.py": HELPER + "\n\ndef later(p):\n    with apply_configuration(jbig2dec_binary=None):\n        return lambda: PdfReader(p)\n"},
+    "reader in a nested function": {"app/pdf.py": HELPER + "\n\ndef later(p):\n    with apply_configuration(jbig2dec_binary=None):\n"
+        "        def make():\n            reader = PdfReader(p)\n            return len(reader.pages)\n        return make\n"},
+    "reader in a generator expression": {"app/pdf.py": HELPER + "\n\ndef later(paths):\n    with apply_configuration(jbig2dec_binary=None):\n"
+        "        return (PdfReader(p) for p in paths)\n"},
+    # BLOCKER 5: the reader object leaves the block; pypdf decodes pages when they are read.
+    "pages read after the block": {"app/pdf.py": READER_AFTER_THE_BLOCK},
+    "reader returned": {"app/pdf.py": HELPER + "\n\ndef load(p):\n    with apply_configuration(jbig2dec_binary=None):\n        reader = PdfReader(p)\n        return reader\n"},
+    "reader stored on an object": {"app/pdf.py": HELPER + "\n\nclass Doc:\n    def load(self, p):\n        with apply_configuration(jbig2dec_binary=None):\n"
+        "            reader = PdfReader(p)\n            self.reader = reader\n"},
+    "reader passed to other code": {"app/pdf.py": HELPER + "\n\ndef load(p, keep):\n    with apply_configuration(jbig2dec_binary=None):\n"
+        "        reader = PdfReader(p)\n        keep(reader)\n"},
+    "reader not bound to a name": {"app/pdf.py": HELPER + "\n\ndef pages(p):\n    with apply_configuration(jbig2dec_binary=None):\n        return PdfReader(p).pages\n"},
+    "reader used lazily in a generator expression": {"app/pdf.py": HELPER + "\n\ndef pages(p):\n    with apply_configuration(jbig2dec_binary=None):\n"
+        "        reader = PdfReader(p)\n        return (reader.pages[i] for i in range(3))\n"},
+    "reader captured by a closure": {"app/pdf.py": HELPER + "\n\ndef pages(p):\n    with apply_configuration(jbig2dec_binary=None):\n"
+        "        reader = PdfReader(p)\n        return lambda: reader.pages\n"},
+    "reader made global": {"app/pdf.py": HELPER + "\n\ndef load(p):\n    global reader\n    with apply_configuration(jbig2dec_binary=None):\n"
+        "        reader = PdfReader(p)\n"},
+}
+
+
+@pytest.mark.parametrize("label", sorted(STILL_REFUSED))
+def test_project_shapes_the_first_version_of_the_proof_accepted(tmp_path, label):
+    result, _ = pypdf_judgement(tmp_path, STILL_REFUSED[label])
+    proof = result["proofs"][0]
+    assert proof["accepted"] is False and proof["lines"] == [], (label, proof["reason"])
+    assert outcome(result) == ("UNRESOLVED", "SINK_REACHABLE")
+
+
+ACCEPTED_SHAPES = {
+    "the InvoiceHub adapter": None,  # read from demo_project/InvoiceHub/app/pdf_adapter.py in the test
+    "reader used in two guard blocks": HELPER + "\n\ndef extract(p):\n    with apply_configuration(jbig2dec_binary=None):\n        reader = PdfReader(p)\n"
+        "        first = reader.pages[0].extract_text()\n    with apply_configuration(jbig2dec_binary=None):\n        return first + str(len(reader.pages))\n",
+    "two readers in two functions": GUARDED + "\n\ndef count(path):\n    with apply_configuration(jbig2dec_binary=None):\n"
+        "        reader = PdfReader(path)\n        return len(reader.pages)\n",
+}
+
+
+@pytest.mark.parametrize("label", sorted(ACCEPTED_SHAPES))
+def test_project_shapes_for_which_the_proof_holds(tmp_path, label):
+    from test_cavr_support import REPO
+    source = ACCEPTED_SHAPES[label] or (REPO / "demo_project" / "InvoiceHub" / "app" / "pdf_adapter.py").read_text()
+    result, _ = pypdf_judgement(tmp_path, {"app/pdf.py": source})
+    proof = result["proofs"][0]
+    assert proof["accepted"] is True and proof["lines"] == [774, 804], proof["reason"]
+    assert "used after the block" in proof["limit"]
+    assert outcome(result) == ("OK", "NO_DENIED_SINK_REACHABLE")
+
+
+def test_pypdf_as_a_dependency_is_not_covered_by_the_projects_own_guard(tmp_path):
+    """Review BLOCKER 4c: the wheel that was asked for calls PdfReader itself, outside any guard of the project."""
+    root = build_wheel(tmp_path / "w", "top", "1.0", files={"top/__init__.py": "from pypdf import PdfReader\n\n\ndef run(p):\n    return PdfReader(p).pages\n"})
+    nodes = [node(root, "top", "1.0"), node(PYPDF_WHEEL, "pypdf", "6.19.0")]
+    context = extract_project_context(project(tmp_path, {"app/pdf.py": GUARDED, "app/main.py": "import top\n\ntop.run('a.pdf')\n"}))
+    contract = infer_capability_contract(nodes[0]["metadata"], context, POLICY)
+    assert contract["result"] == "OK", contract["reason"]
+    result = judge_sinks(nodes, [scan_wheel(root), pypdf_scan()], contract, context)
+    assert result["proofs"][0]["accepted"] is False and "dependency" in result["proofs"][0]["reason"]
+    assert outcome(result) == ("UNRESOLVED", "SINK_REACHABLE")

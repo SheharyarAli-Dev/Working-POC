@@ -132,7 +132,12 @@ def _and_more(items: list) -> str:
 def _python_files(root: Path):
     """(sorted relative paths of the `.py` files, skipped directories, symbolic links that were not followed)."""
     paths, skipped, not_read = [], [], []
-    for base, directories, names in os.walk(root, followlinks=False):
+
+    def unlistable(error: OSError) -> None:
+        # Without this `os.walk` skips a directory it may not list and says nothing.
+        not_read.append({"file": Path(error.filename).relative_to(root).as_posix(), "reason": error.strerror or str(error)})
+
+    for base, directories, names in os.walk(root, followlinks=False, onerror=unlistable):
         relative = lambda name: (Path(base) / name).relative_to(root).as_posix()
         kept = []
         for name in sorted(directories):

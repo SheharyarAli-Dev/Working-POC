@@ -188,6 +188,21 @@ def test_symlinked_directory_is_not_followed(tmp_path):
     assert context["imports"] == [] and context["not_read"] == [{"file": "linked", "reason": "symbolic link"}]
 
 
+def test_directory_that_cannot_be_listed_makes_the_context_unresolved(tmp_path):
+    """Review BLOCKER 6: `os.walk` skips a directory it may not read without saying so."""
+    root = project(tmp_path, {"a.py": "import pypdf\n", "locked/b.py": "import pypdf\npypdf.PdfReader(1)\n"})
+    if os.geteuid() == 0:
+        pytest.skip("root can read every directory")
+    os.chmod(root / "locked", 0)
+    try:
+        context = extract_project_context(root)
+    finally:
+        os.chmod(root / "locked", 0o755)
+    assert outcome(context) == ("UNRESOLVED", "SOURCE_NOT_READ")
+    assert [entry["file"] for entry in context["not_read"]] == ["locked"]
+    assert outcome(extract_project_context(root)) == ("OK", "PROJECT_READ")
+
+
 def test_budgets(tmp_path, monkeypatch):
     root = project(tmp_path, {"a.py": "x = 1\n", "b.py": "y = 2\n" * 10})
     monkeypatch.setattr(context_extractor, "MAX_FILE_BYTES", 20)

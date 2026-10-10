@@ -1589,8 +1589,8 @@ suite or open the recorded OSV file.
 
 ## Step 9 — C4 capability contract from real imports and call sites (2026-10-10)
 
-Plan commit 9, `feat(cavr): C4 capability contract from real imports and call sites`.
-Review: one cavr-reviewer batch pass over steps 9-11; outcome in the "Steps 9-11 — batch review" section.
+Plan commit 9, `feat(cavr): C4 capability contract from real imports and call sites` (`a188cb6`).
+Reviewed by cavr-reviewer (1 batch pass over steps 9-11; it ran both suites, findings derived by reading); batch verdict: fix first; 1 BLOCKER in this step, fixed in the batch fix commit; 3 MINOR open.
 
 ### Ch 6 Implementation
 
@@ -1708,8 +1708,8 @@ Run on 2026-10-10:
 
 ## Step 10 — 8-field verdict cache (2026-10-10)
 
-Plan commit 10, `feat(cavr): 8-field verdict cache`.
-Review: one cavr-reviewer batch pass over steps 9-11; outcome in the "Steps 9-11 — batch review" section.
+Plan commit 10, `feat(cavr): 8-field verdict cache` (`d8e6367`).
+Reviewed by cavr-reviewer (1 batch pass over steps 9-11); batch verdict: fix first; 0 BLOCKERs and 0 MINOR in this step.
 
 ### Ch 6 Implementation
 
@@ -1809,8 +1809,9 @@ Run on 2026-10-10:
 
 ## Step 11 — single verify_request pipeline (2026-10-10)
 
-Plan commit 11, `feat(cavr): single verify_request pipeline`.
-Review: NOT DONE. The session's usage limit was reached after this commit; the cavr-reviewer batch pass over steps 9-11 has not run.
+Plan commit 11, `feat(cavr): single verify_request pipeline` (`c5c0ef4`).
+Reviewed by cavr-reviewer (1 batch pass over steps 9-11); batch verdict: fix first; 6 BLOCKERs in this step, fixed in the batch fix commit; 8 MINOR open.
+This section describes the code as committed in `c5c0ef4`; the sink judgement and the pypdf proof were changed by the fix commit (next section).
 
 ### Ch 6 Implementation
 
@@ -1841,7 +1842,7 @@ Key algorithm, verdict of one package: tree REJECTED -> REJECTED; any advisory R
 |---|---|---|
 | Only the scan + sink analysis is cached; the advisory result never is | Cache the final verdict | A cached REJECTED-by-OSV would stay after the advisory is withdrawn; a cached VERIFIED must turn REJECTED when OSV changes. |
 | OSV is asked for every node of the tree, and before the UNRESOLVED checks | Root only; stop at the first unknown | A vulnerable dependency, or a vulnerable package the project does not import yet, is REJECTED rather than UNRESOLVED. |
-| "Call-site path" = import closure from the contract's entry modules | Every sink reachable once the package is used; a real call graph | Over-approximates what importing can run, needs no execution, and leaves a real "unreachable" class (a `cli.py` nobody imports). A dynamic import in reached code makes everything reachable. |
+| "Call-site path" = import closure from the contract's entry modules | Every sink reachable once the package is used; a real call graph | Follows every `import` statement from what the project imports, needs no execution, and leaves a real "unreachable" class (a `cli.py` nobody imports). It is a bound only while a module's path in the wheel is its import name; the cases where it is not were found in the review and are in the next section. |
 | The pypdf guard is accepted only with two extra conditions | Trust `disabled_jbig2_sinks` alone | On its own it accepts five project shapes where a reader is unguarded (tests below). The plan says not to edit it, so the conditions are added around it. |
 | `build_tree` does stages 3 and 4 together | Download the root twice | One download per file; the root's download result is still reported as stage `artifact`. |
 | A fault inside a stage -> UNRESOLVED `INTERNAL_ERROR` | Let it raise | Unknown must never become a pass, and the caller always gets the metric fields. |
@@ -1885,7 +1886,7 @@ Run on 2026-10-10:
 | `test_unreachable_sink_is_evidence_and_the_package_is_verified`, `test_native_code_is_unresolved_without_escalation`, `test_artifact_changed_between_hashing_and_scanning_is_unresolved`, `test_unpinned_dependency_makes_the_tree_unresolved`, `test_lockfile_hash_that_differs_from_the_download_is_unresolved`, `test_project_without_a_lockfile`, `test_project_that_cannot_be_read_is_unresolved`, `test_local_version_is_unresolved_before_any_download` | Edge cases | As named | VERIFIED with UNREACHABLE evidence; otherwise UNRESOLVED with the stage's rule | pass |
 | `test_several_requirements_the_worst_one_decides`, `test_requirements_file_with_the_right_hash_and_with_a_wrong_one`, `test_requirements_edit_*` (2), `test_bad_requirements_snapshots_are_unresolved_not_an_exception` (5), `test_a_captured_record_can_be_passed_in` | Request forms | Two packages; `--hash`; edits; bad snapshots | Worst status wins; `REQUEST_HASH_MISMATCH`; `NOTHING_TO_VERIFY`; `CAPTURE_FAILED` | pass |
 | `test_verifying_does_not_install_or_run_the_package` | No execution | A module that creates a marker when imported | No marker, not importable; marker appears when really run | pass |
-| `test_cavr_reachability.py` (18 functions, 46 cases) | Sink judgement | Module names, import graph, entry modules, dependency sinks, dynamic import, unreadable wheel, the pypdf proof | As named | pass |
+| `test_cavr_reachability.py` (18 functions, 36 cases) | Sink judgement | Module names, import graph, entry modules, dependency sinks, dynamic import, unreadable wheel, the pypdf proof | As named | pass |
 | `test_the_proof_is_refused_when_the_project_enters_pypdf_in_a_way_the_guard_does_not_see` (5) | Reused guard is too lenient | `pypdf.PdfReader(p)` in another file; `PdfReader as R`; `PdfWriter(clone_from=p)`; `FACTORY = PdfReader`; nested guards + one unguarded reader | `disabled_jbig2_sinks` alone returns `[774, 804]`; the pipeline does not accept it -> UNRESOLVED | pass |
 
 ### Defects found and fixed
@@ -1898,7 +1899,7 @@ Run on 2026-10-10:
 
 ### Known limitations / deferred
 
-- **The pypdf proof is about where the reader is created.** A page decoded after the `with` block has ended is not covered; the project would still be VERIFIED. Not fixed; to be decided by Maryam (stricter proof or M2).
+- **The pypdf proof, as committed in this step, was about where the reader is created.** A page decoded after the `with` block had ended was not covered and the project was still VERIFIED. Narrowed in the batch fix commit (next section).
 - The import closure cannot see imports built at run time other than `__import__` / `importlib.import_module`, nor `exec` of a string (that is itself a sink).
 - A root requirement's marker is ignored (the package is verified whether or not the marker applies).
 - Every run downloads the tree again; the cache saves the scan, not the network.
@@ -1908,8 +1909,8 @@ Run on 2026-10-10:
 ### Tool disclosure (Ch 8.7)
 
 - **Generated by Claude Code:** `pipeline.py`, `reachability.py`, the changes in the other modules, all tests, these notes, the commit.
-- **Reviewed / changed by Maryam:** nothing yet. The cavr-reviewer pass for steps 9-11 has not run.
-- **Verified by:** the pytest runs, the live run and the 24 fault injections above.
+- **Reviewed / changed by Maryam:** nothing yet.
+- **Verified by:** the pytest runs, the live run and the 24 fault injections above; then the cavr-reviewer pass (next section).
 
 ### Supervisor Q&A prep
 
@@ -1919,3 +1920,104 @@ Run on 2026-10-10:
    It skips the AST scan and the sink judgement. The download, the SHA-256 check, the tree, the contract and the OSV query run every time, because the first four make the key and advisories change.
 3. **How are the report numbers produced?**
    Every call writes one row (status, `fast_gate_ms`, `cache_hit`, `escalated`) to `verdict_log`; `pipeline.metrics(store)` computes the hit rate and the p50 / p95 from those rows.
+
+## Steps 9-11 — batch review fix (2026-10-10)
+
+The fix commit after `c5c0ef4`, `fix(cavr): close fail-open paths in the sink judgement and the pypdf proof`.
+Steps 9-11 were committed as `a188cb6`, `d8e6367`, `c5c0ef4`. The sections above describe the code as committed
+there; this section lists what the fix commit changed. The fix has not been reviewed again.
+
+### Ch 6 Implementation
+
+| File | Function | Change |
+|---|---|---|
+| `backend/cavr/reachability.py` (274 -> 409 lines) | `judge_sinks` | (1) A sink is ALLOWED only when its capability is granted with the scope `*`; a grant with any other scope does not clear it. (2) Entry modules are every module of the tree that the project imports or uses, not only those of the requested package, plus `sitecustomize` / `usercustomize`. (3) No sink is UNREACHABLE when the project imports no module of the wheels, or a `.pth` file adds an import path. |
+| | `_project_entries` (new) | Entry names from all imports, call sites, references and star imports of the project. |
+| | `import_graph` | Also returns `owners` (which package ships a module). |
+| | `_pypdf_proof`, `_other_callers`, `_foreign_names`, `_guard_around`, `_reader_problem` (new), `_guard_problem` (rewritten) | The proof is accepted only when: pypdf is the requested package and no other wheel imports it; `PdfReader` and `apply_configuration` are imported only as `from pypdf import ...`, never defined, assigned or reached as an attribute, and every call of them is a contract call site; the reader is created as `name = PdfReader(...)` inside the guard and that name is only used inside a guard block, as `name.<attribute>`, in code that runs there. The proof carries `limit`. |
+| `backend/cavr/context_extractor.py` (233 -> 238 lines) | `_python_files` | `os.walk(..., onerror=...)`: a directory that cannot be listed goes to `not_read` -> UNRESOLVED `SOURCE_NOT_READ`. |
+| `backend/cavr/pipeline.py` (347 -> 348 lines) | `PIPELINE_VERSION` | `cavr-pipeline/1` -> `cavr-pipeline/2`, so verdicts cached under the old sink judgement are not served. |
+| `tests/test_cavr_reachability.py` (304 -> 461 lines), `tests/test_cavr_pipeline.py` (626 -> 644), `tests/test_cavr_contract.py` (478 -> 493) | | 26 / 45 / 44 test functions, 64 / 68 / 65 cases. |
+
+Key algorithm, `_reader_problem` (one `PdfReader(...)` call): it must be the value of `name = PdfReader(...)`; walking up
+the AST from that statement must reach a guard `with` before a nested function, a lambda, or the lazy part of a generator
+expression; then every other occurrence of `name` in the enclosing function must be a read of the form `name.<attribute>`
+that passes the same walk.
+
+### Design decisions
+
+| Decision | Alternatives considered | Why |
+|---|---|---|
+| Only a `*` grant clears a sink | Keep "capability name granted" and mark `scope_checked: false` | The scan sees that code connects, not where to. With a scoped grant the destination is unknown, and unknown is UNRESOLVED. Cost: a scoped grant never clears a reachable sink in M1. Open for Maryam. |
+| The reader object must not leave the guard block | Keep the proof and state the limit in the evidence only | pypdf decodes pages when they are read, so "created inside, read after" is the usual shape and was VERIFIED. The limit that remains (an object taken from the reader and used later) is in the evidence. |
+| Names are tied to contract call sites | Match by name as the reused function does | A local or third-party `apply_configuration` that does nothing was accepted as the guard. |
+| The proof is refused when pypdf is a dependency | Check the other wheel's source for guards too | A guard in the project does not govern calls made inside another wheel. |
+| `.pth` path line or no entry module -> every sink reachable | Map `.pth` paths to module names | One simple rule that cannot be wrong; a wheel that moves its import root is rare. |
+| `fast_gate.disabled_jbig2_sinks` still called, still not edited | Replace it | The plan fixes it as the proof and wants its result in the evidence (`guard_result`). It now only supplies the wheel-side check and the line numbers. |
+
+### Requirements covered
+
+FR-6 (Fail-Closed Security Policy, ID from `RequirementsTab.tsx`, Maryam to confirm): five routes to VERIFIED with
+a reachable sink are closed, and an unreadable project directory is UNRESOLVED. Acceptance checks:
+`test_project_shapes_the_first_version_of_the_proof_accepted` (18),
+`test_no_entry_module_in_the_wheels_means_nothing_can_be_called_unreachable`,
+`test_a_grant_limited_to_a_scope_does_not_clear_a_sink`,
+`test_directory_that_cannot_be_listed_makes_the_context_unresolved`.
+
+### Ch 7 Test cases
+
+Run on 2026-10-10 after the fix:
+
+- `.venv/bin/python -m pytest tests/test_cavr_*.py -q` -> 999 passed, 5 skipped (968 + 31 new).
+- `.venv/bin/python -m pytest -q` -> 1057 passed, 7 failed, 5 skipped (the same 7 baseline tests).
+- `CAVR_LIVE=1 … tests/test_cavr_live.py` -> 5 passed.
+- Before the fix the new cases were run against `c5c0ef4`: 27 failed (26 in `test_cavr_reachability.py`, 1 in `test_cavr_contract.py`); the 3 "proof holds" cases among them failed only because `limit` did not exist.
+- Fault injection on the fix, one line at a time, files restored: 16 faults; 15 made a test fail at once. "Call not checked against the contract" failed no test; the case "names that cannot be traced to pypdf" was added and now fails with that fault.
+
+| Test ID | Purpose | Input | Expected | Result |
+|---|---|---|---|---|
+| `test_a_grant_limited_to_a_scope_does_not_clear_a_sink`, `test_sink_under_a_scoped_grant_is_unresolved_and_escalated` | Scoped grant | Policy `NETWORK_CONNECT:billing.example.com`; the wheel connects to `example.invalid` | REACHABLE -> UNRESOLVED, escalated (was ALLOWED / VERIFIED) | pass |
+| `test_a_sink_whose_capability_is_granted_without_a_scope_limit_is_evidence`, `test_sink_granted_without_a_scope_limit_is_evidence` | `*` grant | Policy `NETWORK_CONNECT:*` | ALLOWED, VERIFIED | pass |
+| `test_dependency_that_the_project_imports_directly_is_an_entry` (3 project forms) | Entries | Root `top` never imports `helper`; the project does (`import`, `from ... import`, star) | `helper`'s `os.system` REACHABLE (was UNREACHABLE) | pass |
+| `test_no_entry_module_in_the_wheels_means_nothing_can_be_called_unreachable` | Import root moved | `top_level.txt` = `nice`, code at `_src/nice/`, `x.pth` = `_src`; and the same without the `.pth` | REACHABLE (was UNREACHABLE -> VERIFIED) | pass |
+| `test_a_pth_path_line_makes_every_sink_reachable` | `.pth` path | `demo.pth` = `_vendor`, sink in `_vendor/extra.py` | REACHABLE; without the `.pth` line UNREACHABLE | pass |
+| `test_modules_python_runs_at_start_up_are_always_reached` (2) | Start-up modules | `sitecustomize.py` / `usercustomize.py` with `os.system` | REACHABLE | pass |
+| `test_project_shapes_the_first_version_of_the_proof_accepted` (18) | Proof refused | Local or foreign `apply_configuration`; guard hidden by a local function; reader re-exported (attribute, alias, star); names from a project star import; reader in a lambda, nested function, generator expression; pages read after the block; reader returned, stored on `self`, passed on, not bound, used lazily, captured by a closure, made global | Proof not accepted -> UNRESOLVED `SINK_REACHABLE` | pass |
+| `test_project_shapes_for_which_the_proof_holds` (3) | Proof kept | The real InvoiceHub adapter; a reader used in two guard blocks; two readers in two functions | Accepted, lines `[774, 804]`, `limit` present | pass |
+| `test_pypdf_as_a_dependency_is_not_covered_by_the_projects_own_guard` | Other caller | Root `top` calls `PdfReader` itself; the project has its own guarded reader | Proof refused | pass |
+| `test_pages_read_after_the_guard_block_are_unresolved_and_escalated` (pipeline) | End to end | Reader created in the block, pages read after it | UNRESOLVED, `escalation` set | pass |
+| `test_directory_that_cannot_be_listed_makes_the_context_unresolved` | Unreadable directory | A project directory with mode 000 | UNRESOLVED `SOURCE_NOT_READ` (was OK) | pass |
+
+### Defects found and fixed
+
+| # | Found by | Finding | Outcome |
+|---|---|---|---|
+| 1 | cavr-reviewer (BLOCKER, step 11, shown by a passing test) | A sink was ALLOWED when its capability name was granted, whatever the scope | Fixed; only `*` clears a sink |
+| 2 | cavr-reviewer (BLOCKER, step 11, by reading) | Entry modules came only from the requested package: a dependency the project imports directly was UNREACHABLE with a false reason | Reproduced, fixed |
+| 3 | cavr-reviewer (BLOCKER, step 11, by reading) | With no entry module in the wheels (import root moved by a `.pth` line) every sink was UNREACHABLE -> VERIFIED; `sitecustomize` was never an entry | Reproduced, fixed |
+| 4 | cavr-reviewer (BLOCKER, step 11, by reading) | The pypdf proof was accepted with a guard that is not pypdf's, a reader re-exported by a project module, pypdf as a dependency of the requested wheel, and a reader written inside the block but run later | Reproduced (all four), fixed |
+| 5 | cavr-reviewer (BLOCKER, step 11; listed in step 11 as a known limit) | Pages read after the guard block were VERIFIED with the sink marked `GUARD_DISABLED` | Fixed: the reader must stay in the block |
+| 6 | cavr-reviewer (BLOCKER, step 9, by reading) | A directory that cannot be listed was skipped silently and the context was OK | Reproduced, fixed |
+| 7 | cavr-reviewer (BLOCKER, notes) | Step 11 notes said 46 reachability cases; the file had 36 | Corrected |
+
+### Known limitations / deferred
+
+- The 11 MINOR items of the review are in `docs/cavr-m1-plan.md` under "Known issues deferred" (found in the batch 9-11 review). None was changed.
+- Still not followed by the proof: an object taken from the reader (a page, a stream) and used after the block; a name rebound through `globals()` or `setattr`.
+- The proof now refuses some safe projects (a reader passed to a helper function, two readers with one name in one function). They get UNRESOLVED with an escalation, not a wrong VERIFIED.
+- The reviewer could not open the pypdf wheel; lines 774 / 804 and pypdf's lazy decoding rest on the tests and on general pypdf behaviour.
+
+### Tool disclosure (Ch 8.7)
+
+- **Generated by Claude Code:** the review (the read-only `cavr-reviewer` subagent), the fixes, the 31 new test cases, these notes, the commit.
+- **Reviewed / decided by Maryam:** nothing in this commit yet. Open for her: only `*` grants clear a sink; the proof's remaining limit.
+- **Verified by:** the pytest runs, the live run and the 16 fault injections above. The reviewer did not see the fix.
+
+### Supervisor Q&A prep
+
+1. **pypdf decodes pages lazily. What if the reader is created inside the guard and the pages are read after it?**
+   The proof is refused: the reader's name is used outside the guard block, so the two `subprocess.run` calls count as reachable and the verdict is UNRESOLVED with an escalation (`test_pages_read_after_the_guard_block_are_unresolved_and_escalated`).
+2. **The policy grants `NETWORK_CONNECT:billing.example.com`. Where is that scope compared with what the code connects to?**
+   Nowhere in M1, and that is why such a grant does not clear a sink: the scan cannot see the destination. Only an unrestricted grant (`*`) does; a scoped one leaves the sink to reachability and, if reachable, to deep analysis.
+3. **Can UNREACHABLE be wrong?**
+   It follows `import` statements. It is not used when reached code imports at run time, when a `.pth` file changes the import path, or when the project imports nothing that is a module of the wheels. Imports made through `runpy`, `pkgutil` or `sys.path` edits are not seen; that is a stated limit.
