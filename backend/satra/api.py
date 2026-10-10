@@ -359,15 +359,10 @@ index 0000000..5a77c38
 @satra_router.get("/status")
 def satra_status():
     """Returns Ollama status, GitHub connection, and local environment readiness."""
-    ollama_online = False
-    model_name = "qwen2.5-coder:1.5b (local)"
-    try:
-        req = urllib.request.Request("http://localhost:11434/api/tags", headers={"User-Agent": "ASENT-SATRA"})
-        with urllib.request.urlopen(req, timeout=1.0) as resp:
-            if resp.status == 200:
-                ollama_online = True
-    except Exception:
-        ollama_online = False
+    from backend.satra.settings import load_settings, responds
+    settings = load_settings()
+    endpoint = settings.ollama_endpoint
+    ollama_online = responds(endpoint)
 
     github_token = os.environ.get("GITHUB_TOKEN", "")
     has_token = bool(github_token and len(github_token) > 10)
@@ -376,20 +371,35 @@ def satra_status():
         "status": "ok",
         "ollama": {
             "online": ollama_online,
-            "url": "http://localhost:11434",
-            "model": model_name,
+            "url": endpoint,
+            "model": settings.model_name,
             "mode": "Live Ollama inference" if ollama_online else "Deterministic-only fallback (honest limitation mode)"
         },
         "github": {
             "connected": True,
-            "owner": "asent-sentinel",
-            "repo": "invoicehub-secure",
+            "owner": "SheharyarAli-Dev",
+            "repo": "Threat-Repository",
             "branch": "main",
             "token_configured": has_token,
             "token_scope": "fine-grained: contents=read/write, pull_requests=write" if has_token else "local demo sandbox simulation"
         },
         "sandbox_ready": True
     }
+
+
+@satra_router.get("/commits")
+def satra_commits(limit: int = 20):
+    """Returns real commit history from Threat-Repository via backend.satra.ingest."""
+    from backend.satra.settings import load_settings
+    from backend.satra.ingest import ensure_repository, list_recent_commits
+    settings = load_settings()
+    try:
+        repo_dir = ensure_repository(settings)
+        commits = list_recent_commits(repo_dir, limit=limit)
+        return {"available": True, "commits": commits}
+    except Exception as e:
+        return {"available": False, "error": str(e), "commits": []}
+
 
 @satra_router.get("/dictionary")
 def satra_dictionary():

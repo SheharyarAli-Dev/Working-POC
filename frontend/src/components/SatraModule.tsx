@@ -5,6 +5,9 @@ import {
   Lock, ArrowRight, Download, Info, HelpCircle, GitCommit, GitPullRequest, 
   GitBranch, Code2, AlertOctagon, Layers, FileCode, CheckSquare, Sparkles
 } from 'lucide-react';
+import { SatraCommitPicker } from './satra/SatraCommitPicker';
+import { SatraGateMatrix } from './satra/SatraGateMatrix';
+import { SatraEvidenceDrawer } from './satra/SatraEvidenceDrawer';
 
 interface SecurityRule {
   id: string;
@@ -112,8 +115,29 @@ export const SatraModule: React.FC = () => {
 
   const terminalEndRef = useRef<HTMLDivElement | null>(null);
 
+  const [realCommits, setRealCommits] = useState<any[]>([]);
+  const [selectedRealCommitSha, setSelectedRealCommitSha] = useState<string>('');
+  const [loadingCommits, setLoadingCommits] = useState(false);
+
+  const fetchRealCommits = () => {
+    setLoadingCommits(true);
+    fetch('/api/satra/commits?limit=15')
+      .then(r => r.json())
+      .then(d => {
+        if (d.available && d.commits) {
+          setRealCommits(d.commits);
+          if (d.commits.length > 0 && !selectedRealCommitSha) {
+            setSelectedRealCommitSha(d.commits[0].sha);
+          }
+        }
+      })
+      .catch(e => console.error('Commits fetch error:', e))
+      .finally(() => setLoadingCommits(false));
+  };
+
   // Initial load
   useEffect(() => {
+    fetchRealCommits();
     fetch('/api/satra/status')
       .then(r => r.json())
       .then(d => {
