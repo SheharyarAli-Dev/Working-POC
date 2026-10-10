@@ -2,7 +2,7 @@ import argparse
 import json
 import sys
 
-from backend.satra import ingest
+from backend.satra import ingest, diff_localizer, security_contract
 from backend.satra.settings import load_settings
 
 
@@ -12,7 +12,7 @@ def show_change_set(change_set):
     print("parents: " + ", ".join(change_set["parents"]))
     print("merge:   " + str(change_set["merge"]))
     print("author:  %s  %s" % (change_set["author"], change_set["date"]))
-    print("message: " + change_set["message"].splitlines()[0] if change_set["message"] else "message: ")
+    print("message: " + (change_set["message"].splitlines()[0] if change_set["message"] else ""))
     print("files:")
     for row in change_set["files"]:
         origin = " (from %s)" % row["old_path"] if row["old_path"] else ""
@@ -41,15 +41,71 @@ def command_ingest(arguments):
     return 0
 
 
+def command_localize(arguments):
+    settings = load_settings()
+    repo_dir = ingest.ensure_repository(settings)
+    if arguments.sha is None:
+        print("error: --sha is required", file=sys.stderr)
+        return 2
+    change_set = ingest.ingest_commit(repo_dir, arguments.sha)
+    run_handle = ingest.prepare_run_dirs(settings, repo_dir, change_set)
+    try:
+        loc = diff_localizer.localize_change_set(change_set, run_handle["baseline"], run_handle["candidate"])
+        regions = loc["regions"]
+        test_changes = loc["test_changes"]
+        contracts = security_contract.derive_contracts_for_regions(regions)
+
+        if not regions and not test_changes:
+            verdict = "NOT_APPLICABLE"
+        else:
+            verdict = "APPLICABLE"
+
+        output_data = {
+            "sha": change_set["sha"],
+            "verdict": verdict,
+            "regions": regions,
+            "contracts": contracts,
+            "test_changes": test_changes
+        }
+
+        if arguments.json:
+            print(json.dumps(output_data, indent=2))
+        else:
+            print(f"sha:       {change_set['sha']}")
+            print(f"verdict:   {verdict}")
+            print(f"regions:   {len(regions)}")
+            for r in regions:
+                print(f"  - {r['file']}:{r.get('function')} (lines {r.get('start_line')}-{r.get('end_line')}) -> {','.join(r.get('families', []))}")
+                if r.get("regression_notes"):
+                    print(f"    notes: {', '.join(r['regression_notes'])}")
+            print(f"contracts: {len(contracts)}")
+            for c in contracts:
+                print(f"  - [{c['family']}] {c['contractId']} -> {c['action']} (CWE: {c['cwe']}, auth: {c['source_of_authority']['policy_rule_id']})")
+            if test_changes:
+                print(f"test changes: {len(test_changes)}")
+                for t in test_changes:
+                    print(f"  - {t['path']} ({t['status']})")
+        return 0
+    finally:
+        ingest.release_run_dirs(run_handle)
+
+
 def build_parser():
     parser = argparse.ArgumentParser(prog="satra")
     sub = parser.add_subparsers(dest="command", required=True)
+
     pick = sub.add_parser("ingest")
     pick.add_argument("--sha")
     pick.add_argument("--list", action="store_true")
     pick.add_argument("--limit", type=int, default=20)
     pick.add_argument("--json", action="store_true")
     pick.set_defaults(handler=command_ingest)
+
+    loc = sub.add_parser("localize")
+    loc.add_argument("--sha", required=True)
+    loc.add_argument("--json", action="store_true")
+    loc.set_defaults(handler=command_localize)
+
     return parser
 
 
