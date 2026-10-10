@@ -516,3 +516,144 @@ All in `tests/test_cavr_capture.py`. Run on 2026-10-10:
    skipped, so the pipeline answers UNRESOLVED for it.
 3. **Does capture touch the network or run package code?**
    No. It reads the command and the requirements/constraints files named in it, nothing else.
+
+## Step 2 — C1 capture requirements.txt edits (2026-10-10)
+
+Plan commit 2, `feat(cavr): C1 capture requirements.txt edits`.
+Review: REVIEW_LINE_STEP_2
+
+### Ch 6 Implementation
+
+| File | Function | What it does |
+|---|---|---|
+| `backend/cavr/manifest_parser.py` (70 -> 165 lines) | `snapshot_requirements(path)` | New. Records the file as it is now: `path`, `exists`, `sha256` of its bytes, `content`, `error`. A missing file is a valid snapshot (`exists: False`). |
+| | `capture_requirements_edit(before, after)` | New. Compares two snapshots of the same file and returns a capture record with `source: "requirements_edit"`. `requirements` holds only the added and changed lines; `removed` holds the removed ones. |
+| | `read_manifest(content, source)` | New. Sorts the lines into `requirements`, `options`, `unsupported`, `errors`, using `capture.parse_requirements_text`. `-r`/`-c` lines go to `unsupported`. Adds conflict errors. |
+| | `parse_requirements_txt(content)` | Rewritten. The regex fallback is removed; returns only the named requirements from `read_manifest`. Old keys `name`, `specifier` (`"*"` when empty), `raw` are kept. |
+| | `detect_manifest_changes(before, after, manifest_type)` | Same signature. Now matches lines on canonical name + marker, adds the `MODIFIED` action, and carries the new requirement record under `requirement`. |
+| | `_diff(before, after)` | The diff itself, shared by `detect_manifest_changes` and `capture_requirements_edit`. |
+| | `parse_pyproject_toml` | Not changed. |
+| `backend/cavr/capture.py` | `read_requirements_bytes(path)` | New, moved out of `_read_file` so the snapshot uses the same size cap and UTF-8 check. Returns `(bytes, text, None)` or `(None, None, reason)`. |
+| | `new_record` | Renamed from `_new_record` (now used by `manifest_parser.py`). |
+| `tests/test_cavr_manifest.py` (new, 305 lines) | | 33 test functions, 40 cases. |
+| `docs/cavr-m1-plan.md` | | Progress box 2 ticked. |
+
+Extra fields of an edit record, on top of the step 1 fields: `path`, `before_sha256`, `after_sha256`,
+`changed`, `changes`, `removed`.
+
+Key algorithm, `capture_requirements_edit`:
+
+1. Refuse snapshots of two different paths (`ValueError`).
+2. Earlier snapshot unreadable -> add an error and treat the old state as empty, so every line counts as ADDED. New snapshot unreadable -> add an error and return with no requirements.
+3. `read_manifest` on both contents; key each requirement by (canonical name, marker).
+4. In the new file's order: key not in old -> ADDED; specifier differs -> VERSION_CHANGED; extras or hashes differ -> MODIFIED. Then, in the old file's order: key not in new -> REMOVED.
+5. `complete = not unsupported and not errors`, judged on the whole new file, not only on the changed lines.
+
+### Design decisions
+
+| Decision | Alternatives considered | Why |
+|---|---|---|
+| Unparseable line -> `errors`, never a package | Keep the regex fallback | The fallback turned `git+https://x/a.git` into a package named `git` and `this is not a requirement` into a package named `this`. A made-up name could be allowlisted by accident. |
+| `manifest_parser.py` uses the line classifier in `capture.py` | Its own parser | One definition of "what is a requirement line" for commands, `-r` files and edits. |
+| Edit capture lives in `manifest_parser.py`, not `capture.py` | Put it in `capture.py` and import the diff | The plan says the diff is `detect_manifest_changes`; `capture.py` importing `manifest_parser.py` while it imports `capture.py` would be a circular import. |
+| A snapshot is a dict the caller keeps | The module writes snapshot files itself | No storage decision is needed yet; the pipeline or wrapper that watches the file (steps 11-12) decides where to keep it. The dict is JSON-serialisable. |
+| Lines matched on canonical name + marker | `name.lower()` (old code) | `Foo_Bar` and `foo-bar` are the same PyPI project. The marker is in the key because one name can legitimately appear once per marker. |
+| `MODIFIED` action for extras/hash edits | Report only specifier changes | A changed `--hash` accepts a different file, and a new extra pulls in new dependencies; both must be verified again. |
+| `-r`/`-c` lines are `unsupported` in an edit | Follow the include from disk | Only the edited file has a "before" state; the included file's earlier content is unknown, so its changes cannot be diffed. |
+| Errors are judged on the whole new file | Only on lines that changed | An unparseable line is still in the file pip will read, whether or not this edit touched it. |
+| Unreadable earlier snapshot -> everything ADDED and an error | Refuse to produce a record | Fail closed: with no known old state, nothing is assumed already verified. |
+| Missing file is a normal snapshot | An error | Creating and deleting `requirements.txt` are real edits. |
+
+### Requirements covered
+
+IDs from `frontend/src/components/cavr/RequirementsTab.tsx`. **Maryam to confirm them against the SRS.**
+
+| ID | Name there | What this step does for it | Acceptance check |
+|---|---|---|---|
+| FR-1 | Intercept Before Execution | A requirements.txt edit becomes a capture record listing what was added or changed (CLAUDE.md goal C1, requirements.txt half) | `test_added_requirement`, `test_version_changed`, `test_removed_requirement` |
+| FR-6 | Fail-Closed Security Policy | Unparseable and unsupported lines are reported and make the record incomplete | `test_unparseable_line_is_reported_and_is_not_a_package`, `test_lines_the_old_regex_fallback_accepted_are_no_longer_packages` |
+
+### Ch 7 Test cases
+
+All in `tests/test_cavr_manifest.py`. Every edit test writes a real file under `tmp_path`, snapshots it,
+rewrites it and snapshots it again. Run on 2026-10-10:
+
+- `.venv/bin/python -m pytest tests/test_cavr_*.py -q` -> 224 passed (40 in this file).
+- `.venv/bin/python -m pytest -q` -> 282 passed, 7 failed (the 7 baseline failures).
+
+| Test ID | Purpose | Input (before -> after) | Expected | Result |
+|---|---|---|---|---|
+| `test_added_requirement` | Added | `a==1` -> `a==1`, `b==2` | ADDED b; `requirements` is `b==2` with origin `path:2` | pass |
+| `test_version_changed` | Version changed | `b==2` -> `b==3` | VERSION_CHANGED, old `==2`, new `==3` | pass |
+| `test_removed_requirement` | Removed | `a`, `b` -> `a` | REMOVED b; `requirements` empty; `removed` has `b==2` | pass |
+| `test_unparseable_line_is_reported_and_is_not_a_package` | Unparseable | adds `this is not a requirement` and `b==2` | Only ADDED b; one error at `path:2`; `complete` false | pass |
+| `test_unpinned_requirement_is_captured_as_unpinned` | Unpinned | adds `b>=2`, `c` | Both ADDED with `pinned` false; `complete` true | pass |
+| `test_lines_the_old_regex_fallback_accepted_are_no_longer_packages` (8) | Fallback removed | free text, `git+`, URL, path, `-e .`, `a==`, `a==1 b==2`, `--index-url` | No requirement; exactly one unsupported/error entry; no change reported | pass |
+| `test_parse_requirements_txt_keeps_its_old_keys` | Old return shape | `Foo_Bar==1.0`, `b` | `name`, `specifier` (`"*"` for none), `raw` | pass |
+| `test_no_edit_gives_no_changes` | No edit | same text | No changes; `changed` false | pass |
+| `test_comment_and_order_edits_change_the_file_but_not_the_requirements` | Cosmetic edit | reorder, add comments | `changed` true; `changes` empty | pass |
+| `test_respelling_a_name_is_not_a_change` | Canonical names | `Foo_Bar==1` -> `foo-bar==1` | No changes | pass |
+| `test_respelled_name_with_a_new_version_is_one_change_not_add_plus_remove` | Canonical names | `Foo_Bar==1` -> `foo.bar==2` | One VERSION_CHANGED | pass |
+| `test_pin_loosened_to_a_range_is_a_change_to_an_unpinned_requirement` | Pin removed | `a==1` -> `a>=1` | VERSION_CHANGED; `pinned` false | pass |
+| `test_hash_change_with_the_same_version_is_reported` | Hash edit | `--hash` value changed | MODIFIED with the new hash | pass |
+| `test_extras_change_with_the_same_version_is_reported` | Extras edit | `a==1` -> `a[x]==1` | MODIFIED with extras `["x"]` | pass |
+| `test_same_name_under_two_markers_is_tracked_per_marker` | Markers | one of two marker lines changes version | One VERSION_CHANGED; no conflict error | pass |
+| `test_conflicting_lines_for_one_name_are_an_error` | Conflict | adds `a==2` next to `a==1` | Error "conflicting"; `complete` false | pass |
+| `test_include_lines_are_unsupported_in_an_edit` | Includes | adds `-r other.txt`, `-c other.txt` | 2 unsupported "not followed"; file not read | pass |
+| `test_url_vcs_and_custom_index_lines_are_unsupported` | Unsupported lines | adds `git+`, `--extra-index-url`, `-e` | 3 unsupported; no requirement | pass |
+| `test_unparseable_line_that_was_already_there_is_still_reported` | Old bad line | `???` in both, `b==2` added | ADDED b; error for `???` | pass |
+| `test_unparseable_line_that_was_fixed_is_not_reported` | Bad line removed | `???` only before | No error; `complete` true | pass |
+| `test_neutral_option_lines_are_kept_as_options` | Option line | adds `--pre` | `options` is `[["--pre", None]]` | pass |
+| `test_snapshot_hash_is_the_sha256_of_the_real_bytes` | Real hash | CRLF file bytes | `sha256` equals `hashlib.sha256` of the bytes | pass |
+| `test_snapshot_of_a_missing_file` | Missing file | no file | `exists` false, `sha256` None, no error | pass |
+| `test_file_created_means_every_line_is_added` | File created | none -> 2 lines | 2 ADDED; `before_sha256` None | pass |
+| `test_file_deleted_means_every_line_is_removed` | File deleted | 2 lines -> none | 2 REMOVED; `files` empty | pass |
+| `test_edited_file_that_is_not_utf8_is_an_error` | Bad encoding | new file has `\xff` | No requirements; error "not UTF-8" | pass |
+| `test_unreadable_earlier_snapshot_means_everything_is_treated_as_added` | Unknown old state | old snapshot not UTF-8 | ADDED a; error "earlier snapshot"; `complete` false | pass |
+| `test_oversized_file_is_an_error` | Size cap | cap 8 bytes, 10-byte file | Error "larger than" | pass |
+| `test_directory_in_place_of_the_file_is_an_error` | Directory | path is a directory | Snapshot error "cannot read" | pass |
+| `test_snapshots_of_two_different_files_are_refused` | Wrong pair | snapshots of `a.txt` and `b.txt` | `ValueError` | pass |
+| `test_record_lists_the_file_with_its_hash` | Evidence | `a==1` -> `a==2` | `files[0].sha256` equals SHA-256 of the new bytes | pass |
+| `test_detect_manifest_changes_shape` | Text API | 3 lines -> 3 lines | VERSION_CHANGED b, ADDED d (`"*"`), REMOVED c | pass |
+| `test_pyproject_branch_still_works` | pyproject path | `dependencies` list edited | VERSION_CHANGED b, ADDED c | pass |
+
+### Defects found and fixed
+
+| # | Found by | Finding | Outcome |
+|---|---|---|---|
+| 1 | Reading the old code | Regex fallback in `parse_requirements_txt` accepted any line starting with a name-like word as a package | Fixed (the step's purpose); `test_lines_the_old_regex_fallback_accepted_are_no_longer_packages` |
+| 2 | Reading the old code | `detect_manifest_changes` keyed on `name.lower()`, so `Foo_Bar` -> `foo-bar` showed as REMOVED + ADDED | Fixed; `test_respelling_a_name_is_not_a_change` |
+| 3 | Reading the old code | Two lines for one name under different markers overwrote each other in the diff | Fixed (marker is part of the key); `test_same_name_under_two_markers_is_tracked_per_marker` |
+
+No test failed during this step.
+
+### Known limitations / deferred
+
+- Nothing watches a requirements file yet. The caller must take the two snapshots; steps 11-12 do that.
+- `-r`/`-c` lines inside an edited file are not followed; the record is incomplete (UNRESOLVED later).
+  A project that uses `-c constraints.txt` needs each file captured separately.
+- An unparseable line keeps every later edit capture of that file incomplete until the line is fixed.
+- `parse_pyproject_toml` is unchanged: it still finds `dependencies` with a regex and silently drops
+  entries it cannot parse. `pyproject.toml` edits are not an M1 goal. No caller uses that branch.
+- A marker edit on a line shows as REMOVED + ADDED, because the marker is part of the key.
+- Each ADDED/VERSION_CHANGED/MODIFIED change repeats the requirement record that is also in
+  `requirements` (same object), so the JSON evidence has it twice.
+
+### Tool disclosure (Ch 8.7)
+
+- **Generated by Claude Code:** the rewrite of `backend/cavr/manifest_parser.py`, the helper moved in
+  `backend/cavr/capture.py`, `tests/test_cavr_manifest.py`, these notes, the commit.
+- **Reviewed / decided by Maryam:** the plan step and the batch workflow. The code of this step has not
+  yet been read by Maryam.
+- **Verified by:** the two pytest runs above; one `cavr-reviewer` pass over the batch diff.
+
+### Supervisor Q&A prep
+
+1. **Why is only the changed part of the file verified?**
+   Lines that did not change were captured when they were added. The record still checks the whole new
+   file for unparseable or unsupported lines, because pip reads the whole file.
+2. **What did the regex fallback do wrong?**
+   It took the first word of any line as a package name, so a URL or a typo became a "package". Now a
+   line is either a valid named requirement or it is reported and the capture is incomplete.
+3. **How do you know the file really changed?**
+   Each snapshot stores the SHA-256 of the file's bytes; `changed` compares the two digests.

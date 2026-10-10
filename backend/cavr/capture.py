@@ -79,7 +79,7 @@ UNSUPPORTED_OPTIONS = {
 
 def parse_pip_command(command, cwd=".") -> dict:
     """Capture one pip command. `command` is a string or a list of tokens; `cwd` is where it ran."""
-    record = _new_record("pip_command")
+    record = new_record("pip_command")
     if isinstance(command, str):
         try:
             argv = shlex.split(command)
@@ -201,7 +201,7 @@ def parse_requirements_text(text: str, source: str = "requirements.txt") -> list
 
 # --- internals ---------------------------------------------------------------
 
-def _new_record(source: str) -> dict:
+def new_record(source: str) -> dict:
     return {"source": source, "command": [], "action": None, "options": [], "requirements": [],
             "constraints": [], "unsupported": [], "errors": [], "files": [], "complete": False}
 
@@ -377,19 +377,9 @@ def _read_file(record: dict, path: Path, target: str, origin: str, raw: str, sta
     if path in stack:
         _note(record, "errors", raw, f"requirements file includes itself: {path}", origin)
         return
-    try:
-        with open(path, "rb") as handle:
-            data = handle.read(MAX_REQUIREMENTS_FILE_BYTES + 1)
-    except OSError as exc:
-        _note(record, "errors", raw, f"cannot read {path}: {exc.strerror or exc}", origin)
-        return
-    if len(data) > MAX_REQUIREMENTS_FILE_BYTES:
-        _note(record, "errors", raw, f"{path} is larger than {MAX_REQUIREMENTS_FILE_BYTES} bytes", origin)
-        return
-    try:
-        text = data.decode("utf-8-sig")
-    except UnicodeDecodeError:
-        _note(record, "errors", raw, f"{path} is not UTF-8 text", origin)
+    data, text, problem = read_requirements_bytes(path)
+    if problem:
+        _note(record, "errors", raw, problem, origin)
         return
 
     record["files"].append({"path": str(path), "role": target, "sha256": hashlib.sha256(data).hexdigest(),
@@ -403,6 +393,21 @@ def _read_file(record: dict, path: Path, target: str, origin: str, raw: str, sta
             record["options"].append([entry["name"], entry["value"]])
         else:
             _add(record, entry, target)
+
+
+def read_requirements_bytes(path: Path):
+    """Read a requirements file. Returns (bytes, text, None), or (None, None, reason) if it cannot be used."""
+    try:
+        with open(path, "rb") as handle:
+            data = handle.read(MAX_REQUIREMENTS_FILE_BYTES + 1)
+    except OSError as exc:
+        return None, None, f"cannot read {path}: {exc.strerror or exc}"
+    if len(data) > MAX_REQUIREMENTS_FILE_BYTES:
+        return None, None, f"{path} is larger than {MAX_REQUIREMENTS_FILE_BYTES} bytes"
+    try:
+        return data, data.decode("utf-8-sig"), None
+    except UnicodeDecodeError:
+        return None, None, f"{path} is not UTF-8 text"
 
 
 def _logical_lines(text: str) -> list[tuple[int, str]]:
