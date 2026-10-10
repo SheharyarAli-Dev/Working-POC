@@ -22,6 +22,7 @@ from pathlib import Path
 import pytest
 
 from backend.cavr import api
+from backend.cavr.pipeline import STATUSES   # VERIFIED, REJECTED, BLOCK, UNRESOLVED: the order of the report
 from test_cavr_api import Dashboard
 from test_cavr_support import PYPDF_SHA256
 
@@ -31,7 +32,6 @@ PAGE = FRONTEND / "src" / "components" / "CavrModule.tsx"
 PARTS = sorted((FRONTEND / "src" / "components" / "cavr").glob("*.ts*"))
 RENDERER = REPO / "tests" / "test_cavr_data" / "render_cavr.mjs"
 DASH = "—"
-STATUSES = ("VERIFIED", "REJECTED", "UNRESOLVED", "BLOCK")
 
 
 def sources() -> dict:
@@ -233,3 +233,46 @@ def test_the_requirements_tab_prints_what_a_stage_returned_and_no_pass_of_its_ow
     assert [returned(requirement) for requirement in ("FR-3", "FR-4", "FR-5", "FR-7", "FR-8", "FR-9", "NFR-1", "NFR-2")] == [DASH] * 8
     assert returned("FR-10") == blocked["proof"]["certificate_id"]
     assert "PASS" not in table and "FAIL" not in table and "NOT RUN" not in table
+
+
+# --- issue 3: fast_gate_ms per verdict and per cache lookup ---------------------------------------------------------
+
+def table_rows(pieces, heading, columns, rows):
+    """The cells of the table under `heading`, as `rows` lists of `columns` cells (the header row is left out)."""
+    start = pieces.index(heading) + 1 + columns
+    cells = pieces[start:start + rows * columns]
+    return [cells[row * columns:(row + 1) * columns] for row in range(rows)]
+
+
+def test_the_metrics_tab_lists_the_time_per_verdict_and_per_cache_lookup(dashboard, tmp_path):
+    for scenario in ("verified", "verified_again", "known_vulnerable", "not_on_allowlist", "tampered_wheel"):
+        dashboard.run(scenario)
+    report = json.loads(json.dumps(api.get_metrics()))
+    assert report["verdicts"] == 4                    # the tampered run was under a demo condition: not logged
+    (tab,) = render(tmp_path, {"view": "metrics", "metrics": report})
+    times = report["fast_gate_ms"]
+    assert table_rows(tab, "fast_gate_ms by verdict", 4, 4) == [
+        [status, shown(row["count"]), shown(row["p50"]), shown(row["p95"])] for status, row in times["by_status"].items()]
+    assert [row[0] for row in table_rows(tab, "fast_gate_ms by verdict", 4, 4)] == list(STATUSES)
+    assert table_rows(tab, "fast_gate_ms by verdict", 4, 4)[3] == ["UNRESOLVED", "0", DASH, DASH]     # none logged: no time
+    assert table_rows(tab, "fast_gate_ms by cache lookup", 4, 3) == [
+        [found, shown(row["count"]), shown(row["p50"]), shown(row["p95"])] for found, row in times["by_cache_lookup"].items()]
+    pairs = times["by_status_and_cache_lookup"]
+    assert table_rows(tab, "fast_gate_ms by verdict and cache lookup", 5, len(pairs)) == [
+        [row["status"], row["cache_lookup"], shown(row["count"]), shown(row["p50"]), shown(row["p95"])] for row in pairs]
+    assert ["VERIFIED", "HIT"] in [row[:2] for row in table_rows(tab, "fast_gate_ms by verdict and cache lookup", 5, len(pairs))]
+    # Two hit rates, each with what it is a rate of. No single percentile over all verdicts.
+    assert after(tab, "Cache hit rate, all verdicts") == "25.0%" and "1 of 4 verdicts" in tab
+    assert after(tab, "Cache hit rate, lookups only") == "33.3%" and "1 of 3 verdicts that reached the cache lookup" in tab
+    assert not [piece for piece in tab if "Fast gate p50" in piece or "Fast gate p95" in piece]
+    recent = table_rows(tab, "Last verdicts (verdict log)", 7, 4)
+    assert [(row[2], row[5]) for row in recent] == [("BLOCK", "NOT_REACHED"), ("REJECTED", "MISS"), ("VERIFIED", "HIT"),
+                                                    ("VERIFIED", "MISS")]
+
+
+def test_the_metrics_tab_with_an_empty_log_shows_dashes(dashboard, tmp_path):
+    (tab,) = render(tmp_path, {"view": "metrics", "metrics": json.loads(json.dumps(api.get_metrics()))})
+    assert table_rows(tab, "fast_gate_ms by verdict", 4, 4) == [[status, "0", DASH, DASH] for status in STATUSES]
+    assert table_rows(tab, "fast_gate_ms by cache lookup", 4, 3) == [[found, "0", DASH, DASH] for found in ("HIT", "MISS", "NOT_REACHED")]
+    assert after(tab, "Cache hit rate, all verdicts") == DASH and after(tab, "Cache hit rate, lookups only") == DASH
+    assert tab.count("No verdict has been logged yet.") == 3      # the pairs table, the legend, the last verdicts
