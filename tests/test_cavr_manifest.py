@@ -209,6 +209,17 @@ def test_neutral_option_lines_are_kept_as_options(tmp_path):
     assert record["complete"] is True
 
 
+def test_removed_option_lines_are_listed(tmp_path):
+    """Step 12, deferred from the batch 1-3 review: a deleted `--require-hashes` must be visible in the record."""
+    record = edit(tmp_path, "--require-hashes\n--pre\na==1\n", "--pre\na==1\nb==2\n")
+    assert record["removed_options"] == [["--require-hashes", None]] and record["options"] == [["--pre", None]]
+    assert actions(record) == [("ADDED", "b")] and record["complete"] is True
+    unchanged = edit(tmp_path, "--pre\na==1\n", "--pre\na==1\nb==2\n")
+    assert unchanged["removed_options"] == []
+    deleted = edit(tmp_path, "--require-hashes\na==1\n", None)
+    assert deleted["removed_options"] == [["--require-hashes", None]]
+
+
 # --- snapshots ---------------------------------------------------------------------
 
 def test_snapshot_hash_is_the_sha256_of_the_real_bytes(tmp_path):

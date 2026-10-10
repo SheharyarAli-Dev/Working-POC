@@ -19,6 +19,13 @@ A capture record is a plain dict:
 `complete` is the fail-closed switch: a later stage must not treat a record as fully
 captured unless it is True. An unpinned requirement (`a>=1`) is still a complete capture;
 refusing it is the requirement gate's job (C2), not the capture's.
+
+Limits on `-r` / `-c` files: only files inside the directory the command ran in are read
+(a file outside it, or one given as a URL, is recorded as unsupported), only regular files
+are opened, and at most `MAX_REQUIREMENTS_FILES` files are read for one command.
+
+A password inside a URL (`https://user:password@host/...`) is replaced by `***` in everything
+the record keeps (`redact`), because the record is printed, logged and shown on the dashboard.
 """
 from __future__ import annotations
 
@@ -31,11 +38,13 @@ from packaging.requirements import InvalidRequirement, Requirement
 from packaging.utils import canonicalize_name
 
 MAX_REQUIREMENTS_FILE_BYTES = 1_000_000
+MAX_REQUIREMENTS_FILES = 100
 
 PIP_PROGRAM = re.compile(r"^pip(\d+(\.\d+)?)?(\.exe)?$", re.IGNORECASE)
 PYTHON_PROGRAM = re.compile(r"^(python(\d+(\.\d+)?)?|py)(\.exe)?$", re.IGNORECASE)
 VCS_PREFIX = re.compile(r"^(git|hg|svn|bzr)\+", re.IGNORECASE)
 COMMENT = re.compile(r"(^|\s+)#.*$")
+URL_CREDENTIALS = re.compile(r"(?<=://)[^/\s@]*@")
 HASH_VALUE = re.compile(r"^(sha256:[0-9a-f]{64}|sha384:[0-9a-f]{96}|sha512:[0-9a-f]{128})$")
 ARCHIVE_SUFFIXES = (".whl", ".zip", ".tar.gz", ".tgz", ".tar", ".tar.bz2", ".tbz", ".tar.xz", ".txz")
 
@@ -84,12 +93,15 @@ def parse_pip_command(command, cwd=".") -> dict:
         try:
             argv = shlex.split(command)
         except ValueError as exc:
-            record["command"] = [command]
+            record["command"] = [redact(command)]
             _note(record, "errors", command, f"cannot split the command: {exc}", "command")
             return _finish(record)
-    else:
+    elif isinstance(command, (list, tuple)):
         argv = [str(token) for token in command]
-    record["command"] = argv
+    else:
+        _note(record, "errors", repr(command)[:200], "the command must be a string or a list of tokens", "command")
+        return _finish(record)
+    record["command"] = [redact(token) for token in argv]
 
     arguments = _pip_arguments(argv)
     if arguments is None:
@@ -106,7 +118,7 @@ def parse_pip_command(command, cwd=".") -> dict:
               f"pip {record['action'] or '(no subcommand)'} is not captured, only pip install", "command")
         return _finish(record)
 
-    _apply(record, items, "command", Path(cwd), "requirements", ())
+    _apply(record, items, "command", Path(cwd), "requirements", (), Path(cwd).resolve())
     if not (record["requirements"] or record["unsupported"] or record["errors"]):
         _note(record, "errors", " ".join(argv), "no requirement given", "command")
     return _finish(record)
@@ -123,7 +135,7 @@ def parse_requirement(text: str, origin: str = "command") -> dict:
     raw = text.strip()
 
     def other(kind, reason):
-        return {"kind": kind, "raw": raw, "reason": reason, "origin": origin}
+        return {"kind": kind, "raw": redact(raw), "reason": reason, "origin": origin}
 
     if not raw:
         return other("error", "malformed requirement: empty")
@@ -170,7 +182,7 @@ def parse_requirements_text(text: str, source: str = "requirements.txt") -> list
         origin = f"{source}:{number}"
 
         def other(kind, reason):
-            return {"kind": kind, "raw": line, "reason": reason, "origin": origin}
+            return {"kind": kind, "raw": redact(line), "reason": reason, "origin": origin}
 
         words = line.split()
         first_option = next((i for i, word in enumerate(words) if word.startswith("-")), len(words))
@@ -206,8 +218,13 @@ def new_record(source: str) -> dict:
             "constraints": [], "unsupported": [], "errors": [], "files": [], "complete": False}
 
 
+def redact(text):
+    """`text` with the user and password of every URL in it replaced by `***` (None stays None)."""
+    return URL_CREDENTIALS.sub("***@", text) if isinstance(text, str) else text
+
+
 def _note(record: dict, key: str, raw: str, reason: str, origin: str) -> None:
-    record[key].append({"raw": raw, "reason": reason, "origin": origin})
+    record[key].append({"raw": redact(raw), "reason": redact(reason), "origin": origin})
 
 
 def _finish(record: dict) -> dict:
@@ -310,7 +327,7 @@ def _takes_value(name: str) -> bool:
     return name in VALUE_OPTIONS or UNSUPPORTED_OPTIONS.get(name, (False,))[0]
 
 
-def _apply(record: dict, items: list[tuple], origin: str, base_dir: Path, target: str, stack: tuple) -> None:
+def _apply(record: dict, items: list[tuple], origin: str, base_dir: Path, target: str, stack: tuple, root: Path) -> None:
     """Put command-line items into the record. `target` is "requirements" or "constraints"."""
     for kind, name, value, raw in items:
         if kind == "arg":
@@ -320,15 +337,15 @@ def _apply(record: dict, items: list[tuple], origin: str, base_dir: Path, target
         elif kind == "missing":
             _note(record, "errors", raw, f"option {name} needs a value", origin)
         elif name == "--requirement":
-            _read_file(record, base_dir / value, target, origin, raw, stack)
+            _read_file(record, base_dir, value, target, origin, raw, stack, root)
         elif name == "--constraint":
-            _read_file(record, base_dir / value, "constraints", origin, raw, stack)
+            _read_file(record, base_dir, value, "constraints", origin, raw, stack, root)
         elif name == "--hash":
             _note(record, "errors", raw, "--hash is only valid after a requirement in a requirements file", origin)
         elif name in UNSUPPORTED_OPTIONS:
             _note(record, "unsupported", raw, UNSUPPORTED_OPTIONS[name][1], origin)
         else:
-            record["options"].append([name, value])
+            record["options"].append([name, redact(value)])
 
 
 def _add(record: dict, entry: dict, target: str) -> None:
@@ -346,8 +363,9 @@ def _option_line_entries(items: list[tuple], line: str, origin: str) -> list[dic
     """Entries for a requirements-file line that starts with an option."""
     entries: list[dict] = []
     for kind, name, value, raw in items:
+        raw = redact(raw)
         if kind == "arg":
-            return [{"kind": "error", "raw": line, "reason": "malformed line: text after an option", "origin": origin}]
+            return [{"kind": "error", "raw": redact(line), "reason": "malformed line: text after an option", "origin": origin}]
         if kind == "unknown":
             entries.append({"kind": "unsupported", "raw": raw, "reason": "unknown option", "origin": origin})
         elif kind == "missing":
@@ -362,19 +380,31 @@ def _option_line_entries(items: list[tuple], line: str, origin: str) -> list[dic
             entries.append({"kind": "unsupported", "raw": raw, "reason": UNSUPPORTED_OPTIONS[name][1],
                             "origin": origin})
         else:
-            entries.append({"kind": "option", "name": name, "value": value, "raw": raw, "origin": origin})
+            entries.append({"kind": "option", "name": name, "value": redact(value), "raw": raw, "origin": origin})
     return entries
 
 
-def _read_file(record: dict, path: Path, target: str, origin: str, raw: str, stack: tuple) -> None:
-    """Read one requirements/constraints file and everything it includes.
+def _read_file(record: dict, base_dir: Path, value: str, target: str, origin: str, raw: str, stack: tuple,
+               root: Path) -> None:
+    """Read the requirements/constraints file `value` (relative to `base_dir`) and everything it includes.
 
     `stack` holds the files currently being read, so a file that includes itself (directly
-    or through another file) is reported once instead of looping forever.
+    or through another file) is reported once instead of looping forever. `root` is the
+    directory the command ran in: a file outside it is not opened, so `-r /some/secret/file`
+    cannot copy that file's lines into the record.
     """
-    path = path.resolve()
+    if "://" in value:
+        _note(record, "unsupported", raw, "requirements file given as a URL", origin)
+        return
+    path = (base_dir / value).resolve()
+    if path != root and root not in path.parents:
+        _note(record, "unsupported", raw, f"requirements file outside the project directory {root}", origin)
+        return
     if path in stack:
         _note(record, "errors", raw, f"requirements file includes itself: {path}", origin)
+        return
+    if len(record["files"]) >= MAX_REQUIREMENTS_FILES:
+        _note(record, "errors", raw, f"more than {MAX_REQUIREMENTS_FILES} requirements files in one command", origin)
         return
     data, text, problem = read_requirements_bytes(path)
     if problem:
@@ -386,8 +416,8 @@ def _read_file(record: dict, path: Path, target: str, origin: str, raw: str, sta
     for entry in parse_requirements_text(text, str(path)):
         if entry["kind"] == "include":
             nested_target = "constraints" if entry["constraint"] else target
-            _read_file(record, path.parent / entry["path"], nested_target, entry["origin"], entry["raw"],
-                       stack + (path,))
+            _read_file(record, path.parent, entry["path"], nested_target, entry["origin"], entry["raw"],
+                       stack + (path,), root)
         elif entry["kind"] == "option":
             record["options"].append([entry["name"], entry["value"]])
         else:
@@ -396,6 +426,10 @@ def _read_file(record: dict, path: Path, target: str, origin: str, raw: str, sta
 
 def read_requirements_bytes(path: Path):
     """Read a requirements file. Returns (bytes, text, None), or (None, None, reason) if it cannot be used."""
+    path = Path(path)
+    if path.exists() and not path.is_file():
+        # A directory, FIFO or device: opening a FIFO would wait for a writer forever.
+        return None, None, f"cannot read {path}: not a regular file"
     try:
         with open(path, "rb") as handle:
             data = handle.read(MAX_REQUIREMENTS_FILE_BYTES + 1)

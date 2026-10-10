@@ -32,7 +32,8 @@ Rules of the verdict:
   advisory result is never cached: a cached VERIFIED becomes REJECTED the day OSV lists the
   version, and VERIFIED again if the advisory is withdrawn.
 - Several requirements in one request: REJECTED if any is REJECTED, else UNRESOLVED if any
-  is UNRESOLVED, else VERIFIED.
+  is UNRESOLVED, else VERIFIED. The same release asked for twice is verified once when both
+  lines are identical; when their extras, `--hash` values or markers differ it is UNRESOLVED.
 
 Every verdict, whatever its status, has `fast_gate_ms` (wall time of this call), `cache_hit`
 (every package's analysis came from the cache) and `escalated`. One row per call goes to the
@@ -54,7 +55,7 @@ from backend.config import DATA
 from backend.cavr.advisories import check_advisories
 from backend.cavr.ast_scan import ANALYZER_VERSION as SCAN_VERSION, scan_wheel
 from backend.cavr.capability_contract import infer_capability_contract
-from backend.cavr.capture import parse_pip_command
+from backend.cavr.capture import parse_pip_command, redact
 from backend.cavr.context_extractor import extract_project_context
 from backend.cavr.dep_tree import build_tree
 from backend.cavr.manifest_parser import capture_requirements_edit
@@ -69,6 +70,8 @@ PIPELINE_VERSION = "cavr-pipeline/2"  # /2: the sink judgement changed after the
 ESCALATION = "deep analysis required (M2)"
 LOCKFILE_NAME = "dependencies.lock.json"
 PASSED = ("verdict", "ALL_CHECKS_PASSED")
+ANALYSIS_KEYS = {"status", "stage", "rule", "reason", "escalation", "scan", "reachability"}  # what `_analyse` returns
+MAX_LOGGED_REQUEST = 500
 
 
 def verify_request(request, project_dir, policy, store, *, transport=None, quarantine_dir=None, advisory_cache_dir=None,
@@ -131,17 +134,24 @@ def verify_request(request, project_dir, policy, store, *, transport=None, quara
                           policy_version=policy_version(policy), analyzer_version=fields["analyzer_version"])
 
     # 3-9, once per requirement.
-    seen = set()
+    seen = {}
     for requirement, decision in zip(record["requirements"], gate["decisions"]):
         release = (decision["package"], canonicalize_version(Version(decision["version"])))
-        if release not in seen:
-            seen.add(release)
-            try:
-                package = _verify_package(requirement, decision, run)
-            except Exception as exc:  # a fault in a stage is "unknown", never a pass and never a lost verdict
-                package = _package_verdict(decision, "UNRESOLVED", "internal", "INTERNAL_ERROR",
-                                           f"a verification stage failed: {type(exc).__name__}: {exc}")
-            fields["packages"].append(package)
+        asked = _asked(requirement)
+        if release in seen:
+            if seen[release] != asked:
+                # Verifying only the first line would leave the second line's extras and hashes unchecked.
+                fields["packages"].append(_package_verdict(
+                    decision, "UNRESOLVED", "capture", "DUPLICATE_REQUIREMENT",
+                    "this release is asked for twice in one request with different extras, --hash values or markers"))
+            continue
+        seen[release] = asked
+        try:
+            package = _verify_package(requirement, decision, run)
+        except Exception as exc:  # a fault in a stage is "unknown", never a pass and never a lost verdict
+            package = _package_verdict(decision, "UNRESOLVED", "internal", "INTERNAL_ERROR",
+                                       f"a verification stage failed: {type(exc).__name__}: {exc}")
+        fields["packages"].append(package)
 
     packages = fields["packages"]
     worst = (next((p for p in packages if p["status"] == "REJECTED"), None)
@@ -190,6 +200,13 @@ def _capture(request, project_dir: Path):
     return None, ("REQUEST_INVALID", "the request is not a pip command, a requirements edit or a capture record")
 
 
+def _asked(requirement):
+    """What one request line asks for besides the release itself: its extras, `--hash` values and marker."""
+    if not isinstance(requirement, dict):
+        return repr(requirement)
+    return (sorted(requirement.get("extras") or ()), sorted(requirement.get("hashes") or ()), requirement.get("marker"))
+
+
 def _verify_package(requirement: dict, decision: dict, run) -> dict:
     """Stages 3 to 9 for one permitted requirement."""
     started = time.perf_counter()
@@ -228,6 +245,10 @@ def _verify_package(requirement: dict, decision: dict, run) -> dict:
             found = lookup(run.store, key_fields)
             cache.update(lookup=found["rule"], key=found["key"], reason=found["reason"])
             hit, cached = found["hit"], found["verdict"]
+            if hit and not (isinstance(cached, dict) and ANALYSIS_KEYS <= set(cached) and cached["status"] in CACHEABLE):
+                # A sound row that does not hold an analysis (written by other code): analyse again and replace it.
+                hit, cached = False, None
+                cache.update(lookup="ROW_INCOMPLETE", reason="the stored verdict is not a complete analysis; analysed again")
 
     # 7. Advisories for every package of the tree, also on a cache hit and also when something above is unknown.
     targets = {(node["name"], node["version"]) for node in tree["nodes"]}
@@ -338,11 +359,17 @@ def _sha256_of_file(path):
 
 def _log(store, request, verdict: dict) -> bool:
     """Write one row to the verdict log. False when there is no store or it cannot be written."""
-    record = verdict["request"] or {}
-    requested = " ".join(record["command"]) if record.get("command") else record.get("path") or repr(request)[:200]
     try:
-        store.record_verdict(record.get("source"), requested, verdict["status"], verdict["stage"], verdict["rule"],
-                             verdict["fast_gate_ms"], verdict["cache_hit"], verdict["escalated"])
+        record = verdict["request"] or {}
+        command = record.get("command")
+        if isinstance(command, (list, tuple)) and command:
+            requested = " ".join(str(token) for token in command)
+        else:
+            requested = record.get("path") or repr(request)
+        # A caller-made record was not redacted by the capture, so URL passwords are removed here as well.
+        store.record_verdict(record.get("source"), redact(str(requested))[:MAX_LOGGED_REQUEST], verdict["status"],
+                             verdict["stage"], verdict["rule"], verdict["fast_gate_ms"], verdict["cache_hit"],
+                             verdict["escalated"])
     except Exception:  # the log is for the report; it must never change or lose a verdict
         return False
     return True

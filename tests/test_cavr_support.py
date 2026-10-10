@@ -1,4 +1,4 @@
-"""Shared helpers for the CAVR C3 and pipeline tests (plan steps 4-11). This file holds no tests.
+"""Shared helpers for the CAVR C3, pipeline and entry-point tests (plan steps 4-14). This file holds no tests.
 
 Nothing here fakes a result: `build_wheel` writes a real zip file, and `FakeIndex` serves the real
 bytes of that file together with a registry response whose digest is computed from those bytes.
@@ -7,13 +7,16 @@ A test that wants a mismatch has to change the bytes or the response itself.
 import base64
 import hashlib
 import json
+import shutil
 import zipfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from packaging.utils import canonicalize_name
 
+from backend.cavr.pipeline import verify_request
 from backend.cavr.pypi_client import FILES_HOST, TransportError, registry_url
+from backend.cavr.storage import CavrStorage
 from backend.orchestrator.hashing import digest
 
 REPO = Path(__file__).resolve().parents[1]
@@ -153,3 +156,68 @@ def synthetic_advisory(advisory_id, name, introduced="0", fixed=None) -> dict:
     events = [{"introduced": introduced}] + ([{"fixed": fixed}] if fixed else [])
     return {"id": advisory_id, "summary": "synthetic test advisory",
             "affected": [{"package": {"name": name, "ecosystem": "PyPI"}, "ranges": [{"type": "ECOSYSTEM", "events": events}]}]}
+
+
+# --- one project, one index, one cache: the world of the pipeline tests (steps 11-14) ---------------------
+
+INVOICEHUB = REPO / "demo_project" / "InvoiceHub"
+RECORDED_6_19_0 = json.loads((REPO / "tests" / "test_cavr_data" / "osv-pypdf-6.19.0.json").read_text())["response"].get("vulns", [])
+POLICY = {
+    "project_task_description": "Invoice PDF text extraction",
+    "allowed_scopes": ["FILE_READ:invoice_documents", "FILE_WRITE:scratch_tmp", "PROCESS_EXEC:none", "NETWORK_CONNECT:none"],
+    "approved_requirements": ["pypdf==6.19.0", "demo==1.0", "top==1.0", "helper==2.0", "native==1.0"],
+    "denied_packages": [{"name": "reqeusts", "reason": "typosquat of requests"}],
+}
+UNGUARDED = "\n\ndef quick(path):\n    return PdfReader(path)\n"
+CLEAN_DEMO = {"demo/__init__.py": "def run():\n    return 1\n"}
+USES_DEMO = "import demo\n\n\ndef go():\n    return demo.run()\n"
+
+
+class World:
+    """One project directory, one package index, one cache database, one advisory cache."""
+
+    def __init__(self, tmp_path):
+        self.tmp_path = tmp_path
+        self.project = tmp_path / "project"
+        shutil.copytree(INVOICEHUB / "app", self.project / "app")
+        for name in ("requirements.txt", "dependencies.lock.json"):
+            shutil.copy(INVOICEHUB / name, self.project / name)
+        self.index = FakeIndex()
+        self.index.add_pypdf()
+        self.store = CavrStorage(tmp_path / "cavr.sqlite3")
+        self.osv_dir = tmp_path / "osv"
+        self.advisories("pypdf", "6.19.0", RECORDED_6_19_0)
+        self.policy = json.loads(json.dumps(POLICY))
+        self.builds = 0
+
+    def advisories(self, name, version, vulns):
+        write_osv_cache(self.osv_dir, name, version, vulns)
+
+    def add(self, name, version, files=None, requires=(), lock=True, **wheel_args):
+        """Build a wheel, serve it, record "no advisories" for it and (by default) pin it in the lockfile."""
+        self.builds += 1
+        wheel = build_wheel(self.tmp_path / f"build{self.builds}", name, version, files=files, requires=requires, **wheel_args)
+        self.index.add(name, version, wheel)
+        self.advisories(name, version, [])
+        if lock:
+            path = self.project / "dependencies.lock.json"
+            lockfile = json.loads(path.read_text())
+            lockfile["packages"].append({"name": name, "version": version, "ecosystem": "PyPI"})
+            path.write_text(json.dumps(lockfile))
+        return wheel
+
+    def write(self, relative, text):
+        target = self.project / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(text)
+
+    def verify(self, request="pip install pypdf==6.19.0", **overrides):
+        args = {"transport": self.index, "quarantine_dir": self.tmp_path / "quarantine", "advisory_cache_dir": self.osv_dir,
+                "live_advisories": False}
+        args.update(overrides)
+        return verify_request(request, args.pop("project_dir", self.project), args.pop("policy", self.policy),
+                              args.pop("store", self.store), **args)
+
+    def cache_rows(self):
+        with self.store.connect() as connection:
+            return [dict(row) for row in connection.execute("SELECT * FROM verdict_cache").fetchall()]
