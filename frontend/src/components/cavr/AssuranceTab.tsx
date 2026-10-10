@@ -111,18 +111,17 @@ export const AssuranceTab: React.FC<AssuranceTabProps> = ({ state }) => {
         {/* Linked Blocks Visual Strip */}
         <div className="chain-blocks-strip">
           {blocks.map((b, idx) => {
-            const isBroken = false;
-
+            // The blocks are listed as recorded. Whether the chain is intact is only said by "Verify Chain".
             return (
               <React.Fragment key={b.seq}>
-                <div className={`chain-block ${isBroken ? 'broken-block' : 'valid-block'}`}>
+                <div className="chain-block">
                   <div className="block-seq">BLOCK #{b.seq}</div>
                   <div className="block-phase">{b.phase}</div>
                   <strong className="block-name">{b.substep || b.type}</strong>
                   <code className="block-hash">{String(b.sha256).substring(0, 12)}...</code>
                 </div>
                 {idx < blocks.length - 1 && (
-                  <div className={`chain-connector ${isBroken ? 'broken-link' : 'valid-link'}`}>
+                  <div className="chain-connector">
                     <Link2 size={14} />
                   </div>
                 )}

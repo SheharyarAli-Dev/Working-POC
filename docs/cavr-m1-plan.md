@@ -405,10 +405,61 @@ Handled in step 13: NOT_OBSERVED chip in `CounterfactualTab.tsx`; NFR-1 / NFR-2 
 without observation (the dashboard no longer calls `counterfactual.py`); stale docker command (the proof says "not run");
 UNRESOLVED gate shown as REJECTED; marker in the version field; `skipped_directories` in the verdict.
 Still open after step 13: `normalizer.py` maps NOT_OBSERVED to `FILE_READ`/`INFO` and `harness.py` / `image_digest`
-(legacy sandbox path, no longer called by the dashboard) -> M2; `/api/cavr/cache`, `/simple/` and the dialog texts still
-describe the old trusted-package list; `storage.SEED_PACKAGES` hashes not checked against PyPI; legacy modules
+(legacy sandbox path, no longer called by the dashboard) -> M2; `/api/cavr/cache`, `/simple/` and the dialog texts
+(removed or replaced in the batch review fix); `storage.SEED_PACKAGES` hashes not checked against PyPI; legacy modules
 (`resolver.py`, `reverifier.py`, `reconstructor.py`, `fixtures/scenarios.py`, `triggers.py`, `repair_engine.py`) are
 unused by the dashboard and still in the repository; the frontend was not checked in a browser.
+
+Step 14 stopped before any code change (2026-10-10), needs Maryam's decision: the safe scenario is VERIFIED today only
+because `analyze()` accepts PyPI's advisory list (`advisories/registry-*.json`, mode `PYPI ADVISORY METADATA (dated)`);
+the pipeline returns UNRESOLVED `ADVISORIES_UNAVAILABLE` for the same data. Delegating therefore changes
+`test_cavr_safe_cache_and_advisory` in `tests/test_modules.py`, which the plan says to ask about first. Options A-D are in
+`docs/report-notes/cavr-report-notes.md`, section "Step 14". Separately: that registry record is accepted for 30 days,
+so from 2026-10-25 the same test fails with the current code.
+
+Handled in the batch 12-13 review fix (2026-10-10): demo-condition runs are no longer logged or cached; `/simple/*`,
+`POST /api/cavr/cache` and `/api/cavr/dialog/*` removed; `GET /api/cavr/cache` lists the real verdict cache;
+`demo_condition` in every event; note facts corrected. `README.md` line 168 still mentions `/simple/` (not in scope).
+
+Found in the batch 12-13 review (2026-10-10, 1 BLOCKER outside the scope and the MINOR items, all derived by reading)
+and deliberately not fixed there:
+
+- **BLOCKER, needs Maryam:** `frontend/src/components/CavrModule.tsx` prints "VERIFIED MATCH" for every run (`:1163`),
+  "Counterfactual Container Runs (1)" for an empty list (`:1168`), "Matches" on a timer for the Re-verify button
+  (`:126-131`), fixed stage timings (`:379-447`), the sandbox and honeytoken panel after every verdict (`:774-923`), and
+  still sends the old chips (`:146-164`).
+- `api.py` `run_verification` / `launch_cavr_pipeline`: the task reference is not kept and there is no `try/finally`; a
+  fault after the pipeline leaves the run unfinished and the stream sends heartbeats for ever. Always mark the run
+  finished; add a test. -> next change to the file.
+- `api.py` `approve_alternative`: accepts unknown run ids, appends after the final event, and no alternative exists on
+  this path. Return 404 or remove; untested. -> with the `CavrModule.tsx` decision.
+- `api.py` / `assurance.py`: "Terminal Hash", `evidence_chain_root` and `total_blocks` are taken before the final record,
+  so they differ from `/verify`'s `terminal_digest`. Label it. -> next change.
+- `api.pip_request`: the single token can itself be an option (`package="-rrequirements.txt"` reads the sample
+  project's own file). Fail-closed; reword the docstring and add a test case. -> next change.
+- `api.verdict_events`: the gate event is published as "Requirement gate" even when the capture failed before the gate.
+- `pipeline.metrics`: p50 / p95 include BLOCK and capture-failure rows, which download nothing. Report per status, or
+  only runs that reached the artifact stage. -> Maryam (it is the report number).
+- `pip_shim.py`: the output does not say which policy file was used; `python -m pip` runs with the caller's directory on
+  `sys.path` (a `pip.py` in the project would run; use `-P` or a temporary `cwd`); a non-dict verdict or a `ValueError`
+  from the runner gives a traceback (nothing is installed). -> next change to the file.
+- `capture.redact`: `--proxy user:pass@host:8080` without a scheme is not redacted, and a password containing `@` leaks
+  its tail. `capture._read_file`: `path != root` lets `-r .` through to the "not a regular file" error; simplify.
+- `pypi_client` with the shared quarantine: a `tampered_wheel` demo run deletes the good wheel that a concurrent real run
+  is about to scan (that run becomes UNRESOLVED `ARTIFACT_CHANGED`). Give demo runs their own directory.
+- `RequirementsTab.tsx`: PASS / FAIL means "stage produced output" or "request passed" (FR-2 shows FAIL when the gate
+  correctly blocks); the scope box still describes sandbox isolation and an offline OSV mirror.
+  `CapabilityContractTab.tsx`: `startsWith` can match a longer capability name. `OverviewTab.tsx`: the badge counts all
+  findings, the list shows three. `MetricsTab.tsx`: "per verified request" should be "per request".
+- `requirement_gate.check_requirement_gate`: the docstring still calls it the dashboard entry point.
+- Tests: none for `approve_alternative`, for `pip_shim._default_store()` returning None, or for an unknown status exit
+  code; `test_printable_certificate_shows_the_real_values_and_escapes_them` checks escaping of `reason` only;
+  `test_only_the_two_named_conditions_change_the_transport` checks `demo_condition` only.
+- Hard to explain line by line: `pip_shim.install_plan` (`setdefault(...) != ...`), the eviction slice in
+  `api.launch_cavr_pipeline`, the unreachable `yield` in `OfflineTransport.stream`, the 90-line `verdict_events`, many
+  lines over 120 characters.
+- The reviewer did not run the live tests and did not open the dashboard in a browser. The fix commit has not been
+  reviewed again.
 
 ## Verification
 
@@ -436,6 +487,8 @@ unused by the dashboard and still in the repository; the frontend was not checke
 - [x] 10 verdict cache (committed 2026-10-10, `d8e6367`)
 - [x] 11 pipeline (committed 2026-10-10, `c5c0ef4`; batch review fixes in the next commit)
 - [x] 12 pip wrapper (committed 2026-10-10, `1e17034`)
-- [ ] 13 dashboard API (backend and `frontend/src/components/cavr/` committed 2026-10-10; the chips, timeline and proof
+- [ ] 13 dashboard API (backend and `frontend/src/components/cavr/` committed 2026-10-10, `ca5a0e2`, batch review fix in the
+      next commit; the chips, timeline and proof
       drawer in `frontend/src/components/CavrModule.tsx` are outside the allowed scope and unchanged: waiting for Maryam)
-- [ ] 14 orchestrator analyzer
+- [ ] 14 orchestrator analyzer (not started; stopped 2026-10-10: delegating changes the outcome of
+      `tests/test_modules.py::test_cavr_safe_cache_and_advisory`, see "Open after step 13" and the Step 14 note)

@@ -105,6 +105,7 @@ def test_pypdf_6_19_0_is_verified_for_the_shipped_project_and_policy(dashboard):
                                             "filename": "pypdf-6.19.0-py3-none-any.whl"}]
     assert resolution["vulnerability_count"] == 0 and resolution["known_risk_signals"] == []
     assert dashboard.payload(run_id, "cache_result")["result"] == "MISS"
+    assert all("demo_condition" in event["payload"] and event["payload"]["demo_condition"] is None for event in dashboard.events(run_id))
     action = dashboard.payload(run_id, "action_completed")
     assert action["capability_contract"]["rule"] == "CONTRACT_INFERRED"
     assert [(c["file"], c["symbol"]) for c in action["capability_contract"]["call_sites"]] == [
@@ -176,6 +177,7 @@ def test_tampered_wheel_is_rejected_on_the_hash_of_the_bytes_that_arrived(dashbo
     assert shape(dashboard, run_id) == [(0, "state_change"), (1, "requirement_gate_evaluated"), (2, "package_resolved"),
                                         (2, "verdict_computed"), (2, "state_change")]
     assert all(event["payload"]["demo_condition"]["id"] == "tampered_wheel" for event in dashboard.events(run_id))
+    assert verdict["logged"] is False
     assert api.RUN_CERTIFICATES[run_id]["demo_condition"]["id"] == "tampered_wheel"
     assert (api.RUN_CERTIFICATES[run_id]["status"], api.RUN_CERTIFICATES[run_id]["verdict"]) == ("REJECTED", "BLOCK")
 
@@ -203,11 +205,28 @@ def test_what_the_pipeline_is_given_under_each_condition(dashboard, monkeypatch)
     for scenario in ("denylisted", "network_off", "tampered_wheel"):
         dashboard.run(scenario)
     plain, offline, tampered = (options for _, _, options in seen)
-    assert all(project_dir == api.PROJECT_DIR and store is dashboard.store for project_dir, store, _ in seen)
+    assert all(project_dir == api.PROJECT_DIR for project_dir, _, _ in seen)
+    # Only the plain run gets the store: a run under a demo condition is neither logged nor cached.
+    assert [store for _, store, _ in seen] == [dashboard.store, None, None]
     assert plain["transport"] is dashboard.index and plain["live_advisories"] is True
     assert isinstance(offline["transport"], api.OfflineTransport) and offline["live_advisories"] is False  # OSV is not asked live
     assert isinstance(tampered["transport"], api.TamperingTransport) and tampered["transport"].inner is dashboard.index
     assert tampered["live_advisories"] is True
+
+
+def test_runs_under_a_demo_condition_are_not_in_the_log_the_cache_or_the_metrics(dashboard):
+    """Their outcome was arranged by the demo, so they must not count in the report numbers."""
+    for scenario in ("tampered_wheel", "network_off"):
+        run_id, verdict = dashboard.run(scenario)
+        assert verdict["logged"] is False and verdict["status"] in ("REJECTED", "UNRESOLVED")
+        assert api.get_proof(run_id)["cavr_verdict"]["logged"] is False
+    assert dashboard.store.get_verdict_log() == [] and dashboard.store.list_cached_verdicts() == []
+    assert api.get_metrics()["verdicts"] == 0 and api.get_cache() == []
+    # A plain run of the same request is logged and cached, and a demo run afterwards does not read that cache.
+    assert dashboard.run("verified")[1]["logged"] is True
+    assert len(dashboard.store.get_verdict_log()) == 1 and len(dashboard.store.list_cached_verdicts()) == 1
+    dashboard.run("network_off")
+    assert api.get_metrics()["verdicts"] == 1 and api.get_metrics()["by_status"] == {"VERIFIED": 1}
 
 
 # --- a condition or a scenario name can never improve a verdict ------------------------------------------------
@@ -440,14 +459,42 @@ def test_metrics_come_from_the_verdict_log(dashboard, client):
     empty = client.get("/api/cavr/metrics").json()
     assert empty == {"verdicts": 0, "cache_hits": 0, "cache_hit_rate": None, "fast_gate_ms_p50": None, "fast_gate_ms_p95": None,
                      "by_status": {}, "recent": []}
-    verdicts = [dashboard.run("verified")[1], dashboard.run("verified")[1], dashboard.run("denylisted")[1], dashboard.run("network_off")[1]]
+    verdicts = [dashboard.run("verified")[1], dashboard.run("verified")[1], dashboard.run("denylisted")[1],
+                dashboard.run(package="left-pad", version="1.0")[1]]
+    dashboard.run("network_off")      # demo runs: not counted
+    dashboard.run("tampered_wheel")
     report = client.get("/api/cavr/metrics").json()
     assert report["verdicts"] == 4 and report["cache_hits"] == 1 and report["cache_hit_rate"] == 0.25
-    assert report["by_status"] == {"BLOCK": 1, "UNRESOLVED": 1, "VERIFIED": 2}
+    assert report["by_status"] == {"BLOCK": 2, "VERIFIED": 2}
     times = sorted(verdict["fast_gate_ms"] for verdict in verdicts)
     assert report["fast_gate_ms_p50"] == pytest.approx(times[1], abs=0.01) and report["fast_gate_ms_p95"] == pytest.approx(times[3], abs=0.01)
-    assert [row["status"] for row in report["recent"]] == ["UNRESOLVED", "BLOCK", "VERIFIED", "VERIFIED"]
-    assert report["recent"][0]["requested"] == "pip install pypdf==6.19.0"
+    assert [row["status"] for row in report["recent"]] == ["BLOCK", "BLOCK", "VERIFIED", "VERIFIED"]
+    assert report["recent"][0]["requested"] == "pip install left-pad==1.0"
+
+
+def test_cache_endpoint_lists_the_real_verdict_cache_and_no_seed_rows(dashboard, client):
+    assert client.get("/api/cavr/cache").json() == []            # nothing analysed yet: no built-in "trusted" packages
+    _, verdict = dashboard.run("verified")
+    (row,) = client.get("/api/cavr/cache").json()
+    assert (row["name"], row["version"], row["sha256"], row["status"], row["source"]) == (
+        "pypdf", "6.19.0", PYPDF_SHA256, "VERIFIED", "CAVR verdict cache")
+    assert row["key_fields"] == verdict["packages"][0]["key_fields"] and isinstance(row["capabilities"], str)
+    dashboard.run("denylisted")                                  # a BLOCK analyses nothing, so it adds no row
+    assert len(client.get("/api/cavr/cache").json()) == 1
+    with dashboard.store.connect() as connection:               # a row that was edited is not shown
+        connection.execute("UPDATE verdict_cache SET status='REJECTED'")
+        connection.commit()
+    assert client.get("/api/cavr/cache").json() == []
+
+
+@pytest.mark.parametrize("method, path, status", [
+    ("get", "/simple/", 404), ("get", "/simple/requests/", 404), ("get", "/simple/%3Cimg%20src=x%3E/", 404),
+    ("get", "/simple/requests/requests-2.31.0-py3-none-any.whl", 404), ("post", "/api/cavr/cache?name=x&version=1&sha256=0", 405),
+    ("get", "/api/cavr/dialog/cache", 404), ("get", "/api/cavr/dialog/action", 404), ("get", "/api/cavr/dialog/environment", 404),
+])
+def test_endpoints_of_the_old_trusted_package_list_are_gone(client, method, path, status):
+    """They served a seeded list as "PyPI Verified", let anyone add to it, and put the URL into an HTML page unescaped."""
+    assert getattr(client, method)(path).status_code == status
 
 
 def test_old_runs_are_dropped(dashboard, client, monkeypatch):
