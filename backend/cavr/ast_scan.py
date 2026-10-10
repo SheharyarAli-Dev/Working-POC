@@ -11,6 +11,9 @@ variable or a file-existence check. On top of that this module adds:
 - dynamic imports and `compile` calls, as `DYNAMIC_CODE` findings;
 - everything the scan cannot cover, as explicit findings.
 
+A `.pth` file is decoded as `site.py` decodes it (UTF-8, optional BOM), not by a PEP 263 coding
+line, so the lines the scan sees are the lines the interpreter would run.
+
 The result says whether the scan covered all code in the wheel:
 
     NOT_A_WHEEL, ZIP_BUDGET, DUPLICATE_ENTRY, UNSAFE_PATH   from the archive checks (step 5)
@@ -132,8 +135,14 @@ def _scan(archive: zipfile.ZipFile, fields: dict, knowledge: dict) -> None:
             if source is not None and scan_source(name, source):
                 scanned.append(name)
         elif name.lower().endswith(".pth") and info.file_size <= MAX_SOURCE_BYTES:
-            source = _decode(archive.read(info), name, parse_errors, findings)
-            if source is None:
+            # Read it the way site.py does: UTF-8 with an optional BOM. A coding cookie means nothing
+            # in a .pth file, so honouring one here would hide an import line from the scan.
+            try:
+                source = archive.read(info).decode("utf-8-sig")
+            except UnicodeDecodeError as exc:
+                error = f"UnicodeDecodeError: {exc}"
+                parse_errors.append({"file": name, "error": error})
+                findings.append(_finding("PARSE_ERROR", name, None, f"cannot be decoded ({error})"))
                 continue
             lines = source.splitlines()
             executable = [number for number, line in enumerate(lines, 1) if line.startswith(("import ", "import\t"))]

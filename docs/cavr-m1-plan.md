@@ -309,6 +309,41 @@ Found in the batch 1-3 review (2026-10-10, MINOR items) and deliberately not fix
 - Nice-to-have capture tests: `pip install a==1 && pip install b==1`, `PIP_INDEX_URL=x pip install a==1`,
   the `--` separator, `-r https://...`, `-qr reqs.txt`. By reading, all fail closed. -> step 12.
 
+Found in the batch 4-8 review (2026-10-10, MINOR items, all derived by reading) and deliberately not fixed there:
+
+- `pypi_client.select_wheel`: two wheel entries with the same filename make `sorted` compare the entry
+  dicts and raise `TypeError` (a crash, not a result). Sort on (rank, filename) or return
+  `REGISTRY_INVALID`. -> step 11.
+- `pypi_client.fetch_artifact`: a filename with a NUL byte passes `parse_wheel_filename` and `mkstemp`
+  raises an uncaught `ValueError`. -> step 11.
+- `pypi_client._chunks`: the 120 s deadline is checked only when a chunk arrives; a slow drip below the
+  15 s read timeout can run past it. The Step 4 notes state the deadline without this limit. -> step 11.
+- `pypi_client.NAME` (and `wheel_meta.NAME`) use `match` with `$`, which accepts a trailing newline.
+  Use `fullmatch`. -> step 11.
+- `HttpxTransport.stream` (redirect, non-200) has no offline test; `httpx.MockTransport` would cover it.
+  -> step 11.
+- After a `HASH_MISMATCH`, an older good `<filename>` from an earlier run stays in quarantine beside
+  `<filename>.rejected`. -> step 11.
+- `wheel_meta._headers`: parser defects are ignored (a non-header line inside the header block ends it
+  silently). Treat non-empty `defects` as `METADATA_INVALID`. -> step 9.
+- `wheel_meta.read_wheel` without an expected name and version skips the request identity check; the
+  pipeline must always pass both. -> step 11.
+- `wheel_meta.check_entries`: the duplicate-name check lowercases but does not Unicode-normalise
+  (NFC vs NFD). -> step 11.
+- `dep_tree`: a node key is (name, version text), so `1.0` and `1.0.0` coming from different sources
+  could become two nodes. -> step 10 (together with the version normalisation item above).
+- `ast_scan`: nested archives (`.zip`, `.egg`, `.whl`), `*.data/scripts/*` without a `.py` suffix and
+  `.pyw` files are neither scanned nor reported, and the result is still `SCAN_COMPLETE`. Add a
+  "not scanned" finding. -> step 11.
+- `ast_scan._alias_pass`: `from os import *` followed by `system(...)` is not found. -> step 11.
+- Test names that claim more than the test checks:
+  `test_subtree_digest_is_stable_and_does_not_depend_on_requires_dist_order` (no digest compared for the
+  swapped order), `test_every_recorded_advisory_matches_5_1_0_and_most_do_not_match_6_19_0` ("most",
+  asserts all), `test_scanning_does_not_execute_the_package` (cannot fail). -> next change to each file.
+- `tests/test_cavr_data/osv-pypdf-5.1.0.json` was not opened by the reviewer; "real, only trimmed" rests on
+  the recording step and on the live test (`CAVR_LIVE=1`), not on the review.
+- The reviewer did not run the full suite; the 7 baseline failures were confirmed by the batch runs only.
+
 ## Verification
 
 - `.venv/bin/python -m pytest -q` before every commit (offline).
@@ -326,11 +361,11 @@ Found in the batch 1-3 review (2026-10-10, MINOR items) and deliberately not fix
 - [x] 1 C1 pip command capture (committed 2026-10-10, `73f7892`; batch review fixes in the next commit)
 - [x] 2 C1 requirements.txt edit capture (committed 2026-10-10, `4c053b6`; batch review fixes in the next commit)
 - [x] 3 C2 fail-closed requirement gate (committed 2026-10-10, `c018f30`; batch review fixes in the next commit)
-- [x] 4 C3 PyPI fetch + SHA-256 (committed 2026-10-10; hash added in the batch-end commit)
-- [x] 5 C3 wheel metadata (committed 2026-10-10; hash added in the batch-end commit)
-- [x] 6 C3 transitive tree + subtree digest (committed 2026-10-10; hash added in the batch-end commit)
-- [x] 7 C3 OSV ranges (committed 2026-10-10; hash added in the batch-end commit)
-- [x] 8 C3 AST scan (committed 2026-10-10; hash added in the batch-end commit)
+- [x] 4 C3 PyPI fetch + SHA-256 (committed 2026-10-10, `00b9332`; batch review fix in the next commit)
+- [x] 5 C3 wheel metadata (committed 2026-10-10, `3ba4970`; batch review fix in the next commit)
+- [x] 6 C3 transitive tree + subtree digest (committed 2026-10-10, `3cb1a35`; batch review fix in the next commit)
+- [x] 7 C3 OSV ranges (committed 2026-10-10, `b7c98cf`; batch review fix in the next commit)
+- [x] 8 C3 AST scan (committed 2026-10-10, `c72b56a`; batch review fix in the next commit)
 - [ ] 9 C4 capability contract
 - [ ] 10 verdict cache
 - [ ] 11 pipeline
