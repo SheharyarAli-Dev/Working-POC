@@ -1705,3 +1705,104 @@ Run on 2026-10-10:
    The contract is "what this project needs from the package". With no call site there is nothing to derive it from, so no capability can be justified.
 3. **Why does the contract digest include all project source files?**
    The verdict depends on the code around a call site, not only on the call site. Hashing the sources guarantees a cached verdict is only reused for the exact project state it was judged against.
+
+## Step 10 — 8-field verdict cache (2026-10-10)
+
+Plan commit 10, `feat(cavr): 8-field verdict cache`.
+Review: one cavr-reviewer batch pass over steps 9-11; outcome in the "Steps 9-11 — batch review" section.
+
+### Ch 6 Implementation
+
+| File | Function / constant | What it does |
+|---|---|---|
+| `backend/cavr/verdict_cache.py` (new, 149 lines) | `KEY_FIELDS` | The eight fields: `ecosystem`, `name`, `version`, `artifact_sha256`, `subtree_digest`, `contract_digest`, `policy_version`, `analyzer_version`. |
+| | `cache_key(fields)` | Returns `(key, normalised fields, None)` or `(None, None, reason)`. Exactly the eight keys, every value a non-empty string, ecosystem PyPI, a valid name and non-local version, four 64-hex digests. The key is the SHA-256 of the canonical JSON of the normalised values, with the version in canonical form. |
+| | `lookup(storage, fields)` | `hit`, `rule` (`HIT`, `MISS`, `KEY_INCOMPLETE`, `ROW_TAMPERED`, `CACHE_UNAVAILABLE`), `reason`, `key`, `verdict`, `stored_at`, `fields`. |
+| | `store(storage, fields, verdict)` | `stored`, `rule` (`STORED`, `NOT_CACHEABLE`, `KEY_INCOMPLETE`, `CACHE_UNAVAILABLE`), `reason`, `key`, `stored_at`. Only a JSON object whose `status` is VERIFIED or REJECTED, at most `MAX_VERDICT_BYTES` (2 MiB). |
+| | `row_integrity(row)` | SHA-256 over `cache_key`, the eight fields, `status`, `verdict_json`, `stored_at`. |
+| | `_sound(row, key)` | A row is used only if its integrity digest matches, its own eight columns give the key it is filed under, its status is cacheable, and its verdict JSON has that status. |
+| `backend/cavr/storage.py` (247 -> 281 lines) | table `verdict_cache`, `get_cached_verdict(cache_key)`, `put_cached_verdict(row)` | One row per key (`INSERT OR REPLACE`). The table is created with `CREATE TABLE IF NOT EXISTS`, so an existing database gets it on the next start. |
+| `backend/cavr/dep_tree.py` (232 -> 250 lines) | `build_tree`, `_expand`, `subtree_digest`, `_canonical` | One node per release however the version is written (`known` maps `(name, Version)` to the node key in use); the subtree digest uses canonical versions. Deferred items from the batch 1-3 and 4-8 reviews. |
+| `tests/test_cavr_verdict_cache.py` (new, 298 lines) | | 27 test functions, 102 cases. |
+| `tests/test_cavr_dep_tree.py` | | +2 test functions; 1 test renamed to say what it checks (deferred item). |
+
+Key algorithm:
+
+1. `cache_key`: refuse unless all eight fields are usable; normalise (canonical name, `str(Version)`, lower-case digests); hash, with the version as `canonicalize_version` gives it.
+2. `store`: refuse anything but VERIFIED / REJECTED; serialise the verdict as canonical JSON; write the row with `row_integrity`.
+3. `lookup`: no key -> `KEY_INCOMPLETE`; no row -> `MISS`; a row that fails `_sound` -> `ROW_TAMPERED`; otherwise `HIT` with a fresh copy of the verdict.
+
+### Design decisions
+
+| Decision | Alternatives considered | Why |
+|---|---|---|
+| A missing or malformed field gives no key | Hash `None` as a value | Two requests whose tree or contract is unknown would otherwise share one entry. |
+| UNRESOLVED and BLOCK are never stored | Cache everything with a short lifetime | UNRESOLVED means "not known"; storing it would freeze a network failure. BLOCK is decided before any artifact exists, so there is nothing to key on. |
+| The row holds the eight fields as columns, and the key is recomputed from them on read | Store the key only | A row copied under another key is detected even if its digest was recomputed (`test_a_forged_row_whose_fields_do_not_give_its_key_is_ignored`). |
+| Integrity digest is a plain SHA-256 | HMAC with a secret outside the database | Detects damage and single-column edits. A keyed digest needs key management (M2). The limit is stated in the module docstring. |
+| `1.0` and `1.0.0` give one key | Version text as written | They are one release on PyPI; the deferred review item asked for it. |
+| Cache errors are a miss, never an exception | Let `sqlite3.Error` propagate | A broken cache must cost time (a full analysis), not a verdict. |
+| `analyzer_version` is an opaque string here | Build it in this module | The pipeline knows which analyser code and rule set judged the artifact (step 11). |
+| New table in `storage.py`, logic in `verdict_cache.py` | All in `storage.py` | The plan names both files; the storage class stays plain SQL. |
+
+### Requirements covered
+
+No `FR-CAVR-NN` identifiers exist in this repository; IDs are from `RequirementsTab.tsx` (Maryam to confirm).
+
+| ID | Title | What this step covers | Acceptance check |
+|---|---|---|---|
+| none listed | CLAUDE.md goal C3, "verdict cache keyed on the 8-field digest" | Key, store, lookup | `test_hit_on_identical_inputs`, `test_miss_when_one_field_changes` (8) |
+| FR-6 | Fail-Closed Security Policy | Tampered row ignored; UNRESOLVED not stored; incomplete key not used | `test_tampered_row_is_ignored` (6), `test_only_verified_and_rejected_are_stored` (7), `test_incomplete_key_is_neither_looked_up_nor_stored` |
+
+### Ch 7 Test cases
+
+Run on 2026-10-10:
+
+- `.venv/bin/python -m pytest tests/test_cavr_*.py -q` -> 838 passed, 4 skipped (734 + 104 new).
+- `.venv/bin/python -m pytest -q` -> 896 passed, 7 failed, 4 skipped (the same 7 baseline tests).
+- Fault injection, one line at a time, files restored after each: integrity not checked, UNRESOLVED made cacheable, contract digest left out of the key, a missing field accepted, row status not checked, `stored_at` left out of the integrity digest, version not canonicalised -> each made 1 to 9 tests fail. "Key not recomputed from the row" first made no test fail; `test_a_forged_row_whose_fields_do_not_give_its_key_is_ignored` was added and now fails with that fault.
+- The 2 new `dep_tree` tests failed against the committed `dep_tree.py` and pass with the change.
+
+| Test ID | Purpose | Input | Expected | Result |
+|---|---|---|---|---|
+| `test_the_key_has_exactly_the_eight_fields` | Key shape | The eight fields, in two orders | 64-hex key, same for both | pass |
+| `test_spellings_of_the_same_release_give_the_same_key` (7), `test_name_canonicalisation_in_the_key` | Normalisation | `PyPDF`, `6.19`, `6.19.0.0`, `pypi`, upper-case digest; `Foo_Bar` / `foo-bar` | Same key | pass |
+| `test_hit_on_identical_inputs`, `test_hit_through_another_spelling_of_the_same_release` | Hit | Store, then look up the same fields | `HIT` with the stored verdict | pass |
+| `test_miss_when_one_field_changes` (8), `test_each_field_changes_the_key` (8) | Miss per field | Each of the 8 fields changed, one at a time | `MISS` (`KEY_INCOMPLETE` for another ecosystem); the original entry still hits | pass |
+| `test_a_missing_or_malformed_field_gives_no_key` (32), `test_unusable_values_give_no_key` (9), `test_a_missing_or_extra_field_gives_no_key`, `test_incomplete_key_is_neither_looked_up_nor_stored` | Incomplete key | `None`, `""`, a number, a list in each field; `npm`, a local version, a short digest; 7 or 9 fields | No key; nothing stored | pass |
+| `test_only_verified_and_rejected_are_stored` (7), `test_unresolved_does_not_replace_a_stored_verdict` | UNRESOLVED not stored | `UNRESOLVED`, `BLOCK`, `PERMITTED`, `OK`, `verified`, `""`, `None` | `NOT_CACHEABLE`; 0 rows; an existing VERIFIED stays | pass |
+| `test_rejected_is_cached_too`, `test_a_new_verdict_for_the_same_key_replaces_the_old_one`, `test_the_cache_survives_a_new_storage_object`, `test_the_returned_verdict_is_a_copy` | Normal use | REJECTED; two stores; a second `CavrStorage` on the file; mutating the returned dict | Stored; 1 row; hit; cache unchanged | pass |
+| `test_a_verdict_that_is_not_a_json_object_is_not_stored` (6), `test_an_oversized_verdict_is_not_stored` | Bad verdicts | `None`, a string, a set inside, NaN; over the size limit | `NOT_CACHEABLE` | pass |
+| `test_tampered_row_is_ignored` (6) | Tampered row | Verdict JSON + status rewritten to VERIFIED; status column; a key column; `stored_at`; integrity; broken JSON | `ROW_TAMPERED`; a new verdict can be stored over it | pass |
+| `test_a_row_moved_under_another_key_is_ignored`, `test_a_forged_row_whose_fields_do_not_give_its_key_is_ignored`, `test_a_row_with_a_status_that_is_never_cached_is_ignored` | Forged rows | A genuine row copied under another key; the same with the digest recomputed; an UNRESOLVED row with the digest recomputed | `ROW_TAMPERED` | pass |
+| `test_database_failure_is_a_miss_not_an_exception`, `test_storage_without_the_cache_methods_is_a_miss`, `test_the_table_is_created_in_an_existing_database` | Storage errors | Table dropped; `None` storage; an old database file | `CACHE_UNAVAILABLE`; table created | pass |
+| `test_the_same_release_written_two_ways_is_one_node`, `test_subtree_digest_does_not_depend_on_how_a_version_is_written` (`test_cavr_dep_tree.py`) | Version spelling | Request `app==1.0`, lockfile `app==1.0.0`, a cycle back to `app` | One `app` node, fetched once; same digest for `1.0` and `1.0.0` | pass |
+
+### Defects found and fixed
+
+| # | Found by | Finding | Outcome |
+|---|---|---|---|
+| 1 | Fault injection | Removing the "row fields give the key" check failed no test: the integrity digest alone caught the copied row | Test added for a forged row with a recomputed digest |
+| 2 | Deferred items (batch 1-3 and 4-8 reviews) | The version as written fed the key; `1.0` and `1.0.0` could be two tree nodes | Canonical version in the key; one node per release in `dep_tree` |
+
+### Known limitations / deferred
+
+- The integrity digest is not keyed. Someone who can write the database can store a complete, consistent forged row. Mitigation in step 11: the artifact hash and the advisories are checked again on every hit. A keyed digest -> M2.
+- No expiry and no size limit on the table; old rows stay until overwritten.
+- The request spelling of the root version (`1.0` vs `1.0.0`) is kept in the tree's labels; only keys and digests are canonical.
+- The cache is not called by anything until step 11.
+
+### Tool disclosure (Ch 8.7)
+
+- **Generated by Claude Code:** `verdict_cache.py`, the table and two methods in `storage.py`, the `dep_tree.py` change, the tests, these notes, the commit.
+- **Reviewed / changed by Maryam:** nothing yet; the batch ran without stops.
+- **Verified by:** the pytest runs and the fault injections above.
+
+### Supervisor Q&A prep
+
+1. **Why eight fields and not just name, version and hash?**
+   The verdict also depends on the dependency tree under the package, on how this project uses it, on the project policy, and on the analyser that judged it. If any of them changes, the old verdict was for a different question.
+2. **What stops someone editing the cache to say VERIFIED?**
+   Each row carries a digest of its content and is checked against its own key; an edited row is ignored. The digest is not secret, so a full rewrite is possible for someone with database access; that is why a hit still re-checks the artifact hash and OSV.
+3. **Why is UNRESOLVED not cached?**
+   It means the answer is not known (for example the network was down). Caching it would keep answering "unknown" after the cause is gone.

@@ -84,7 +84,7 @@ def test_every_node_is_downloaded_and_hashed(world):
     assert tree["nodes"][0]["import_names"] == ["app"]
 
 
-def test_subtree_digest_is_stable_and_does_not_depend_on_requires_dist_order(tmp_path):
+def test_subtree_digest_is_stable_and_edge_order_does_not_depend_on_requires_dist_order(tmp_path):
     def run(directory, order):
         world = World(directory)
         world.add("app", "1.0", requires=order)
@@ -397,3 +397,35 @@ def test_every_result_has_the_same_keys(world):
     good = world.tree("app", "1.0", lockfile)
     bad = world.tree("app", "1.0", [])
     assert set(good) == set(bad)
+
+
+# --- one node per release, however the version is written (plan step 10) ---------------------------------------
+
+def test_the_same_release_written_two_ways_is_one_node(world):
+    """`app==1.0` is asked for; the lockfile, which pins the way back from `b`, says `1.0.0`."""
+    world.add("app", "1.0", requires=["b==2"])
+    world.add("b", "2", requires=["app>=1"])
+    tree = world.tree("app", "1.0", lock("app==1.0.0", "b==2"))
+    assert outcome(tree) == ("OK", "TREE_BUILT")
+    assert [(node["name"], node["version"]) for node in tree["nodes"]] == [("app", "1.0"), ("b", "2")]
+    assert sorted((edge["parent"], edge["child"]) for edge in tree["edges"]) == [("app==1.0", "b==2"), ("b==2", "app==1.0")]
+    # Before this rule `app==1.0.0` was a second node and was asked for again.
+    assert world.index.calls.count(registry_url("app", "1.0")) == 1 and registry_url("app", "1.0.0") not in world.index.calls
+
+
+def test_subtree_digest_does_not_depend_on_how_a_version_is_written(tmp_path):
+    def run(directory, requested, locked):
+        world = World(directory)
+        world.add("app", "1.0", requires=["b==2"])
+        world.add("b", "2", requires=["app>=1"])
+        # The registry answers for every spelling of the release, as PyPI does.
+        world.index.routes[registry_url("app", "1.0.0")] = world.index.routes[registry_url("app", "1.0")]
+        return world.tree("app", requested, lock(f"app=={locked}", "b==2"))
+
+    first, second = run(tmp_path / "x", "1.0", "1.0"), run(tmp_path / "y", "1.0.0", "1")
+    assert outcome(first) == outcome(second) == ("OK", "TREE_BUILT")
+    assert first["root"]["version"] != second["root"]["version"]
+    assert first["subtree_digest"] == second["subtree_digest"]
+    one = dep_tree.subtree_digest(("a", "1.0"), [("a", "1.0", "f" * 64)], [("a", "1.0", "a", "1.0")])
+    assert one == dep_tree.subtree_digest(("a", "1"), [("a", "1.0.0", "f" * 64)], [("a", "1.0.0", "a", "1")])
+    assert one != dep_tree.subtree_digest(("a", "1.1"), [("a", "1.1", "f" * 64)], [("a", "1.1", "a", "1.1")])

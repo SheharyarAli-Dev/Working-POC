@@ -173,6 +173,22 @@ class CavrStorage:
                 reason TEXT,
                 timestamp TEXT NOT NULL
             );
+
+            CREATE TABLE IF NOT EXISTS verdict_cache(
+                cache_key TEXT PRIMARY KEY,
+                ecosystem TEXT NOT NULL,
+                name TEXT NOT NULL,
+                version TEXT NOT NULL,
+                artifact_sha256 TEXT NOT NULL,
+                subtree_digest TEXT NOT NULL,
+                contract_digest TEXT NOT NULL,
+                policy_version TEXT NOT NULL,
+                analyzer_version TEXT NOT NULL,
+                status TEXT NOT NULL,
+                verdict_json TEXT NOT NULL,
+                stored_at TEXT NOT NULL,
+                integrity TEXT NOT NULL
+            );
             """)
 
             # Seed if table is empty
@@ -245,3 +261,21 @@ class CavrStorage:
         with self.connect() as conn:
             rows = conn.execute("SELECT * FROM audit_log ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
             return [dict(r) for r in rows]
+
+    # --- verdict cache (rows are built and checked by backend/cavr/verdict_cache.py) ---
+
+    VERDICT_CACHE_COLUMNS = ("cache_key", "ecosystem", "name", "version", "artifact_sha256", "subtree_digest",
+                             "contract_digest", "policy_version", "analyzer_version", "status", "verdict_json",
+                             "stored_at", "integrity")
+
+    def get_cached_verdict(self, cache_key: str) -> dict | None:
+        with self.connect() as conn:
+            row = conn.execute("SELECT * FROM verdict_cache WHERE cache_key=?", (cache_key,)).fetchone()
+            return dict(row) if row else None
+
+    def put_cached_verdict(self, row: dict) -> None:
+        columns = self.VERDICT_CACHE_COLUMNS
+        with self.connect() as conn:
+            conn.execute(f"INSERT OR REPLACE INTO verdict_cache({', '.join(columns)}) VALUES({', '.join('?' * len(columns))})",
+                         tuple(row[column] for column in columns))
+            conn.commit()
