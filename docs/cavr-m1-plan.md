@@ -291,7 +291,7 @@ Found in commit 0b (2026-10-10, `521c414`) and deliberately not fixed there:
 - [x] 0b accept either monitor mode in `test_controlled_dormant_execution` (committed 2026-10-10, `521c414`)
 - [x] 1 C1 pip command capture (committed 2026-10-10)
 - [x] 2 C1 requirements.txt edit capture (committed 2026-10-10)
-- [ ] 3 C2 fail-closed requirement gate
+- [x] 3 C2 fail-closed requirement gate (committed 2026-10-10)
 - [ ] 4 C3 PyPI fetch + SHA-256
 - [ ] 5 C3 wheel metadata
 - [ ] 6 C3 transitive tree + subtree digest

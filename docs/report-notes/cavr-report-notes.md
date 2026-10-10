@@ -657,3 +657,179 @@ No test failed during this step.
    line is either a valid named requirement or it is reported and the capture is incomplete.
 3. **How do you know the file really changed?**
    Each snapshot stores the SHA-256 of the file's bytes; `changed` compares the two digests.
+
+## Step 3 — C2 fail-closed requirement gate (2026-10-10)
+
+Plan commit 3, `feat(cavr): C2 fail-closed requirement gate`.
+Review: REVIEW_LINE_STEP_3
+
+### Ch 6 Implementation
+
+| File | Function / constant | What it does |
+|---|---|---|
+| `backend/cavr/requirement_gate.py` (rewritten, 84 -> 307 lines) | `evaluate_requirement(requirement, policy, lockfile=None)` | Judges one requirement (string or capture record) against a parsed policy and an optional parsed lockfile. Returns `result`, `rule`, `reason`, `package`, `version`, `requested`, `policy_version`, `evidence`. |
+| | `evaluate_capture(record, policy, lockfile=None)` | Judges a whole capture record; adds `decisions` (one per requirement). |
+| | `gate_from_files(target, policy_path, lockfile_path=None)` | Reads the policy and lockfile from disk, then calls one of the two functions above. |
+| | `load_json_file(path)` | Parsed JSON; `None` when the file does not exist; an `Unreadable` object when it exists but is not usable JSON (or is `null`). |
+| | `policy_problems(policy)`, `lockfile_problems(lockfile)` | Lists of what is wrong. Empty list = usable. |
+| | `policy_version(policy)` | `backend.orchestrator.hashing.digest(policy)`: SHA-256 of the canonical JSON. |
+| | `check_requirement_gate(package_name, version)` | Kept for `backend/cavr/api.py`. Now calls `gate_from_files` on `project_policy.json` and adds the old keys `status`, `matched_rule`, `rule_checked`, `policy_file_excerpt`. |
+| | `RULE_TITLES` | Rule id -> readable title, used for `rule_checked`. |
+| | `_approved_entry`, `_denied_name`, `_requirement_text`, `_decision`, `_is_pypi`, `_version` | Small helpers: parse one allowlist entry, one denylist entry, the request; build the result dict. |
+| `backend/cavr/api.py` | `execute_full_cavr_pipeline` | 2 lines. `is_gate_denied` is now `result != "PERMITTED"` (was `== "BLOCK"`), and the evidence line prints the real result, rule and reason instead of the fixed text "Matched explicit denylist rule". |
+| `tests/test_cavr_requirement_gate.py` (new, 433 lines) | | 50 test functions, 118 cases. |
+| `docs/cavr-m1-plan.md` | | Progress box 3 ticked. |
+
+Key algorithm, `evaluate_requirement` (first rule that applies decides):
+
+1. `policy is None` -> UNRESOLVED `POLICY_MISSING`. `policy_problems(policy)` not empty -> UNRESOLVED `POLICY_INVALID`.
+2. Parse the request again with `capture.parse_requirement(name + specifier)`. Not a named requirement -> UNRESOLVED `REQUIREMENT_INVALID`.
+3. Canonical name in `denied_packages` -> BLOCK `DENYLIST`. Not exactly one `==` clause -> BLOCK `NOT_PINNED`.
+4. No `approved_requirements` entry with the same canonical name whose specifier contains the requested version -> BLOCK `NOT_ON_ALLOWLIST`.
+5. Lockfile given: not well formed -> UNRESOLVED `LOCKFILE_INVALID`; no PyPI entry with this canonical name and an equal version -> BLOCK `NOT_IN_LOCKFILE`.
+6. Only here: PERMITTED `ALLOWED`. This is the only `PERMITTED` for a requirement in the module.
+
+`evaluate_capture`: any BLOCK -> BLOCK; else capture not `complete` -> UNRESOLVED `CAPTURE_INCOMPLETE`;
+else any UNRESOLVED -> UNRESOLVED; else no requirements (an edit that only removes lines) -> PERMITTED
+`NOTHING_TO_VERIFY`; else PERMITTED.
+
+### Design decisions
+
+| Decision | Alternatives considered | Why |
+|---|---|---|
+| Missing or invalid policy -> UNRESOLVED | PERMITTED (old code); BLOCK | The plan's rule. The gate does not know whether the package is allowed, which is UNRESOLVED, not a refusal by policy. |
+| Unlisted package -> BLOCK | "Permit for deep analysis" (old code) | An allowlist that lets unlisted names through is not an allowlist. |
+| Allowlist entry = name + specifier, version must satisfy it | Name match only (old code: `req.split("==")[0] == name` permitted any version of an approved name) | The plan: "canonical name + specifier". `test_wrong_version_of_an_allowed_name_is_blocked`. |
+| `allowlist_patterns` (regex on names) is no longer read | Keep it | A name-only regex permits every version. All 14 patterns in the shipped file repeat names that are already in `approved_requirements`. The key still counts in `policy_version`. |
+| Denylist is checked before pinning and allowlist | Allowlist first | A denied name must be refused with the denylist reason even if someone also allowlists it. |
+| One invalid entry makes the whole policy invalid | Skip the bad entry | Skipping a bad denylist entry would be fail-open; treating both lists the same way is simpler to explain. |
+| The gate parses `name` + `specifier` itself | Trust the record's `pinned` and `version` | The record is input; `test_pinned_flag_in_the_record_is_not_trusted`. |
+| Versions compared as `packaging.version.Version` | String compare | `1.0` and `1.0.0` are the same release. |
+| Only lockfile entries with `ecosystem` "PyPI" count | Any entry with the name | A package locked as a LOCAL vendored file must not authorise downloading the same name from PyPI (dependency confusion). |
+| No lockfile -> rule skipped; unreadable lockfile -> UNRESOLVED | Missing lockfile -> BLOCK | The plan: "lockfile present and name/version not in it -> BLOCK". A project without a lockfile is a normal case; a broken one is unknown state. |
+| BLOCK reasons are decided before the lockfile is validated | Validate everything first | A denied or unlisted package is refused whatever state the lockfile is in; the more definite answer wins. |
+| For a capture: BLOCK beats UNRESOLVED | UNRESOLVED beats BLOCK | Both stop the install; BLOCK carries the concrete policy reason. |
+| `policy_version` = digest of the whole policy, including keys the gate does not read | Digest of the two lists only | The plan: "digest of the canonical policy JSON". Step 9 reads other policy keys, and any policy change must change the cache key. |
+| `policy_version` is `None` when the policy is missing or invalid | Digest of whatever was read | There is no policy to name; UNRESOLVED is never cached. |
+| `check_requirement_gate` kept as a thin wrapper | Change `api.py` to the new functions now | `api.py` is replaced in step 13; the wrapper keeps the dashboard running until then. |
+| `api.py`: any non-PERMITTED gate result ends in the final BLOCK | Leave `== "BLOCK"` | With the old line, an UNRESOLVED gate (policy missing) would let the dashboard run reach VERIFIED. |
+
+### Requirements covered
+
+IDs from `frontend/src/components/cavr/RequirementsTab.tsx`. **Maryam to confirm them against the SRS.**
+
+| ID | Name there | What this step does for it | Acceptance check |
+|---|---|---|---|
+| FR-2 | Requirement Gate Enforcement | Allowlist (name + specifier), denylist, pin and lockfile rules; immediate BLOCK when not permitted (CLAUDE.md goal C2) | `test_denylisted_name_is_blocked_even_when_it_is_also_on_the_allowlist`, `test_wrong_version_of_an_allowed_name_is_blocked`, `test_unpinned_requirement_is_blocked`, `test_name_missing_from_the_lockfile_is_blocked` |
+| FR-6 | Fail-Closed Security Policy | Missing/invalid policy, invalid lockfile, invalid request, incomplete capture -> UNRESOLVED | `test_missing_policy_is_unresolved`, `test_invalid_policy_is_unresolved_even_for_an_entry_that_looks_allowed`, `test_dashboard_gate_no_longer_fails_open_without_a_policy` |
+
+The description of FR-2 in `RequirementsTab.tsx` still mentions "allowlist patterns". -> step 13.
+
+### Ch 7 Test cases
+
+All in `tests/test_cavr_requirement_gate.py`. Run on 2026-10-10:
+
+- `.venv/bin/python -m pytest tests/test_cavr_*.py -q` -> 342 passed (118 in this file).
+- `.venv/bin/python -m pytest -q` -> 400 passed, 7 failed (the 7 baseline failures: 1 in `tests/test_api_replay.py`, 6 in `tests/test_integration.py`).
+
+| Test ID | Purpose | Input | Expected | Result |
+|---|---|---|---|---|
+| `test_missing_policy_is_unresolved` | No policy | `policy=None` | UNRESOLVED `POLICY_MISSING`; `policy_version` None | pass |
+| `test_invalid_policy_is_unresolved_even_for_an_entry_that_looks_allowed` (17) | Invalid policy | Wrong types, missing key, unparseable entry, URL/marker/extras entry, denylist entry that is a string / has no name / has a specifier | UNRESOLVED `POLICY_INVALID` with `problems` | pass |
+| `test_invalid_policy_does_not_block_or_permit_a_denied_name_either` | Invalid policy, denied name | Bad allowlist entry + denied name requested | UNRESOLVED | pass |
+| `test_valid_policy_has_no_problems` | Valid policy | Test policy; two empty lists | No problems | pass |
+| `test_denylisted_name_is_blocked_even_when_it_is_also_on_the_allowlist` | Deny wins | `evil-pkg==1`, on both lists | BLOCK `DENYLIST`, reason in text | pass |
+| `test_denylist_matches_on_the_canonical_name_whatever_the_version` (5) | Deny by name | `Evil_Pkg==1`, `evil.pkg==9`, `EVIL-PKG`, `evil-pkg>=1`, `bad-name==1` | BLOCK `DENYLIST` | pass |
+| `test_unpinned_requirement_is_blocked` (9) | Pin rule | `a`, `a>=1.0`, `a==1.*`, `a~=1.0`, `a>=1.0,<=1.0`, `a===1.0`, `a===`, `a!=2`, `c` | BLOCK `NOT_PINNED` | pass |
+| `test_pinned_flag_in_the_record_is_not_trusted` | Forged record | `specifier: ">=1.0"`, `pinned: True` | BLOCK `NOT_PINNED` | pass |
+| `test_name_not_on_the_allowlist_is_blocked` | Unlisted name | `zzz==1.0` | BLOCK `NOT_ON_ALLOWLIST` | pass |
+| `test_wrong_version_of_an_allowed_name_is_blocked` | Wrong version | `a==2.0`, policy `a==1.0` | BLOCK; evidence lists `a==1.0` | pass |
+| `test_exact_allowed_pin_is_permitted` | Happy path | `a==1.0` | PERMITTED `ALLOWED` | pass |
+| `test_requested_version_must_satisfy_an_allowlist_specifier` (12) | Specifier match | `1` vs `1.0`; range `>=1,<2` at 1, 1.9.9, 2, 0.9; entry with no specifier; two entries for one name | PERMITTED / BLOCK as listed in the test | pass |
+| `test_allowlist_name_is_canonicalised_on_both_sides` (4) | Name canonicalisation | `foo-bar`, `Foo_Bar`, `FOO.BAR`, `foo__bar` vs policy `Foo_Bar==1.0` | PERMITTED; `package` is `foo-bar` | pass |
+| `test_capture_record_is_accepted_as_input` | Record input | Record from `parse_pip_command` | PERMITTED | pass |
+| `test_no_lockfile_skips_the_lockfile_rule` | No lockfile | `lockfile=None` | PERMITTED | pass |
+| `test_name_and_version_in_the_lockfile_is_permitted` | In lockfile | `a==1.0` | PERMITTED; lock entry in evidence | pass |
+| `test_lockfile_names_and_versions_are_normalised` | Normalisation | `foo_bar==1.0` vs lock `Foo.Bar` `1` | PERMITTED | pass |
+| `test_name_missing_from_the_lockfile_is_blocked` | Not locked | `b==1.5` | BLOCK `NOT_IN_LOCKFILE` | pass |
+| `test_other_version_in_the_lockfile_is_blocked` | Other version locked | lock has `a` `0.9` | BLOCK; `locked_versions` `["0.9"]` | pass |
+| `test_lockfile_entry_of_another_ecosystem_does_not_count` | Ecosystem | `c==7`, locked as LOCAL | BLOCK `NOT_IN_LOCKFILE` | pass |
+| `test_empty_lockfile_blocks_everything` | Empty lockfile | `{"packages": []}` | BLOCK | pass |
+| `test_invalid_lockfile_is_unresolved` (9) | Invalid lockfile | Wrong types, entry without version / ecosystem, bad version | UNRESOLVED `LOCKFILE_INVALID` | pass |
+| `test_rule_order_block_reasons_come_before_the_lockfile_check` | Rule order | Denied / unpinned / unlisted with a broken lockfile | BLOCK with the earlier rule | pass |
+| `test_request_that_is_not_a_named_requirement_is_unresolved` (11) | Bad request | Empty, free text, VCS, path, URL, `{}`, record without name, `a==`, non-string name, `None`, `7` | UNRESOLVED `REQUIREMENT_INVALID` | pass |
+| `test_policy_version_is_a_sha256_of_the_canonical_json_and_is_on_every_decision` | Digest | 5 different outcomes | 64 hex chars; same value on each | pass |
+| `test_policy_version_ignores_key_order_and_whitespace` | Canonical JSON | Keys reordered, re-indented | Same digest | pass |
+| `test_policy_version_changes_with_any_change_to_the_policy` (5) | Sensitivity | Entry added / changed, deny entry removed, reason changed, unread key added | Different digest | pass |
+| `test_capture_with_only_permitted_requirements_is_permitted` | Capture, all allowed | `pip install a==1.0 b==1.5` | PERMITTED; 2 decisions | pass |
+| `test_one_blocked_requirement_blocks_the_capture` | Capture, one blocked | `a==1.0 zzz==1` | BLOCK `NOT_ON_ALLOWLIST` | pass |
+| `test_unpinned_requirement_from_a_capture_is_blocked` | Capture, unpinned | `pip install a` | BLOCK `NOT_PINNED` | pass |
+| `test_incomplete_capture_is_unresolved_even_when_its_named_requirements_are_allowed` | Incomplete capture | `a==1.0` + a `git+` URL | UNRESOLVED `CAPTURE_INCOMPLETE` | pass |
+| `test_incomplete_capture_with_a_denied_name_is_blocked` | BLOCK beats UNRESOLVED | denied name + local path | BLOCK `DENYLIST` | pass |
+| `test_capture_with_no_requirements_and_incomplete_is_unresolved` | Other subcommand | `pip download a==1.0` | UNRESOLVED | pass |
+| `test_capture_without_the_complete_flag_is_unresolved` | Malformed record | `complete` deleted; `{}`; `None` | UNRESOLVED `CAPTURE_INCOMPLETE` | pass |
+| `test_capture_is_unresolved_without_a_policy_and_judges_nothing` | No policy | `policy=None` | UNRESOLVED; no decisions | pass |
+| `test_capture_with_an_invalid_lockfile_is_unresolved` | Bad lockfile | `{"packages": {}}` | UNRESOLVED `LOCKFILE_INVALID` | pass |
+| `test_edit_that_only_removes_lines_has_nothing_to_verify` | Removal-only edit | real file, one line removed | PERMITTED `NOTHING_TO_VERIFY` | pass |
+| `test_edit_that_adds_an_unlisted_package_is_blocked` | Edit adds unlisted | real file, `zzz==1` added | BLOCK | pass |
+| `test_gate_from_files_permits_with_a_real_policy_and_lockfile` | Files on disk | policy + lockfile written to `tmp_path` | PERMITTED; `b==1.5` -> `NOT_IN_LOCKFILE` | pass |
+| `test_missing_policy_file_is_unresolved` | No policy file | path does not exist | UNRESOLVED `POLICY_MISSING` | pass |
+| `test_unreadable_policy_file_is_unresolved` (5) | Bad policy file | empty, broken JSON, `[]`, `null`, not UTF-8 | UNRESOLVED `POLICY_INVALID` | pass |
+| `test_policy_path_that_is_a_directory_is_unresolved` | Directory | a directory path | UNRESOLVED `POLICY_INVALID` | pass |
+| `test_missing_lockfile_file_skips_the_rule` | No lockfile file | path does not exist | PERMITTED | pass |
+| `test_unreadable_lockfile_file_is_unresolved` | Bad lockfile file | broken JSON | UNRESOLVED `LOCKFILE_INVALID` (requirement and capture) | pass |
+| `test_lockfile_containing_json_null_is_unresolved_not_skipped` | `null` lockfile | file content `null` | UNRESOLVED `LOCKFILE_INVALID` | pass |
+| `test_real_project_lockfile_format_is_understood` | Real lockfile | `demo_project/InvoiceHub/dependencies.lock.json` | `pypdf==6.19.0` PERMITTED; `6.18.0` -> `NOT_IN_LOCKFILE` | pass |
+| `test_shipped_policy_file_is_valid` | Shipped policy | `backend/cavr/project_policy.json` | No problems | pass |
+| `test_dashboard_gate_with_the_shipped_policy` | Wrapper | `requests-security`, `pdf-clean-extractor==1.0.0`, `dormant-exfil==1.2.0`, `requests==2.0.0` | BLOCK `DENYLIST`; PERMITTED; BLOCK `NOT_ON_ALLOWLIST` (2); old keys present | pass |
+| `test_dashboard_gate_no_longer_fails_open_without_a_policy` | Wrapper, no policy | `POLICY_PATH` points to a missing file | UNRESOLVED, `status` FAIL | pass |
+| `test_dashboard_gate_no_longer_fails_open_on_a_broken_policy` | Wrapper, broken policy | broken JSON file | UNRESOLVED, `status` FAIL | pass |
+
+### Defects found and fixed
+
+| # | Found by | Finding | Outcome |
+|---|---|---|---|
+| 1 | Reading the old code | Missing or unparseable policy returned PERMITTED | Fixed; `test_dashboard_gate_no_longer_fails_open_without_a_policy`, `..._on_a_broken_policy` |
+| 2 | Reading the old code | An unlisted package returned PERMITTED (`R1_UNLISTED_PASS_TO_ANALYSIS`) | Fixed; now BLOCK `NOT_ON_ALLOWLIST` |
+| 3 | Reading the old code | Any version of an approved name was PERMITTED (`req.split("==")[0] == name`) | Fixed; `test_wrong_version_of_an_allowed_name_is_blocked` |
+| 4 | Reading the old code | Names compared with `.lower()` only, so `Requests_Security` did not match the denylist entry `requests-security` | Fixed; `test_denylist_matches_on_the_canonical_name_whatever_the_version` |
+| 5 | First test run (2 of 118 failed) | Two test inputs were wrong, not the gate: `packaging` 26.3 accepts `a===` (empty version) as a valid requirement, so `"broken ==="` was a valid allowlist entry and `{"name": "a", "specifier": "==="}` was a valid, unpinned request. Inputs changed to `==` (really unparseable); `a===` added to the unpinned cases, where it is BLOCK `NOT_PINNED`. No assertion was weakened. | Fixed in the tests |
+| 6 | Reading `api.py` | `is_gate_denied` was true only for BLOCK, so an UNRESOLVED gate would not stop a dashboard run | Fixed (2 lines in `api.py`). **No automated test runs `execute_full_cavr_pipeline`**; checked by reading and by `import backend.cavr.api` |
+
+### Known limitations / deferred
+
+- **Dashboard behaviour changed.** With the shipped `project_policy.json`, the chips `dormant-exfil==1.2.0`
+  (`trigger_dependent`) and `invoice-utils==2.0.1` (`transitive_risk`) are now BLOCK at the gate
+  (`NOT_ON_ALLOWLIST`) and end in a final BLOCK; before, they passed the gate. The later phases still
+  run and are shown. The chips are replaced by real requests in step 13.
+- **The shipped policy approves `pypdf==4.2.0` only**, so `pypdf==6.19.0` (the plan's VERIFIED case) and
+  `pypdf==5.1.0` (the OSV case) are BLOCK `NOT_ON_ALLOWLIST` today. The policy file was not changed in
+  this step; which versions to approve is Maryam's decision, needed by step 11.
+- `project_policy.json` still contains `allowlist_patterns`; the gate does not read it.
+- `OverviewTab.tsx` still prints "Matched explicit denylist rule" for every gate BLOCK. -> step 13.
+- An allowlist entry with a range (`pypdf>=6,<7`) also admits pre-releases inside the range.
+- Constraints (`-c`) are captured but not judged by the gate; they matter when children are pinned (step 6).
+- The gate is not called by a pipeline yet (step 11); `check_requirement_gate` passes no lockfile.
+- Extras and markers on the request are ignored by the gate (the name and version are judged).
+
+### Tool disclosure (Ch 8.7)
+
+- **Generated by Claude Code:** the rewrite of `backend/cavr/requirement_gate.py`, the 2-line change in
+  `backend/cavr/api.py`, `tests/test_cavr_requirement_gate.py`, these notes, the commit.
+- **Reviewed / decided by Maryam:** the plan step and the batch workflow. The code of this step has not
+  yet been read by Maryam. Open for her: the two dashboard chips that now BLOCK, and the pypdf versions
+  in the shipped policy.
+- **Verified by:** the two pytest runs above; one `cavr-reviewer` pass over the batch diff.
+
+### Supervisor Q&A prep
+
+1. **What does "fail closed" mean in this gate?**
+   The function returns PERMITTED from one place only, after every rule passed. A missing policy, a
+   broken policy, a broken lockfile or a request it cannot parse gives UNRESOLVED; nothing unknown is
+   let through.
+2. **Why is a missing policy UNRESOLVED and an unlisted package BLOCK?**
+   BLOCK means the policy was read and says no. With no readable policy the gate has no rule to apply,
+   so it cannot say yes or no; both stop the install.
+3. **What is `policy_version` for?**
+   It is the SHA-256 of the policy as canonical JSON and is one of the 8 fields of the verdict-cache key
+   (step 10). If the policy changes in any way, old cached verdicts no longer match.

@@ -477,8 +477,9 @@ async def execute_full_cavr_pipeline(
     )
     await asyncio.sleep(0.6)
 
-    # If immediate BLOCK at requirement gate (e.g. explicit denylist for typosquat), note it but allow analysis for research visibility
-    is_gate_denied = (gate_result["result"] == "BLOCK")
+    # Anything but PERMITTED (BLOCK, or UNRESOLVED when the policy is missing or invalid) ends in a final BLOCK below.
+    # The analysis phases still run for research visibility.
+    is_gate_denied = (gate_result["result"] != "PERMITTED")
 
     # =========================================================================
     # STEP 3 (Timeline index 2): Quarantine -> Phase 5: Package Resolution & Transitive Tree
@@ -691,7 +692,7 @@ async def execute_full_cavr_pipeline(
     # Evidence lines
     evidence_lines = []
     if is_gate_denied:
-        evidence_lines.append(f"Requirement Gate: Matched explicit denylist rule '{gate_result['matched_rule']}'.")
+        evidence_lines.append(f"Requirement Gate: {gate_result['result']} by rule '{gate_result['matched_rule']}'. {gate_result['reason']}")
     if resolution.get("known_risk_signals"):
         for sig in resolution["known_risk_signals"]:
             evidence_lines.append(f"OSV Advisory: {sig['cve']} ({sig['severity']}) - {sig['summary']}")
