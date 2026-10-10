@@ -3,7 +3,8 @@ import {
   BookOpen, Cpu, ShieldAlert, CheckCircle2, XCircle, AlertTriangle, 
   Terminal, ExternalLink, Copy, Check, Play, RefreshCw, Eye, 
   Lock, ArrowRight, Download, Info, HelpCircle, GitCommit, GitPullRequest, 
-  GitBranch, Code2, AlertOctagon, Layers, FileCode, CheckSquare, Sparkles
+  GitBranch, Code2, AlertOctagon, Layers, FileCode, CheckSquare, Sparkles,
+  Loader2, AlertCircle
 } from 'lucide-react';
 import { SatraCommitPicker } from './satra/SatraCommitPicker';
 import { SatraGateMatrix } from './satra/SatraGateMatrix';
@@ -110,6 +111,8 @@ export const SatraModule: React.FC = () => {
   const [decisionData, setDecisionData] = useState<any>(null);
   const [recommitData, setRecommitData] = useState<any>(null);
   const [approvedRecommit, setApprovedRecommit] = useState<any>(null);
+  const [isApproving, setIsApproving] = useState<boolean>(false);
+  const [approvalError, setApprovalError] = useState<string | null>(null);
   const [proofData, setProofData] = useState<any>(null);
   const [copiedHash, setCopiedHash] = useState<string | null>(null);
 
@@ -266,6 +269,8 @@ export const SatraModule: React.FC = () => {
     setDecisionData(null);
     setRecommitData(null);
     setApprovedRecommit(null);
+    setIsApproving(false);
+    setApprovalError(null);
     setProofData(null);
 
     try {
@@ -494,7 +499,9 @@ export const SatraModule: React.FC = () => {
   const handleApproveRecommit = async () => {
     const branchToPush = effectiveRecommit?.branch || recommitData?.branch || `satra/repair/${commitData?.hash || selectedRealCommitSha?.slice(0, 7) || '0ea2ab3'}`;
     const runIdToApprove = activeRunId || proofData?.run_id || 'satra-live-0ea2ab3';
-    if (!runIdToApprove) return;
+    if (!runIdToApprove || isApproving) return;
+    setIsApproving(true);
+    setApprovalError(null);
     try {
       const res = await fetch('/api/satra/recommit/approve', {
         method: 'POST',
@@ -505,12 +512,17 @@ export const SatraModule: React.FC = () => {
           branch: branchToPush
         })
       });
+      const data = await res.json().catch(() => ({}));
       if (res.ok) {
-        const data = await res.json();
         setApprovedRecommit(data);
+      } else {
+        setApprovalError(data.detail || 'Failed to push repair branch to GitHub repository.');
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Recommit approval failed:', err);
+      setApprovalError(err?.message || 'Network error while contacting server.');
+    } finally {
+      setIsApproving(false);
     }
   };
 
@@ -1061,18 +1073,24 @@ export const SatraModule: React.FC = () => {
                 <button
                   className="satra-approve-push-btn"
                   onClick={handleApproveRecommit}
+                  disabled={isApproving}
                   id="approve-repair-push-btn"
                   style={{ padding: '7px 16px', fontSize: '12px' }}
                 >
-                  <Check size={13} />
-                  <span>Approve &amp; Push Repair</span>
+                  {isApproving ? <Loader2 size={13} className="satra-spinner" /> : <Check size={13} />}
+                  <span>{isApproving ? 'Pushing to GitHub...' : 'Approve & Push Repair'}</span>
                 </button>
               ) : (
                 <span style={{ fontSize: '11px', fontWeight: 700, color: '#15803d', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                  <CheckCircle2 size={13} /> Pushed to GitHub
+                  <CheckCircle2 size={13} /> {approvedRecommit.pushed ? 'Pushed to GitHub' : 'Branch Created'}
                 </span>
               )}
             </div>
+            {approvalError && (
+              <div style={{ marginTop: '8px', padding: '8px 12px', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '4px', color: '#991b1b', fontSize: '11px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <AlertCircle size={14} /> <span>{approvalError}</span>
+              </div>
+            )}
           </div>
         )}
 
@@ -1297,17 +1315,24 @@ export const SatraModule: React.FC = () => {
                 <button 
                   className="satra-approve-push-btn"
                   onClick={handleApproveRecommit}
+                  disabled={isApproving}
                   id="approve-and-push-btn"
                 >
-                  <Check size={14} />
-                  <span>Approve and Push</span>
+                  {isApproving ? <Loader2 size={14} className="satra-spinner" /> : <Check size={14} />}
+                  <span>{isApproving ? 'Pushing to GitHub...' : 'Approve and Push'}</span>
                 </button>
               ) : (
                 <span style={{ fontSize: '11.5px', fontWeight: 700, color: '#15803d', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  <CheckCircle2 size={14} /> {approvedRecommit.status === 'PUSHED_TO_ORIGIN' ? 'Pushed to GitHub & Audited' : 'Pushed & Audited'}
+                  <CheckCircle2 size={14} /> {approvedRecommit.status === 'PUSHED_TO_ORIGIN' || approvedRecommit.pushed ? 'Pushed to GitHub & Audited' : 'Pushed & Audited'}
                 </span>
               )}
             </div>
+
+            {approvalError && (
+              <div style={{ marginBottom: '12px', padding: '10px 14px', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 'var(--radius-sm)', color: '#991b1b', fontSize: '12px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <AlertCircle size={16} /> <span><strong>Approval / Push Notice:</strong> {approvalError}</span>
+              </div>
+            )}
 
             <div style={{ background: '#ffffff', border: '1px solid #86efac', borderRadius: 'var(--radius-sm)', padding: '14px', marginBottom: '14px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
@@ -1352,6 +1377,16 @@ export const SatraModule: React.FC = () => {
                   >
                     Commit {approvedRecommit.commit_sha} <ExternalLink size={12} />
                   </a>
+                  {approvedRecommit.branch_url && (
+                    <a 
+                      href={approvedRecommit.branch_url} 
+                      target="_blank" 
+                      rel="noreferrer"
+                      style={{ color: '#0284c7', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                    >
+                      Branch: {approvedRecommit.branch} <ExternalLink size={12} />
+                    </a>
+                  )}
                   <span style={{ color: 'var(--ink-muted)' }}>
                     Operator: {approvedRecommit.audit_entry?.operator || approvedRecommit.operator || 'Security Operator'}
                   </span>
