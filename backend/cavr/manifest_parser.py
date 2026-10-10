@@ -41,7 +41,9 @@ def read_manifest(content: str, source: str = "requirements.txt") -> dict:
             manifest["unsupported"].append(entry)
         else:
             manifest["errors"].append(entry)
-    manifest["errors"].extend(conflicting_requirements(manifest["requirements"]))
+    # The diff keeps one line per (name, marker). Two lines that differ would hide one of them,
+    # so they are an error here, including a difference only in extras or --hash values.
+    manifest["errors"].extend(conflicting_requirements(manifest["requirements"], ("specifier", "extras", "hashes")))
     return manifest
 
 

@@ -431,3 +431,66 @@ def test_dashboard_gate_no_longer_fails_open_on_a_broken_policy(tmp_path, monkey
     monkeypatch.setattr(requirement_gate, "POLICY_PATH", path)
     decision = check_requirement_gate("requests", "2.31.0")
     assert (decision["result"], decision["status"]) == ("UNRESOLVED", "FAIL")
+
+
+# --- found by the batch review: a malformed capture record must not be permitted --------
+
+@pytest.mark.parametrize("record", [
+    {"requirements": ("zzz==1",), "complete": True, "unsupported": [], "errors": []},
+    {"requirements": None, "complete": True, "unsupported": [], "errors": []},
+    {"requirements": "evil-pkg==1", "complete": True, "unsupported": [], "errors": []},
+    {"complete": True, "unsupported": [], "errors": []},
+    {"complete": True},
+    [],
+    "a==1.0",
+])
+def test_capture_whose_requirements_are_not_a_list_is_unresolved(record):
+    decision = evaluate_capture(record, POLICY)
+    assert (decision["result"], decision["rule"]) == ("UNRESOLVED", "CAPTURE_INCOMPLETE")
+    assert decision["decisions"] == []
+
+
+def test_gate_from_files_does_not_permit_a_record_with_a_string_of_requirements(tmp_path):
+    policy = write(tmp_path / "policy.json", POLICY)
+    record = {"requirements": "evil-pkg==1", "complete": True, "unsupported": [], "errors": []}
+    assert gate_from_files(record, policy)["result"] == "UNRESOLVED"
+
+
+@pytest.mark.parametrize("field, value", [
+    ("unsupported", [{"raw": "./x", "reason": "local path requirement", "origin": "command"}]),
+    ("errors", [{"raw": "??", "reason": "malformed requirement", "origin": "command"}]),
+    ("unsupported", None),
+    ("errors", "none"),
+])
+def test_complete_flag_is_not_trusted_when_the_record_lists_problems(field, value):
+    record = parse_pip_command("pip install a==1.0")
+    assert evaluate_capture(record, POLICY)["result"] == "PERMITTED"
+    record[field] = value
+    assert record["complete"] is True
+    decision = evaluate_capture(record, POLICY)
+    assert (decision["result"], decision["rule"]) == ("UNRESOLVED", "CAPTURE_INCOMPLETE")
+
+
+@pytest.mark.parametrize("field", ["unsupported", "errors"])
+def test_capture_without_its_problem_lists_is_unresolved(field):
+    record = parse_pip_command("pip install a==1.0")
+    del record[field]
+    assert evaluate_capture(record, POLICY)["rule"] == "CAPTURE_INCOMPLETE"
+
+
+@pytest.mark.parametrize("source", ["pip_command", None, "something_else"])
+def test_empty_capture_is_permitted_only_for_a_requirements_edit(source):
+    record = {"source": source, "requirements": [], "unsupported": [], "errors": [], "complete": True}
+    decision = evaluate_capture(record, POLICY)
+    assert (decision["result"], decision["rule"]) == ("UNRESOLVED", "CAPTURE_INCOMPLETE")
+    record["source"] = "requirements_edit"
+    assert evaluate_capture(record, POLICY)["rule"] == "NOTHING_TO_VERIFY"
+
+
+def test_edit_with_a_hidden_duplicate_line_is_not_permitted(tmp_path):
+    path = tmp_path / "requirements.txt"
+    path.write_text('a==1.0; python_version >= "3"\n')
+    before = snapshot_requirements(path)
+    path.write_text('a==2.0; python_version >= "3"\na==1.0; python_version >= "3"\n')
+    decision = evaluate_capture(capture_requirements_edit(before, snapshot_requirements(path)), POLICY)
+    assert (decision["result"], decision["rule"]) == ("UNRESOLVED", "CAPTURE_INCOMPLETE")

@@ -303,3 +303,32 @@ def test_pyproject_branch_still_works():
     after = '[project]\ndependencies = ["a==1", "b==3", "c"]\n'
     changes = detect_manifest_changes(before, after, "pyproject.toml")
     assert [(c["action"], c["package"]) for c in changes] == [("VERSION_CHANGED", "b"), ("ADDED", "c")]
+
+
+# --- found by the batch review: a second line for the same requirement must not vanish ---
+
+@pytest.mark.parametrize("before, after", [
+    ('a==1.0; python_version >= "3"\n', 'a==2.0; python_version >= "3"\na==1.0; python_version >= "3"\n'),
+    ("a==1\n", "a[x]==1\na==1\n"),
+    (f"a==1 --hash={SHA_A}\n", f"a==1 --hash={SHA_B}\na==1 --hash={SHA_A}\n"),
+    ("a==1\n", "a==1\nA==1 --hash=" + SHA_A + "\n"),
+])
+def test_differing_lines_for_the_same_requirement_are_an_error(tmp_path, before, after):
+    record = edit(tmp_path, before, after)
+    (error,) = record["errors"]
+    assert "conflicting" in error["reason"]
+    assert error["origin"].endswith(":1, " + str(tmp_path / "requirements.txt") + ":2")
+    assert record["complete"] is False
+
+
+def test_identical_duplicate_lines_are_not_an_error(tmp_path):
+    record = edit(tmp_path, "a==1\n", "a==1\nA==1\nb==2\nb==2\n")
+    assert record["errors"] == []
+    assert actions(record) == [("ADDED", "b")]
+    assert record["complete"] is True
+
+
+def test_read_manifest_reports_one_error_per_duplicated_requirement():
+    manifest = read_manifest("a==1\na==2\na==3\nb==1\n")
+    assert len(manifest["errors"]) == 1
+    assert manifest["errors"][0]["origin"] == "requirements.txt:1, requirements.txt:2"
