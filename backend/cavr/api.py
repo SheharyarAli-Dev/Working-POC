@@ -13,7 +13,9 @@ How one run goes:
    pipeline stage that ran (`verdict_events`), the verdict, and the final event.
 3. `GET /api/cavr/stream/{run_id}` replays the run's events from the first one and ends after
    the last, so a client that connects late misses nothing.
-4. `GET /api/cavr/proof/{run_id}` returns the whole verdict.
+4. `GET /api/cavr/proof/{run_id}` returns the whole verdict, and `stages`: the page's timeline
+   (`stage_summary`), which says for each stage whether it ran and which values it computed.
+   A value that was not computed is null; the page prints a dash for it and never fills it in.
 
 Every event is also appended to the run's hash chain (`assurance.EvidenceChain`).
 
@@ -72,6 +74,11 @@ RUN_CERTIFICATES: dict[str, dict] = {}
 
 ALIASES = {"VERIFIED": "ALLOW", "REJECTED": "BLOCK", "BLOCK": "BLOCK", "UNRESOLVED": "NEEDS_REVIEW"}
 NOT_RUN = "not run: the fast gate does not execute package code (deep analysis is M2)"
+# The stages of the page's timeline, in pipeline order.
+STAGE_TITLES = {"capture": "Request (C1)", "gate": "Requirement gate (C2)", "artifact": "Artifact, tree and advisories (C3)",
+                "cache": "Verdict cache lookup", "analysis": "Contract, AST scan and sinks (C4)", "verdict": "Verdict"}
+# Whether the downloaded bytes equal the registry digest. Any other artifact rule means no comparison was made.
+HASH_MATCHES = {"HASH_MATCH": True, "HASH_MISMATCH": False}
 
 # The dashboard's scenario chips, in the order the page shows them. Each one is a real request;
 # the page reads this list and sends the chosen id to POST /api/cavr/run. `expected_status` and
@@ -358,9 +365,9 @@ async def run_verification(run_id: str, body: InterceptRequest) -> dict:
         "run_id": run_id, "request": shown, "demo_condition": condition,
         "package": certificate["subject"]["package"], "version": certificate["subject"]["version"],
         "verdict": ALIASES.get(verdict["status"], "NEEDS_REVIEW"), "policy_state": verdict["status"],
-        "cavr_verdict": verdict,
+        "cavr_verdict": verdict, "stages": stage_summary(verdict),
         "hash_comparison": {"declared_or_expected": artifact.get("registry_sha256"), "actual_sha256": artifact.get("sha256"),
-                            "matches": artifact.get("rule") == "HASH_MATCH" if artifact else None},
+                            "rule": artifact.get("rule"), "matches": HASH_MATCHES.get(artifact.get("rule"))},
         "docker_command": NOT_RUN, "container_id": NOT_RUN, "image_digest": NOT_RUN, "counterfactual_runs": [],
         "evidence_chain_root": chain.last_hash, "evidence_records_count": len(chain.records),
         "certificate_id": certificate["certificate_id"],
@@ -465,6 +472,67 @@ def verdict_events(verdict: dict, condition=None) -> list[tuple]:
         "message": f"Verdict: {status} ({verdict['stage']} / {verdict['rule']}). {verdict['reason']}",
         "plain_explanation": honesty_wording(verdict)}))
     return events
+
+
+def stage_summary(verdict: dict) -> list[dict]:
+    """The timeline of one run: for each stage, whether it ran and the values it computed.
+
+    Returns [{"id", "title", "ran", "values": [{"label", "value"}, ...]}, ...] in pipeline order.
+    Every value is copied from the verdict, or is the length of one of its lists. A value that
+    was not computed is None, and a stage none of whose values was computed has `ran: False`.
+    There is no time per stage: the pipeline measures one time, `fast_gate_ms`, for the request.
+    """
+    capture, gate = _dict(verdict.get("request")), _dict(verdict.get("gate"))
+    packages = _list(verdict.get("packages"))
+    package = _dict(packages[0]) if packages else {}  # the page shows one package; the proof holds all of them
+    evidence, cache = _dict(package.get("evidence")), _dict(package.get("cache"))
+    artifact, tree, contract = (_dict(evidence.get(key)) for key in ("artifact", "tree", "contract"))
+    reachability = _dict(evidence.get("reachability"))
+    advisories = [item for item in _list(evidence.get("advisories")) if isinstance(item, dict)]
+    scans = [item for item in _list(evidence.get("scan")) if isinstance(item, dict)]
+    looked_up = cache.get("lookup") is not None
+    decided = verdict.get("stage") is not None and verdict.get("rule") is not None
+    values = {
+        "capture": [("source", capture.get("source")), ("requirements captured", _count(capture, "requirements")),
+                    ("complete", capture.get("complete"))],
+        "gate": [("result", gate.get("result")), ("rule", gate.get("rule")),
+                 ("policy version", verdict.get("policy_version") if gate else None)],
+        "artifact": [("hash check", artifact.get("rule")), ("file", artifact.get("filename")),
+                     ("sha256 of the download", artifact.get("sha256")), ("registry sha256", artifact.get("registry_sha256")),
+                     ("dependency tree", tree.get("rule")), ("files in the tree", _count(tree, "nodes")),
+                     ("advisories", ", ".join(sorted({str(advisory.get("rule")) for advisory in advisories})) or None),
+                     ("advisories that affect it",
+                      sum(len(_list(advisory.get("affected"))) for advisory in advisories) if advisories else None)],
+        "cache": [("lookup", cache.get("lookup")), ("stored", cache.get("stored") if looked_up else None),
+                  ("key", cache.get("key"))],
+        "analysis": [("contract", contract.get("rule")), ("call sites", _count(contract, "call_sites")),
+                     ("AST scan", ", ".join(sorted({str(scan.get("rule")) for scan in scans})) or None),
+                     ("Python files scanned",
+                      sum(scan["python_files"] for scan in scans if isinstance(scan.get("python_files"), int)) if scans else None),
+                     ("sink judgement", reachability.get("rule")), ("sink calls judged", _count(reachability, "sinks")),
+                     # False by default in the evidence, so it is a computed value only when a scan result exists.
+                     ("analysis from the cache", evidence.get("analysis_from_cache") if scans else None)],
+        "verdict": [("status", verdict.get("status")),
+                    ("decided at", f"{verdict['stage']} / {verdict['rule']}" if decided else None),
+                    ("fast_gate_ms", verdict.get("fast_gate_ms")), ("cache_hit", verdict.get("cache_hit")),
+                    ("escalated", verdict.get("escalated")), ("escalation", verdict.get("escalation"))],
+    }
+    return [{"id": stage, "title": title, "ran": any(value is not None for _, value in values[stage]),
+             "values": [{"label": label, "value": value} for label, value in values[stage]]}
+            for stage, title in STAGE_TITLES.items()]
+
+
+def _dict(value) -> dict:
+    return value if isinstance(value, dict) else {}
+
+
+def _list(value) -> list:
+    return value if isinstance(value, list) else []
+
+
+def _count(mapping: dict, key: str):
+    """How many items the list `mapping[key]` has, or None when there is no such list."""
+    return len(mapping[key]) if isinstance(mapping.get(key), list) else None
 
 
 def honesty_wording(verdict: dict) -> str:

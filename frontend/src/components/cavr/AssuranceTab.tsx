@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { CavrRunState } from './types';
+import { CavrRunState, shown } from './types';
 import { ShieldCheck, Download, CheckCircle2, XCircle, Link2, AlertTriangle, RefreshCw, FileCode, Printer } from 'lucide-react';
 
 interface AssuranceTabProps {
@@ -157,19 +157,19 @@ export const AssuranceTab: React.FC<AssuranceTabProps> = ({ state }) => {
             <p>{cert.reason}</p>
             <p>"{cert.bounded_trust_claim}"</p>
             <p>
-              fast_gate_ms: {String(cert.fast_gate_ms)} · cache_hit: {String(cert.cache_hit)} · escalated: {String(cert.escalated)}
+              fast_gate_ms: {shown(cert.fast_gate_ms)} · cache_hit: {shown(cert.cache_hit)} · escalated: {shown(cert.escalated)}
               {cert.escalation ? ` · escalation: ${cert.escalation}` : ''}
               {cert.demo_condition ? ` · demo condition: ${cert.demo_condition.id}` : ''}
             </p>
           </div>
 
           <div className="cert-kv-grid">
-            <div><span>Package:</span> <strong>{cert.subject?.package}</strong></div>
-            <div><span>Version:</span> <code>{cert.subject?.version}</code></div>
-            <div><span>Artifact SHA-256:</span> <code>{cert.subject?.artifact_sha256 || 'not downloaded'}</code></div>
-            <div><span>Registry SHA-256:</span> <code>{cert.subject?.registry_sha256 || 'not read'}</code></div>
-            <div><span>Subtree Digest:</span> <code>{cert.subject?.subtree_digest || 'not built'}</code></div>
-            <div><span>Contract Digest:</span> <code>{cert.subject?.contract_digest || 'not inferred'}</code></div>
+            <div><span>Package:</span> <strong>{shown(cert.subject?.package)}</strong></div>
+            <div><span>Version:</span> <code>{shown(cert.subject?.version)}</code></div>
+            <div><span>Artifact SHA-256:</span> <code>{shown(cert.subject?.artifact_sha256)}</code></div>
+            <div><span>Registry SHA-256:</span> <code>{shown(cert.subject?.registry_sha256)}</code></div>
+            <div><span>Subtree Digest:</span> <code>{shown(cert.subject?.subtree_digest)}</code></div>
+            <div><span>Contract Digest:</span> <code>{shown(cert.subject?.contract_digest)}</code></div>
             {checks.map(([name, value]) => (
               <div key={name}><span>{name}:</span> <code>{Array.isArray(value) ? value.join(', ') : String(value)}</code></div>
             ))}

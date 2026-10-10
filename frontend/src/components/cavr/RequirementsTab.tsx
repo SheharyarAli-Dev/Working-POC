@@ -1,22 +1,26 @@
 import React from 'react';
-import { CavrRunState } from './types';
-import { CheckCircle2, XCircle, Clock, ShieldCheck, AlertCircle } from 'lucide-react';
+import { CavrRunState, NOT_COMPUTED, shown } from './types';
+import { ShieldCheck } from 'lucide-react';
 
 interface RequirementsTabProps {
   state: CavrRunState;
 }
 
+// The last column is what the backend returned for the stage that would prove the requirement,
+// or a dash when that stage did not run. The page gives no PASS or FAIL of its own.
 export const RequirementsTab: React.FC<RequirementsTabProps> = ({ state }) => {
-  const { stepIndex, verdict, gateResult, actionData, counterfactualResults, causalGraph, repair, reverification, reconstruction, certificate } = state;
+  const { gateResult, actionData, counterfactualResults, causalGraph, repair, reverification, reconstruction, certificate } = state;
+  const v = state.proofData?.cavr_verdict;
+  const captureSource = v?.request?.source;
 
-  const requirements = [
+  const requirements: { id: string; name: string; desc: string; module: string; event: string; returned: unknown }[] = [
     {
       id: "FR-1",
       name: "Intercept Before Execution",
       desc: "Capture the pip install request and verify it before anything is installed or executed.",
       module: "capture.py / pip_shim.py / api.py",
       event: "P1 Capture",
-      status: state.runId ? "PASS" : "NOT_RUN"
+      returned: captureSource ? `captured (${captureSource})` : null
     },
     {
       id: "FR-2",
@@ -24,7 +28,7 @@ export const RequirementsTab: React.FC<RequirementsTabProps> = ({ state }) => {
       desc: "Check the request against project_policy.json: denylist, exact pin, approved requirements, lockfile. Fails closed.",
       module: "requirement_gate.py",
       event: "P2 RequirementGate",
-      status: gateResult ? (gateResult.result === "PERMITTED" ? "PASS" : "FAIL") : "NOT_RUN"
+      returned: gateResult ? `${gateResult.result} (${gateResult.matched_rule})` : null
     },
     {
       id: "FR-3",
@@ -32,23 +36,23 @@ export const RequirementsTab: React.FC<RequirementsTabProps> = ({ state }) => {
       desc: "Derive allowed and denied capabilities from the project's real imports and call sites and the policy.",
       module: "capability_contract.py",
       event: "P4 ContractInference",
-      status: actionData?.capability_contract ? (actionData.capability_contract.result === "OK" ? "PASS" : "FAIL") : "NOT_RUN"
+      returned: actionData?.capability_contract?.rule
     },
     {
       id: "FR-4",
       name: "Adaptive Counterfactual Activation",
-      desc: "Explore dormant behaviors by synthesizing safe environment conditions (fake env vars, files, time shims) within budget.",
+      desc: "Explore dormant behaviors by synthesizing safe environment conditions (fake env vars, files, time shims) within budget. Deep analysis (M2).",
       module: "counterfactual.py",
       event: "P7 CounterfactualRuns",
-      status: counterfactualResults ? "PASS" : "NOT_RUN"
+      returned: counterfactualResults?.stop_reason
     },
     {
       id: "FR-5",
       name: "Causal Capability Graph",
-      desc: "Construct NetworkX directed graph tracking source-to-sink paths from canary secrets to external network sinks.",
+      desc: "Construct NetworkX directed graph tracking source-to-sink paths from canary secrets to external network sinks. Deep analysis (M2).",
       module: "causal_graph.py",
       event: "P9 CausalGraph",
-      status: causalGraph ? "PASS" : "NOT_RUN"
+      returned: causalGraph ? `${(causalGraph.nodes || []).length} nodes` : null
     },
     {
       id: "FR-6",
@@ -56,31 +60,31 @@ export const RequirementsTab: React.FC<RequirementsTabProps> = ({ state }) => {
       desc: "VERIFIED / REJECTED / UNRESOLVED / BLOCK with evidence. Anything unknown is UNRESOLVED.",
       module: "pipeline.py",
       event: "Verdict",
-      status: verdict ? "PASS" : "NOT_RUN"
+      returned: v ? `${v.status} (${v.stage} / ${v.rule})` : null
     },
     {
       id: "FR-7",
       name: "Minimal Safe Repair",
-      desc: "Search candidates across 4 repair levels minimizing disruption objective w1*deps + w2*dist + w3*calls + w4*risk.",
+      desc: "Search candidates across 4 repair levels minimizing disruption objective w1*deps + w2*dist + w3*calls + w4*risk. Deep analysis (M2).",
       module: "repair_engine.py",
       event: "P10 MinimalRepair",
-      status: repair ? "PASS" : "NOT_RUN"
+      returned: repair?.chosen_candidate?.name
     },
     {
       id: "FR-8",
       name: "Re-Verification Suite",
-      desc: "Re-execute sample project tests and security obligations for chosen repair candidate inside fresh container.",
+      desc: "Re-execute sample project tests and security obligations for chosen repair candidate inside fresh container. Deep analysis (M2).",
       module: "reverifier.py",
       event: "P11 Reverification",
-      status: reverification ? (reverification.all_passed ? "PASS" : "FAIL") : "NOT_RUN"
+      returned: reverification ? `all_passed: ${reverification.all_passed}` : null
     },
     {
       id: "FR-9",
       name: "Clean Reconstruction",
-      desc: "Rebuild accepted dependency set in fresh environment from baseline plus pinned hashes. Discard analysis sandbox.",
+      desc: "Rebuild accepted dependency set in fresh environment from baseline plus pinned hashes. Discard analysis sandbox. Deep analysis (M2).",
       module: "reconstructor.py",
       event: "P12 CleanReconstruction",
-      status: reconstruction ? "PASS" : "NOT_RUN"
+      returned: reconstruction?.status
     },
     {
       id: "FR-10",
@@ -88,15 +92,15 @@ export const RequirementsTab: React.FC<RequirementsTabProps> = ({ state }) => {
       desc: "Hash-chain every transition record and provide independent cryptographic re-verification endpoint.",
       module: "assurance.py",
       event: "P13 AssuranceEvidence",
-      status: certificate ? "PASS" : "NOT_RUN"
+      returned: certificate?.certificate_id
     },
     {
       id: "NFR-1",
       name: "Non-Root Isolation",
-      desc: "Hardened sandbox: UID 10001, cap-drop ALL, no-new-privileges, read-only rootfs, 30s timeout.",
+      desc: "Hardened sandbox: UID 10001, cap-drop ALL, no-new-privileges, read-only rootfs, 30s timeout. Deep analysis (M2).",
       module: "sandbox_runner.py",
       event: "SandboxLockdown",
-      status: counterfactualResults ? "PASS" : "NOT_RUN"
+      returned: counterfactualResults?.stop_reason
     },
     {
       id: "NFR-2",
@@ -104,7 +108,7 @@ export const RequirementsTab: React.FC<RequirementsTabProps> = ({ state }) => {
       desc: "Purely deterministic AST, NetworkX, and formal repair solver. Zero reliance on paid black-box LLM APIs.",
       module: "inspector.py / triggers.py",
       event: "Design property (not checked by a run)",
-      status: "NOT_EVALUATED"
+      returned: null
     }
   ];
 
@@ -130,14 +134,14 @@ export const RequirementsTab: React.FC<RequirementsTabProps> = ({ state }) => {
               <li>Staged base64 payloads &amp; backdoor scripts</li>
               <li>Dormant Trojan exfiltration gated behind env triggers</li>
               <li>Transitive dependencies pulling unauthorized network sockets</li>
-              <li>Known unpatched vulnerabilities in offline OSV mirror</li>
+              <li>Known vulnerabilities listed by OSV for the exact version (asked on every run)</li>
             </ul>
           </div>
 
           <div className="scope-box">
             <h6>Explicit Assumptions &amp; Boundaries:</h6>
             <ul>
-              <li>Rootless Linux container isolation (UID 10001)</li>
+              <li>Container isolation belongs to deep analysis (M2); the fast gate runs no package code</li>
               <li>Deterministic capability contract derived from project call sites</li>
               <li>No paid or ungrounded generative LLM in verification loop</li>
               <li>Unreached predicates honestly declared as residual uncertainty</li>
@@ -157,7 +161,7 @@ export const RequirementsTab: React.FC<RequirementsTabProps> = ({ state }) => {
                 <th style={{ width: '24%' }}>Requirement</th>
                 <th style={{ width: '24%' }}>Module Reference</th>
                 <th style={{ width: '24%' }}>Proving Event</th>
-                <th style={{ width: '18%' }}>Status</th>
+                <th style={{ width: '18%' }}>Returned by this run</th>
               </tr>
             </thead>
             <tbody>
@@ -171,11 +175,7 @@ export const RequirementsTab: React.FC<RequirementsTabProps> = ({ state }) => {
                   <td><code>{r.module}</code></td>
                   <td><span className="event-tag">{r.event}</span></td>
                   <td>
-                    {r.status === 'PASS' && <span className="req-status pass"><CheckCircle2 size={12} /> PASS</span>}
-                    {r.status === 'FAIL' && <span className="req-status fail"><XCircle size={12} /> FAIL</span>}
-                    {r.status === 'NOT_APPLICABLE' && <span className="req-status na">N/A (Clean)</span>}
-                    {r.status === 'NOT_RUN' && <span className="req-status pending"><Clock size={12} /> NOT RUN</span>}
-                    {r.status === 'NOT_EVALUATED' && <span className="req-status na">NOT EVALUATED</span>}
+                    <span className={`req-status ${shown(r.returned) === NOT_COMPUTED ? 'pending' : 'na'}`}>{shown(r.returned)}</span>
                   </td>
                 </tr>
               ))}

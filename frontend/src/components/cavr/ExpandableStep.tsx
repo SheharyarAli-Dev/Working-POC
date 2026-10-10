@@ -1,88 +1,68 @@
 import React from 'react';
-import { Check, Clock, XCircle, AlertCircle, ChevronDown, ChevronUp } from 'lucide-react';
-
-export interface SubStep {
-  name: string;
-  phase: string;
-  status: 'pending' | 'running' | 'done' | 'skipped' | 'failed';
-  timeTaken?: string;
-  desc: string;
-}
+import { Check, ChevronDown, ChevronUp } from 'lucide-react';
+import { StageSummary, shown } from './types';
 
 interface ExpandableStepProps {
   stepIndex: number;
-  currentStepIndex: number;
+  // The stage as the backend summarised it, or null when no run has finished yet.
+  stage: StageSummary | null;
   title: string;
-  summary: string;
-  substeps: SubStep[];
   isExpanded: boolean;
   onToggleExpand: () => void;
-  onClickStep: () => void;
-  explainSimply: boolean;
 }
 
-export const ExpandableStep: React.FC<ExpandableStepProps> = ({
-  stepIndex,
-  currentStepIndex,
-  title,
-  summary,
-  substeps,
-  isExpanded,
-  onToggleExpand,
-  onClickStep,
-  explainSimply
-}) => {
-  const isPast = currentStepIndex > stepIndex;
-  const isCurrent = currentStepIndex === stepIndex;
+// One stage of the timeline. It shows only what the backend returned for the stage: whether it ran,
+// and the values it computed. A value that was not computed is printed as a dash. There is no time
+// per stage, because the pipeline measures one time for the whole request (fast_gate_ms).
+export const ExpandableStep: React.FC<ExpandableStepProps> = ({ stepIndex, stage, title, isExpanded, onToggleExpand }) => {
+  const values = stage ? stage.values : [];
+  const headline = values.length > 0 ? values[0] : null;
 
   return (
-    <div className={`timeline-node-item ${isCurrent ? 'active-step' : ''} ${isPast ? 'completed-step' : ''}`}>
-      <div className="node-click-area" onClick={onClickStep}>
+    <div className={`timeline-node-item ${stage && stage.ran ? 'completed-step' : ''}`}>
+      <div className="node-click-area" onClick={onToggleExpand}>
         <div className="node-marker">
-          {isPast ? <Check size={12} /> : <span>{stepIndex + 1}</span>}
+          {stage && stage.ran ? <Check size={12} /> : <span>{stepIndex + 1}</span>}
         </div>
         <strong className="node-title">{title}</strong>
-        <span className="node-desc">{summary}</span>
+        <span className="node-desc">
+          {stage === null ? shown(null) : (stage.ran ? `${headline?.label}: ${shown(headline?.value)}` : 'did not run')}
+        </span>
       </div>
 
-      {/* Sub-stages toggle chevron */}
-      <button 
+      <button
         className="substages-toggle-btn"
         onClick={(e) => {
           e.stopPropagation();
           onToggleExpand();
         }}
-        title="Toggle real sub-stages breakdown"
+        title="Show the values this stage returned"
       >
-        <span>{substeps.length} sub-stages</span>
+        <span>{values.length} values</span>
         {isExpanded ? <ChevronUp size={11} /> : <ChevronDown size={11} />}
       </button>
 
-      {/* Sub-stages dropdown overlay */}
       {isExpanded && (
         <div className="substages-dropdown-panel" onClick={(e) => e.stopPropagation()}>
           <div className="dropdown-header">
-            <span>Sub-Stages Breakdown</span>
+            <span>{title}</span>
             <button className="dropdown-close" onClick={onToggleExpand}>✕</button>
           </div>
           <div className="substages-list">
-            {substeps.map((sub, idx) => (
-              <div key={idx} className={`substage-row ${sub.status}`}>
-                <div className="substage-icon">
-                  {sub.status === 'done' && <Check size={12} className="text-emerald-400" />}
-                  {sub.status === 'running' && <span className="substage-spinner" />}
-                  {sub.status === 'failed' && <XCircle size={12} className="text-red-400" />}
-                  {sub.status === 'skipped' && <AlertCircle size={12} className="text-gray-400" />}
-                  {sub.status === 'pending' && <Clock size={12} className="text-gray-500" />}
+            {values.length === 0 && (
+              <div className="substage-row pending">
+                <div className="substage-text">
+                  <p className="substage-desc">No run has finished yet.</p>
                 </div>
-
+              </div>
+            )}
+            {values.map((item) => (
+              <div key={item.label} className={`substage-row ${item.value === null ? 'pending' : 'done'}`}>
                 <div className="substage-text">
                   <div className="substage-title-line">
-                    <span className="substage-phase-tag">{sub.phase}</span>
-                    <strong>{sub.name}</strong>
-                    {sub.timeTaken && <span className="substage-time">{sub.timeTaken}</span>}
+                    <span className="substage-phase-tag">{item.label}</span>
+                    <strong style={{ wordBreak: 'break-all' }}>{shown(item.value)}</strong>
                   </div>
-                  <p className="substage-desc">{sub.desc}</p>
                 </div>
               </div>
             ))}

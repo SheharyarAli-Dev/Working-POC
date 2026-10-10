@@ -1,5 +1,5 @@
 import React from 'react';
-import { CavrRunState } from './types';
+import { CavrRunState, NOT_COMPUTED, shown } from './types';
 import { ShieldCheck, AlertOctagon, HelpCircle, CheckCircle, FileText, Clock, Cpu, Lock, AlertTriangle } from 'lucide-react';
 
 interface OverviewTabProps {
@@ -40,17 +40,17 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({ state }) => {
             {verdict === 'ALLOW' && <CheckCircle size={18} />}
             {verdict === 'BLOCK' && <AlertOctagon size={18} />}
             {verdict === 'NEEDS_REVIEW' && <AlertTriangle size={18} />}
-            <span>VERDICT: {verdict || 'ANALYZING'}</span>
+            <span>VERDICT: {shown(verdict)}</span>
           </div>
 
           <div className="policy-state-badge">
-            POLICY STATE: <strong>{policyState || 'EVALUATING'}</strong>
+            POLICY STATE: <strong>{shown(policyState)}</strong>
           </div>
         </div>
 
         <div className="overview-honesty-banner">
           <span className="honesty-tag">HONESTY WORDING</span>
-          <p className="honesty-claim">"{honestyWording}"</p>
+          <p className="honesty-claim">{shown(honestyWording)}</p>
           <span className="honesty-sub">
             {v ? `${v.status}: ${v.stage} / ${v.rule}` : 'The verdict is bounded by the checks that ran; it never says "safe".'}
           </span>
@@ -61,13 +61,13 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({ state }) => {
       <div className="overview-stats-grid">
         <div className="overview-stat-box">
           <span className="stat-label"><FileText size={13} /> Package &amp; Version</span>
-          <strong className="stat-value">{pkg} <code>v{ver}</code></strong>
-          <span className="stat-meta">Scenario: {state.scenarioKey}</span>
+          <strong className="stat-value">{shown(pkg)} <code>{shown(ver)}</code></strong>
+          <span className="stat-meta">Scenario: {shown(state.scenarioKey)}</span>
         </div>
 
         <div className="overview-stat-box">
           <span className="stat-label"><Lock size={13} /> Artifact SHA-256</span>
-          <strong className="stat-value mono">{hash ? `${hash.substring(0, 16)}...` : (verdict ? 'not downloaded' : 'pending')}</strong>
+          <strong className="stat-value mono">{hash ? `${hash.substring(0, 16)}...` : NOT_COMPUTED}</strong>
           <span className="stat-meta">
             {resolution?.hash_rule ? `${resolution.hash_rule} against the registry digest` : 'SHA-256 of the downloaded file'}
           </span>
@@ -75,14 +75,14 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({ state }) => {
 
         <div className="overview-stat-box">
           <span className="stat-label"><Clock size={13} /> Fast gate</span>
-          <strong className="stat-value">{v?.fast_gate_ms != null ? `${v.fast_gate_ms} ms` : 'pending'}</strong>
-          <span className="stat-meta">Cache hit: {v ? (v.cache_hit ? 'yes' : 'no') : 'pending'}</span>
+          <strong className="stat-value">{v?.fast_gate_ms != null ? `${v.fast_gate_ms} ms` : NOT_COMPUTED}</strong>
+          <span className="stat-meta">Cache hit: {v ? (v.cache_hit ? 'yes' : 'no') : NOT_COMPUTED}</span>
         </div>
 
         <div className="overview-stat-box">
           <span className="stat-label"><Cpu size={13} /> Escalated</span>
-          <strong className="stat-value">{v ? (v.escalated ? 'yes' : 'no') : 'pending'}</strong>
-          <span className="stat-meta">{v?.escalation || 'No deep analysis requested'}</span>
+          <strong className="stat-value">{v ? (v.escalated ? 'yes' : 'no') : NOT_COMPUTED}</strong>
+          <span className="stat-meta">Escalation: {shown(v?.escalation)}</span>
         </div>
       </div>
 
@@ -102,7 +102,7 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({ state }) => {
             <span className="card-badge">{findings.length} recorded</span>
           </div>
           <ul className="findings-list">
-            {findings.slice(0, 3).map((f, i) => (
+            {findings.map((f, i) => (
               <li key={i} className="finding-item">
                 <span className="finding-num">{i + 1}</span>
                 <span>{f}</span>
