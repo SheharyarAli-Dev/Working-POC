@@ -279,6 +279,9 @@ Found in the batch 1-3 review (2026-10-10, MINOR items) and deliberately not fix
 
 - Gate, local versions: `a==1.0+local` is expected to satisfy the allowlist entry `a==1.0` (PEP 440;
   read from the rules, not run). Block local versions or pin the behaviour with a test. -> step 4.
+  **Handled in step 4:** the gate still permits it and `pypi_client.fetch_artifact` returns UNRESOLVED
+  for any local version before any network call
+  (`test_local_version_is_unresolved_even_though_the_gate_permits_it`).
 - Gate decisions carry the version as written (`"1"` for `a==1`), not normalised. It feeds the cache
   key. -> step 10.
 - `check_requirement_gate` builds `f"{name}=={version}"`, so a version string containing a marker
@@ -323,7 +326,7 @@ Found in the batch 1-3 review (2026-10-10, MINOR items) and deliberately not fix
 - [x] 1 C1 pip command capture (committed 2026-10-10, `73f7892`; batch review fixes in the next commit)
 - [x] 2 C1 requirements.txt edit capture (committed 2026-10-10, `4c053b6`; batch review fixes in the next commit)
 - [x] 3 C2 fail-closed requirement gate (committed 2026-10-10, `c018f30`; batch review fixes in the next commit)
-- [ ] 4 C3 PyPI fetch + SHA-256
+- [x] 4 C3 PyPI fetch + SHA-256 (committed 2026-10-10; hash added in the batch-end commit)
 - [ ] 5 C3 wheel metadata
 - [ ] 6 C3 transitive tree + subtree digest
 - [ ] 7 C3 OSV ranges
