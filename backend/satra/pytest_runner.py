@@ -38,7 +38,8 @@ def run_pytest(root,output,selected='all',trusted=False):
         args=['-q','-o','addopts=','-c',str(work/'pytest.ini'),'--junitxml='+str(work/'results.xml'),*targets]
         if engine:
             args=['-q','-o','addopts=','-c','/work/pytest.ini','--junitxml=/work/results.xml',*targets]
-            cmd=[engine,'run','--rm','--network','none','--read-only','--cap-drop','ALL','--security-opt','no-new-privileges','--memory','512m','--cpus','1','--pids-limit','64','--tmpfs','/tmp:rw,nosuid,size=64m','-v',str(work)+':/work:rw','-w','/work','-e','PYTEST_DISABLE_PLUGIN_AUTOLOAD=1','asent-sandbox:local','python','-m','pytest',*args]
+            user_flag=['-u',f"{os.getuid()}:{os.getgid()}"] if hasattr(os,'getuid') else []
+            cmd=[engine,'run','--rm',*user_flag,'--network','none','--read-only','--cap-drop','ALL','--security-opt','no-new-privileges','--memory','512m','--cpus','1','--pids-limit','64','--tmpfs','/tmp:rw,nosuid,size=64m','-v',str(work)+':/work:rw','-w','/work','-e','PYTEST_DISABLE_PLUGIN_AUTOLOAD=1','asent-sandbox:local','python','-m','pytest',*args]
         else:
             cmd=[sys.executable,'-I',str(ROOT/'backend/satra/runner_entry.py'),str(work),*args]
         env={'PATH':os.environ.get('PATH','/usr/bin:/bin'),'HOME':str(work),'LANG':'C.UTF-8','PYTEST_DISABLE_PLUGIN_AUTOLOAD':'1','PYTHONDONTWRITEBYTECODE':'1'}

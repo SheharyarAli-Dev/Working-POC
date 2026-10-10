@@ -95,10 +95,8 @@ def mutate_ownership(root):
     found = False
     for node in tree.body:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name in ("can_access_invoice", "read_invoice"):
-            for child in ast.walk(node):
-                if isinstance(child, ast.If):
-                    child.test = ast.Constant(value=False)
-                    found = True
+            node.body = [ast.Return(value=ast.Constant(value=True))]
+            found = True
     if found:
         ast.fix_missing_locations(tree)
         path.write_text(ast.unparse(tree) + "\n", encoding="utf-8")
