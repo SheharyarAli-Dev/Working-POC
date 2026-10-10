@@ -8,8 +8,9 @@ Progress is tracked in the checklist at the end; update it as each commit lands.
 - Claude never runs `git commit` or `git push`. Each step stops with the diff in the working tree;
   Maryam reviews and commits it herself.
 - One commit at a time. Do not start the next commit until asked.
-- Edit only `backend/cavr/`, `tests/test_cavr_*`, `frontend/src/components/cavr/`, plus the two
-  approved exceptions: this file, and `test_controlled_dormant_execution` in `tests/test_modules.py`.
+- Edit only `backend/cavr/`, `tests/test_cavr_*`, `frontend/src/components/cavr/`,
+  `docs/report-notes/`, plus the two approved exceptions: this file, and
+  `test_controlled_dormant_execution` in `tests/test_modules.py`.
 - Do not edit `backend/orchestrator/context_service.py` (Ali's area). Work around it inside `backend/cavr/`.
 - No fixture-faked results. Hashes come from real files. Anything unknown is UNRESOLVED.
 - Every feature has pytest tests, including failure and edge cases.
@@ -99,6 +100,7 @@ These feed the supervisor's required report: cache hit rate and p50/p95 fast-gat
    fails. Return a "no isolation" UNRESOLVED result instead, and carry it through
    `counterfactual.py` and `causal_graph.py` so it cannot turn into VERIFIED.
    Tests: no-Docker run executes nothing; failed container run does not fall back to the host.
+   Deliberately out of scope: `backend/cavr/sandbox.py`, the hash-pinned inert lab path, keeps its host mode and is covered elsewhere.
 
 0b. `test(cavr): accept either monitor mode in controlled dormant execution` **[approved change]**
    `tests/test_modules.py::test_controlled_dormant_execution` only. It currently requires
@@ -207,6 +209,49 @@ These feed the supervisor's required report: cache hit rate and p50/p95 fast-gat
   alias table is worked around in commit 9.
 - `backend/main.py`, `backend/orchestrator/`, `backend/integrations/`, `backend/satra/`,
   `backend/sable/` – ask before touching, per CLAUDE.md.
+
+## Known issues deferred
+
+Found in the commit 0 review (2026-10-10) and deliberately not fixed there:
+
+- NOT_OBSERVED is shown as clean by consumers: `CounterfactualTab.tsx` chips it "CLEAN",
+  `normalizer.py` maps it to `FILE_READ`/`INFO`, and `api.py` words NEEDS_REVIEW as hostile/blocked.
+  The verdict itself is correct. -> step 13.
+- Sandbox timeout is not enforced on a silent container (`readline()` blocks), and the kill stops
+  the docker CLI rather than the container (no `--name` / `docker kill`). -> M2 sandbox.
+- `harness.py` never imports a `.whl` yet reports `test_passed: True`; `image_digest` in
+  `sandbox_runner.py` is a hardcoded constant, not checked against the image. -> step 13 / M2.
+- Report forgery: the package shares stdout with the harness. Commit 0 treats more than one report
+  marker as UNRESOLVED; a per-run random marker needs a `harness.py` change and an out-of-band
+  report channel to be robust. A single forged report is accepted when the harness's own is
+  suppressed (the package prints one report, then replaces `sys.stdout` or exits early with
+  `os._exit(0)`). -> M2 sandbox.
+- Invalid UTF-8 in container output: `readline()` raises `UnicodeDecodeError`, the `except` in
+  `SandboxRunner.run` catches it, and the process is neither killed nor waited for. The result is
+  still UNRESOLVED. -> M2 sandbox.
+- `RequirementsTab.tsx` shows NFR-1 "Non-Root Isolation" as a hardcoded `status: "PASS"`, whatever
+  the run did (NFR-2 is hardcoded the same way). -> step 13.
+
+Found in the commit 0 review pass 4 (2026-10-10) and deliberately not fixed there:
+
+- Two routes to VERIFIED without observation remain in the legacy dashboard path in
+  `counterfactual.py`. (a) For the package name `dormant-exfil`, run 0 is a hardcoded NEUTRAL
+  behaviour and `sandbox_runner.run` is never called; with no triggers the verdict is VERIFIED.
+  (b) After an observed clean baseline, runs 1..n record "Branch evaluated safely" (NEUTRAL)
+  without calling the sandbox, so a trigger-gated path is reported as explored. Both are removed
+  in step 13. -> step 13.
+- The docker command fix in `sandbox_runner.py` (image `ENTRYPOINT` runs the harness, only `/pkg`
+  is passed) has not been executed. `docker/asent-sandbox/Dockerfile` does `COPY harness.py`, and
+  `harness.py` exists only in `backend/cavr/`, so the image must be built with `backend/cavr` as
+  the build context. Believed-correct command, from the repository root, **not yet run**:
+  `docker build -f docker/asent-sandbox/Dockerfile -t asent-sandbox backend/cavr`.
+  Real Docker verification waits until Docker is installed. -> M2.
+- The proof drawer shows a stale command: `api.py` hardcodes
+  `asent-sandbox python /opt/asent/harness.py /pkg/<name>.py` and a relative
+  `seccomp=asent-seccomp.json`; neither matches what the runner now executes. -> step 13.
+- Harness `events` are ignored: `baseline_behaviors` reads only the five metrics, so a report with
+  zero metrics and non-empty `events` is a clean import. Metrics are authoritative for now;
+  harness events are to be used from M2. -> M2.
 
 ## Verification
 
