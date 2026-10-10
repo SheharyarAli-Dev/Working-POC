@@ -213,3 +213,59 @@ Tests in `tests/test_cavr_pipeline.py`, with the real pypdf wheel and the Invoic
   one `PdfReader(path)` outside the guard -> both sinks `REACHABLE`, `SINK_REACHABLE`, `escalated: true`.
 - **Cache hit** (`test_second_run_is_a_cache_hit_that_still_checks_osv`): the VERIFIED request twice;
   second run `cache_hit: true`, the scan ran once, OSV was asked twice, the wheel was hashed twice.
+
+## Batch D — steps 12-14: pip wrapper, dashboard API, orchestrator (2026-10-11)
+
+Steps 12 and 13 are committed (`1e17034`, `ca5a0e2`, review fix `fe9fd4f`). Step 14 is not implemented.
+
+### Q1. How does the pip wrapper stop a real `pip install` before it runs?
+
+It never starts pip until the pipeline has said VERIFIED. You run the wrapper instead of pip:
+`python -m backend.cavr.pip_shim install pypdf==6.19.0`. In `backend/cavr/pip_shim.py`, `main`:
+
+1. `split_arguments` takes out the wrapper's own options (`--install`, `--cavr-project`, ...).
+2. `verify_request(["pip", ...], project, policy, store)` checks the request (gate, hash, tree, OSV, contract, scan).
+3. It prints the verdict and evidence. Exit code 0 VERIFIED, 1 REJECTED, 2 UNRESOLVED, 3 BLOCK.
+4. Without `--install` it stops here. With `--install`, and only on VERIFIED, `install_plan` writes
+   one line per verified file, `pypdf==6.19.0 --hash=sha256:7e5d6e73…8d14`, and `_install` runs
+   `python -m pip install --require-hashes --no-deps ... -r <that file>`.
+
+What you typed is never given to pip, so `--index-url` or `-e` cannot reach it. pip downloads again,
+but `--require-hashes` refuses any file whose SHA-256 is not the verified one.
+Example: `install reqeusts==2.31.0 --install` -> BLOCK, exit 3, nothing downloaded, pip not called
+(`test_install_on_block_never_invokes_pip_and_downloads_nothing`).
+Limit: nothing puts the wrapper on `PATH` as `pip`. A plain `pip install` typed in a shell is not intercepted.
+
+### Q2. How does the dashboard now get real verdicts instead of fixture data?
+
+`backend/cavr/api.py` no longer computes anything. `POST /api/cavr/intercept` builds the request
+`pip install <package>==<version>` (`pip_request`) and `run_verification` calls the same
+`verify_request` as the wrapper, for the project `backend/cavr/sample_project` and the policy
+`project_policy.json`. `verdict_events` then turns the verdict into one event per stage that ran
+(gate, artifact / tree / OSV, cache, contract / scan), copying the values. Before, the "hash" was the
+SHA-256 of a source string in `fixtures/scenarios.py`; that module is not imported any more.
+
+The five scenarios in `SCENARIOS` are real requests. Two only change the network: `TamperingTransport`
+flips one bit of the downloaded wheel, `OfflineTransport` fails every request. The pipeline runs
+unchanged, so a scenario can only make a verdict worse; such runs are not logged or cached.
+Example: `pypdf==5.1.0` passes the gate (`pypdf>=5,<7`), the real wheel's hash matches, and OSV
+rejects it with 97 advisories, one of them `GHSA-7hfw-26vp-jp8m`
+(`test_pypdf_5_1_0_is_rejected_by_osv_with_the_recorded_advisory_ids`).
+Limit: the chips on the page are in `frontend/src/components/CavrModule.tsx` (not edited), so the
+page still sends the five old package names; the new scenarios run through `POST /api/cavr/run?scenario=<id>`.
+
+### Q3. How does the orchestrator use the new pipeline?
+
+It does not yet. Step 14 was stopped before any code change, so `backend/cavr/analyzer.py::analyze`
+is the old code: it reads the wheel named in `dependencies.lock.json` from disk, checks its hash
+against the recorded registry response, and does its own contract, scan, OSV and cache. It does not
+call `verify_request`.
+
+Why it stopped: for the safe scenario the only advisory data `analyze()` has is PyPI's advisory list
+(`advisories/registry-f9283cc3….json`). `analyze()` accepts that; the pipeline does not, because that
+list has no version ranges to check. Measured on 2026-10-10:
+`OSV().query("pypdf", "6.19.0")` -> available, mode `PYPI ADVISORY METADATA (dated)`;
+`check_advisories("pypdf", "6.19.0", ROOT / "advisories")` -> UNRESOLVED `ADVISORIES_UNAVAILABLE`.
+So delegating would turn the safe scenario from VERIFIED into UNRESOLVED and fail
+`tests/test_modules.py::test_cavr_safe_cache_and_advisory`, which the plan says to ask about first.
+The four options (A-D) are in `cavr-report-notes.md`, section "Step 14"; the decision is open.
