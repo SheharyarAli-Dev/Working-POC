@@ -283,7 +283,8 @@ Found in the batch 1-3 review (2026-10-10, MINOR items) and deliberately not fix
   for any local version before any network call
   (`test_local_version_is_unresolved_even_though_the_gate_permits_it`).
 - Gate decisions carry the version as written (`"1"` for `a==1`), not normalised. It feeds the cache
-  key. -> step 10.
+  key. -> step 10. **Handled in step 10:** `verdict_cache.cache_key` uses the canonical version
+  (`test_spellings_of_the_same_release_give_the_same_key`).
 - `check_requirement_gate` builds `f"{name}=={version}"`, so a version string containing a marker
   (`2.31.0; python_version > "1"`) is PERMITTED while `api.py` keeps the raw string. -> step 13.
 - `requirement_gate.py` module docstring says PERMITTED is returned "from exactly one place";
@@ -333,6 +334,7 @@ Found in the batch 4-8 review (2026-10-10, MINOR items, all derived by reading) 
   (NFC vs NFD). -> step 11.
 - `dep_tree`: a node key is (name, version text), so `1.0` and `1.0.0` coming from different sources
   could become two nodes. -> step 10 (together with the version normalisation item above).
+  **Handled in step 10** (`test_the_same_release_written_two_ways_is_one_node`).
 - `ast_scan`: nested archives (`.zip`, `.egg`, `.whl`), `*.data/scripts/*` without a `.py` suffix and
   `.pyw` files are neither scanned nor reported, and the result is still `SCAN_COMPLETE`. Add a
   "not scanned" finding. -> step 11.
@@ -368,7 +370,7 @@ Found in the batch 4-8 review (2026-10-10, MINOR items, all derived by reading) 
 - [x] 7 C3 OSV ranges (committed 2026-10-10, `b7c98cf`; batch review fix in the next commit)
 - [x] 8 C3 AST scan (committed 2026-10-10, `c72b56a`; batch review fix in the next commit)
 - [x] 9 C4 capability contract (2026-10-10; hash in the batch 9-11 review commit)
-- [ ] 10 verdict cache
+- [x] 10 verdict cache (2026-10-10; hash in the batch 9-11 review commit)
 - [ ] 11 pipeline
 - [ ] 12 pip wrapper
 - [ ] 13 dashboard API

@@ -31,7 +31,7 @@ import re
 
 from packaging.markers import InvalidMarker, Marker, UndefinedComparison, UndefinedEnvironmentName, default_environment
 from packaging.specifiers import InvalidSpecifier, SpecifierSet
-from packaging.utils import canonicalize_name
+from packaging.utils import canonicalize_name, canonicalize_version
 from packaging.version import InvalidVersion, Version
 
 from backend.cavr.pypi_client import fetch_artifact, request_problem
@@ -63,6 +63,8 @@ def build_tree(name, version, lockfile, quarantine_dir, transport=None, environm
         return _tree("UNRESOLVED", "LOCKFILE_INVALID", "project lockfile is not usable: " + problem, **fields)
 
     loaded, expansions, problems = {}, {}, []
+    # One node per release: `1.0` in the request and `1.0.0` in the lockfile are the same version.
+    known = {(root[0], Version(root[1])): root}
     extras_for = {root: set(extras)}
     pending = [root]
     while pending:
@@ -77,7 +79,7 @@ def build_tree(name, version, lockfile, quarantine_dir, transport=None, environm
         node = loaded[key][0]
         if node is None:
             continue
-        expansions[key] = _expand(key, node, extras_for[key], pins, env)
+        expansions[key] = _expand(key, node, extras_for[key], pins, env, known)
         for child, child_extras in expansions[key][3]:
             if child not in extras_for:
                 extras_for[child] = set(child_extras)
@@ -114,9 +116,22 @@ def build_tree(name, version, lockfile, quarantine_dir, transport=None, environm
 
 def subtree_digest(root, nodes, edges) -> str:
     """SHA-256 over the root, the set of (name, version, sha256) nodes and the set of
-    (parent name, parent version, child name, child version) edges, each sorted."""
-    return digest({"root": list(root), "nodes": sorted({tuple(node) for node in nodes}),
-                   "edges": sorted({tuple(edge) for edge in edges})})
+    (parent name, parent version, child name, child version) edges, each sorted.
+
+    Versions go in in canonical form, so the digest does not depend on how a version was
+    written (`1.0` or `1.0.0`)."""
+    root = (root[0], _canonical(root[1]))
+    nodes = {(name, _canonical(version), sha256) for name, version, sha256 in nodes}
+    edges = {(parent, _canonical(parent_version), child, _canonical(child_version))
+             for parent, parent_version, child, child_version in edges}
+    return digest({"root": list(root), "nodes": sorted(nodes), "edges": sorted(edges)})
+
+
+def _canonical(version: str) -> str:
+    try:
+        return canonicalize_version(Version(version))
+    except InvalidVersion:
+        return version
 
 
 # --- internals ---------------------------------------------------------------
@@ -196,8 +211,11 @@ def _load(key, pins, quarantine_dir, transport, env):
     return node, problems
 
 
-def _expand(key, node, extras, pins, env):
-    """The dependency lines of one node. Returns (edges, excluded, problems, [(child key, child extras)])."""
+def _expand(key, node, extras, pins, env, known):
+    """The dependency lines of one node. Returns (edges, excluded, problems, [(child key, child extras)]).
+
+    `known` maps (name, Version) to the node key already in use for that release.
+    """
     edges, excluded, problems, children = [], [], [], []
     for requirement in node["metadata"]["requires_dist"]:
         raw, child_name = requirement["raw"], requirement["canonical_name"]
@@ -226,7 +244,7 @@ def _expand(key, node, extras, pins, env):
                                      f"the lockfile has more than one version of {child_name} that satisfies {raw!r}: "
                                      f"{', '.join(map(str, fitting))}", raw))
         else:
-            child = (child_name, str(fitting[0]))
+            child = known.setdefault((child_name, fitting[0]), (child_name, str(fitting[0])))
             edges.append({"parent": _label(key), "child": _label(child), "requirement": raw})
             children.append((child, requirement["extras"]))
     return edges, excluded, problems, children
