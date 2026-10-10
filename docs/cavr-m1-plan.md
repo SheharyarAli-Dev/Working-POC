@@ -327,7 +327,7 @@ Found in the batch 1-3 review (2026-10-10, MINOR items) and deliberately not fix
 - [x] 2 C1 requirements.txt edit capture (committed 2026-10-10, `4c053b6`; batch review fixes in the next commit)
 - [x] 3 C2 fail-closed requirement gate (committed 2026-10-10, `c018f30`; batch review fixes in the next commit)
 - [x] 4 C3 PyPI fetch + SHA-256 (committed 2026-10-10; hash added in the batch-end commit)
-- [ ] 5 C3 wheel metadata
+- [x] 5 C3 wheel metadata (committed 2026-10-10; hash added in the batch-end commit)
 - [ ] 6 C3 transitive tree + subtree digest
 - [ ] 7 C3 OSV ranges
 - [ ] 8 C3 AST scan
