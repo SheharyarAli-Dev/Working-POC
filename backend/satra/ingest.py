@@ -47,7 +47,12 @@ def git_environment():
     cleaned = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
     cleaned["GIT_TERMINAL_PROMPT"] = "0"
     cleaned["LC_ALL"] = "C.UTF-8"
+    cleaned["GIT_AUTHOR_NAME"] = "ASENT Security Gate"
+    cleaned["GIT_AUTHOR_EMAIL"] = "asent-gate@security.local"
+    cleaned["GIT_COMMITTER_NAME"] = "ASENT Security Gate"
+    cleaned["GIT_COMMITTER_EMAIL"] = "asent-gate@security.local"
     return cleaned
+
 
 
 def run_git(repo_dir, *arguments, feed=None, tolerate=False):
