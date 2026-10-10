@@ -1,4 +1,5 @@
 import React from 'react';
+import { CheckCircle2, XCircle, ShieldCheck } from 'lucide-react';
 
 export interface GateItem {
   id: string;
@@ -13,60 +14,66 @@ interface SatraGateMatrixProps {
   runStatus: string;
 }
 
-export const SatraGateMatrix: React.FC<SatraGateMatrixProps> = ({ gates, verdict, runStatus }) => {
+export const SatraGateMatrix: React.FC<SatraGateMatrixProps> = ({ gates, verdict }) => {
   const passedCount = gates.filter((g) => g.passed).length;
   const totalCount = gates.length;
 
-  const verdictColor =
-    verdict === 'ACCEPT' || verdict === 'ACCEPTED'
-      ? 'text-emerald-400 bg-emerald-950/40 border-emerald-500/40'
-      : verdict === 'BLOCK' || verdict === 'REJECTED'
-      ? 'text-rose-400 bg-rose-950/40 border-rose-500/40'
-      : 'text-amber-400 bg-amber-950/40 border-amber-500/40';
+  const isAccepted = verdict === 'ACCEPT' || verdict === 'ACCEPTED';
+  const isRejected = verdict === 'BLOCK' || verdict === 'REJECTED';
 
   return (
-    <div className="bg-slate-900 border border-slate-800 rounded-lg p-4 space-y-4">
-      <div className="flex items-center justify-between">
+    <div className="satra-gate-card">
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <div>
-          <h3 className="text-sm font-semibold text-slate-200">7-Gate Assurance Matrix</h3>
-          <p className="text-xs text-slate-400">Sequential verification required for automated acceptance</p>
+          <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--ink-primary)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <ShieldCheck size={16} color="var(--accent-emerald)" />
+            <span>7-Gate Assurance Matrix</span>
+          </div>
+          <p style={{ fontSize: '11px', color: 'var(--ink-muted)', marginTop: '2px' }}>
+            Sequential verification required for autonomous promotion
+          </p>
         </div>
-        <div className="flex items-center space-x-2">
-          <span className="text-xs font-mono text-slate-400">
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <span style={{ fontSize: '11px', fontFamily: 'monospace', fontWeight: 700, color: 'var(--ink-secondary)' }}>
             {passedCount}/{totalCount} Gates
           </span>
           {verdict && (
-            <span className={`text-xs font-bold px-2 py-0.5 rounded border ${verdictColor}`}>
+            <span
+              style={{
+                fontSize: '11px',
+                fontWeight: 800,
+                padding: '3px 8px',
+                borderRadius: '4px',
+                border: '1px solid',
+                borderColor: isAccepted ? '#86efac' : isRejected ? '#fca5a5' : '#fde047',
+                background: isAccepted ? '#f0fdf4' : isRejected ? '#fef2f2' : '#fefce8',
+                color: isAccepted ? '#15803d' : isRejected ? '#b91c1c' : '#854d0e'
+              }}
+            >
               {verdict}
             </span>
           )}
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+      <div className="satra-gate-grid">
         {gates.map((g, idx) => (
           <div
             key={g.id || idx}
-            className={`p-2.5 rounded-md border text-xs flex items-start space-x-2.5 transition-all ${
-              g.passed
-                ? 'bg-emerald-950/20 border-emerald-500/30 text-slate-200'
-                : 'bg-rose-950/20 border-rose-500/30 text-slate-300'
-            }`}
+            className={`satra-gate-cell ${g.passed ? 'passed' : 'failed'}`}
           >
-            <div className="mt-0.5">
-              {g.passed ? (
-                <span className="flex h-4 w-4 items-center justify-center rounded-full bg-emerald-500/20 text-emerald-400 font-bold text-[10px]">
-                  ✓
-                </span>
-              ) : (
-                <span className="flex h-4 w-4 items-center justify-center rounded-full bg-rose-500/20 text-rose-400 font-bold text-[10px]">
-                  ✗
-                </span>
-              )}
+            <div className={`satra-gate-icon ${g.passed ? 'passed' : 'failed'}`}>
+              {g.passed ? <CheckCircle2 size={13} /> : <XCircle size={13} />}
             </div>
-            <div className="flex-1 min-w-0">
-              <div className="font-medium text-slate-100">{g.label}</div>
-              {g.detail && <div className="text-[11px] text-slate-400 mt-0.5 truncate">{g.detail}</div>}
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontWeight: 600, color: 'var(--ink-primary)', fontSize: '11.5px' }}>
+                {g.label}
+              </div>
+              {g.detail && (
+                <div style={{ fontSize: '10.5px', color: 'var(--ink-muted)', marginTop: '2px', wordBreak: 'break-word' }}>
+                  {g.detail}
+                </div>
+              )}
             </div>
           </div>
         ))}

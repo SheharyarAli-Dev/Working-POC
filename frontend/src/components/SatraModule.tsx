@@ -201,6 +201,7 @@ export const SatraModule: React.FC = () => {
     setProofData(null);
 
     try {
+      const targetSha = scenarioKey === 'live' ? (selectedRealCommitSha || (realCommits.length > 0 ? realCommits[0].sha : undefined)) : undefined;
       const res = await fetch('/api/satra/runs', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -211,7 +212,7 @@ export const SatraModule: React.FC = () => {
           branch: 'main',
           auto_repair: true,
           retry_attempt: retryAttempt,
-          commit_sha: scenarioKey === 'live' ? selectedRealCommitSha : undefined
+          commit_sha: targetSha
         })
       });
 
@@ -219,8 +220,27 @@ export const SatraModule: React.FC = () => {
       const data = await res.json();
       setActiveRunId(data.run_id);
 
+      setTimeout(() => {
+        document.getElementById('satra-live-status-bar')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }, 150);
+
       // Connect to SSE stream
       const eventSource = new EventSource(data.stream_url);
+
+      const watchdogTimer = setTimeout(() => {
+        console.warn('SATRA watchdog timer expired; resetting run state');
+        try { eventSource.close(); } catch (_) {}
+        setIsRunning(false);
+        setActiveWorkflowBox('none');
+      }, 90000);
+
+      eventSource.onerror = (e) => {
+        console.warn('SATRA event stream closed or error encountered:', e);
+        clearTimeout(watchdogTimer);
+        try { eventSource.close(); } catch (_) {}
+        setIsRunning(false);
+        setActiveWorkflowBox('none');
+      };
 
       eventSource.addEventListener('step_change', (e: any) => {
         const payload = JSON.parse(e.data);
@@ -337,7 +357,8 @@ export const SatraModule: React.FC = () => {
       });
 
       eventSource.addEventListener('run_completed', (e: any) => {
-        eventSource.close();
+        clearTimeout(watchdogTimer);
+        try { eventSource.close(); } catch (_) {}
         setIsRunning(false);
         setActiveWorkflowBox('none');
         // Fetch proof drawer info
@@ -348,7 +369,8 @@ export const SatraModule: React.FC = () => {
       });
 
       eventSource.addEventListener('run_error', (e: any) => {
-        eventSource.close();
+        clearTimeout(watchdogTimer);
+        try { eventSource.close(); } catch (_) {}
         setIsRunning(false);
         setActiveWorkflowBox('none');
       });
@@ -535,6 +557,24 @@ export const SatraModule: React.FC = () => {
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            {isRunning && (
+              <span style={{
+                fontSize: '11px',
+                fontWeight: 600,
+                color: '#065f46',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                background: '#ecfdf5',
+                padding: '5px 10px',
+                borderRadius: '4px',
+                border: '1px solid #a7f3d0'
+              }}>
+                <span className="module-pulse-dot" />
+                Live Docker Sandbox Executing...
+              </span>
+            )}
+
             {proofData && (
               <button 
                 className="btn-secondary" 
@@ -575,20 +615,38 @@ export const SatraModule: React.FC = () => {
         )}
 
         {/* Live Step Status Bar */}
-        <div style={{ 
-          background: '#f8fafc', 
-          border: '1px solid var(--border-light)', 
-          borderRadius: 'var(--radius-sm)', 
-          padding: '10px 16px', 
-          marginBottom: '20px',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '10px'
-        }}>
+        <div 
+          id="satra-live-status-bar"
+          style={{ 
+            background: isRunning ? '#f0fdf4' : '#f8fafc', 
+            border: `1px solid ${isRunning ? '#bbf7d0' : 'var(--border-light)'}`, 
+            borderRadius: 'var(--radius-sm)', 
+            padding: '12px 16px', 
+            marginBottom: '20px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '12px',
+            transition: 'all 0.2s ease',
+            boxShadow: isRunning ? '0 0 12px rgba(16, 185, 129, 0.15)' : 'none'
+          }}
+        >
           <span className={`status-dot ${isRunning ? 'pulsing' : ''}`} />
-          <span style={{ fontSize: '11.5px', color: 'var(--ink-secondary)', fontWeight: 600 }}>
-            {currentStepName}
-          </span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1, minWidth: 0 }}>
+            <span style={{
+              fontSize: '10px',
+              fontFamily: 'monospace',
+              fontWeight: 800,
+              padding: '2px 6px',
+              borderRadius: '3px',
+              background: isRunning ? '#dcfce7' : '#e2e8f0',
+              color: isRunning ? '#15803d' : '#64748b'
+            }}>
+              {isRunning ? 'PIPELINE ACTIVE' : 'ENGINE READY'}
+            </span>
+            <span style={{ fontSize: '12px', color: 'var(--ink-secondary)', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {currentStepName}
+            </span>
+          </div>
         </div>
 
         {/* 1. FETCH: Commit Card */}
