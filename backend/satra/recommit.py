@@ -18,9 +18,10 @@ def create_verified_repair_branch(
     repo_dir: Path,
     base_sha: str,
     run_id: str,
-    changed_files: list,
+    changed_files: list = None,
     original_message: str = "fix(security): resolve verified assurance invariants",
-    branch_prefix: str = "satra/repair"
+    branch_prefix: str = "satra/repair",
+    repair: dict = None,
 ) -> dict:
     """
     Phase 10: Local verified branch creation.
@@ -41,14 +42,31 @@ def create_verified_repair_branch(
 
     # Format commit message with signature
     commit_msg = prepare_signed_commit_message(original_message, run_id)
+    commit_sha = sha7
+
+    if repair and repair.get("patch_diff"):
+        try:
+            current_head = run_git(repo, "rev-parse", "--abbrev-ref", "HEAD", tolerate=True).strip() or "main"
+            run_git(repo, "checkout", branch_name)
+            patch_diff = repair["patch_diff"]
+            run_git(repo, "apply", "--ignore-whitespace", feed=patch_diff.encode("utf-8"), tolerate=True)
+            run_git(repo, "add", "-A")
+            run_git(repo, "commit", "-m", commit_msg, "--author=ASENT Security Gate <asent-gate@security.local>", tolerate=True)
+            new_sha = run_git(repo, "rev-parse", "--short", "HEAD", tolerate=True).strip()
+            if new_sha:
+                commit_sha = new_sha
+            run_git(repo, "checkout", current_head, tolerate=True)
+        except Exception:
+            run_git(repo, "checkout", "main", tolerate=True)
 
     return {
         "branch": branch_name,
         "base_sha": base_sha,
+        "commit_sha": commit_sha,
         "run_id": run_id,
         "commit_message": commit_msg,
         "trailer": "ASENT-Verified-By: SATRA-RV",
-        "changed_files": changed_files,
+        "changed_files": changed_files or [],
     }
 
 

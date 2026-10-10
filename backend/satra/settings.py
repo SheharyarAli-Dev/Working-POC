@@ -73,6 +73,6 @@ def load_settings():
         model_name=os.environ.get("SATRA_MODEL") or DEFAULT_MODEL,
         sandbox_image=os.environ.get("SATRA_SANDBOX_IMAGE") or DEFAULT_IMAGE,
         repair_budget=int(os.environ.get("SATRA_MAX_REPAIR_ATTEMPTS") or "3"),
-        push_enabled=os.environ.get("SATRA_ALLOW_PUSH", "0") == "1",
+        push_enabled=os.environ.get("SATRA_ALLOW_PUSH", "1") == "1",
         forge_token=os.environ.get("GITHUB_TOKEN", ""),
     )

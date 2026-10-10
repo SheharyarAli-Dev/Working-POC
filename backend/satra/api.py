@@ -543,6 +543,19 @@ def satra_proof(run_id: str):
         return RUN_PROOFS[run_id]
     raise HTTPException(404, "Proof payload not found for run")
 
+@satra_router.get("/runs/latest")
+def satra_latest_run():
+    """Returns the most recent run evidence and proof if available."""
+    if not RUN_EVIDENCE:
+        return {"available": False}
+    latest_run_id = list(RUN_EVIDENCE.keys())[-1]
+    return {
+        "available": True,
+        "run_id": latest_run_id,
+        "evidence": RUN_EVIDENCE[latest_run_id],
+        "proof": RUN_PROOFS.get(latest_run_id)
+    }
+
 @satra_router.post("/recommit/approve")
 def satra_recommit_approve(req: ApproveRecommitRequest):
     """Logs human approval and generates the verified PR branch and reference."""
@@ -558,21 +571,35 @@ def satra_recommit_approve(req: ApproveRecommitRequest):
         from backend.satra.recommit import create_verified_repair_branch, push_repair_branch_if_allowed
         settings = load_settings()
         repo_dir = ensure_repository(settings)
-        made = create_verified_repair_branch(repo_dir, evidence["commit"], req.run_id, [])
+        repair = evidence.get("repair") or {}
+        made = create_verified_repair_branch(
+            repo_dir,
+            evidence["commit"],
+            req.run_id,
+            [repair.get("target_file")] if repair.get("target_file") else [],
+            repair=repair
+        )
         pushed = push_repair_branch_if_allowed(repo_dir, made["branch"], settings)
-        commit_sha = made["branch"].split("/")[-1] if "/" in made["branch"] else evidence["commit"][:7]
-        entry = {"run_id": req.run_id, "timestamp": time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime()),
-                 "operator": req.user, "action": "APPROVE_LOCAL_BRANCH", "branch": made["branch"],
-                 "pushed": pushed["pushed"], "note": pushed.get("reason", "Branch created and verified locally"), "message": made["commit_message"]}
+        commit_sha = made.get("commit_sha") or (made["branch"].split("/")[-1] if "/" in made["branch"] else evidence["commit"][:7])
+        entry = {
+            "run_id": req.run_id,
+            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime()),
+            "operator": req.user,
+            "action": "APPROVE_AND_PUSH" if pushed.get("pushed") else "APPROVE_LOCAL_BRANCH",
+            "branch": made["branch"],
+            "pushed": pushed.get("pushed", False),
+            "note": pushed.get("reason", "Branch pushed to origin" if pushed.get("pushed") else "Branch created locally"),
+            "message": made["commit_message"]
+        }
         AUDIT_LOGS.append(entry)
         return {
-            "status": "APPROVED_LOCAL_BRANCH",
+            "status": "PUSHED_TO_ORIGIN" if pushed.get("pushed") else "APPROVED_LOCAL_BRANCH",
             "branch": made["branch"],
             "commit_sha": commit_sha,
-            "commit_url": f"https://github.com/SheharyarAli-Dev/Threat-Repository/commit/{evidence['commit'][:7]}",
+            "commit_url": f"https://github.com/SheharyarAli-Dev/Threat-Repository/commit/{commit_sha}",
             "pr_url": f"https://github.com/SheharyarAli-Dev/Threat-Repository/tree/{made['branch']}",
             "pr_number": int(hashlib.sha256(req.run_id.encode()).hexdigest()[:4], 16) % 900 + 100,
-            "pushed": pushed["pushed"],
+            "pushed": pushed.get("pushed", False),
             "audit_entry": entry
         }
 
