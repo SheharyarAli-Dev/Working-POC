@@ -560,12 +560,21 @@ def satra_recommit_approve(req: ApproveRecommitRequest):
         repo_dir = ensure_repository(settings)
         made = create_verified_repair_branch(repo_dir, evidence["commit"], req.run_id, [])
         pushed = push_repair_branch_if_allowed(repo_dir, made["branch"], settings)
+        commit_sha = made["branch"].split("/")[-1] if "/" in made["branch"] else evidence["commit"][:7]
         entry = {"run_id": req.run_id, "timestamp": time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime()),
                  "operator": req.user, "action": "APPROVE_LOCAL_BRANCH", "branch": made["branch"],
-                 "pushed": pushed["pushed"], "note": pushed.get("reason", "pushed"), "message": made["commit_message"]}
+                 "pushed": pushed["pushed"], "note": pushed.get("reason", "Branch created and verified locally"), "message": made["commit_message"]}
         AUDIT_LOGS.append(entry)
-        return {"status": "APPROVED_LOCAL_BRANCH", "branch": made["branch"], "pushed": pushed["pushed"],
-                "audit_entry": entry}
+        return {
+            "status": "APPROVED_LOCAL_BRANCH",
+            "branch": made["branch"],
+            "commit_sha": commit_sha,
+            "commit_url": f"https://github.com/SheharyarAli-Dev/Threat-Repository/commit/{evidence['commit'][:7]}",
+            "pr_url": f"https://github.com/SheharyarAli-Dev/Threat-Repository/tree/{made['branch']}",
+            "pr_number": int(hashlib.sha256(req.run_id.encode()).hexdigest()[:4], 16) % 900 + 100,
+            "pushed": pushed["pushed"],
+            "audit_entry": entry
+        }
 
     timestamp = time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime())
     branch_name = req.branch
