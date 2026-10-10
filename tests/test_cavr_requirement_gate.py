@@ -494,3 +494,13 @@ def test_edit_with_a_hidden_duplicate_line_is_not_permitted(tmp_path):
     path.write_text('a==2.0; python_version >= "3"\na==1.0; python_version >= "3"\n')
     decision = evaluate_capture(capture_requirements_edit(before, snapshot_requirements(path)), POLICY)
     assert (decision["result"], decision["rule"]) == ("UNRESOLVED", "CAPTURE_INCOMPLETE")
+
+
+def test_deeply_nested_json_file_is_unreadable_not_a_crash(tmp_path):
+    """Deferred from the batch 1-3 review: `json.loads` raises RecursionError, which is not a ValueError."""
+    deep = write(tmp_path / "policy.json", "[" * 200_000 + "]" * 200_000)
+    loaded = requirement_gate.load_json_file(deep)
+    assert isinstance(loaded, requirement_gate.Unreadable) and "RecursionError" in loaded.reason
+    assert gate_from_files("a==1.0", deep)["rule"] == "POLICY_INVALID"
+    policy = write(tmp_path / "good.json", POLICY)
+    assert gate_from_files("a==1.0", policy, deep)["rule"] == "LOCKFILE_INVALID"

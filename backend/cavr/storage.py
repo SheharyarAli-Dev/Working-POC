@@ -189,6 +189,19 @@ class CavrStorage:
                 stored_at TEXT NOT NULL,
                 integrity TEXT NOT NULL
             );
+
+            CREATE TABLE IF NOT EXISTS verdict_log(
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                recorded_at TEXT NOT NULL,
+                source TEXT,
+                requested TEXT,
+                status TEXT NOT NULL,
+                stage TEXT,
+                rule TEXT,
+                fast_gate_ms REAL NOT NULL,
+                cache_hit INTEGER NOT NULL,
+                escalated INTEGER NOT NULL
+            );
             """)
 
             # Seed if table is empty
@@ -279,3 +292,21 @@ class CavrStorage:
             conn.execute(f"INSERT OR REPLACE INTO verdict_cache({', '.join(columns)}) VALUES({', '.join('?' * len(columns))})",
                          tuple(row[column] for column in columns))
             conn.commit()
+
+    # --- verdict log (one row per verify_request; the report's hit rate and latency come from it) ---
+
+    def record_verdict(self, source, requested, status, stage, rule, fast_gate_ms: float, cache_hit: bool, escalated: bool) -> int:
+        recorded_at = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        with self.connect() as conn:
+            cur = conn.execute("""
+            INSERT INTO verdict_log(recorded_at, source, requested, status, stage, rule, fast_gate_ms, cache_hit, escalated)
+            VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (recorded_at, source, requested, status, stage, rule, float(fast_gate_ms), int(bool(cache_hit)), int(bool(escalated))))
+            conn.commit()
+            return cur.lastrowid
+
+    def get_verdict_log(self, limit: int | None = None) -> list[dict]:
+        with self.connect() as conn:
+            rows = conn.execute("SELECT * FROM verdict_log ORDER BY id DESC" + (" LIMIT ?" if limit is not None else ""),
+                                (limit,) if limit is not None else ()).fetchall()
+            return [dict(r) for r in rows]

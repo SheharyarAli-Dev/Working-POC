@@ -257,6 +257,9 @@ def test_scanning_does_not_execute_the_package(tmp_path):
     source = f"open({str(marker)!r}, 'w').write('x')\n"
     result = scan_wheel(wheel(tmp_path, {"demo/__init__.py": source, "boot.pth": f"import demo\n"}))
     assert result["python_files"] == 1 and not marker.exists()
+    # The same source does create the marker when it is really run, so the assertion above can fail.
+    exec(compile(source, "demo/__init__.py", "exec"), {})
+    assert marker.exists()
 
 
 def test_same_wheel_gives_the_same_result(tmp_path):
@@ -299,3 +302,44 @@ def test_pth_that_is_not_utf8_is_unresolved(tmp_path):
     # site.py falls back to the locale encoding here, which CAVR cannot know: not covered.
     result = scan_wheel(wheel(tmp_path, {"demo/__init__.py": CLEAN, "x.pth": b"import os # \xff\xfe\n"}))
     assert outcome(result) == ("UNRESOLVED", "SOURCE_NOT_PARSED")
+
+
+# --- items deferred from the batch 4-8 review, handled in plan step 11 ----------------------------------------
+
+@pytest.mark.parametrize("source, line, sink", [
+    ("from os import *\n\nsystem('id')\n", 3, "os.system"),
+    ("from subprocess import *\n\n\ndef f():\n    return run(['id'])\n", 5, "subprocess.run"),
+    ("from json import *\nfrom socket import *\ncreate_connection(('example.invalid', 1))\n", 3, "socket.create_connection"),
+])
+def test_sink_called_after_a_star_import_is_found(tmp_path, source, line, sink):
+    result = scan_wheel(wheel(tmp_path, {"demo/__init__.py": source}))
+    assert outcome(result) == ("OK", "SCAN_COMPLETE")
+    assert [(s["line"], s["sink"], s["via_alias"]) for s in result["sinks"]] == [(line, sink, True)]
+
+
+def test_star_import_of_another_module_does_not_invent_a_sink(tmp_path):
+    result = scan_wheel(wheel(tmp_path, {"demo/__init__.py": "from json import *\n\nrun(['id'])\nsystem('id')\n"}))
+    assert result["sinks"] == []
+
+
+def test_pyw_source_is_scanned_like_py(tmp_path):
+    result = scan_wheel(wheel(tmp_path, {"demo/__init__.py": "", "demo/gui.pyw": "import os\nos.system('id')\n"}))
+    assert outcome(result) == ("OK", "SCAN_COMPLETE") and result["python_files"] == 2
+    assert [(s["file"], s["line"], s["sink"]) for s in result["sinks"]] == [("demo/gui.pyw", 2, "os.system")]
+
+
+@pytest.mark.parametrize("path", ["demo/vendor.zip", "demo/plugin.egg", "demo/inner-1.0-py3-none-any.whl", "demo/app.PYZ",
+                                  "demo-1.0.data/scripts/tool", "demo-1.0.data/scripts/run.sh"])
+def test_code_the_scan_does_not_read_is_an_explicit_finding_and_unresolved(tmp_path, path):
+    result = scan_wheel(wheel(tmp_path, {"demo/__init__.py": CLEAN, path: b"#!python\nimport os\nos.system('id')\n"}))
+    assert outcome(result) == ("UNRESOLVED", "CODE_NOT_SCANNED")
+    assert result["not_scanned_files"] == [path] and "NOT_SCANNED" in kinds(result)
+    assert result["files_scanned"] == ["demo/__init__.py"]
+
+
+def test_data_files_and_py_scripts_are_not_reported_as_unscanned(tmp_path):
+    files = {"demo/__init__.py": CLEAN, "demo/data.json": "{}", "demo-1.0.data/scripts/tool.py": "print('hi')\n",
+             "demo-1.0.data/data/share/readme.txt": "hello"}
+    result = scan_wheel(wheel(tmp_path, files))
+    assert outcome(result) == ("OK", "SCAN_COMPLETE") and result["not_scanned_files"] == []
+    assert result["files_scanned"] == ["demo-1.0.data/scripts/tool.py", "demo/__init__.py"]

@@ -347,6 +347,18 @@ Found in the batch 4-8 review (2026-10-10, MINOR items, all derived by reading) 
   the recording step and on the live test (`CAVR_LIVE=1`), not on the review.
 - The reviewer did not run the full suite; the 7 baseline failures were confirmed by the batch runs only.
 
+Handled in step 11 (2026-10-10), each with a test: `load_json_file` RecursionError; `capture_requirements_edit`
+errors caught by the pipeline (`CAPTURE_FAILED`); `select_wheel` duplicate filename and NUL filename; `NAME`
+fullmatch; `HttpxTransport` offline tests; stale good file beside `.rejected`; `read_wheel` always gets name and
+version (through `dep_tree`); NFC duplicate names; `ast_scan` not-scanned finding and star imports; the
+`requirement_gate.py` docstring; the `test_scanning_does_not_execute_the_package` test can now fail.
+Decided in step 11: a missing lockfile stays "no lockfile" and is stated in the verdict (`lockfile.present`).
+Still open after step 11: `_chunks` slow-drip deadline -> M2; removed option lines of an edit -> step 12;
+`test_cavr_advisories.py` test name and `manifest_parser.py` docstring -> next change to each file.
+Found in step 11 and not fixed: the pypdf proof (`fast_gate.disabled_jbig2_sinks` plus the conditions in
+`reachability.py`) does not cover pages decoded after the `with apply_configuration(...)` block ends. -> Maryam.
+The cavr-reviewer batch pass over `657098a..HEAD` (steps 9-11) has not run yet.
+
 ## Verification
 
 - `.venv/bin/python -m pytest -q` before every commit (offline).
@@ -371,7 +383,7 @@ Found in the batch 4-8 review (2026-10-10, MINOR items, all derived by reading) 
 - [x] 8 C3 AST scan (committed 2026-10-10, `c72b56a`; batch review fix in the next commit)
 - [x] 9 C4 capability contract (2026-10-10; hash in the batch 9-11 review commit)
 - [x] 10 verdict cache (2026-10-10; hash in the batch 9-11 review commit)
-- [ ] 11 pipeline
+- [x] 11 pipeline (2026-10-10; committed, cavr-reviewer pass for steps 9-11 NOT yet run)
 - [ ] 12 pip wrapper
 - [ ] 13 dashboard API
 - [ ] 14 orchestrator analyzer

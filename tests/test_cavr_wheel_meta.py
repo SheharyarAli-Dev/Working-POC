@@ -353,3 +353,10 @@ def test_every_result_has_the_same_keys(tmp_path):
     mismatch = read_wheel(PYPDF_WHEEL, "other", "1")
     assert set(good) == set(bad) == set(mismatch)
     assert good["path"] == str(PYPDF_WHEEL)
+
+
+def test_entries_that_are_one_name_in_another_unicode_form_are_unresolved(tmp_path):
+    """`caf\u00e9.py` (one code point) and `cafe\u0301.py` (e + combining accent) are one file on macOS."""
+    wheel = build_wheel(tmp_path, "demo", "1.0", files={"demo/__init__.py": "", "demo/caf\u00e9.py": "x = 1\n"})
+    wheel = add_entry(wheel, "demo/cafe\u0301.py", b"import os\n")
+    assert outcome(read_wheel(wheel)) == ("UNRESOLVED", "DUPLICATE_ENTRY")

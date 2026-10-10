@@ -1,7 +1,9 @@
 """C2 requirement gate: is this requirement permitted by the project policy?
 
 The gate runs before anything is downloaded and answers PERMITTED, BLOCK or UNRESOLVED.
-It fails closed: PERMITTED is returned from exactly one place, after every rule has passed.
+It fails closed: one requirement is PERMITTED only at the end of `evaluate_requirement`, after
+every rule has passed, and `evaluate_capture` answers PERMITTED only when every requirement
+of a complete capture was permitted that way (or a requirements edit asks for nothing).
 
 Rules, in order (the first one that applies decides):
 
@@ -223,8 +225,8 @@ def load_json_file(path):
         return None
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError) as exc:
-        return Unreadable(f"cannot read {path}: {exc}")
+    except (OSError, ValueError, RecursionError) as exc:  # RecursionError: JSON nested too deeply
+        return Unreadable(f"cannot read {path}: {type(exc).__name__}: {exc}")
     if data is None:
         return Unreadable(f"{path} contains null")
     return data

@@ -61,12 +61,13 @@ class TransportError(Exception):
 class HttpxTransport:
     """Plain HTTPS GET. Redirects are not followed; any status other than 200 is an error."""
 
-    def __init__(self, timeout: float = 15.0):
+    def __init__(self, timeout: float = 15.0, transport=None):
         self.timeout = timeout
+        self.transport = transport  # an httpx transport; None means the real network
 
     def stream(self, url: str):
         try:
-            with httpx.Client(timeout=self.timeout, follow_redirects=False) as client:
+            with httpx.Client(timeout=self.timeout, follow_redirects=False, transport=self.transport) as client:
                 with client.stream("GET", url) as response:
                     if response.status_code != 200:
                         raise TransportError(f"HTTP {response.status_code} for {url}", status=response.status_code)
@@ -155,6 +156,9 @@ def fetch_artifact(name, version, quarantine_dir, transport=None, max_bytes: int
         final = quarantine_dir / (filename if matches else filename + ".rejected")
         os.replace(partial, final)
         partial = None
+        if not matches:
+            # A file of this name kept from an earlier run is not what the registry serves now.
+            (quarantine_dir / filename).unlink(missing_ok=True)
     except _TooLarge:
         return result("UNRESOLVED", "TOO_LARGE", f"{filename} sent more than the cap of {max_bytes} bytes")
     except (TransportError, OSError) as exc:
@@ -184,7 +188,7 @@ def select_wheel(entries: list[dict], name: str, version: str, supported_tags=No
         filename = entry.get("filename")
         if entry.get("packagetype") != "bdist_wheel" and not (isinstance(filename, str) and filename.endswith(".whl")):
             continue
-        if not isinstance(filename, str) or "/" in filename or "\\" in filename:
+        if not isinstance(filename, str) or "/" in filename or "\\" in filename or "\0" in filename:
             return None, ("REGISTRY_INVALID", f"wheel entry has an unusable filename: {filename!r}")
         try:
             wheel_name, wheel_version, _, tags = parse_wheel_filename(filename)
@@ -192,10 +196,13 @@ def select_wheel(entries: list[dict], name: str, version: str, supported_tags=No
             return None, ("REGISTRY_INVALID", f"wheel entry has an unusable filename: {exc}")
         if wheel_name != name or wheel_version != Version(version):
             return None, ("REGISTRY_INVALID", f"wheel {filename} is not a file of {name} {version}")
+        if any(filename == listed for _, listed, _ in wheels):
+            return None, ("REGISTRY_INVALID", f"the registry lists {filename} more than once")
         wheels.append((min((rank[tag] for tag in tags if tag in rank), default=None), filename, entry))
     if not wheels:
         return None, ("NO_WHEEL", f"{name} {version} has no wheel on PyPI; source distributions are not verified")
-    compatible = sorted((position, filename, entry) for position, filename, entry in wheels if position is not None)
+    compatible = sorted(((position, filename, entry) for position, filename, entry in wheels if position is not None),
+                        key=lambda wheel: wheel[:2])
     if not compatible:
         return None, ("NO_COMPATIBLE_WHEEL",
                       f"no wheel of {name} {version} fits this interpreter: {sorted(w[1] for w in wheels)}")
@@ -218,7 +225,7 @@ def _result(outcome, rule, reason, name=None, version=None, registry_url=None, f
 
 
 def request_problem(name, version) -> str | None:
-    if not isinstance(name, str) or not NAME.match(name):
+    if not isinstance(name, str) or not NAME.fullmatch(name):
         return f"not a package name: {name!r}"
     if not isinstance(version, str):
         return f"not a version: {version!r}"

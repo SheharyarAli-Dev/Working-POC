@@ -1,4 +1,4 @@
-"""Shared helpers for the CAVR C3 tests (plan steps 4-8). This file holds no tests.
+"""Shared helpers for the CAVR C3 and pipeline tests (plan steps 4-11). This file holds no tests.
 
 Nothing here fakes a result: `build_wheel` writes a real zip file, and `FakeIndex` serves the real
 bytes of that file together with a registry response whose digest is computed from those bytes.
@@ -8,11 +8,13 @@ import base64
 import hashlib
 import json
 import zipfile
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from packaging.utils import canonicalize_name
 
 from backend.cavr.pypi_client import FILES_HOST, TransportError, registry_url
+from backend.orchestrator.hashing import digest
 
 REPO = Path(__file__).resolve().parents[1]
 PYPDF_WHEEL = REPO / "artifacts" / "pypdf-6.19.0-py3-none-any.whl"
@@ -126,3 +128,28 @@ class FakeIndex:
             raise body
         for start in range(0, len(body), self.chunk_size):
             yield body[start:start + self.chunk_size]
+
+
+def write_osv_cache(cache_dir, name, version, vulns, age_days=0.0) -> Path:
+    """Write an advisory answer in the exact format `OSV.query(live=True)` stores it.
+
+    `vulns` is a list of OSV advisories: [] for "none known", a recorded response, or hand-written
+    ones (give those an id starting with "SYNTH-").
+    """
+    query = {"package": {"name": name, "ecosystem": "PyPI"}, "version": version}
+    body = {"vulns": list(vulns), "pages": [{"vulns": list(vulns)}]}
+    value = {"query": query, "retrieved_at": (datetime.now(timezone.utc) - timedelta(days=age_days)).isoformat(),
+             "source": "https://api.osv.dev/v1/query", "response": body, "response_sha256": digest(body)}
+    cache_dir = Path(cache_dir)
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    path = cache_dir / (digest(query) + ".json")
+    path.write_text(json.dumps(value))
+    return path
+
+
+def synthetic_advisory(advisory_id, name, introduced="0", fixed=None) -> dict:
+    """A hand-written OSV advisory for `name`, affected from `introduced` up to (not including) `fixed`."""
+    assert advisory_id.startswith("SYNTH-")
+    events = [{"introduced": introduced}] + ([{"fixed": fixed}] if fixed else [])
+    return {"id": advisory_id, "summary": "synthetic test advisory",
+            "affected": [{"package": {"name": name, "ecosystem": "PyPI"}, "ranges": [{"type": "ECOSYSTEM", "events": events}]}]}

@@ -429,3 +429,16 @@ def test_subtree_digest_does_not_depend_on_how_a_version_is_written(tmp_path):
     one = dep_tree.subtree_digest(("a", "1.0"), [("a", "1.0", "f" * 64)], [("a", "1.0", "a", "1.0")])
     assert one == dep_tree.subtree_digest(("a", "1"), [("a", "1.0.0", "f" * 64)], [("a", "1.0.0", "a", "1")])
     assert one != dep_tree.subtree_digest(("a", "1.1"), [("a", "1.1", "f" * 64)], [("a", "1.1", "a", "1.1")])
+
+
+# --- the evidence of a node that could not be used (plan step 11) ---------------------------------------------
+
+def test_failed_node_keeps_the_download_result_as_evidence(world):
+    lockfile = three_levels(world)
+    world.index.routes[world.index.add("leaf", "2.0", world.wheels["leaf"])["urls"][0]["url"]] = b"not the bytes the registry describes"
+    tree = world.tree("app", "1.0", lockfile)
+    assert outcome(tree) == ("REJECTED", "HASH_MISMATCH")
+    failure, = tree["failed_nodes"]
+    assert failure["node"] == "leaf==2.0" and failure["metadata"] is None
+    assert failure["artifact"]["rule"] == "HASH_MISMATCH" and failure["artifact"]["path"].endswith(".rejected")
+    assert failure["artifact"]["sha256"] == sha256_file(failure["artifact"]["path"]) != failure["artifact"]["registry_sha256"]
