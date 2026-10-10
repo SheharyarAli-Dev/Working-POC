@@ -34,3 +34,6 @@ Append to docs/report-notes/cavr-report-notes.md, under a heading "Step N — <t
 - **Supervisor Q&A prep:** 2–3 likely questions with short answers.
 Keep it factual and short; real file names, test names and numbers only. Never invent results.
 Record review outcomes in ONE line per step (number of passes, verdict, open MINOR count). Do not narrate review history.
+
+## Study Q&A
+When Maryam asks an "explain" or "why" question about CAVR, also append the question and a short plain-language answer (with file/function names and one example) to docs/report-notes/cavr-study-qa.md under a heading for the current batch. Keep each answer under 15 lines.
