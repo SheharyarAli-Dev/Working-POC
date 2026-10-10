@@ -160,3 +160,80 @@ def judge(baseline, mutant, repeat, feasible):
     if is_pass(mutant):
         return {"accepted": False, "diagnosis": "ORACLE_WEAKENED", "reason": "Test passes even when mutation is active"}
     return {"accepted": False, "diagnosis": "INCONCLUSIVE", "reason": "Execution failure is not a mutant kill"}
+
+
+def validate_generated_test(test_code, contract, baseline_result=None, mutant_result=None, repeat_result=None):
+    """
+    SATRA Phase 7: 7-Check Validator Pipeline for Generated / Adaptive Tests:
+    1. Preflight Syntax & Vocabulary (ast.parse, no forbidden imports/calls)
+    2. Assertion presence (not vacuous or trivial)
+    3. No assertion weakening (in [200, 403], True, 1)
+    4. Contract alignment (targets applicable security contract & rule ID)
+    5. Clean pass on secure baseline
+    6. Decisive mutant kill (discriminates against counterfactual mutant)
+    7. Baseline repeatability (deterministic result across repeated execution)
+    """
+    checks = {}
+
+    # Check 1: Syntax & vocabulary
+    try:
+        tree = ast.parse(test_code)
+    except SyntaxError as e:
+        checks["check1_syntax_and_vocabulary"] = {"passed": False, "reason": str(e)}
+        return {"valid": False, "failing_check": 1, "reason": f"Syntax error: {e}", "checks": checks}
+
+    for n in ast.walk(tree):
+        if isinstance(n, (ast.Import, ast.ImportFrom)):
+            modules = [a.name for a in n.names] if isinstance(n, ast.Import) else [n.module]
+            if any(m not in ("pytest",) for m in modules if m):
+                checks["check1_syntax_and_vocabulary"] = {"passed": False, "reason": "Imports outside permitted test vocabulary"}
+                return {"valid": False, "failing_check": 1, "reason": "Imports outside permitted test vocabulary", "checks": checks}
+        if isinstance(n, ast.Attribute) and (n.attr.startswith("__") or n.attr in ("skip", "xfail", "system", "execute", "Popen")):
+            checks["check1_syntax_and_vocabulary"] = {"passed": False, "reason": "Unsafe or non-discriminative test construct"}
+            return {"valid": False, "failing_check": 1, "reason": "Unsafe or non-discriminative test construct", "checks": checks}
+        if isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id in ("eval", "exec", "open", "compile", "getattr", "setattr", "__import__"):
+            checks["check1_syntax_and_vocabulary"] = {"passed": False, "reason": "Unsafe side effect / dynamic execution"}
+            return {"valid": False, "failing_check": 1, "reason": "Unsafe side effect / dynamic execution", "checks": checks}
+    checks["check1_syntax_and_vocabulary"] = {"passed": True, "reason": "Passed syntax and vocabulary check"}
+
+    # Check 2: Assertion presence
+    assert_nodes = [n for n in ast.walk(tree) if isinstance(n, ast.Assert)]
+    checks["check2_assertion_present"] = {"passed": bool(assert_nodes), "count": len(assert_nodes)}
+    if not assert_nodes:
+        return {"valid": False, "failing_check": 2, "reason": "No assertion found in test code", "checks": checks}
+
+    # Check 3: Assertion weakening / tampering
+    findings = check_static_test_integrity("", test_code, file_name="generated_test.py")
+    checks["check3_no_weakened_assertions"] = {"passed": len(findings) == 0, "findings": findings}
+    if findings:
+        return {"valid": False, "failing_check": 3, "reason": f"Weakened assertion detected: {findings[0]['detail']}", "checks": checks}
+
+    # Check 4: Contract alignment
+    rule_id = contract.get("rule_id") if isinstance(contract, dict) else getattr(contract, "rule_id", None)
+    expected_status = str(contract.get("expected_status", 403) if isinstance(contract, dict) else getattr(contract, "expected_status", 403))
+    mentions_rule = rule_id is None or (rule_id.lower() in test_code.lower() or expected_status in test_code)
+    checks["check4_contract_alignment"] = {"passed": mentions_rule, "rule_id": rule_id, "expected_status": expected_status}
+    if not mentions_rule:
+        return {"valid": False, "failing_check": 4, "reason": f"Test does not align with contract expected status ({expected_status}) or rule", "checks": checks}
+
+    # Checks 5, 6, 7 (Dynamic differential execution if results provided)
+    if baseline_result is not None:
+        p_base = is_pass(baseline_result)
+        checks["check5_passes_secure_baseline"] = {"passed": p_base}
+        if not p_base:
+            return {"valid": False, "failing_check": 5, "reason": "Generated test failed on secure baseline", "checks": checks}
+
+    if mutant_result is not None:
+        k_mut = killed(mutant_result)
+        checks["check6_kills_counterfactual"] = {"passed": k_mut}
+        if not k_mut:
+            return {"valid": False, "failing_check": 6, "reason": "Generated test failed to kill counterfactual mutant", "checks": checks}
+
+    if repeat_result is not None:
+        p_rep = is_pass(repeat_result)
+        checks["check7_baseline_repeatability"] = {"passed": p_rep}
+        if not p_rep:
+            return {"valid": False, "failing_check": 7, "reason": "Generated test baseline run is not deterministic/repeatable", "checks": checks}
+
+    return {"valid": True, "failing_check": None, "reason": "All validation checks passed", "checks": checks}
+
