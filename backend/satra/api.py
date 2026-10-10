@@ -607,6 +607,11 @@ def satra_recommit_approve(req: ApproveRecommitRequest):
         "audit_entry": log_entry
     }
 
+@satra_router.get("/audit-logs")
+def satra_audit_logs():
+    """Returns the immutable append-only audit trail of approved recommits."""
+    return {"count": len(AUDIT_LOGS), "audit_logs": AUDIT_LOGS}
+
 # ----------------- BACKGROUND WORKFLOW EXECUTION -----------------
 
 async def run_satra_pipeline(run_id: str, req: RunRequest, scenario: dict):
