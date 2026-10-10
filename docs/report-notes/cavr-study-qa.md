@@ -143,3 +143,73 @@ step 11 will judge against the project's own call sites.
 - OK (`SCAN_COMPLETE`): pypdf 6.19.0; 59 files read, 2 sinks listed (`pypdf/filters.py` lines 774, 804).
 - REJECTED (`UNSAFE_PATH`): a wheel with an entry named `../evil.py`.
 - UNRESOLVED: a file with a syntax error, or a wheel containing a `.so` (`COMPILED_CODE_NOT_SCANNED`).
+
+## Batch C — steps 9-11: C4 contract, verdict cache, one pipeline (2026-10-10)
+
+Answers describe the code after the batch review fix (`002a69c`).
+
+### Q1. How is the capability contract built from the project's real imports and call sites?
+
+`extract_project_context` (`context_extractor.py`), then `infer_capability_contract`
+(`capability_contract.py`). Files are only parsed with `ast`; nothing is run.
+
+1. Read every `.py` file of the project. A file that cannot be read or parsed -> UNRESOLVED.
+2. Per file, note what each import binds: after `from pypdf import PdfReader as R`, `R` means
+   `pypdf.PdfReader`. Every call through such a name is a call site: file, line, real name.
+3. Ask the wheel which import names it provides (`top_level.txt`, else RECORD). The package name is
+   never used as a guess: `invoice-tools` may install `invtools`.
+4. Keep the imports and call sites for those names. None, or imported but never used -> UNRESOLVED
+   `NO_CALL_SITE_AUTHORITY`.
+5. Allowed = what the policy's `allowed_scopes` grants, minus what the threat-repo rule for the
+   project's task denies. Everything else is denied. `digest` covers all of it plus the source hashes.
+
+Example: InvoiceHub + pypdf 6.19.0 -> call sites `app/pdf_adapter.py:7 pypdf.apply_configuration`,
+`:8 pypdf.PdfReader`; allowed `FILE_READ`, `FILE_WRITE`; denied `PROCESS_EXEC`, `NETWORK_CONNECT`.
+
+### Q2. What are the 8 cache-key fields, and why each one?
+
+`cache_key` in `verdict_cache.py`: the SHA-256 of these eight values. One missing -> no key, no lookup.
+
+| Field | Why it is in the key |
+|---|---|
+| `ecosystem` | The same name can exist outside PyPI; only PyPI is verified. |
+| `name` | Which package (`Foo_Bar` = `foo-bar`). |
+| `version` | Which release (`1.0` = `1.0.0`). |
+| `artifact_sha256` | The exact bytes downloaded; a tampered or re-uploaded file is a new key. |
+| `subtree_digest` | Every dependency under it and its hash. |
+| `contract_digest` | How this project uses it and what is allowed; includes the source hashes. |
+| `policy_version` | Digest of the policy; a policy edit must not reuse old verdicts. |
+| `analyzer_version` | Pipeline + scanner version + sink-rule digest; new rules must re-judge. |
+
+Example: change `jbig2dec_binary=None` in the project -> `contract_digest` changes -> cache miss.
+
+### Q3. How does `verify_request` run C1 -> C4 end to end?
+
+`verify_request(request, project_dir, policy, store)` in `backend/cavr/pipeline.py`:
+
+1. C1 capture: `pip install pypdf==6.19.0` becomes a record (`parse_pip_command`).
+2. C2 gate: policy, allowlist, lockfile (`evaluate_capture`). BLOCK stops here, before any download.
+3. C3: download each wheel, SHA-256 it, compare with PyPI, follow `Requires-Dist` (`build_tree`).
+4. C4 contract (Q1), then the cache lookup with the 8-field key (Q2).
+5. OSV for every package of the tree, on every run, also on a cache hit (`check_advisories`).
+6. Cache miss only: AST scan, then `judge_sinks` marks each sink allowed (`*` grant), switched off
+   by the project's guard, unreachable from what the project imports, or reachable.
+7. Verdict: REJECTED for a wrong hash or an affected version; UNRESOLVED when anything is unknown or
+   a denied sink is reachable (`escalation: "deep analysis required (M2)"`); otherwise VERIFIED.
+
+Every verdict has `fast_gate_ms`, `cache_hit`, `escalated`. Examples: Q4.
+
+### Q4. One example of each verdict, and of a cache hit
+
+Tests in `tests/test_cavr_pipeline.py`, with the real pypdf wheel and the InvoiceHub code.
+
+- **VERIFIED** (`test_pypdf_6_19_0_is_verified_with_the_guard_evidence`): hash `7e5d6e73…e48d14`
+  equals PyPI's, OSV lists nothing, and `PdfReader` is only used inside
+  `with apply_configuration(jbig2dec_binary=None)`, so the two `subprocess.run` calls in
+  `pypdf/filters.py` (774, 804) are `GUARD_DISABLED` evidence.
+- **REJECTED** (`test_one_flipped_byte_is_rejected`): one bit of the served wheel flipped ->
+  `HASH_MISMATCH`; the file is kept as `.rejected` and no scan runs.
+- **UNRESOLVED** (`test_the_same_project_with_a_reader_outside_the_guard_is_unresolved_and_escalated`):
+  one `PdfReader(path)` outside the guard -> both sinks `REACHABLE`, `SINK_REACHABLE`, `escalated: true`.
+- **Cache hit** (`test_second_run_is_a_cache_hit_that_still_checks_osv`): the VERIFIED request twice;
+  second run `cache_hit: true`, the scan ran once, OSV was asked twice, the wheel was hashed twice.
