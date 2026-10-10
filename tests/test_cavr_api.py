@@ -9,7 +9,10 @@ real one is not in the repository); only its advisories are real. `SYNTH-` advis
 import ast
 import asyncio
 import json
+import os
 import shutil
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -25,6 +28,7 @@ from test_cavr_support import PYPDF_SHA256, PYPDF_WHEEL, REPO, UNGUARDED, World,
 
 RECORDED_5_1_0 = json.loads((REPO / "tests" / "test_cavr_data" / "osv-pypdf-5.1.0.json").read_text())["response"]["vulns"]
 SCENARIOS = {scenario["id"]: scenario for scenario in api.SCENARIOS}
+DENYLISTED = {"package": "requests-security", "version": "2.31.0"}   # on the denylist of the shipped policy
 
 
 class Dashboard:
@@ -77,18 +81,57 @@ def shape(dashboard, run_id):
     return [(event["step_index"], event["type"]) for event in dashboard.events(run_id)]
 
 
-# --- the five scenario chips are real requests -----------------------------------------------------------------
+# --- the six scenario chips are real requests ------------------------------------------------------------------
 
-def test_scenario_list_is_five_real_requests():
+def test_scenario_list_is_six_real_requests():
     listed = api.list_scenarios()
     assert [(s["id"], s["request"], s["condition"], s["expected_status"]) for s in listed] == [
         ("verified", "pip install pypdf==6.19.0", None, "VERIFIED"),
+        ("verified_again", "pip install pypdf==6.19.0", None, "VERIFIED"),
         ("known_vulnerable", "pip install pypdf==5.1.0", None, "REJECTED"),
-        ("denylisted", "pip install requests-security==2.31.0", None, "BLOCK"),
+        ("not_on_allowlist", "pip install left-pad==1.0", None, "BLOCK"),
         ("tampered_wheel", "pip install pypdf==6.19.0", "tampered_wheel", "REJECTED"),
         ("network_off", "pip install pypdf==6.19.0", "network_off", "UNRESOLVED"),
     ]
     assert all("source_code" not in scenario for scenario in listed)
+    # What a chip shows comes from this list: a label, a sentence, and the request it sends.
+    assert all(s["display_name"] and s["description"] and s["package"] and s["version"] for s in listed)
+    assert [s["display_name"][:2] for s in listed] == ["1.", "2.", "3.", "4.", "5.", "6."]
+
+
+def test_every_scenario_gives_the_verdict_its_chip_names(dashboard):
+    """The six chips in order, each through `run_verification`: (status, stage, rule, cache_hit)."""
+    seen = [dashboard.run(scenario["id"])[1] for scenario in api.SCENARIOS]
+    assert [(v["status"], v["stage"], v["rule"], v["cache_hit"]) for v in seen] == [
+        ("VERIFIED", "verdict", "ALL_CHECKS_PASSED", False),
+        ("VERIFIED", "verdict", "ALL_CHECKS_PASSED", True),
+        ("REJECTED", "advisories", "KNOWN_VULNERABILITY", False),
+        ("BLOCK", "gate", "NOT_ON_ALLOWLIST", False),
+        ("REJECTED", "artifact", "HASH_MISMATCH", False),
+        ("UNRESOLVED", "artifact", "REGISTRY_UNAVAILABLE", False),
+    ]
+    assert [v["status"] for v in seen] == [scenario["expected_status"] for scenario in api.SCENARIOS]
+
+
+def test_the_again_chip_is_the_same_request_and_hits_the_cache_only_when_an_analysis_is_stored(dashboard):
+    first, again = SCENARIOS["verified"], SCENARIOS["verified_again"]
+    assert (again["package"], again["version"], again["condition"]) == (first["package"], first["version"], first["condition"])
+    # Clicked first, on an empty cache, it is an ordinary miss: nothing makes it a hit.
+    run_id, verdict = dashboard.run("verified_again")
+    assert verdict["status"] == "VERIFIED" and verdict["cache_hit"] is False
+    assert dashboard.payload(run_id, "cache_result")["result"] == "MISS"
+    run_id, verdict = dashboard.run("verified_again")
+    assert verdict["cache_hit"] is True and dashboard.payload(run_id, "cache_result")["result"] == "HIT"
+
+
+def test_left_pad_is_blocked_as_not_on_the_allowlist_before_any_download(dashboard):
+    run_id, verdict = dashboard.run("not_on_allowlist")
+    assert outcome(verdict) == ("BLOCK", "gate", "NOT_ON_ALLOWLIST")
+    assert dashboard.index.calls == [] and not dashboard.quarantine.exists()
+    assert shape(dashboard, run_id) == [(0, "state_change"), (1, "requirement_gate_evaluated"), (1, "verdict_computed"), (1, "state_change")]
+    gate = dashboard.payload(run_id, "requirement_gate_evaluated")
+    assert (gate["result"], gate["matched_rule"]) == ("BLOCK", "NOT_ON_ALLOWLIST") and "left-pad" in gate["reason"]
+    assert api.get_proof(run_id)["request"] == "pip install left-pad==1.0"
 
 
 def test_pypdf_6_19_0_is_verified_for_the_shipped_project_and_policy(dashboard):
@@ -141,7 +184,7 @@ def test_pypdf_5_1_0_is_rejected_by_osv_with_the_recorded_advisory_ids(dashboard
 
 
 def test_denylisted_name_is_blocked_before_any_download(dashboard):
-    run_id, verdict = dashboard.run("denylisted")
+    run_id, verdict = dashboard.run(**DENYLISTED)
     assert outcome(verdict) == ("BLOCK", "gate", "DENYLIST")
     assert dashboard.index.calls == [] and not dashboard.quarantine.exists()
     assert shape(dashboard, run_id) == [(0, "state_change"), (1, "requirement_gate_evaluated"), (1, "verdict_computed"), (1, "state_change")]
@@ -202,7 +245,7 @@ def test_what_the_pipeline_is_given_under_each_condition(dashboard, monkeypatch)
     monkeypatch.setattr(api, "verify_request", recording)
     monkeypatch.setattr(api, "LIVE_ADVISORIES", True)
     monkeypatch.setattr(api, "ADVISORY_CACHE_DIR", dashboard.world.tmp_path / "no-advisories")
-    for scenario in ("denylisted", "network_off", "tampered_wheel"):
+    for scenario in ("not_on_allowlist", "network_off", "tampered_wheel"):
         dashboard.run(scenario)
     plain, offline, tampered = (options for _, _, options in seen)
     assert all(project_dir == api.PROJECT_DIR for project_dir, _, _ in seen)
@@ -459,8 +502,8 @@ def test_metrics_come_from_the_verdict_log(dashboard, client):
     empty = client.get("/api/cavr/metrics").json()
     assert empty == {"verdicts": 0, "cache_hits": 0, "cache_hit_rate": None, "fast_gate_ms_p50": None, "fast_gate_ms_p95": None,
                      "by_status": {}, "recent": []}
-    verdicts = [dashboard.run("verified")[1], dashboard.run("verified")[1], dashboard.run("denylisted")[1],
-                dashboard.run(package="left-pad", version="1.0")[1]]
+    verdicts = [dashboard.run("verified")[1], dashboard.run("verified")[1], dashboard.run(**DENYLISTED)[1],
+                dashboard.run("not_on_allowlist")[1]]
     dashboard.run("network_off")      # demo runs: not counted
     dashboard.run("tampered_wheel")
     report = client.get("/api/cavr/metrics").json()
@@ -479,7 +522,7 @@ def test_cache_endpoint_lists_the_real_verdict_cache_and_no_seed_rows(dashboard,
     assert (row["name"], row["version"], row["sha256"], row["status"], row["source"]) == (
         "pypdf", "6.19.0", PYPDF_SHA256, "VERIFIED", "CAVR verdict cache")
     assert row["key_fields"] == verdict["packages"][0]["key_fields"] and isinstance(row["capabilities"], str)
-    dashboard.run("denylisted")                                  # a BLOCK analyses nothing, so it adds no row
+    dashboard.run("not_on_allowlist")                            # a BLOCK analyses nothing, so it adds no row
     assert len(client.get("/api/cavr/cache").json()) == 1
     with dashboard.store.connect() as connection:               # a row that was edited is not shown
         connection.execute("UPDATE verdict_cache SET status='REJECTED'")
@@ -520,3 +563,18 @@ def test_api_imports_none_of_the_fixture_or_simulation_modules():
     assert not imported & gone and "backend.cavr.pipeline" in imported
     source = Path(api.__file__).read_text(encoding="utf-8")
     assert "source_code" not in source and "sha256(" not in source
+
+
+def test_the_running_app_loads_none_of_the_fixture_or_simulation_modules(tmp_path):
+    """Everything the page can call is a route of `backend.main:app`. A module that importing the app
+    does not load cannot be reached from any route, whatever the route imports indirectly."""
+    code = ("import json, sys, backend.main\n"
+            "print(json.dumps(sorted(name for name in sys.modules if name.startswith('backend.cavr'))))")
+    done = subprocess.run([sys.executable, "-c", code], cwd=REPO, env={**os.environ, "ASENT_DATA": str(tmp_path / "data")},
+                          capture_output=True, text=True, timeout=120)
+    assert done.returncode == 0, done.stderr
+    loaded = set(json.loads(done.stdout.strip().splitlines()[-1]))
+    assert {"backend.cavr.api", "backend.cavr.pipeline"} <= loaded
+    assert not loaded & {"backend.cavr.fixtures", "backend.cavr.fixtures.scenarios", "backend.cavr.resolver",
+                         "backend.cavr.reverifier", "backend.cavr.reconstructor", "backend.cavr.triggers",
+                         "backend.cavr.repair_engine", "backend.cavr.counterfactual"}

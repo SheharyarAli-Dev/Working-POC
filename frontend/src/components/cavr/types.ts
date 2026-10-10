@@ -1,6 +1,9 @@
 export interface CavrRunState {
   runId: string | null;
   stepIndex: number;
+  // The request as the backend reports it for this run; null before the first run.
+  request: string | null;
+  // Package, version and id of the scenario that was run, copied from GET /api/cavr/scenarios.
   package: string;
   version: string;
   scenarioKey: string;

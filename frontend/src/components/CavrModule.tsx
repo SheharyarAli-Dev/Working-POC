@@ -29,6 +29,18 @@ interface TrustedPackage {
   added_at: string;
 }
 
+// One chip, as GET /api/cavr/scenarios describes it. The page holds no package name of its own.
+interface Scenario {
+  id: string;
+  display_name: string;
+  description: string;
+  request: string;
+  package: string;
+  version: string;
+  condition: string | null;
+  expected_status: string;
+}
+
 export const CavrModule: React.FC = () => {
   // Dialog visibility states
   const [showCacheDialog, setShowCacheDialog] = useState(false);
@@ -55,18 +67,19 @@ export const CavrModule: React.FC = () => {
   const [timelineStep, setTimelineStep] = useState<number>(0);
   const [expandedTimelineStep, setExpandedTimelineStep] = useState<number | null>(null);
   const [isRunning, setIsRunning] = useState(false);
-  const [currentScenario, setCurrentScenario] = useState<string>('trigger_dependent');
-
-  // Custom package input
-  const [customPackageInput, setCustomPackageInput] = useState('');
+  // The scenario chips, read from the backend. `null` until it has answered.
+  const [scenarios, setScenarios] = useState<Scenario[] | null>(null);
+  const [scenariosFailed, setScenariosFailed] = useState(false);
+  const [currentScenario, setCurrentScenario] = useState<string | null>(null);
 
   // Comprehensive run state
   const [runState, setRunState] = useState<CavrRunState>({
     runId: null,
     stepIndex: 0,
-    package: 'dormant-exfil',
-    version: '1.2.0',
-    scenarioKey: 'trigger_dependent',
+    request: null,
+    package: '',
+    version: '',
+    scenarioKey: '',
     explainSimply: false,
     verdict: null,
     policyState: null,
@@ -107,8 +120,21 @@ export const CavrModule: React.FC = () => {
     }
   };
 
+  const fetchScenarios = async () => {
+    try {
+      const res = await fetch('/api/cavr/scenarios');
+      if (!res.ok) throw new Error(String(res.status));
+      setScenarios(await res.json());
+      setScenariosFailed(false);
+    } catch (err) {
+      console.error('Failed to load scenarios:', err);
+      setScenariosFailed(true);
+    }
+  };
+
   useEffect(() => {
     fetchCache();
+    fetchScenarios();
   }, []);
 
   useEffect(() => {
@@ -130,11 +156,11 @@ export const CavrModule: React.FC = () => {
     }, 2500);
   };
 
-  // Launch Scenario
-  const runScenario = async (scenarioKey: string, customPkg?: string) => {
+  // Run one chip: the backend builds the request from the scenario id and runs the real pipeline.
+  const runScenario = async (scenario: Scenario) => {
     if (isRunning) return;
     setIsRunning(true);
-    setCurrentScenario(scenarioKey);
+    setCurrentScenario(scenario.id);
     setTimelineStep(0);
     setExpandedTimelineStep(null);
     setActiveWorkflowBox('none');
@@ -143,37 +169,20 @@ export const CavrModule: React.FC = () => {
     setActiveEvidenceTab('overview');
     setNewTabAlerts({});
 
-    let pkg = customPkg || 'dormant-exfil';
-    let ver = '1.2.0';
-
-    if (scenarioKey === 'approved_benign') {
-      pkg = 'pdf-clean-extractor';
-      ver = '1.0.0';
-    } else if (scenarioKey === 'known_vulnerable') {
-      pkg = 'reportlab-legacy';
-      ver = '3.5.21';
-    } else if (scenarioKey === 'trigger_dependent') {
-      pkg = 'dormant-exfil';
-      ver = '1.2.0';
-    } else if (scenarioKey === 'transitive_risk') {
-      pkg = 'invoice-utils';
-      ver = '2.0.1';
-    } else if (scenarioKey === 'typosquat') {
-      pkg = 'requests-security';
-      ver = '2.31.0';
-    }
-
     setRunState(prev => ({
       ...prev,
-      package: pkg,
-      version: ver,
-      scenarioKey: scenarioKey,
+      runId: null,
+      stepIndex: 0,
+      request: scenario.request,
+      package: scenario.package,
+      version: scenario.version,
+      scenarioKey: scenario.id,
       explainSimply: explainSimply,
       verdict: null,
       policyState: null,
       honestyWording: 'Evaluating...',
-      currentStateMessage: `Interception initiated for ${pkg}==${ver}...`,
-      currentPlainMessage: `Started checking ${pkg}. ASENT is intercepting it now.`,
+      currentStateMessage: `Sending '${scenario.request}' to the pipeline...`,
+      currentPlainMessage: `Asking ASENT to check '${scenario.request}'.`,
       gateResult: null,
       resolution: null,
       cacheResult: null,
@@ -192,21 +201,14 @@ export const CavrModule: React.FC = () => {
     }));
 
     try {
-      const res = await fetch('/api/cavr/intercept', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          package: pkg,
-          version: ver,
-          scenario_type: scenarioKey
-        })
-      });
+      const res = await fetch(`/api/cavr/run?scenario=${encodeURIComponent(scenario.id)}`, { method: 'POST' });
 
-      if (!res.ok) throw new Error('Interception failed');
+      if (!res.ok) throw new Error(`The run could not be started (HTTP ${res.status})`);
       const data = await res.json();
       const currentRunId = data.run_id;
 
-      setRunState(prev => ({ ...prev, runId: currentRunId }));
+      // The request shown is the one the backend says it is verifying.
+      setRunState(prev => ({ ...prev, runId: currentRunId, request: data.request }));
 
       // Connect to SSE stream
       const eventSource = new EventSource(data.stream_url);
@@ -226,6 +228,11 @@ export const CavrModule: React.FC = () => {
       };
     } catch (err: any) {
       console.error('Workflow error:', err);
+      setRunState(prev => ({
+        ...prev,
+        currentStateMessage: `No run was started: ${err?.message || err}`,
+        currentPlainMessage: 'The check could not be started, so there is no result.'
+      }));
       setIsRunning(false);
     }
   };
@@ -264,6 +271,10 @@ export const CavrModule: React.FC = () => {
           setActiveWorkflowBox('none');
           setContainerLifecycle('destroyed');
           setIsRunning(false);
+        } else if (payload.state === 'DECIDED') {
+          // The last event of a run. The cache box shows what is stored now.
+          setIsRunning(false);
+          fetchCache();
         }
 
         if (payload.verdict) {
@@ -580,54 +591,27 @@ export const CavrModule: React.FC = () => {
             </p>
           </div>
 
-          {/* 5 Seeded Scenario Selector Chips */}
+          {/* Scenario chips: one per entry of GET /api/cavr/scenarios, each a real request */}
           <div className="scenario-chips-wrapper">
-            <span className="scenario-chips-label">Seeded Scenarios:</span>
+            <span className="scenario-chips-label">Real requests (live pipeline):</span>
             <div className="scenario-chips-group">
-              <button 
-                className={`scenario-chip ${currentScenario === 'approved_benign' ? 'active' : ''}`}
-                onClick={() => runScenario('approved_benign')}
-                disabled={isRunning}
-              >
-                <CheckCircle2 size={12} className="text-emerald-400" />
-                <span>1. Approved Benign</span>
-              </button>
-
-              <button 
-                className={`scenario-chip ${currentScenario === 'known_vulnerable' ? 'active' : ''}`}
-                onClick={() => runScenario('known_vulnerable')}
-                disabled={isRunning}
-              >
-                <AlertTriangle size={12} className="text-amber-400" />
-                <span>2. Known Vulnerable (OSV)</span>
-              </button>
-
-              <button 
-                className={`scenario-chip ${currentScenario === 'trigger_dependent' ? 'active' : ''}`}
-                onClick={() => runScenario('trigger_dependent')}
-                disabled={isRunning}
-              >
-                <Sparkles size={12} className="text-cyan-400" />
-                <span>3. Trigger-Dependent (Dormant)</span>
-              </button>
-
-              <button 
-                className={`scenario-chip ${currentScenario === 'transitive_risk' ? 'active' : ''}`}
-                onClick={() => runScenario('transitive_risk')}
-                disabled={isRunning}
-              >
-                <Layers size={12} className="text-purple-400" />
-                <span>4. Transitive Risk</span>
-              </button>
-
-              <button 
-                className={`scenario-chip ${currentScenario === 'typosquat' ? 'active' : ''}`}
-                onClick={() => runScenario('typosquat')}
-                disabled={isRunning}
-              >
-                <XCircle size={12} className="text-red-400" />
-                <span>5. Typosquat / Slopsquat</span>
-              </button>
+              {scenarios === null && (
+                <span className="scenario-chips-label">
+                  {scenariosFailed ? 'The scenario list could not be loaded from the backend.' : 'Loading scenarios...'}
+                </span>
+              )}
+              {(scenarios || []).map((scenario) => (
+                <button
+                  key={scenario.id}
+                  className={`scenario-chip ${currentScenario === scenario.id ? 'active' : ''}`}
+                  onClick={() => runScenario(scenario)}
+                  disabled={isRunning}
+                  title={`${scenario.request}. Expected: ${scenario.expected_status}. ${scenario.description}`}
+                >
+                  <Play size={12} />
+                  <span>{scenario.display_name}</span>
+                </button>
+              ))}
             </div>
           </div>
         </div>
@@ -637,7 +621,7 @@ export const CavrModule: React.FC = () => {
           <div className="prompt-meta-col">
             <span className="prompt-label">INTERCEPTED TARGET</span>
             <code className="prompt-code">
-              pip install {runState.package}=={runState.version}
+              {runState.request ?? '—'}
             </code>
           </div>
 
@@ -1040,18 +1024,6 @@ export const CavrModule: React.FC = () => {
                     <span className="text-gray-400">Unmatched dependency name</span>
                   )}
                 </div>
-              </div>
-            </div>
-
-            {/* Trigger Priority Formula with Worked Example */}
-            <div className="dialog-interactive-card">
-              <h6>Trigger Priority Formula Explained</h6>
-              <code>priority = (sink_risk × reachability_confidence × novelty) / estimated_run_cost</code>
-              <div className="worked-example-box">
-                <strong>Worked Example:</strong> In <code>dormant-exfil</code>, <code>os.getenv("AWS_SECRET_ACCESS_KEY")</code> reaches <code>socket.connect</code>:
-                <p className="mt-1 font-mono text-cyan-300">
-                  (Sink Risk: 9.5 × Confidence: 0.95 × Novelty: 1.0) / Cost: 1.2s = <strong>7.52 Priority Score</strong> (Rank #1)
-                </p>
               </div>
             </div>
 

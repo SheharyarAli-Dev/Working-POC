@@ -73,23 +73,28 @@ RUN_CERTIFICATES: dict[str, dict] = {}
 ALIASES = {"VERIFIED": "ALLOW", "REJECTED": "BLOCK", "BLOCK": "BLOCK", "UNRESOLVED": "NEEDS_REVIEW"}
 NOT_RUN = "not run: the fast gate does not execute package code (deep analysis is M2)"
 
-# The dashboard's scenario chips. Each is a real request; `expected_status` says what the chip
-# is meant to show and is never used to compute anything.
+# The dashboard's scenario chips, in the order the page shows them. Each one is a real request;
+# the page reads this list and sends the chosen id to POST /api/cavr/run. `expected_status` and
+# `description` say what the chip is meant to show and are never used to compute anything.
 SCENARIOS = [
     {"id": "verified", "display_name": "1. pypdf 6.19.0", "package": "pypdf", "version": "6.19.0", "condition": None,
      "expected_status": "VERIFIED",
      "description": "The real wheel from PyPI: hash, dependency tree, OSV, contract and sink reachability all pass."},
-    {"id": "known_vulnerable", "display_name": "2. pypdf 5.1.0 (OSV)", "package": "pypdf", "version": "5.1.0", "condition": None,
+    {"id": "verified_again", "display_name": "2. pypdf 6.19.0 again", "package": "pypdf", "version": "6.19.0",
+     "condition": None, "expected_status": "VERIFIED",
+     "description": "The same request a second time. A cache hit when chip 1 has run before for the same file, tree, "
+                    "contract, policy and analyzer; the wheel is still downloaded and hashed, and OSV is still asked."},
+    {"id": "known_vulnerable", "display_name": "3. pypdf 5.1.0 (OSV)", "package": "pypdf", "version": "5.1.0", "condition": None,
      "expected_status": "REJECTED",
      "description": "Permitted by the policy, but OSV lists advisories that affect this version."},
-    {"id": "denylisted", "display_name": "3. Denylisted name", "package": "requests-security", "version": "2.31.0",
+    {"id": "not_on_allowlist", "display_name": "4. left-pad 1.0 (not allowed)", "package": "left-pad", "version": "1.0",
      "condition": None, "expected_status": "BLOCK",
-     "description": "On the project denylist: blocked by the requirement gate before anything is downloaded."},
-    {"id": "tampered_wheel", "display_name": "4. Tampered wheel", "package": "pypdf", "version": "6.19.0",
+     "description": "Not on the project allowlist: blocked by the requirement gate before anything is downloaded."},
+    {"id": "tampered_wheel", "display_name": "5. Tampered wheel", "package": "pypdf", "version": "6.19.0",
      "condition": "tampered_wheel", "expected_status": "REJECTED",
      "description": "One bit of the downloaded wheel is flipped on the way: its SHA-256 no longer matches the registry."},
-    {"id": "network_off", "display_name": "5. Network off", "package": "pypdf", "version": "6.19.0", "condition": "network_off",
-     "expected_status": "UNRESOLVED",
+    {"id": "network_off", "display_name": "6. Network unavailable", "package": "pypdf", "version": "6.19.0",
+     "condition": "network_off", "expected_status": "UNRESOLVED",
      "description": "PyPI cannot be reached: nothing can be established, so nothing is verified."},
 ]
 CONDITIONS = {
