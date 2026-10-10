@@ -53,7 +53,8 @@ jobs:
         run: |
           sudo systemctl stop docker.socket docker.service containerd.service || true
           sudo mv /usr/bin/docker /usr/bin/docker.disabled || true
-          if command -v docker; then echo "docker still on PATH"; exit 1; fi
+          sudo mv /usr/bin/podman /usr/bin/podman.disabled || true
+          if command -v docker || command -v podman; then echo "container engine still on PATH"; exit 1; fi
           echo "Docker disabled for tests"
       - name: Run module tests
         run: |
@@ -81,7 +82,8 @@ jobs:
         run: |
           sudo systemctl stop docker.socket docker.service containerd.service || true
           sudo mv /usr/bin/docker /usr/bin/docker.disabled || true
-          if command -v docker; then echo "docker still on PATH"; exit 1; fi
+          sudo mv /usr/bin/podman /usr/bin/podman.disabled || true
+          if command -v docker || command -v podman; then echo "container engine still on PATH"; exit 1; fi
           echo "Docker disabled for tests"
       - name: Run full test suite
         run: |
