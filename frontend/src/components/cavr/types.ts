@@ -6,7 +6,8 @@ export interface CavrRunState {
   scenarioKey: string;
   explainSimply: boolean;
   verdict: 'ALLOW' | 'BLOCK' | 'NEEDS_REVIEW' | null;
-  policyState: 'VERIFIED' | 'RESTRICTED' | 'REJECTED' | 'UNRESOLVED' | null;
+  // The pipeline's status. BLOCK is the requirement gate's refusal (nothing was downloaded).
+  policyState: 'VERIFIED' | 'RESTRICTED' | 'REJECTED' | 'UNRESOLVED' | 'BLOCK' | null;
   honestyWording: string;
   currentStateMessage: string;
   currentPlainMessage: string;
@@ -33,5 +34,11 @@ export interface CavrRunState {
     secrets_touched: number;
   };
   honeytokenFlashing: boolean;
+  // The answer of /api/cavr/proof/{run_id}. `proofData.cavr_verdict` is the whole pipeline verdict:
+  // status, stage, rule, reason, fast_gate_ms, cache_hit, escalated, escalation, packages[].evidence.
   proofData: any | null;
 }
+
+// Text shown by a tab whose stage does not exist on the fast-gate path.
+export const NOT_RUN_ON_FAST_GATE =
+  'Not run. The fast gate checks the artifact without executing package code; this stage belongs to deep analysis (M2).';

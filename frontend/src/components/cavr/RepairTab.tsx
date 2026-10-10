@@ -1,5 +1,5 @@
 import React from 'react';
-import { CavrRunState } from './types';
+import { CavrRunState, NOT_RUN_ON_FAST_GATE } from './types';
 import { Wrench, CheckCircle2, XCircle, ThumbsUp, ThumbsDown, Lock, ArrowRight, ShieldCheck } from 'lucide-react';
 
 interface RepairTabProps {
@@ -9,22 +9,19 @@ interface RepairTabProps {
 }
 
 export const RepairTab: React.FC<RepairTabProps> = ({ state, onApproveReject, decisionState }) => {
-  const repair = state.repair || {
-    ranked_candidates: [],
-    chosen_candidate: null,
-    dependency_diff: { before: `- ${state.package}==${state.version}`, after: "+ pypdf==4.2.0" }
-  };
-
-  const reverification = state.reverification || {
-    all_passed: true,
-    obligations: [
-      { id: "OBL-1", obligation: "Fresh Sandbox Execution", passed: true },
-      { id: "OBL-2", obligation: "Sample Project Unit & Contract Tests", passed: true },
-      { id: "OBL-3", obligation: "Static AST & Sink Containment (P4-P6)", passed: true },
-      { id: "OBL-4", obligation: "Counterfactual Behavior Sandbox Tests (P7-P8)", passed: true },
-      { id: "OBL-5", obligation: "Offline OSV Vulnerability Audit", passed: true }
-    ]
-  };
+  if (!state.repair) {
+    // No invented substitute and no invented "all obligations passed" list.
+    return (
+      <div className="evidence-tab-pane repair-pane">
+        <div className="reverification-card">
+          <h6>Repair and re-verification</h6>
+          <p>{NOT_RUN_ON_FAST_GATE}</p>
+        </div>
+      </div>
+    );
+  }
+  const repair = state.repair;
+  const reverification = state.reverification || { all_passed: false, obligations: [] };
 
   const candidates = repair.ranked_candidates || [];
   const chosen = repair.chosen_candidate || candidates[0];

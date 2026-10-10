@@ -2143,3 +2143,133 @@ Run on 2026-10-10:
    The capture marks the request as not fully captured, so the verdict is UNRESOLVED and pip is not run. Even on a VERIFIED verdict the user's arguments are not given to pip; it gets the fixed option list.
 3. **What does the wrapper do when the project has no policy file?**
    UNRESOLVED `POLICY_MISSING`, exit code 2, before any download. It does not borrow another policy.
+
+## Step 13 — dashboard API uses the pipeline (2026-10-10)
+
+Plan commit 13, `refactor(cavr): dashboard API uses the pipeline`.
+Review: see the "Steps 12-14 — batch review" section.
+**Not complete as the plan words it:** the five scenario chips, the timeline labels and the proof drawer are in
+`frontend/src/components/CavrModule.tsx`, which is outside the allowed scope and was not edited. See "Known limitations".
+
+### Ch 6 Implementation
+
+| File | Function / constant | What it does |
+|---|---|---|
+| `backend/cavr/api.py` (835 -> 585 lines) | `intercept_package_endpoint`, `launch_cavr_pipeline` | `POST /api/cavr/intercept` makes a run id and starts `run_verification` in the background. No source string is hashed and nothing is written to a per-run quarantine file any more. |
+| | `pip_request(body)` | The request to verify: the given pip command, or `["pip", "install", "<package>==<version>"]` with package and version in one token. |
+| | `verify_dashboard_request(request, condition)` | Calls `pipeline.verify_request` for `PROJECT_DIR` (the sample project) with the policy `project_policy.json`; picks the transport for a demo condition; a raised exception becomes UNRESOLVED `INTERNAL_ERROR`. |
+| | `run_verification(run_id, body)` | Publishes the "request received" event, runs the pipeline in a worker thread, publishes `verdict_events`, builds the certificate and the proof, publishes the final event, marks the run finished. |
+| | `verdict_events(verdict, condition)` | One event per stage that ran: gate (step 1), artifact / tree / advisories (2), cache lookup (3), contract / scan / sinks (4), then the verdict. Every value is copied from the verdict. A stage that did not run has no event. |
+| | `TamperingTransport`, `OfflineTransport`, `CONDITIONS`, `demo_condition` | The two demo conditions: one bit of every file from `files.pythonhosted.org` flipped; every request failing. Only the exact names `tampered_wheel` and `network_off` turn one on. |
+| | `SCENARIOS`, `list_scenarios` | The five chips as data: package, version, condition, `expected_status` (documentation only). |
+| | `cavr_stream` | Replays the run's events from the first one and ends after the last; a late client misses nothing. Queues are gone. |
+| | `get_metrics` | `pipeline.metrics(storage)` plus the last 10 rows of the verdict log. The in-memory list and the constant `repair_success_rate` are gone. |
+| | `get_evidence_records` | New: the real records of a run's hash chain. |
+| | `ALIASES`, `honesty_wording` | VERIFIED -> ALLOW, REJECTED and BLOCK -> BLOCK, UNRESOLVED -> NEEDS_REVIEW (the old dashboard's three words); `policy_state` is the pipeline status itself. |
+| `backend/cavr/assurance.py` (205 -> 251 lines) | `certificate_for_verdict` (replaces `generate_certificate`) | The certificate copies the verdict: digests, per-check rule or `NOT_REACHED`, the contract rows, the metric fields, the demo condition. The old function wrote "MET 98%", "honeytoken CLEAN" and "EXFILTRATION_OBSERVED" from the verdict word alone. |
+| | `generate_printable_html_certificate` | Shows the new fields; every value goes through `html.escape`. |
+| `backend/cavr/pipeline.py` | `verify_request` | `project.skipped_directories` added to every verdict (deferred item). |
+| `backend/cavr/sample_project/invoice_extractor/reader.py`, `requirements.txt` | | The dashboard's project now creates and uses every `PdfReader` inside `apply_configuration(jbig2dec_binary=None)` and asks for `pypdf==6.19.0`. |
+| `backend/cavr/project_policy.json` | `approved_requirements` | `pypdf==4.2.0` -> `pypdf>=5,<7`, so both scenario versions pass the gate and OSV decides about 5.1.0. |
+| `frontend/src/components/cavr/` (11 files) | `types.ts`, `OverviewTab`, `RequirementsTab`, `CapabilityContractTab`, `TriggersTab`, `CounterfactualTab`, `CausalGraphTab`, `RepairTab`, `AssuranceTab`, `MetricsTab`, `StageDetailPanel` | Read the new evidence (`proofData.cavr_verdict`, `resolution`, `actionData`, `certificate`) and show `fast_gate_ms`, `cache_hit`, `escalated`, `escalation`. Every built-in sample value was removed: a tab without data says so. |
+| Tests | `tests/test_cavr_api.py` (new, 28 functions, 48 cases), one live test in `tests/test_cavr_live.py` | |
+
+No longer imported by `api.py`: `fixtures/scenarios.py`, `resolver.py`, `reverifier.py`, `reconstructor.py`, `triggers.py`,
+`counterfactual.py`, `normalizer.py`, `causal_graph.py`, `repair_engine.py`, `check_requirement_gate`. The files are still
+in the repository.
+
+Key algorithm (`run_verification`): request event -> `verify_request` in a thread -> for each stage present in the verdict,
+one event -> certificate with the chain hash so far -> proof -> final event -> run marked finished, which ends the stream.
+
+### Design decisions
+
+| Decision | Alternatives considered | Why |
+|---|---|---|
+| The API computes nothing; events are projections of the verdict | Keep per-phase logic in `api.py` | One verdict path. What the dashboard shows cannot differ from what the pip wrapper or the orchestrator would get. |
+| Demo conditions change the transport only | Scenario-specific code paths; fixture wheels | The pipeline runs unchanged. A condition can only make a verdict worse, and it is written into every event, the proof and the certificate. |
+| The dashboard project is `backend/cavr/sample_project`, with no lockfile | `demo_project/InvoiceHub` | InvoiceHub's lockfile holds only pypdf 6.19.0, so 5.1.0 would be a gate BLOCK and never reach OSV; that directory is also outside this branch. The verdict states `lockfile.present: false`. |
+| Step index of an event = the last stage that ran (0-4) | Keep the old 8 steps | The old steps 5-7 (sandbox, causal graph, reconstruction) do not exist on this path. With an index above 4 the timeline would mark a sandbox run as done. |
+| Stream replays stored events and then ends | Per-client queues | Events published before the browser connects were lost with queues. |
+| Old three-word alias kept, `policy_state` = pipeline status | New field names only | `CavrModule.tsx` reads `verdict` and `policy_state` and cannot be changed here. |
+| Tabs show "not run" instead of sample data | Leave the fallbacks | The fallbacks showed a "CLEAN" run, a certificate with the SHA-256 of an empty string, fixed chain hashes and "all obligations passed" for runs that never happened. |
+
+### Requirements covered
+
+No `FR-CAVR-NN` identifiers exist in this repository; IDs are from `RequirementsTab.tsx` (Maryam to confirm).
+
+| ID | Title | What this step covers | Acceptance check |
+|---|---|---|---|
+| FR-1 | Intercept Before Execution | The dashboard request goes through the same capture and pipeline | `test_intercept_then_stream_then_proof_over_http` |
+| FR-2 | Requirement Gate Enforcement | BLOCK shown as BLOCK, before any download | `test_denylisted_name_is_blocked_before_any_download` |
+| FR-3 | Capability Contract Inference | The real contract of the sample project on the dashboard | `test_pypdf_6_19_0_is_verified_for_the_shipped_project_and_policy` |
+| FR-6 | Fail-Closed Security Policy | Missing policy, network off, pipeline fault -> UNRESOLVED on the dashboard | `test_missing_or_broken_policy_is_shown_as_unresolved_not_rejected` (2), `test_network_off_is_unresolved_and_the_real_transport_is_never_asked`, `test_a_pipeline_fault_is_an_unresolved_run_that_still_finishes` |
+| FR-10 | Tamper-Evident Evidence Ledger | Every event in the chain; certificate copies the verdict | `test_every_event_is_in_the_hash_chain_and_tampering_is_detected`, `test_certificate_copies_the_verdict_and_invents_nothing` |
+| none listed | Supervisor report: cache hit rate, p50 / p95 `fast_gate_ms` | `/api/cavr/metrics` from the verdict log | `test_metrics_come_from_the_verdict_log` |
+
+### Ch 7 Test cases
+
+Run on 2026-10-10:
+
+- `.venv/bin/python -m pytest tests/test_cavr_*.py -q` -> 1149 passed, 7 skipped (1101 + 48 new; the 7 skips are the live tests).
+- `.venv/bin/python -m pytest -q` -> 1207 passed, 7 failed, 7 skipped (the same 7 baseline tests).
+- `CAVR_LIVE=1 … tests/test_cavr_live.py -k dashboard` -> 1 passed: the five scenarios against the real PyPI and OSV, including the real `pypdf-5.1.0-py3-none-any.whl` (HASH_MATCH, then REJECTED with `GHSA-7hfw-26vp-jp8m` among the advisories).
+- Frontend: `npx tsc -b` exit 0; `npx vite build` into a scratch directory succeeded. **The pages were not opened in a browser.**
+- Fault injection, one change at a time, files restored: 17 in `api.py`, 3 in `assurance.py` (condition not applied, network-off keeping the real transport or asking OSV live, UNRESOLVED shown as ALLOW, BLOCK shown as REJECTED, proof hash always matching, cache always HIT, package and version joined by a space, pipeline fault not caught, stream not replaying, request not redacted, any scenario name acting as a condition, tampering the registry answer too, old runs kept, event not chained, a docker command reported, escalation dropped, a check reported as passed when not reached, HTML not escaped, certificate verdict constant). 19 made a test fail at once; the last one was caught after two assertions were added.
+
+| Test ID | Purpose | Input | Expected | Result |
+|---|---|---|---|---|
+| `test_scenario_list_is_five_real_requests` | Chips as data | `list_scenarios()` | five requests, no `source_code` | pass |
+| `test_pypdf_6_19_0_is_verified_for_the_shipped_project_and_policy` | Scenario 1 | pypdf 6.19.0, shipped sample project and policy | VERIFIED; SHA-256 `7e5d6e73…8d14` = registry; 4 call sites in `invoice_extractor/reader.py`; sinks 774 and 804 GUARD_DISABLED; events at steps 0,1,2,3,4,4,4; sandbox fields `not run` | pass |
+| `test_pypdf_5_1_0_is_rejected_by_osv_with_the_recorded_advisory_ids` | Scenario 2 | stand-in wheel (synthetic) + the 97 recorded OSV advisories (real) | gate PERMITTED; REJECTED `KNOWN_VULNERABILITY`; 97 ids incl. `GHSA-7hfw-26vp-jp8m` | pass |
+| `test_denylisted_name_is_blocked_before_any_download` | Scenario 3 | `requests-security==2.31.0` | BLOCK `DENYLIST`; index never asked; certificate checks `NOT_REACHED` | pass |
+| `test_tampered_wheel_is_rejected_on_the_hash_of_the_bytes_that_arrived` | Scenario 4 | condition `tampered_wheel` | REJECTED `HASH_MISMATCH`; the kept file differs from the real wheel in exactly one bit; condition in every event | pass |
+| `test_network_off_is_unresolved_and_the_real_transport_is_never_asked`, `test_what_the_pipeline_is_given_under_each_condition` | Scenario 5 | condition `network_off` | UNRESOLVED `REGISTRY_UNAVAILABLE`; zero calls to the index; `live_advisories` false | pass |
+| `test_expected_status_of_a_scenario_is_not_used`, `test_no_scenario_type_turns_a_block_into_anything_else` (6), `test_only_the_two_named_conditions_change_the_transport` (5), `test_tampering_transport_flips_one_bit_of_files_only` | A scenario cannot improve a verdict | chip "verified" with a `SYNTH-` advisory; six scenario names on a denylisted package | REJECTED; always BLOCK; conditions only for the two exact names | pass |
+| `test_second_run_is_a_cache_hit`, `test_reader_outside_the_guard_is_unresolved_with_the_escalation` | Metric fields | two runs; project copy with an unguarded reader | `cache_hit` true, cache event HIT; UNRESOLVED, `escalated` true, `escalation` text in event and certificate | pass |
+| `test_package_and_version_are_one_requirement_token`, `test_requests_that_are_not_a_permitted_pinned_install` (8), `test_a_marker_in_the_version_field_does_not_change_what_is_reported` | Request building | version `6.19.0 --index-url …`; empty fields; the old chips' packages; `rm -rf /` | UNRESOLVED / BLOCK; no download; proof reports `pypdf 6.19.0` | pass |
+| `test_url_passwords_are_not_in_events_proof_or_log` | Secrets | `--index-url https://alice:hunter2@…` | `hunter2` in none of events, proof, certificate, log, chain | pass |
+| `test_every_event_is_in_the_hash_chain_and_tampering_is_detected`, `test_certificate_copies_the_verdict_and_invents_nothing`, `test_certificate_of_a_verdict_without_evidence_claims_no_check` (4), `test_printable_certificate_shows_the_real_values_and_escapes_them` | Chain and certificate | a run; one record changed; empty verdicts; `<script>` in a reason | 7 records = 7 events; break at record 3; all checks `NOT_REACHED`; escaped | pass |
+| `test_intercept_then_stream_then_proof_over_http`, `test_scenario_endpoint_and_unknown_runs_over_http`, `test_metrics_come_from_the_verdict_log`, `test_old_runs_are_dropped` | HTTP | FastAPI test client | 7 events, stream ends, replay equal; 404s; hit rate 0.25, p50 / p95 from the log; oldest run dropped | pass |
+| `test_api_imports_none_of_the_fixture_or_simulation_modules` | Fixtures out of the verdict path | AST of `api.py` | none of the nine modules, no `hashlib`, no `source_code` | pass |
+| `test_live_dashboard_scenarios_are_real_requests` (`CAVR_LIVE=1`) | Real PyPI + OSV | the five scenarios | as planned (scenario 1 may become REJECTED if OSV lists 6.19.0) | pass |
+
+### Defects found and fixed
+
+| # | Found by | Finding | Outcome |
+|---|---|---|---|
+| 1 | Reading `api.py` | The "artifact hash" was the SHA-256 of a fixture source string; a trusted-package row made a run a "cache hit" and released it; a gate UNRESOLVED was shown as REJECTED; any non-ALLOW was worded as "hostile behaviors detected" | All removed with the old path |
+| 2 | Reading `assurance.generate_certificate` | Capability rows, confidences and "honeytoken / counterfactual" results were constants chosen by the verdict word | Replaced by `certificate_for_verdict` |
+| 3 | Reading the tabs | Eight tabs showed built-in sample data when they had none: a "CLEAN" baseline run, made-up metrics, a certificate with the hash of an empty string, seven fixed chain blocks, a "Tamper Demo" that printed a detection without checking anything, "all obligations passed", a substitute `pypdf==4.2.0`; `AssuranceTab` reported the chain as intact when the request failed; NFR-1 and NFR-2 were always PASS | Sample data removed; unreachable ledger is "not verified"; NFR-1 follows the sandbox data, NFR-2 is "NOT EVALUATED" |
+| 4 | Tests | `test_dashboard_call_without_a_wheel…` docstring referred to the old `api.py` | Reworded |
+| 5 | Deferred items "-> step 13" | NOT_OBSERVED chip "CLEAN" (`CounterfactualTab`), stale docker command, both routes to VERIFIED without observation in the dashboard path, version string with a marker, `skipped_directories` | Fixed or removed with the old path; `counterfactual.py` itself is unchanged but no longer called by the dashboard |
+
+### Known limitations / deferred
+
+- **`frontend/src/components/CavrModule.tsx` was not edited (outside the allowed scope).** Consequences, all visible on the dashboard:
+  the five chips still carry the old labels and send the old requests (`pdf-clean-extractor==1.0.0`, `reportlab-legacy==3.5.21`,
+  `dormant-exfil==1.2.0`, `invoice-utils==2.0.1`, `requests-security==2.31.0`), which now get real verdicts (UNRESOLVED or
+  BLOCK) and never the five planned scenarios; the timeline still names eight steps with fixed timings such as "680ms";
+  the proof drawer prints "VERIFIED MATCH" whatever `hash_comparison.matches` says and "Counterfactual Container Runs (1)"
+  for an empty list; the sandbox console panel appears after every verdict. The new scenarios are served by
+  `GET /api/cavr/scenarios` and run by `POST /api/cavr/run?scenario=<id>`. Needs Maryam's decision.
+- The frontend was type-checked and built, not looked at in a browser.
+- `/api/cavr/cache`, `/simple/…` and the three `/api/cavr/dialog/*` texts still describe the old trusted-package list and the sandbox. They are not in the verdict path. The seed hashes in `storage.SEED_PACKAGES` were not checked against PyPI.
+- The legacy modules listed above are dead code for the dashboard; removing them is a separate change.
+- Run state is in memory (last 200 runs); a restart loses streams and proofs, not the verdict log.
+- One package per run is shown in the events; a request with several packages has all of them in the proof only.
+- `storage.record_quarantine` is no longer called; wheels are kept in the pipeline's quarantine directory.
+
+### Tool disclosure (Ch 8.7)
+
+- **Generated by Claude Code:** the new `api.py`, `certificate_for_verdict`, the tab changes, the sample-project and policy changes, all tests, these notes, the commit.
+- **Reviewed / changed by Maryam:** nothing yet. Open for her: `CavrModule.tsx`; the policy entry `pypdf>=5,<7`; the sample project as the dashboard project.
+- **Verified by:** the pytest runs, the live run of the five scenarios, the 20 fault injections, `tsc` and `vite build`. No browser check.
+
+### Supervisor Q&A prep
+
+1. **Are the dashboard scenarios still fixtures?**
+   No. Each is a real request through `verify_request`. Two of them change only the network between CAVR and PyPI (one bit flipped, or no connection) and are labelled as a demo condition in every event; the verdict is what the pipeline gives in that situation.
+2. **Can a scenario make a package look better than it is?**
+   No. A condition replaces the transport, so it can only cause a hash mismatch or a network failure. `expected_status` is text for the chip; `test_expected_status_of_a_scenario_is_not_used` shows a "verified" chip returning REJECTED.
+3. **Where do the cache hit rate and the latency numbers on the Metrics tab come from?**
+   From `verdict_log`, one row per `verify_request` call, through `pipeline.metrics`. Nothing is kept in memory and there are no default numbers.
