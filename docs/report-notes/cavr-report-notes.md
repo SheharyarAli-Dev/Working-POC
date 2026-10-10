@@ -361,3 +361,158 @@ Reviewed by cavr-reviewer (2 passes); verdict: fix first, BLOCKERs fixed; test c
    The verdict was `REJECTED` and the canary was received in both. The evidence differs: under strace
    the network connect is missing from the events because `normalize` drops the `EINPROGRESS` line, so
    `causal_confirmed` is false there. This is an open defect, found by this step and not yet fixed.
+
+## Step 1 — C1 parse pip install commands into capture records (2026-10-10)
+
+Plan commit 1, `feat(cavr): C1 parse pip install commands into capture records`.
+Review: REVIEW_LINE_STEP_1
+
+### Ch 6 Implementation
+
+| File | Function / constant | What it does |
+|---|---|---|
+| `backend/cavr/capture.py` (new, 422 lines) | `parse_pip_command(command, cwd=".")` | Entry point. Takes a command string or token list, finds the pip launcher, finds the subcommand, and fills a capture record. Only `install` is captured. |
+| | `parse_requirement(text, origin)` | Classifies one requirement string as `requirement`, `unsupported` (VCS, URL, local path) or `error` (malformed). Sets `pinned` and `version`. |
+| | `parse_requirements_text(text, source)` | Classifies every line of a requirements file without reading any other file. `-r`/`-c` lines come back as `include` entries. |
+| | `conflicting_requirements(requirements)` | One error per name asked for with two different specifiers (requirements with a marker are skipped). |
+| | `_pip_arguments` | Recognises `pip`, `pip3`, `pip3.12`, a path to pip, and `python[3[.x]] ... -m pip` / `py -m pip`. Anything else is "not a pip command". |
+| | `_split_options` | Splits tokens into positionals and options using three tables. Handles `--opt=value`, `--opt value`, `-rfile` and flag clusters such as `-qU`. |
+| | `_apply`, `_add`, `_option_line_entries` | File each item under `requirements`, `constraints`, `unsupported`, `errors` or `options`. |
+| | `_read_file` | Reads one `-r`/`-c` file (size cap, UTF-8 check, SHA-256 of the bytes) and recurses into its includes, relative to the including file. |
+| | `_logical_lines` | Joins `\` continuations, drops comments and blank lines, keeps the first physical line number. |
+| | `FLAG_OPTIONS`, `VALUE_OPTIONS`, `UNSUPPORTED_OPTIONS`, `SHORT_OPTIONS` | The option tables. `UNSUPPORTED_OPTIONS` maps each custom-source option to the reason recorded. |
+| | `MAX_REQUIREMENTS_FILE_BYTES` | 1,000,000. A larger file is an error and is not parsed. |
+| `tests/test_cavr_capture.py` (new, 405 lines) | | 41 test functions, 102 cases. |
+| `docs/cavr-m1-plan.md` | | Progress box 1 ticked. |
+
+Capture record fields: `source`, `command`, `action`, `options`, `requirements`, `constraints`,
+`unsupported`, `errors`, `files`, `complete`. A requirement has `name`, `canonical_name`, `specifier`,
+`version`, `pinned`, `extras`, `marker`, `hashes`, `raw`, `origin`.
+
+Key algorithm, `parse_pip_command`:
+
+1. Split the command (`shlex.split`); find the tokens after `pip` or `python -m pip`. None -> error "not a pip command".
+2. Split those tokens into options and positionals. The first positional is the subcommand; if it is not `install`, record one `unsupported` entry and stop.
+3. For each remaining item: positional -> `parse_requirement`; `-r`/`-c` -> `_read_file`; custom-source option -> `unsupported`; unknown option -> `unsupported`; known neutral option -> `options`.
+4. `_read_file` keeps a stack of the files being read; a file already on the stack is an error ("includes itself"), so nested includes always terminate.
+5. `_finish` adds conflict errors and sets `complete = not unsupported and not errors`.
+
+### Design decisions
+
+| Decision | Alternatives considered | Why |
+|---|---|---|
+| The record is a plain dict | Dataclasses | The rest of `backend/cavr/` passes dicts and they go straight to JSON evidence. |
+| One `complete` flag, false if anything is unsupported or unreadable | Raise an exception on the first problem | The record must list everything that was asked for, including the parts not verified, so a later stage can report them and answer UNRESOLVED. |
+| Unpinned requirement (`a>=1`) is captured, with `pinned: False` | Treat it as a capture error | Capture writes down what was asked; refusing it is the gate's rule (step 3). |
+| Unknown option -> `unsupported`, next token not consumed | Guess that it takes a value; ignore it | We cannot know if the next token is its value. Guessing either way could hide or invent a package, so the record is marked incomplete. |
+| Explicit option tables | Skip every token that starts with `-` (old `pip_shim.parse_pip_command`) | The old way read the value of `-i`, `-t`, `--index-url` as a package name. |
+| Path/URL/VCS checked before `packaging` parses the text | Parse first | `Requirement("a-1-py3-none-any.whl")` parses as a package called `a-1-py3-none-any.whl`. |
+| `--no-binary` is unsupported | Record it as neutral | It asks pip to build from source; the plan verifies wheels only. |
+| `--platform`, `--python-version`, `--abi`, `--implementation` are neutral, kept in `options` | Unsupported | They change which wheel pip picks, but step 12 installs with `--require-hashes` on the verified files, so a different wheel fails to install. Step 4 can read them from `options`. |
+| Nested `-r` resolved relative to the including file | Relative to `cwd` | This is what pip does. |
+| Files nested inside a constraints file stay constraints | Follow the nested option's own role | A `-r` inside a `-c` file must not add an install request. |
+| A requirement line with a bad `--hash` is rejected whole | Keep the requirement, drop the hash | A wrong hash is a wrong line; half of it should not be trusted. |
+| `pip download`, `pip wheel`, `pip uninstall`, bare `pip` -> one `unsupported` entry | Treat as "nothing to verify" (complete) | `download` and `wheel` also fetch packages; step 12 decides which subcommands may pass through, using `action`. |
+| Only `==` with no wildcard counts as pinned; `===` does not | Accept `===` | The plan says pinned with `==`. `===` is string equality for legacy versions. |
+| No dependency on `manifest_parser.py` | Reuse its `parse_requirements_txt` | That parser has the regex fallback step 2 removes, and does not know `-r`, `-c`, `--hash`. Step 2 makes `manifest_parser` use this module instead. |
+
+### Requirements covered
+
+No `FR-CAVR-NN` identifiers exist in this repository; the IDs are from
+`frontend/src/components/cavr/RequirementsTab.tsx`. **Maryam to confirm them against the SRS.**
+
+| ID | Name there | What this step does for it | Acceptance check |
+|---|---|---|---|
+| FR-1 | Intercept Before Execution | A real `pip install` command becomes a structured record before anything is downloaded (CLAUDE.md goal C1, command half) | `test_pip_install_with_two_pins`, `test_pip_launcher_forms`, `test_nested_requirement_files_resolve_relative_to_the_including_file` |
+| FR-6 | Fail-Closed Security Policy | Unsupported or unreadable input makes `complete` false instead of being dropped | `test_unsupported_forms_are_recorded_not_captured`, `test_missing_requirement_file_is_an_error`, `test_malformed_requirement_is_an_error_not_a_package` |
+
+### Ch 7 Test cases
+
+All in `tests/test_cavr_capture.py`. Run on 2026-10-10:
+
+- `.venv/bin/python -m pytest tests/test_cavr_*.py -q` -> 184 passed (102 in this file).
+- `.venv/bin/python -m pytest -q` -> 242 passed, 7 failed (the 7 baseline failures, unchanged).
+
+| Test ID | Purpose | Input | Expected | Result |
+|---|---|---|---|---|
+| `test_pip_install_with_two_pins` | Basic form | `pip install a==1 b==2` | Two pinned requirements, `complete` true | pass |
+| `test_command_can_be_given_as_an_argument_list` | List input | `["pip","install","a==1"]` | Same record; `command` kept | pass |
+| `test_pip_launcher_forms` (8) | Launchers | `python -m pip`, `python3.12 -I -m pip`, `pip3.12`, a path to pip, `py -m pip` | `a==1` captured | pass |
+| `test_known_options_do_not_become_requirements` (7) | Option values | `--target out`, `-t out`, `-qU`, `--timeout 5` before the subcommand | Only `a==1` captured | pass |
+| `test_recognised_options_are_recorded` | Options kept | `--upgrade --target out` | `[["--upgrade", None], ["--target", "out"]]` | pass |
+| `test_name_is_canonicalised_but_the_written_name_is_kept` | Names | `Foo_Bar==1.0` | `name` `Foo_Bar`, `canonical_name` `foo-bar` | pass |
+| `test_extras_and_marker_are_recorded` | Extras, marker | `a[x,b]==1; python_version >= "3"` | Extras `["b","x"]`, marker kept, pinned | pass |
+| `test_anything_but_one_exact_pin_is_recorded_as_unpinned` (7) | Pin rule | `a`, `a>=1`, `a==1.*`, `a~=1.0`, `a>=1,<2`, `a===1`, `a!=1` | `pinned` false, `version` None, still `complete` | pass |
+| `test_unsupported_forms_are_recorded_not_captured` (24) | Unsupported forms | URL, `git+`, local paths, wheel/sdist file names, `-e`, `-i`, `--index-url`, `--extra-index-url`, `-f`, `--no-index`, `--trusted-host`, `--no-binary`, unknown options | Matching reason in `unsupported`; `complete` false | pass |
+| `test_direct_reference_is_unsupported_not_a_named_requirement` | PEP 508 URL | `a @ https://...whl` | No requirement; "direct URL" | pass |
+| `test_unsupported_entry_keeps_what_was_written` | Evidence text | `-e ./pkg a==1` | `raw` is `-e ./pkg`; `a==1` still captured | pass |
+| `test_value_of_a_custom_index_option_is_not_read_as_a_requirement` | Option value | `--index-url URL a==1` | One requirement, one unsupported | pass |
+| `test_other_pip_subcommands_capture_no_requirements` (5) | Other subcommands | `uninstall`, `download`, `wheel`, `--version`, bare `pip` | No requirements; `complete` false | pass |
+| `test_non_pip_commands_are_errors` (6) | Not pip | `ls -la`, `python script.py install a==1`, `python -m venv`, `sudo pip`, empty string, empty list | Error "not a pip command" | pass |
+| `test_unbalanced_quotes_are_an_error` | Bad quoting | `pip install "a==1` | Error "cannot split" | pass |
+| `test_install_without_any_requirement_is_an_error` | Empty install | `pip install --upgrade` | Error "no requirement" | pass |
+| `test_malformed_requirement_is_an_error_not_a_package` (8) | Malformed | `a==`, `==1`, `a=1`, `a==1 b`, `a b==1`, `a==abc!`, `[x]==1`, `a==1;` | No requirement; one error with `raw` | pass |
+| `test_option_missing_its_value_is_an_error` | Missing value | `pip install a==1 -r` | Error "needs a value" | pass |
+| `test_conflicting_pins_for_one_name_are_an_error` | Conflict | `a==1 A==2` | Error "conflicting" | pass |
+| `test_same_pin_twice_is_not_a_conflict` | No false conflict | `a==1 a==1` | No error | pass |
+| `test_requirement_file_is_read_and_expanded` | `-r` | File with comments, blank line, 2 pins; plus `c==3` | 3 requirements; `origin` is `path:line` | pass |
+| `test_requirement_file_hash_is_the_sha256_of_its_real_bytes` | Real hash | File bytes `a==1\n` | `sha256` equals `hashlib.sha256` of those bytes | pass |
+| `test_all_spellings_of_the_requirement_option` (4) | Spellings | `-r f`, `--requirement f`, `--requirement=f`, `-rf` | `a==1` captured | pass |
+| `test_nested_requirement_files_resolve_relative_to_the_including_file` | Nested `-r`, 3 levels | `top.txt` -> `sub/mid.txt` -> `leaf.txt` | 3 requirements; 3 files in order | pass |
+| `test_requirement_file_that_includes_itself_is_an_error_and_terminates` | Include cycle | `a.txt` <-> `b.txt` | Both pins captured; error "includes itself" | pass |
+| `test_missing_requirement_file_is_an_error` | Missing file | `-r nope.txt a==1` | Error "cannot read"; `files` empty; `complete` false | pass |
+| `test_missing_nested_requirement_file_names_the_including_line` | Missing nested file | `top.txt` line 2: `-r gone.txt` | Error `origin` is `top.txt:2` | pass |
+| `test_requirement_path_that_is_a_directory_is_an_error` | Directory | `-r reqs` (a directory) | Error "cannot read" | pass |
+| `test_requirement_file_that_is_not_utf8_is_an_error` | Encoding | Bytes `\xff\xfe` | No requirements; error "not UTF-8" | pass |
+| `test_oversized_requirement_file_is_an_error` | Size cap | Cap set to 8 bytes, 10-byte file | No requirements; error "larger than" | pass |
+| `test_malformed_line_in_a_file_is_reported_with_its_line_number` | Malformed line | Line 2: `this is not a requirement` | Lines 1 and 3 captured; error at `:2` | pass |
+| `test_unsupported_lines_inside_a_file` | Unsupported in file | `--index-url`, `-e`, `git+`, a wheel path, `a==1` | 4 unsupported, 1 requirement | pass |
+| `test_line_continuation_and_bom` | `\` and BOM | BOM, `a==1 \` + `--hash=...`, `b==2` | 2 requirements; hash attached to `a`; `b` at line 3 | pass |
+| `test_hash_options_are_recorded_and_bad_ones_are_errors` | `--hash` | Two good hashes; `--hash=md5:abc` | Hashes kept; bad line is an error and not captured | pass |
+| `test_constraint_file_entries_are_kept_apart_from_requirements` | `-c` | `a==1 -c cons.txt` | `a` in `requirements`; `b`, `c` in `constraints` | pass |
+| `test_constraint_included_from_a_requirement_file` | `-c` inside `-r` | `reqs.txt` has `-c cons.txt` | Same split | pass |
+| `test_files_nested_inside_a_constraint_file_stay_constraints` | `-r` inside `-c` | `cons.txt` has `-r more.txt` | `b` is a constraint, not a requirement | pass |
+| `test_missing_constraint_file_is_an_error` | Missing `-c` file | `-c nope.txt` | Error "cannot read" | pass |
+| `test_conflict_between_command_line_and_file` | Conflict across sources | `a==1` and file `a==2` | Error "conflicting" | pass |
+| `test_same_name_with_different_markers_is_not_a_conflict` | Marker split | Two `a` lines with opposite markers | Both captured; no error | pass |
+| `test_parse_requirement_kinds` | Classifier | `a==1`, `git+...`, `not a requirement`, empty | requirement / unsupported / error / error | pass |
+
+### Defects found and fixed
+
+- None in the new code: the 102 cases passed on the first run.
+- Found in existing code while reading it, **not fixed in this step**: `backend/cavr/pip_shim.py::parse_pip_command`
+  skips only `-r`/`-c` values, so `pip install -i URL a` reports the URL as a package; it also drops the
+  contents of `-r` files. It is replaced in step 12.
+
+### Known limitations / deferred
+
+- Nothing calls `capture.py` yet. The pipeline (step 11) and the pip wrapper (step 12) do.
+- Launchers not recognised, reported as "not a pip command": `sudo pip`, `uv pip`, `pipx`, `env X=1 pip`,
+  and `python` with an option that takes a value before `-m` (`python -W ignore -m pip`).
+- The command string is split with POSIX rules, so an unquoted Windows path with backslashes is misread.
+- `${VAR}` in a requirements file is not expanded; such a line is reported as malformed or unsupported.
+- Markers are recorded, not evaluated. Extras are recorded, not expanded. Both are for step 6.
+- pip configuration outside the command (`pip.conf`, `PIP_INDEX_URL`, `PIP_REQUIREMENT`) is not read, so a
+  custom index set there is not seen. -> step 12 (the wrapper controls pip's environment).
+- The option tables are written by hand from pip's documented options; a real option missing from them is
+  reported as "unknown option" (incomplete capture), never ignored.
+
+### Tool disclosure (Ch 8.7)
+
+- **Generated by Claude Code:** `backend/cavr/capture.py`, `tests/test_cavr_capture.py`, these notes, the
+  commit. Run as part of `/cavr-batch 1, 2, 3` without a stop between steps.
+- **Reviewed / decided by Maryam:** the plan step and the batch workflow (approved 2026-10-10). The code
+  of this step has not yet been read by Maryam; that review is still to do.
+- **Verified by:** the two pytest runs above; one `cavr-reviewer` pass over the batch diff.
+
+### Supervisor Q&A prep
+
+1. **Why not let pip parse the command (import pip's own parser)?**
+   pip's internals are not a public API and change between releases, and importing them would tie the
+   gate to the pip version installed. The capture needs only to recognise what it can verify and to mark
+   everything else as unsupported, which a small explicit table does.
+2. **What happens with a form the parser does not know?**
+   It is written into `unsupported` or `errors` and `complete` becomes false. Nothing is silently
+   skipped, so the pipeline answers UNRESOLVED for it.
+3. **Does capture touch the network or run package code?**
+   No. It reads the command and the requirements/constraints files named in it, nothing else.

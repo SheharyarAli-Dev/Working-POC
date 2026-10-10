@@ -289,7 +289,7 @@ Found in commit 0b (2026-10-10, `521c414`) and deliberately not fixed there:
 
 - [x] 0 refuse host execution of unpinned package source (committed 2026-10-10, `3be14db`)
 - [x] 0b accept either monitor mode in `test_controlled_dormant_execution` (committed 2026-10-10, `521c414`)
-- [ ] 1 C1 pip command capture
+- [x] 1 C1 pip command capture (committed 2026-10-10)
 - [ ] 2 C1 requirements.txt edit capture
 - [ ] 3 C2 fail-closed requirement gate
 - [ ] 4 C3 PyPI fetch + SHA-256
