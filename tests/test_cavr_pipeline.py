@@ -7,6 +7,7 @@ What is synthetic and labelled so: advisories whose id starts with "SYNTH-".
 """
 import json
 import shutil
+import sqlite3
 
 import pytest
 
@@ -14,6 +15,7 @@ from backend.cavr import pipeline
 from backend.cavr.manifest_parser import snapshot_requirements
 from backend.cavr.pipeline import ESCALATION, metrics, verify_request
 from backend.cavr.pypi_client import TransportError, registry_url
+from backend.cavr.storage import CavrStorage
 from backend.cavr.verdict_cache import lookup
 from backend.threat_repo.repository import seeds
 from test_cavr_support import (CLEAN_DEMO, PYPDF_SHA256, PYPDF_WHEEL, RECORDED_6_19_0, UNGUARDED, USES_DEMO, World, build_wheel,
@@ -362,19 +364,118 @@ def test_metric_fields_are_present_on_every_status(world):
     assert set(seen["BLOCK"]) == set(seen["VERIFIED"]) == set(seen["REJECTED"]) == set(seen["UNRESOLVED"]) == set(escalated)
 
 
+NO_ROWS = {"count": 0, "p50": None, "p95": None}
+
+
+def group(*times):
+    """What `metrics` must say for these `fast_gate_ms` values: count and nearest-rank p50 / p95."""
+    ordered = sorted(times)
+    return {"count": len(ordered), "p50": pytest.approx(ordered[(len(ordered) + 1) // 2 - 1], abs=0.01),
+            "p95": pytest.approx(ordered[-(-95 * len(ordered) // 100) - 1], abs=0.01)}
+
+
+def log_row(store, status, fast_gate_ms, cache_lookup, stage="verdict", rule="X"):
+    store.record_verdict("pip_command", "pip install x==1", status, stage, rule, fast_gate_ms, cache_lookup == "HIT", False,
+                         cache_lookup)
+
+
 def test_verdicts_are_logged_and_the_report_numbers_come_from_the_log(world):
-    assert metrics(world.store) == {"verdicts": 0, "cache_hits": 0, "cache_hit_rate": None, "fast_gate_ms_p50": None,
-                                    "fast_gate_ms_p95": None, "by_status": {}}
-    verdicts = [world.verify(), world.verify(), world.verify("pip install reqeusts==1.0"), world.verify()]
-    assert all(verdict["logged"] for verdict in verdicts)
+    assert metrics(world.store) == {
+        "verdicts": 0, "cache_hits": 0, "cache_hit_rate": None, "cache_lookups": 0, "cache_hit_rate_of_lookups": None,
+        "by_status": {},
+        "fast_gate_ms": {"by_status": {status: NO_ROWS for status in ("VERIFIED", "REJECTED", "BLOCK", "UNRESOLVED")},
+                         "by_cache_lookup": {found: NO_ROWS for found in ("HIT", "MISS", "NOT_REACHED")},
+                         "by_status_and_cache_lookup": []}}
+    miss, hit, blocked, hit_again = (world.verify(), world.verify(), world.verify("pip install reqeusts==1.0"), world.verify())
+    assert all(verdict["logged"] for verdict in (miss, hit, blocked, hit_again))
     report = metrics(world.store)
     assert report["verdicts"] == 4 and report["cache_hits"] == 2 and report["cache_hit_rate"] == 0.5
+    # The BLOCK never reached the cache, so it is not one of the lookups.
+    assert report["cache_lookups"] == 3 and report["cache_hit_rate_of_lookups"] == pytest.approx(2 / 3)
     assert report["by_status"] == {"BLOCK": 1, "VERIFIED": 3}
-    times = sorted(verdict["fast_gate_ms"] for verdict in verdicts)
-    assert report["fast_gate_ms_p50"] == pytest.approx(times[1], abs=0.01) and report["fast_gate_ms_p95"] == pytest.approx(times[3], abs=0.01)
+    times = report["fast_gate_ms"]
+    assert times["by_status"] == {
+        "VERIFIED": group(miss["fast_gate_ms"], hit["fast_gate_ms"], hit_again["fast_gate_ms"]), "REJECTED": NO_ROWS,
+        "BLOCK": group(blocked["fast_gate_ms"]), "UNRESOLVED": NO_ROWS}
+    assert times["by_cache_lookup"] == {"HIT": group(hit["fast_gate_ms"], hit_again["fast_gate_ms"]),
+                                        "MISS": group(miss["fast_gate_ms"]), "NOT_REACHED": group(blocked["fast_gate_ms"])}
+    assert times["by_status_and_cache_lookup"] == [
+        {"status": "BLOCK", "cache_lookup": "NOT_REACHED", **group(blocked["fast_gate_ms"])},
+        {"status": "VERIFIED", "cache_lookup": "HIT", **group(hit["fast_gate_ms"], hit_again["fast_gate_ms"])},
+        {"status": "VERIFIED", "cache_lookup": "MISS", **group(miss["fast_gate_ms"])}]
+    assert not [key for key in report if "p50" in key or "p95" in key]      # no percentile over all verdicts
     log = world.store.get_verdict_log()
-    assert [row["status"] for row in log] == ["VERIFIED", "BLOCK", "VERIFIED", "VERIFIED"]  # newest first
+    assert [(row["status"], row["cache_lookup"]) for row in log] == [
+        ("VERIFIED", "HIT"), ("BLOCK", "NOT_REACHED"), ("VERIFIED", "HIT"), ("VERIFIED", "MISS")]  # newest first
     assert log[0]["requested"] == "pip install pypdf==6.19.0" and log[0]["cache_hit"] == 1 and log[0]["escalated"] == 0
+
+
+def test_blocks_do_not_move_the_latency_reported_for_verified_requests(world):
+    """Five fast BLOCKs beside two slow VERIFIED: one median over all seven would be a BLOCK's 2 ms."""
+    log_row(world.store, "VERIFIED", 3000.0, "MISS")
+    log_row(world.store, "VERIFIED", 2000.0, "HIT")
+    for milliseconds in (1.0, 2.0, 2.0, 3.0, 4.0):
+        log_row(world.store, "BLOCK", milliseconds, "NOT_REACHED", stage="gate", rule="NOT_ON_ALLOWLIST")
+    times = metrics(world.store)["fast_gate_ms"]
+    assert times["by_status"]["VERIFIED"] == {"count": 2, "p50": 2000.0, "p95": 3000.0}
+    assert times["by_status"]["BLOCK"] == {"count": 5, "p50": 2.0, "p95": 4.0}
+    assert times["by_cache_lookup"]["HIT"] == {"count": 1, "p50": 2000.0, "p95": 2000.0}
+    assert times["by_cache_lookup"]["MISS"] == {"count": 1, "p50": 3000.0, "p95": 3000.0}
+    assert times["by_cache_lookup"]["NOT_REACHED"] == {"count": 5, "p50": 2.0, "p95": 4.0}
+
+
+@pytest.mark.parametrize("count, p50, p95", [(1, 1.0, 1.0), (2, 1.0, 2.0), (20, 10.0, 19.0), (21, 11.0, 20.0), (100, 50.0, 95.0)])
+def test_percentiles_are_nearest_rank(world, count, p50, p95):
+    for value in range(count, 0, -1):          # logged in descending order: the report sorts them
+        log_row(world.store, "UNRESOLVED", float(value), "NOT_REACHED")
+    assert metrics(world.store)["fast_gate_ms"]["by_status"]["UNRESOLVED"] == {"count": count, "p50": p50, "p95": p95}
+
+
+def test_which_cache_lookup_is_logged_for_each_kind_of_verdict(world):
+    logged = lambda: world.store.get_verdict_log()[0]["cache_lookup"]
+    assert world.verify(transport=type("Down", (), {"stream": lambda self, url: (_ for _ in ()).throw(TransportError("down"))})()
+                        )["status"] == "UNRESOLVED" and logged() == "NOT_REACHED"       # no file, so no key to look up
+    assert world.verify("pip install reqeusts==1.0")["status"] == "BLOCK" and logged() == "NOT_REACHED"
+    assert world.verify()["cache_hit"] is False and logged() == "MISS"
+    assert world.verify()["cache_hit"] is True and logged() == "HIT"
+    # OSV now lists the version: the stored analysis is still found (HIT), and the verdict is REJECTED.
+    world.advisories("pypdf", "6.19.0", [synthetic_advisory("SYNTH-0301", "pypdf")])
+    rejected = world.verify()
+    assert outcome(rejected) == ("REJECTED", "advisories", "KNOWN_VULNERABILITY") and logged() == "HIT"
+    report = metrics(world.store)
+    assert [(row["status"], row["cache_lookup"], row["count"]) for row in report["fast_gate_ms"]["by_status_and_cache_lookup"]] == [
+        ("BLOCK", "NOT_REACHED", 1), ("REJECTED", "HIT", 1), ("UNRESOLVED", "NOT_REACHED", 1), ("VERIFIED", "HIT", 1),
+        ("VERIFIED", "MISS", 1)]
+    assert report["cache_lookups"] == 3 and report["cache_hit_rate_of_lookups"] == pytest.approx(2 / 3)
+
+
+def test_a_rejection_by_osv_before_any_stored_analysis_is_logged_as_a_miss(world):
+    world.advisories("pypdf", "6.19.0", [synthetic_advisory("SYNTH-0302", "pypdf")])
+    assert world.verify()["status"] == "REJECTED"
+    assert world.store.get_verdict_log()[0]["cache_lookup"] == "MISS"       # the key was looked up; nothing was stored for it
+
+
+def test_a_verdict_log_made_before_the_lookup_was_logged_is_still_read(tmp_path):
+    """An existing database keeps its rows. Their lookup is unknown unless they were hits, and the report says so."""
+    path = tmp_path / "old.sqlite3"
+    with sqlite3.connect(path) as connection:
+        connection.execute("""CREATE TABLE verdict_log(id INTEGER PRIMARY KEY AUTOINCREMENT, recorded_at TEXT NOT NULL,
+                              source TEXT, requested TEXT, status TEXT NOT NULL, stage TEXT, rule TEXT,
+                              fast_gate_ms REAL NOT NULL, cache_hit INTEGER NOT NULL, escalated INTEGER NOT NULL)""")
+        for status, milliseconds, cache_hit in (("VERIFIED", 3000.0, 0), ("VERIFIED", 2000.0, 1), ("BLOCK", 2.0, 0)):
+            connection.execute("INSERT INTO verdict_log(recorded_at, source, requested, status, stage, rule, fast_gate_ms, cache_hit,"
+                               " escalated) VALUES('2026-10-10T00:00:00+00:00', 'pip_command', 'pip install x==1', ?, 'verdict', 'X', ?, ?, 0)",
+                               (status, milliseconds, cache_hit))
+    store = CavrStorage(path)
+    assert [row["cache_lookup"] for row in store.get_verdict_log()] == [None, None, None]
+    log_row(store, "VERIFIED", 1000.0, "MISS")
+    report = metrics(store)
+    assert report["verdicts"] == 4 and report["cache_hits"] == 1
+    assert {found: row["count"] for found, row in report["fast_gate_ms"]["by_cache_lookup"].items()} == {
+        "HIT": 1, "MISS": 1, "NOT_REACHED": 0, "NOT_RECORDED": 2}
+    # Rows whose lookup is unknown are not counted as lookups: the rate is over what is known.
+    assert report["cache_lookups"] == 2 and report["cache_hit_rate_of_lookups"] == 0.5
+    assert CavrStorage(path).get_verdict_log()[0]["cache_lookup"] == "MISS"      # opening it again changes nothing
 
 
 # --- sinks judged by the contract and by reachability --------------------------------------------------------------------

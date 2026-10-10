@@ -607,19 +607,37 @@ def test_scenario_endpoint_and_unknown_runs_over_http(dashboard, client):
 
 def test_metrics_come_from_the_verdict_log(dashboard, client):
     empty = client.get("/api/cavr/metrics").json()
-    assert empty == {"verdicts": 0, "cache_hits": 0, "cache_hit_rate": None, "fast_gate_ms_p50": None, "fast_gate_ms_p95": None,
-                     "by_status": {}, "recent": []}
-    verdicts = [dashboard.run("verified")[1], dashboard.run("verified")[1], dashboard.run(**DENYLISTED)[1],
-                dashboard.run("not_on_allowlist")[1]]
+    no_rows = {"count": 0, "p50": None, "p95": None}
+    assert empty == {
+        "verdicts": 0, "cache_hits": 0, "cache_hit_rate": None, "cache_lookups": 0, "cache_hit_rate_of_lookups": None,
+        "by_status": {}, "recent": [],
+        "fast_gate_ms": {"by_status": {status: no_rows for status in ("VERIFIED", "REJECTED", "BLOCK", "UNRESOLVED")},
+                         "by_cache_lookup": {found: no_rows for found in ("HIT", "MISS", "NOT_REACHED")},
+                         "by_status_and_cache_lookup": []}}
+    miss, hit = dashboard.run("verified")[1], dashboard.run("verified_again")[1]
+    rejected, blocked = dashboard.run("known_vulnerable")[1], dashboard.run("not_on_allowlist")[1]
+    denied = dashboard.run(**DENYLISTED)[1]
     dashboard.run("network_off")      # demo runs: not counted
     dashboard.run("tampered_wheel")
     report = client.get("/api/cavr/metrics").json()
-    assert report["verdicts"] == 4 and report["cache_hits"] == 1 and report["cache_hit_rate"] == 0.25
-    assert report["by_status"] == {"BLOCK": 2, "VERIFIED": 2}
-    times = sorted(verdict["fast_gate_ms"] for verdict in verdicts)
-    assert report["fast_gate_ms_p50"] == pytest.approx(times[1], abs=0.01) and report["fast_gate_ms_p95"] == pytest.approx(times[3], abs=0.01)
-    assert [row["status"] for row in report["recent"]] == ["BLOCK", "BLOCK", "VERIFIED", "VERIFIED"]
-    assert report["recent"][0]["requested"] == "pip install left-pad==1.0"
+    assert report["verdicts"] == 5 and report["cache_hits"] == 1 and report["cache_hit_rate"] == 0.2
+    assert report["cache_lookups"] == 3 and report["cache_hit_rate_of_lookups"] == pytest.approx(1 / 3)
+    assert report["by_status"] == {"BLOCK": 2, "REJECTED": 1, "VERIFIED": 2}
+    close = lambda value: pytest.approx(value, abs=0.01)
+    by_status = report["fast_gate_ms"]["by_status"]
+    verified = sorted([miss["fast_gate_ms"], hit["fast_gate_ms"]])
+    assert by_status["VERIFIED"] == {"count": 2, "p50": close(verified[0]), "p95": close(verified[1])}
+    assert by_status["REJECTED"] == {"count": 1, "p50": close(rejected["fast_gate_ms"]), "p95": close(rejected["fast_gate_ms"])}
+    assert by_status["BLOCK"]["count"] == 2 and by_status["UNRESOLVED"] == no_rows
+    assert by_status["BLOCK"]["p95"] == close(max(blocked["fast_gate_ms"], denied["fast_gate_ms"]))
+    assert {found: row["count"] for found, row in report["fast_gate_ms"]["by_cache_lookup"].items()} == {
+        "HIT": 1, "MISS": 2, "NOT_REACHED": 2}
+    assert [(row["status"], row["cache_lookup"], row["count"]) for row in report["fast_gate_ms"]["by_status_and_cache_lookup"]] == [
+        ("BLOCK", "NOT_REACHED", 2), ("REJECTED", "MISS", 1), ("VERIFIED", "HIT", 1), ("VERIFIED", "MISS", 1)]
+    assert "fast_gate_ms_p50" not in report and "fast_gate_ms_p95" not in report
+    assert [(row["status"], row["cache_lookup"]) for row in report["recent"]] == [
+        ("BLOCK", "NOT_REACHED"), ("BLOCK", "NOT_REACHED"), ("REJECTED", "MISS"), ("VERIFIED", "HIT"), ("VERIFIED", "MISS")]
+    assert report["recent"][1]["requested"] == "pip install left-pad==1.0"
 
 
 def test_cache_endpoint_lists_the_real_verdict_cache_and_no_seed_rows(dashboard, client):

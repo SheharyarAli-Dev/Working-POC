@@ -1,12 +1,19 @@
 import React, { useState, useEffect } from 'react';
-import { CavrRunState, NOT_COMPUTED } from './types';
+import { CavrRunState, NOT_COMPUTED, shown } from './types';
 import { BarChart3, PieChart, Clock, History } from 'lucide-react';
 
 interface MetricsTabProps {
   state: CavrRunState;
 }
 
-// The numbers of /api/cavr/metrics, which come from the verdict log: one row per verified request.
+// One group of fast_gate_ms values in the answer of /api/cavr/metrics.
+interface TimeSummary {
+  count: number;
+  p50: number | null;
+  p95: number | null;
+}
+
+// Loads /api/cavr/metrics (the verdict log: one row per request) again after each run.
 // Nothing is shown until the backend has answered.
 export const MetricsTab: React.FC<MetricsTabProps> = ({ state }) => {
   const [metrics, setMetrics] = useState<any | null>(null);
@@ -28,12 +35,51 @@ export const MetricsTab: React.FC<MetricsTabProps> = ({ state }) => {
       </div>
     );
   }
+  return <MetricsReport metrics={metrics} />;
+};
 
+// The numbers of one answer of /api/cavr/metrics. fast_gate_ms is given per verdict and per cache
+// lookup, never as one percentile over all verdicts: a BLOCK takes a few milliseconds and downloads
+// nothing, so it would hide how long verifying a package takes.
+export const MetricsReport: React.FC<{ metrics: any }> = ({ metrics }) => {
   const total: number = metrics.verdicts || 0;
   const byStatus: Record<string, number> = metrics.by_status || {};
-  const hitRate = metrics.cache_hit_rate == null ? NOT_COMPUTED : `${(metrics.cache_hit_rate * 100).toFixed(1)}%`;
-  const ms = (value: any) => (value == null ? NOT_COMPUTED : `${value} ms`);
+  const times = metrics.fast_gate_ms || {};
+  const pairs: any[] = times.by_status_and_cache_lookup || [];
+  const percent = (rate: any) => (rate == null ? NOT_COMPUTED : `${(rate * 100).toFixed(1)}%`);
   const segment: Record<string, string> = { VERIFIED: 'allow', REJECTED: 'block', BLOCK: 'block', UNRESOLVED: 'review' };
+
+  // One table of groups: a name, how many requests, and their nearest-rank p50 and p95.
+  const timeTable = (title: string, firstColumn: string, groups: Record<string, TimeSummary>) => (
+    <div className="history-table-card">
+      <div className="history-header">
+        <Clock size={16} />
+        <h6>{title}</h6>
+      </div>
+      <div className="history-table-wrap">
+        <table className="history-table">
+          <thead>
+            <tr>
+              <th>{firstColumn}</th>
+              <th>Requests</th>
+              <th>p50 (ms)</th>
+              <th>p95 (ms)</th>
+            </tr>
+          </thead>
+          <tbody>
+            {Object.entries(groups).map(([name, group]) => (
+              <tr key={name} className="history-row">
+                <td><code>{name}</code></td>
+                <td>{shown(group.count)}</td>
+                <td>{shown(group.p50)}</td>
+                <td>{shown(group.p95)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
 
   return (
     <div className="evidence-tab-pane metrics-pane">
@@ -41,25 +87,59 @@ export const MetricsTab: React.FC<MetricsTabProps> = ({ state }) => {
         <div className="kpi-card">
           <span className="kpi-title"><BarChart3 size={13} /> Verdicts logged</span>
           <strong className="kpi-val">{total}</strong>
-          <span className="kpi-sub">One row per verified request</span>
+          <span className="kpi-sub">One row per request. Runs under a demo condition are not logged.</span>
         </div>
 
         <div className="kpi-card">
-          <span className="kpi-title"><PieChart size={13} /> Cache hit rate</span>
-          <strong className="kpi-val">{hitRate}</strong>
-          <span className="kpi-sub">{metrics.cache_hits} of {total} verdicts (a BLOCK counts as no hit)</span>
+          <span className="kpi-title"><PieChart size={13} /> Cache hit rate, all verdicts</span>
+          <strong className="kpi-val">{percent(metrics.cache_hit_rate)}</strong>
+          <span className="kpi-sub">{shown(metrics.cache_hits)} of {total} verdicts</span>
         </div>
 
         <div className="kpi-card">
-          <span className="kpi-title"><Clock size={13} /> Fast gate p50</span>
-          <strong className="kpi-val">{ms(metrics.fast_gate_ms_p50)}</strong>
-          <span className="kpi-sub">Nearest-rank median of fast_gate_ms</span>
+          <span className="kpi-title"><PieChart size={13} /> Cache hit rate, lookups only</span>
+          <strong className="kpi-val">{percent(metrics.cache_hit_rate_of_lookups)}</strong>
+          <span className="kpi-sub">{shown(metrics.cache_hits)} of {shown(metrics.cache_lookups)} verdicts that reached the cache lookup</span>
         </div>
+      </div>
 
-        <div className="kpi-card">
-          <span className="kpi-title"><Clock size={13} /> Fast gate p95</span>
-          <strong className="kpi-val">{ms(metrics.fast_gate_ms_p95)}</strong>
-          <span className="kpi-sub">Nearest-rank 95th percentile</span>
+      {timeTable('fast_gate_ms by verdict', 'Verdict', times.by_status || {})}
+      {timeTable('fast_gate_ms by cache lookup', 'Cache lookup', times.by_cache_lookup || {})}
+
+      <div className="history-table-card">
+        <div className="history-header">
+          <Clock size={16} />
+          <h6>fast_gate_ms by verdict and cache lookup</h6>
+        </div>
+        <div className="history-table-wrap">
+          <table className="history-table">
+            <thead>
+              <tr>
+                <th>Verdict</th>
+                <th>Cache lookup</th>
+                <th>Requests</th>
+                <th>p50 (ms)</th>
+                <th>p95 (ms)</th>
+              </tr>
+            </thead>
+            <tbody>
+              {pairs.length > 0 ? (
+                pairs.map((row: any) => (
+                  <tr key={`${row.status}-${row.cache_lookup}`} className="history-row">
+                    <td><code>{row.status}</code></td>
+                    <td><code>{row.cache_lookup}</code></td>
+                    <td>{shown(row.count)}</td>
+                    <td>{shown(row.p50)}</td>
+                    <td>{shown(row.p95)}</td>
+                  </tr>
+                ))
+              ) : (
+                <tr>
+                  <td colSpan={5} className="text-center py-4 text-gray-500">No verdict has been logged yet.</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
         </div>
       </div>
 
@@ -100,7 +180,7 @@ export const MetricsTab: React.FC<MetricsTabProps> = ({ state }) => {
                 <th>Status</th>
                 <th>Stage / rule</th>
                 <th>fast_gate_ms</th>
-                <th>Cache hit</th>
+                <th>Cache lookup</th>
                 <th>Escalated</th>
               </tr>
             </thead>
@@ -112,8 +192,8 @@ export const MetricsTab: React.FC<MetricsTabProps> = ({ state }) => {
                     <td><code>{row.requested}</code></td>
                     <td><span className={`verdict-tag-sm ${segment[row.status] || 'review'}`}>{row.status}</span></td>
                     <td><code>{row.stage} / {row.rule}</code></td>
-                    <td>{row.fast_gate_ms}</td>
-                    <td>{row.cache_hit ? 'yes' : 'no'}</td>
+                    <td>{shown(row.fast_gate_ms)}</td>
+                    <td>{shown(row.cache_lookup)}</td>
                     <td>{row.escalated ? 'yes' : 'no'}</td>
                   </tr>
                 ))

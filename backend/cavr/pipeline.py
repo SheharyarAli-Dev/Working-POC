@@ -37,13 +37,13 @@ Rules of the verdict:
 
 Every verdict, whatever its status, has `fast_gate_ms` (wall time of this call), `cache_hit`
 (every package's analysis came from the cache) and `escalated`. One row per call goes to the
-store's verdict log; `metrics(store)` gives the cache hit rate and p50 / p95 of `fast_gate_ms`.
+store's verdict log; `metrics(store)` gives the cache hit rate and the p50 / p95 of
+`fast_gate_ms` per status and per cache lookup (never one percentile over all verdicts).
 
 No stage installs, imports or runs package code.
 """
 from __future__ import annotations
 import hashlib
-import math
 import time
 from pathlib import Path
 from types import SimpleNamespace
@@ -72,6 +72,8 @@ LOCKFILE_NAME = "dependencies.lock.json"
 PASSED = ("verdict", "ALL_CHECKS_PASSED")
 ANALYSIS_KEYS = {"status", "stage", "rule", "reason", "escalation", "scan", "reachability"}  # what `_analyse` returns
 MAX_LOGGED_REQUEST = 500
+STATUSES = ("VERIFIED", "REJECTED", "BLOCK", "UNRESOLVED")   # the order the report lists them in
+CACHE_LOOKUPS = ("HIT", "MISS", "NOT_REACHED")
 
 
 def verify_request(request, project_dir, policy, store, *, transport=None, quarantine_dir=None, advisory_cache_dir=None,
@@ -170,22 +172,69 @@ def analyzer_version(knowledge=None) -> str:
 
 
 def metrics(store) -> dict:
-    """Cache hit rate and p50 / p95 of `fast_gate_ms` over every logged verdict (nearest-rank percentiles).
+    """The report numbers, from the verdict log: counts, cache hit rates, and p50 / p95 of `fast_gate_ms` per group.
 
-    The hit rate is hits / all verdicts, so a BLOCK, which never reaches the cache, counts as "not a hit".
+    There is no percentile over all verdicts. A BLOCK takes a few milliseconds and downloads
+    nothing, so a median over everything says nothing about how long verifying a package
+    takes. The times are grouped three ways instead (nearest-rank percentiles):
+
+        by_status                   VERIFIED / REJECTED / BLOCK / UNRESOLVED, each always listed
+        by_cache_lookup             HIT / MISS / NOT_REACHED, each always listed
+        by_status_and_cache_lookup  one row per pair that occurs; "VERIFIED, HIT" against
+                                    "VERIFIED, MISS" is what a cache hit saves
+
+    Two hit rates: `cache_hit_rate` is hits / all verdicts (a BLOCK counts as "not a hit");
+    `cache_hit_rate_of_lookups` is hits / verdicts that reached the cache lookup.
+    A row written before the lookup was logged is HIT when it was a hit and NOT_RECORDED otherwise.
     """
     rows = store.get_verdict_log()
-    times = sorted(row["fast_gate_ms"] for row in rows)
-    rank = lambda fraction: times[max(math.ceil(fraction * len(times)), 1) - 1] if times else None
-    hits = sum(1 for row in rows if row["cache_hit"])
-    by_status = {}
+    by_status = {status: [] for status in STATUSES}
+    by_lookup = {found: [] for found in CACHE_LOOKUPS}
+    by_pair = {}
     for row in rows:
-        by_status[row["status"]] = by_status.get(row["status"], 0) + 1
+        found = row.get("cache_lookup") or ("HIT" if row["cache_hit"] else "NOT_RECORDED")
+        for groups, key in ((by_status, row["status"]), (by_lookup, found), (by_pair, (row["status"], found))):
+            groups.setdefault(key, []).append(row["fast_gate_ms"])
+    hits = sum(1 for row in rows if row["cache_hit"])
+    lookups = len(by_lookup["HIT"]) + len(by_lookup["MISS"])
     return {"verdicts": len(rows), "cache_hits": hits, "cache_hit_rate": hits / len(rows) if rows else None,
-            "fast_gate_ms_p50": rank(0.50), "fast_gate_ms_p95": rank(0.95), "by_status": dict(sorted(by_status.items()))}
+            "cache_lookups": lookups, "cache_hit_rate_of_lookups": len(by_lookup["HIT"]) / lookups if lookups else None,
+            "by_status": {status: len(times) for status, times in sorted(by_status.items()) if times},
+            "fast_gate_ms": {
+                "by_status": {status: _time_summary(times) for status, times in by_status.items()},
+                "by_cache_lookup": {found: _time_summary(times) for found, times in by_lookup.items()},
+                "by_status_and_cache_lookup": [{"status": status, "cache_lookup": found, **_time_summary(times)}
+                                               for (status, found), times in sorted(by_pair.items())]}}
+
+
+def cache_lookup_of(verdict: dict) -> str:
+    """What the verdict log records about the cache for one request: HIT, MISS or NOT_REACHED.
+
+    HIT          the analysis of every package came from the cache (`cache_hit`)
+    MISS         at least one package got as far as the cache lookup and was not served from it
+    NOT_REACHED  no package got that far: a BLOCK, a failed download, an unusable contract
+    """
+    if verdict["cache_hit"]:
+        return "HIT"
+    reached = any((package.get("cache") or {}).get("lookup") is not None for package in verdict["packages"])
+    return "MISS" if reached else "NOT_REACHED"
 
 
 # --- internals ---------------------------------------------------------------
+
+def _time_summary(times: list) -> dict:
+    """How many times there are, and their nearest-rank p50 and p95 (None when there are none)."""
+    ordered = sorted(times)
+    return {"count": len(ordered), "p50": _nearest_rank(ordered, 50), "p95": _nearest_rank(ordered, 95)}
+
+
+def _nearest_rank(ordered: list, percent: int):
+    """The smallest value with at least `percent` % of the values at or below it. `ordered` is sorted ascending."""
+    if not ordered:
+        return None
+    rank = -(-percent * len(ordered) // 100)      # ceil(percent * n / 100), in whole numbers
+    return ordered[max(rank, 1) - 1]
+
 
 def _capture(request, project_dir: Path):
     """(capture record, None), or (None, (rule, reason)) when the request cannot be turned into one."""
@@ -371,7 +420,7 @@ def _log(store, request, verdict: dict) -> bool:
         # A caller-made record was not redacted by the capture, so URL passwords are removed here as well.
         store.record_verdict(record.get("source"), redact(str(requested))[:MAX_LOGGED_REQUEST], verdict["status"],
                              verdict["stage"], verdict["rule"], verdict["fast_gate_ms"], verdict["cache_hit"],
-                             verdict["escalated"])
+                             verdict["escalated"], cache_lookup_of(verdict))
     except Exception:  # the log is for the report; it must never change or lose a verdict
         return False
     return True

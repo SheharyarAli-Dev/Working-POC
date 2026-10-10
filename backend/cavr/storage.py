@@ -200,9 +200,14 @@ class CavrStorage:
                 rule TEXT,
                 fast_gate_ms REAL NOT NULL,
                 cache_hit INTEGER NOT NULL,
-                escalated INTEGER NOT NULL
+                escalated INTEGER NOT NULL,
+                cache_lookup TEXT
             );
             """)
+
+            # A database made before the cache lookup was logged gets the column; its old rows keep NULL.
+            if "cache_lookup" not in {column[1] for column in conn.execute("PRAGMA table_info(verdict_log)")}:
+                conn.execute("ALTER TABLE verdict_log ADD COLUMN cache_lookup TEXT")
 
             # Seed if table is empty
             count = conn.execute("SELECT COUNT(*) FROM trusted_packages").fetchone()[0]
@@ -300,13 +305,17 @@ class CavrStorage:
 
     # --- verdict log (one row per verify_request; the report's hit rate and latency come from it) ---
 
-    def record_verdict(self, source, requested, status, stage, rule, fast_gate_ms: float, cache_hit: bool, escalated: bool) -> int:
+    def record_verdict(self, source, requested, status, stage, rule, fast_gate_ms: float, cache_hit: bool, escalated: bool,
+                       cache_lookup: str | None = None) -> int:
+        """`cache_lookup` is HIT, MISS or NOT_REACHED for the whole request (`pipeline.cache_lookup_of`)."""
         recorded_at = datetime.datetime.now(datetime.timezone.utc).isoformat()
         with self.connect() as conn:
             cur = conn.execute("""
-            INSERT INTO verdict_log(recorded_at, source, requested, status, stage, rule, fast_gate_ms, cache_hit, escalated)
-            VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (recorded_at, source, requested, status, stage, rule, float(fast_gate_ms), int(bool(cache_hit)), int(bool(escalated))))
+            INSERT INTO verdict_log(recorded_at, source, requested, status, stage, rule, fast_gate_ms, cache_hit, escalated,
+                                    cache_lookup)
+            VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (recorded_at, source, requested, status, stage, rule, float(fast_gate_ms), int(bool(cache_hit)),
+                  int(bool(escalated)), cache_lookup))
             conn.commit()
             return cur.lastrowid
 

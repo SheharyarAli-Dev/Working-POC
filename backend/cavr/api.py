@@ -188,7 +188,7 @@ def get_cache():
 
 @cavr_router.get("/api/cavr/metrics")
 def get_metrics():
-    """The report numbers, from the verdict log: counts by status, cache hit rate, p50 / p95 of `fast_gate_ms`."""
+    """The report numbers, from the verdict log: counts, cache hit rates, p50 / p95 of `fast_gate_ms` per status and per cache lookup."""
     report = pipeline_metrics(storage)
     report["recent"] = storage.get_verdict_log(limit=10)
     return report
