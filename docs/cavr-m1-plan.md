@@ -5,9 +5,19 @@ Progress is tracked in the checklist at the end; update it as each commit lands.
 
 ## Working rules (apply to every step)
 
-- Claude never runs `git commit` or `git push`. Each step stops with the diff in the working tree;
-  Maryam reviews and commits it herself.
-- One commit at a time. Do not start the next commit until asked.
+- **[changed 2026-10-10, decided by Maryam]** Steps 0 and 0b were done one at a time: Claude stopped
+  with the diff in the working tree and Maryam reviewed and committed it herself. From step 1 on, steps
+  run in batches through `.claude/commands/cavr-batch.md` (`/cavr-batch <steps>`):
+  - Claude does the named steps in order without asking between them, and commits each step itself
+    with the plan's message for that step, staging that step's files by name (never `reports/` or
+    `.claude/settings.local.json`).
+  - Claude never runs `git push`.
+  - One `cavr-reviewer` pass runs at the end of each batch, over the diff from the commit before the
+    batch to `HEAD`. BLOCKERs are fixed in one extra commit; MINOR items go to "Known issues deferred".
+  - Claude stops and asks only if a test cannot be made to pass without weakening it, the plan needs a
+    real change, or a file outside the allowed scope must be edited.
+  - Where this plan and the `/cavr-batch` command differ, the command wins.
+- Do not start steps outside the batch that was asked for.
 - Edit only `backend/cavr/`, `tests/test_cavr_*`, `frontend/src/components/cavr/`,
   `docs/report-notes/`, plus the two approved exceptions: this file, and
   `test_controlled_dormant_execution` in `tests/test_modules.py`.
@@ -93,7 +103,7 @@ These feed the supervisor's required report: cache hit rate and p50/p95 fast-gat
 - `artifacts/pypdf-6.19.0-py3-none-any.whl` + `advisories/registry-*.json` – a real wheel and a
   real recorded registry response for offline tests.
 
-## Commits (each: code + `tests/test_cavr_*.py`, full pytest run, then stop for review)
+## Commits (each: code + `tests/test_cavr_*.py`, full pytest run, then commit; review at the end of each batch)
 
 0. `fix(cavr): refuse host execution of unpinned package source`
    `sandbox_runner.py` falls back to running the package on the host when Docker is missing or
@@ -253,6 +263,18 @@ Found in the commit 0 review pass 4 (2026-10-10) and deliberately not fixed ther
   zero metrics and non-empty `events` is a clean import. Metrics are authoritative for now;
   harness events are to be used from M2. -> M2.
 
+Found in commit 0b (2026-10-10, `521c414`) and deliberately not fixed there:
+
+- `backend/cavr/runtime_monitor.py::normalize` skips every strace line containing ` = -1 `. A
+  non-blocking connect is printed by strace as `connect(...) = -1 EINPROGRESS`, so in strace mode the
+  lab package's connect gives no `NETWORK_CONNECT` event and no correlation has `causal_confirmed`
+  true. Seen with a real strace 6.19 on the lab package; the verdict was still `REJECTED` and the canary
+  was still received. Consequence: `tests/test_modules.py::test_controlled_dormant_execution` still
+  fails on a machine with strace, at its `causal_confirmed` assertion; commit 0b fixed only the mode
+  assertions. Because every failed syscall is skipped, a blocked connect or a failed open of a secret
+  file in a `--network none` container would also leave no event (read from the code, not run; docker
+  and podman modes were not executed). No code change now. -> M2 sandbox.
+
 ## Verification
 
 - `.venv/bin/python -m pytest -q` before every commit (offline).
@@ -266,7 +288,7 @@ Found in the commit 0 review pass 4 (2026-10-10) and deliberately not fixed ther
 ## Progress
 
 - [x] 0 refuse host execution of unpinned package source (committed 2026-10-10, `3be14db`)
-- [ ] 0b accept either monitor mode in `test_controlled_dormant_execution`
+- [x] 0b accept either monitor mode in `test_controlled_dormant_execution` (committed 2026-10-10, `521c414`)
 - [ ] 1 C1 pip command capture
 - [ ] 2 C1 requirements.txt edit capture
 - [ ] 3 C2 fail-closed requirement gate
