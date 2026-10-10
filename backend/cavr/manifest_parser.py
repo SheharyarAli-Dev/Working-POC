@@ -3,7 +3,9 @@
 `snapshot_requirements` records a requirements file as it is now. `capture_requirements_edit`
 compares two snapshots of the same file and returns a capture record (same fields as
 `backend.cavr.capture`) whose `requirements` are the lines that were added or changed, which
-are the ones that have to be verified. The diff itself is `detect_manifest_changes`.
+are the ones that have to be verified. The diff is `_diff`, which `detect_manifest_changes`
+also uses. Option lines that the edit removed (a deleted `--require-hashes`, for example) are
+listed under `removed_options`.
 
 Lines are classified by `backend.cavr.capture.parse_requirements_text`. A line that is not a
 named requirement is never turned into a package: it is reported under `unsupported` or
@@ -141,7 +143,7 @@ def capture_requirements_edit(before: dict, after: dict) -> dict:
     record = new_record("requirements_edit")
     record.update({"path": path, "before_sha256": before["sha256"], "after_sha256": after["sha256"],
                    "changed": before["sha256"] != after["sha256"] or before["exists"] != after["exists"],
-                   "changes": [], "removed": []})
+                   "changes": [], "removed": [], "removed_options": []})
 
     if before["error"]:
         # The old state is unknown, so nothing can be assumed to be already verified.
@@ -159,8 +161,9 @@ def capture_requirements_edit(before: dict, after: dict) -> dict:
         record["files"].append({"path": path, "role": "requirements", "sha256": after["sha256"],
                                 "included_from": None})
 
-    previous = read_manifest(before["content"], path)["requirements"]
-    record["changes"] = _diff(previous, manifest["requirements"])
+    previous = read_manifest(before["content"], path)
+    record["removed_options"] = [option for option in previous["options"] if option not in manifest["options"]]
+    record["changes"] = _diff(previous["requirements"], manifest["requirements"])
     record["requirements"] = [c["requirement"] for c in record["changes"] if c["action"] != "REMOVED"]
     record["removed"] = [c["removed"] for c in record["changes"] if c["action"] == "REMOVED"]
     record["complete"] = not record["unsupported"] and not record["errors"]

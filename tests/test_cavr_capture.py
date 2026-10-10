@@ -1,5 +1,7 @@
 """C1 capture: pip install commands -> capture records (plan step 1)."""
 import hashlib
+import os
+import threading
 
 import pytest
 
@@ -410,3 +412,122 @@ def test_conflicting_pins_under_the_same_marker_are_an_error(tmp_path):
     record = parse_pip_command("pip install -r reqs.txt", cwd=tmp_path)
     assert any("conflicting" in r for r in reasons(record, "errors"))
     assert record["complete"] is False
+
+
+# --- step 12: items deferred from the batch 1-3 review ------------------------------------------
+
+@pytest.mark.parametrize("command", [None, 5, {}, b"pip install a==1"])
+def test_command_that_is_not_text_or_a_token_list_is_an_error_record(command):
+    record = parse_pip_command(command)
+    assert record["requirements"] == [] and record["complete"] is False
+    assert reasons(record, "errors") == ["the command must be a string or a list of tokens"]
+
+
+def test_requirement_file_outside_the_project_directory_is_not_read(tmp_path):
+    project = tmp_path / "project"
+    project.mkdir()
+    secret = tmp_path / "secrets.txt"
+    secret.write_text("AWS_SECRET_ACCESS_KEY = hunter2\nzzz==9\n")
+    for option in (f"-r {secret}", "-r ../secrets.txt", f"-c {secret}"):
+        record = parse_pip_command(f"pip install a==1 {option}", cwd=project)
+        assert names(record) == [("a", "1")] and record["constraints"] == [] and record["files"] == []
+        assert any("outside the project directory" in r for r in reasons(record, "unsupported"))
+        assert record["complete"] is False
+        assert "hunter2" not in repr(record)  # no line of the file reached the record
+
+
+def test_symlink_to_a_file_outside_the_project_directory_is_not_read(tmp_path):
+    project = tmp_path / "project"
+    project.mkdir()
+    (tmp_path / "secrets.txt").write_text("hunter2\n")
+    (project / "reqs.txt").symlink_to(tmp_path / "secrets.txt")
+    record = parse_pip_command("pip install -r reqs.txt", cwd=project)
+    assert any("outside the project directory" in r for r in reasons(record, "unsupported"))
+    assert "hunter2" not in repr(record) and record["files"] == []
+
+
+def test_nested_include_that_leaves_the_project_directory_is_not_read(tmp_path):
+    project = tmp_path / "project"
+    project.mkdir()
+    (tmp_path / "outside.txt").write_text("zzz==9\n")
+    (project / "reqs.txt").write_text("a==1\n-r ../outside.txt\n")
+    record = parse_pip_command("pip install -r reqs.txt", cwd=project)
+    assert names(record) == [("a", "1")] and record["complete"] is False
+    (entry,) = record["unsupported"]
+    assert entry["origin"] == f"{project / 'reqs.txt'}:2" and "outside the project directory" in entry["reason"]
+
+
+@pytest.mark.parametrize("option", ["-r https://example.invalid/reqs.txt", "-c https://example.invalid/cons.txt"])
+def test_requirement_file_given_as_a_url_is_unsupported(tmp_path, option):
+    record = parse_pip_command(f"pip install a==1 {option}", cwd=tmp_path)
+    assert reasons(record, "unsupported") == ["requirements file given as a URL"] and record["complete"] is False
+
+
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="needs named pipes")
+def test_named_pipe_as_a_requirement_file_does_not_block(tmp_path):
+    os.mkfifo(tmp_path / "reqs.txt")
+    records = []
+    worker = threading.Thread(target=lambda: records.append(parse_pip_command("pip install -r reqs.txt", cwd=tmp_path)), daemon=True)
+    worker.start()
+    worker.join(10)
+    assert not worker.is_alive(), "the capture is waiting on the named pipe"
+    assert reasons(records[0], "errors") == [f"cannot read {tmp_path / 'reqs.txt'}: not a regular file"]
+
+
+def test_number_of_requirement_files_is_capped(tmp_path, monkeypatch):
+    monkeypatch.setattr("backend.cavr.capture.MAX_REQUIREMENTS_FILES", 3)
+    for number in range(6):
+        (tmp_path / f"r{number}.txt").write_text(f"p{number}==1\n-r r{number + 1}.txt\n")
+    record = parse_pip_command("pip install -r r0.txt", cwd=tmp_path)
+    assert names(record) == [("p0", "1"), ("p1", "1"), ("p2", "1")] and len(record["files"]) == 3
+    assert reasons(record, "errors") == ["more than 3 requirements files in one command"] and record["complete"] is False
+
+
+def test_long_include_chain_is_an_error_not_a_recursion_error(tmp_path):
+    for number in range(1200):
+        (tmp_path / f"r{number}.txt").write_text(f"-r r{number + 1}.txt\n")
+    record = parse_pip_command("pip install -r r0.txt", cwd=tmp_path)
+    assert len(record["files"]) == 100 and any("more than 100" in r for r in reasons(record, "errors"))
+
+
+def test_file_included_twice_counts_twice_towards_the_cap(tmp_path, monkeypatch):
+    monkeypatch.setattr("backend.cavr.capture.MAX_REQUIREMENTS_FILES", 3)
+    (tmp_path / "top.txt").write_text("-r left.txt\n-r right.txt\n")
+    (tmp_path / "left.txt").write_text("-r shared.txt\n")
+    (tmp_path / "right.txt").write_text("-r shared.txt\n")
+    (tmp_path / "shared.txt").write_text("a==1\n")
+    record = parse_pip_command("pip install -r top.txt", cwd=tmp_path)
+    assert len(record["files"]) == 3 and record["complete"] is False
+
+
+def test_url_passwords_are_not_kept_in_the_record(tmp_path):
+    (tmp_path / "reqs.txt").write_text("--extra-index-url https://bob:hunter2@example.invalid/simple\n"
+                                       "pkg @ https://bob:hunter2@example.invalid/pkg-1-py3-none-any.whl\n"
+                                       "--proxy http://bob:hunter2@proxy.invalid:8080\n")
+    record = parse_pip_command("pip install a==1 --index-url https://alice:hunter2@example.invalid/simple "
+                               "--proxy=http://alice:hunter2@proxy.invalid:8080 git+https://hunter2@example.invalid/x.git "
+                               "-r https://alice:hunter2@example.invalid/reqs.txt -r reqs.txt", cwd=tmp_path)
+    assert "hunter2" not in repr(record)
+    assert "https://***@example.invalid/simple" in record["command"]
+    assert ["--proxy", "http://***@proxy.invalid:8080"] in record["options"]
+    assert record["complete"] is False
+    # A URL without credentials and an `@` in a path are left alone.
+    plain = parse_pip_command("pip install https://example.invalid/a@b/pkg.whl")
+    assert plain["unsupported"][0]["raw"] == "https://example.invalid/a@b/pkg.whl"
+
+
+@pytest.mark.parametrize("command, complete, key, reason", [
+    ("pip install a==1 && pip install b==1", False, "errors", "malformed requirement"),     # `&&` is not a requirement
+    ("PIP_INDEX_URL=https://example.invalid pip install a==1", False, "errors", "not a pip command"),
+    ("pip install -- a==1", True, None, None),
+    ("pip install a==1 -- -e .", False, "unsupported", "local path requirement"),            # after `--` nothing is an option
+    ("pip install -qr reqs.txt", False, "unsupported", "unknown option"),                    # a cluster hiding a value option
+])
+def test_command_forms_noted_in_the_review(tmp_path, command, complete, key, reason):
+    (tmp_path / "reqs.txt").write_text("zzz==1\n")
+    record = parse_pip_command(command, cwd=tmp_path)
+    assert record["complete"] is complete and record["files"] == []
+    if complete:
+        assert names(record) == [("a", "1")] and record["unsupported"] == [] and record["errors"] == []
+    else:
+        assert any(reason in r for r in reasons(record, key))

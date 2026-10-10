@@ -2,13 +2,18 @@
 
     CAVR_LIVE=1 .venv/bin/python -m pytest -q tests/test_cavr_live.py
 """
+import io
+import json
 import os
+import subprocess
+import sys
 
 import pytest
 
 import shutil
 
 from backend.cavr.advisories import check_advisories
+from backend.cavr.pip_shim import main as pip_wrapper
 from backend.cavr.pipeline import verify_request
 from backend.cavr.pypi_client import fetch_artifact
 from backend.cavr.storage import CavrStorage
@@ -67,3 +72,40 @@ def test_live_pipeline_pypdf_6_19_0_in_the_invoicehub_project(tmp_path):
     if first["status"] == "VERIFIED":
         second = verify_request("pip install pypdf==6.19.0", project, policy, store, **args)
         assert second["status"] == "VERIFIED" and second["cache_hit"] is True
+
+
+def test_live_pip_wrapper_installs_only_with_the_flag_and_only_the_verified_wheel(tmp_path):
+    """Plan step 12's manual check with the real PyPI, the real OSV and the real pip, in a scratch venv."""
+    project = tmp_path / "project"
+    shutil.copytree(REPO / "demo_project" / "InvoiceHub" / "app", project / "app")
+    shutil.copy(REPO / "demo_project" / "InvoiceHub" / "dependencies.lock.json", project / "dependencies.lock.json")
+    (project / "cavr-policy.json").write_text(json.dumps({
+        "project_task_description": "Invoice PDF text extraction", "denied_packages": [{"name": "reqeusts", "reason": "typosquat"}],
+        "allowed_scopes": ["FILE_READ:invoice_documents", "PROCESS_EXEC:none", "NETWORK_CONNECT:none"],
+        "approved_requirements": ["pypdf==6.19.0"]}))
+    subprocess.run([sys.executable, "-m", "venv", str(tmp_path / "venv")], check=True)
+    python = tmp_path / "venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+
+    def installed_version():
+        done = subprocess.run([str(python), "-c", "import pypdf; print(pypdf.__version__)"], capture_output=True, text=True)
+        return done.stdout.strip() if done.returncode == 0 else None
+
+    def wrapper(*argv):
+        out = io.StringIO()
+        code = pip_wrapper(["--cavr-project", str(project), "--cavr-python", str(python), *argv], out=out,
+                           store=CavrStorage(tmp_path / "cavr.sqlite3"), quarantine_dir=tmp_path / "quarantine",
+                           advisory_cache_dir=tmp_path / "osv", live_advisories=True)
+        return code, out.getvalue()
+
+    assert wrapper("install", "reqeusts==2.31.0", "--install")[0] == 3 and installed_version() is None
+    code, text = wrapper("install", "pypdf==6.19.0")
+    # Not asserted to be VERIFIED for ever: OSV may list 6.19.0 one day, and then REJECTED is the right answer.
+    assert code in (0, 1), text
+    assert installed_version() is None  # deciding installs nothing
+    code_with_flag, text = wrapper("install", "pypdf==6.19.0", "--install")
+    if code == 0:
+        assert code_with_flag == 0, text
+        assert "cache_hit: True" in text and f"pypdf==6.19.0 --hash=sha256:{PYPDF_SHA256}" in text
+        assert installed_version() == "6.19.0"
+    else:
+        assert code_with_flag == 1 and installed_version() is None

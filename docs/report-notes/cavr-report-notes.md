@@ -2021,3 +2021,125 @@ Run on 2026-10-10 after the fix:
    Nowhere in M1, and that is why such a grant does not clear a sink: the scan cannot see the destination. Only an unrestricted grant (`*`) does; a scoped one leaves the sink to reachability and, if reachable, to deep analysis.
 3. **Can UNREACHABLE be wrong?**
    It follows `import` statements. It is not used when reached code imports at run time, when a `.pth` file changes the import path, or when the project imports nothing that is a module of the wheels. Imports made through `runpy`, `pkgutil` or `sys.path` edits are not seen; that is a stated limit.
+
+## Step 12 — pip wrapper runs the pipeline before pip (2026-10-10)
+
+Plan commit 12, `feat(cavr): pip wrapper runs the pipeline before pip`.
+Review: see the "Steps 12-14 — batch review" section.
+
+### Ch 6 Implementation
+
+| File | Function / constant | What it does |
+|---|---|---|
+| `backend/cavr/pip_shim.py` (rewritten, 59 -> 280 lines) | `main(argv, *, pip_runner, out, store, **verify_options)` | Splits the arguments, reads the policy, calls `pipeline.verify_request(["pip", *arguments], project, policy, store)`, prints the verdict and evidence, and returns the exit code: 0 VERIFIED, 1 REJECTED, 2 UNRESOLVED, 3 BLOCK, 4 when `--install` was given, the verdict is VERIFIED and pip did not succeed. |
+| | `split_arguments(argv)` | Takes out the wrapper's own options (`--install`, `--cavr-project`, `--cavr-policy`, `--cavr-python`, `--cavr-json`); the rest is the pip command. An unknown `--cavr-*` option is a usage error (exit 2, nothing verified). Everything from `--` on belongs to pip. |
+| | `install_plan(verdict)` | One line `name==version --hash=sha256:<digest>` per node of every verified tree, or a reason why not. Refuses unless the verdict and every package are VERIFIED and every tree is `TREE_BUILT`, and checks each name, version and digest again with a strict pattern. |
+| | `_install` | Without `--install`: does nothing. With it: writes the plan to a file in a new temporary directory, runs `<python> -m pip install <PIP_INSTALL_OPTIONS> -r <file>` once, removes the directory. |
+| | `PIP_INSTALL_OPTIONS` | `--isolated --disable-pip-version-check --no-input --index-url https://pypi.org/simple/ --require-hashes --no-deps --only-binary :all:` |
+| | `render`, `_render_package` | The verdict as text: status, stage, rule, reason, request, the three metric fields, gate, and per package the artifact digests, tree, contract, advisories, scan, sinks and cache result. |
+| `backend/cavr/capture.py` (426 -> 460 lines) | `redact`, `URL_CREDENTIALS` | `https://user:password@host` becomes `https://***@host` in the command, every `raw`, every reason and option values. |
+| | `_read_file` | A `-r` / `-c` file is read only when it is inside the directory the command ran in (after resolving symlinks) and is not a URL; at most `MAX_REQUIREMENTS_FILES` (100) files per command. |
+| | `read_requirements_bytes` | Something that exists and is not a regular file (directory, FIFO, device) is refused before `open`. |
+| | `parse_pip_command` | A command that is not a string, list or tuple gives an error record instead of `TypeError`. |
+| `backend/cavr/pipeline.py` (348 -> 375 lines) | `verify_request`, `_asked` | The same release asked for twice: identical lines are verified once; lines that differ in extras, `--hash` values or marker give a second package verdict UNRESOLVED `DUPLICATE_REQUIREMENT`. |
+| | `_verify_package`, `ANALYSIS_KEYS` | A sound cache row that is not a complete analysis is a miss (`ROW_INCOMPLETE`); the package is analysed again and the row replaced. |
+| | `_log`, `MAX_LOGGED_REQUEST` | Built entirely inside the `try`; the logged request is redacted and cut to 500 characters. |
+| `backend/cavr/manifest_parser.py` (167 -> 170 lines) | `capture_requirements_edit` | New field `removed_options`: option lines of the old file that are not in the new one. Docstring corrected (`_diff`). |
+| Tests | `tests/test_cavr_pip_shim.py` (new, 394 lines, 33 functions, 73 cases); additions in `test_cavr_capture.py` (+11 functions, 20 cases), `test_cavr_pipeline.py` (+5 functions, 9 cases), `test_cavr_manifest.py` (+1), `test_cavr_live.py` (+1 live test); `World` and its constants moved from `test_cavr_pipeline.py` to `test_cavr_support.py` unchanged | |
+
+Key algorithm (`main`): (1) wrapper options out, usage error -> exit 2; (2) `verify_request` on the remaining pip command;
+(3) if `--install` and `install_plan(verdict)` gives lines, write them to a file and run pip with the fixed options;
+(4) print; (5) exit code from the verdict status, or 4 when the install was asked for and did not succeed.
+
+### Design decisions
+
+| Decision | Alternatives considered | Why |
+|---|---|---|
+| Decide only by default; install only with `--install` (plan, approved change) | Always install on VERIFIED | The wrapper can be used as a check without changing the environment. |
+| The user's arguments are never passed to pip; pip gets a fixed option list and the generated file | Append `--require-hashes` to the user's command | An option the capture does not model could otherwise change what pip does. With a fixed command there is nothing to model. |
+| The generated file pins every node of the tree by the SHA-256 the pipeline computed; `--no-deps` | Let pip resolve dependencies; install from the quarantine directory with `--no-index` | pip downloads again, but only the analysed bytes can pass `--require-hashes`, and nothing outside the verified tree is installed. Installing from quarantine would avoid the second download; the plan asked for the hash-pinned file. |
+| `--isolated` and an explicit `--index-url` | Leave pip's environment and configuration alone | `PIP_*` variables and the user's pip configuration cannot add an index or an option. Cost: a proxy set only in pip's configuration is ignored. |
+| `--only-binary :all:` | Rely on the hash alone | The pipeline verifies wheels only; this also stops pip from ever building an sdist. |
+| `install_plan` validates name, version and digest again | Trust the verdict | Each line is parsed by pip; a newline or a space in a value would be a second requirement or an option. |
+| Policy: `--cavr-policy`, else `$CAVR_POLICY`, else `<project>/cavr-policy.json`; missing -> UNRESOLVED | Fall back to `backend/cavr/project_policy.json` | That file is the dashboard's policy; a project without a policy must not be judged by another project's. |
+| Only `pip install` is handled; other pip commands are UNRESOLVED and not passed on | Pass `pip list` etc. through | `pip download` / `pip wheel` can run build code; a pass-through list is future work. |
+| `-r` files only inside the project directory | Truncate `raw` in error entries | The lines of a file outside the project never enter the record. A file inside the project is still read (see limitations). |
+| Duplicate release with different extras / hashes -> UNRESOLVED | Merge the two lines | Simple and fail-closed; merging hashes has pip-specific semantics. |
+
+### Requirements covered
+
+No `FR-CAVR-NN` identifiers exist in this repository; IDs are from `RequirementsTab.tsx` (Maryam to confirm).
+
+| ID | Title | What this step covers | Acceptance check |
+|---|---|---|---|
+| FR-1 | Intercept Before Execution | The wrapper verifies before pip runs, and pip runs only on VERIFIED with `--install` | `test_default_prints_the_verdict_and_never_invokes_pip`, `test_install_on_verified_invokes_pip_once_with_the_hash_pinned_file` |
+| FR-2 | Requirement Gate Enforcement | BLOCK: no download, no pip | `test_install_on_block_never_invokes_pip_and_downloads_nothing` (3) |
+| FR-6 | Fail-Closed Security Policy | REJECTED / UNRESOLVED / missing policy / usage error / pipeline fault -> no install | `test_install_on_rejected_never_invokes_pip`, `test_install_on_unresolved_never_invokes_pip`, `test_no_policy_file_is_unresolved_and_downloads_nothing`, `test_a_fault_in_the_pipeline_call_is_unresolved_not_a_traceback` |
+| none listed | CLAUDE.md C1 "pip wrapper/gateway that captures real `pip install X==Y`" | The command line is captured by `capture.parse_pip_command` through the pipeline | `test_module_runs_as_a_program_and_fails_closed` |
+
+### Ch 7 Test cases
+
+Run on 2026-10-10:
+
+- `.venv/bin/python -m pytest tests/test_cavr_*.py -q` -> 1101 passed, 6 skipped (999 + 102 new; the 6 skips are the live tests).
+- `.venv/bin/python -m pytest -q` -> 1159 passed, 7 failed, 6 skipped (the same 7 baseline tests in `test_api_replay.py` and `test_integration.py`).
+- `CAVR_LIVE=1 … tests/test_cavr_live.py` -> 5 passed before this step's test was added; the new test, run alone, passed: real PyPI, real OSV, real pip, a new venv; pip printed `Successfully installed pypdf-6.19.0`.
+- The 23 new cases for the deferred items were run against the previously committed `capture.py`, `pipeline.py` and `manifest_parser.py`: all 23 failed there, all pass now.
+- Fault injection in `pip_shim.py`, one change at a time, file restored: 17 faults (install without the flag, verdict status / package status / tree rule ignored, `--require-hashes` removed, `--no-deps` removed, name / version / digest not validated, two files for one package accepted, pip failure ignored, exit 0 for every status, only the root listed, missing policy falling back to the dashboard policy, usage error ignored, `--` not honoured, generated file not removed). All 17 made a test fail. An 18th injected change turned out to change nothing and is not counted.
+
+| Test ID | Purpose | Input | Expected | Result |
+|---|---|---|---|---|
+| `test_default_prints_the_verdict_and_never_invokes_pip` | Default decides only | `install pypdf==6.19.0` | exit 0; pip never called; output has the SHA-256 `7e5d6e73…8d14`, `HASH_MATCH`, the two sinks, the metric fields | pass |
+| `test_default_exit_code_is_non_zero_unless_verified` (6) | Exit codes | denylisted, unpinned, missing `-r` file, `list`, `--version`, no arguments | 3 / 3 / 2 / 2 / 2 / 2; no pip, no download | pass |
+| `test_install_on_verified_invokes_pip_once_with_the_hash_pinned_file` (3) | `--install` + VERIFIED | `--install` at three positions | pip called once: `[python, -m, pip, install, *PIP_INSTALL_OPTIONS, -r, file]`; file is `pypdf==6.19.0 --hash=sha256:7e5d…8d14`; file gone afterwards | pass |
+| `test_install_lists_the_whole_verified_tree`, `test_two_requested_packages_are_one_pip_call` | Exact tree | `top==1.0` needing `helper>=2`; two packages | Both files listed with the SHA-256 of their real bytes; one pip call | pass |
+| `test_the_users_own_pip_options_never_reach_pip` | Fixed command | `--upgrade --no-cache-dir --target somewhere` | None of them in the pip command | pass |
+| `test_install_on_rejected_never_invokes_pip`, `..._on_a_known_vulnerability_...`, `..._on_unresolved_...`, `..._on_an_escalated_verdict_...`, `..._on_block_...` (3), `test_one_verified_and_one_rejected_installs_neither` | `--install` on anything else | flipped byte; `SYNTH-1201`; registry unreachable; unguarded reader; denylist / allowlist / unpinned; one good + one vulnerable | exit 1 / 1 / 2 / 2 / 3 / 1; pip never called | pass |
+| `test_requests_the_capture_does_not_support_are_never_installed` (6) | Unsupported requests | custom index, `--no-binary`, URL, `-e .`, `pip download`, `-- --install` | exit 2; no pip; no download | pass |
+| `test_pip_failing_is_a_non_zero_exit`, `test_pip_that_cannot_be_started_is_a_non_zero_exit` | pip fails | stub returns 1; stub raises `FileNotFoundError` | exit 4 | pass |
+| `test_no_policy_file_is_unresolved_and_downloads_nothing`, `test_a_policy_that_is_not_json_is_unresolved`, `test_policy_option_and_environment_variable` | Policy | no file; `{broken`; option / variable / named but missing | `POLICY_MISSING`, `POLICY_INVALID`; option wins; no fallback | pass |
+| `test_split_arguments`, `test_bad_wrapper_options_are_a_usage_error` (6), `test_a_usage_error_verifies_and_installs_nothing` | Wrapper options | as named | usage error -> exit 2, nothing verified or logged | pass |
+| `test_install_plan_refuses_a_verdict_that_is_not_a_fully_verified_tree` (16), `test_install_plan_refuses_two_files_for_one_package`, `test_install_plan_of_something_that_is_not_a_verdict` (7), `test_a_verified_verdict_without_a_usable_plan_is_not_installed` | Defence in depth | status changed; no nodes; digest `7e5d` / None / upper case; name with a newline and `--index-url`; version with `--hash`; two digests | No plan, with the reason; exit 4 without calling pip | pass |
+| `test_credentials_in_a_request_are_not_printed_or_logged`, `test_url_passwords_are_not_kept_in_the_record`, `test_url_passwords_do_not_reach_the_verdict_log` | Secrets | `https://alice:hunter2@…` in the command, a requirements file, `--proxy` | `hunter2` nowhere in the record, the output or `verdict_log` | pass |
+| `test_requirement_file_outside_the_project_directory_is_not_read`, `test_symlink_…`, `test_nested_include_…`, `test_requirement_file_given_as_a_url_is_unsupported` (2), `test_named_pipe_as_a_requirement_file_does_not_block`, `test_number_of_requirement_files_is_capped`, `test_long_include_chain_is_an_error_not_a_recursion_error`, `test_file_included_twice_counts_twice_towards_the_cap` | `-r` limits | absolute path, `../`, symlink, URL, FIFO, 6-file and 1200-file chains, diamond | unsupported / error; nothing of the outside file in the record; returns within 10 s | pass |
+| `test_command_that_is_not_text_or_a_token_list_is_an_error_record` (4), `test_command_forms_noted_in_the_review` (5) | Command forms | `None`, `5`, `{}`, bytes; `&&`, `PIP_INDEX_URL=… pip`, `--`, `-qr` | error record; fail closed | pass |
+| `test_the_same_line_twice_is_verified_once`, `test_one_release_asked_for_twice_in_different_ways_is_unresolved` (3) | Duplicates | same line twice; second line with a wrong hash / an extra | VERIFIED once; UNRESOLVED `DUPLICATE_REQUIREMENT` | pass |
+| `test_a_cache_row_that_is_not_a_complete_analysis_is_a_miss_and_is_replaced` (3), `test_a_caller_made_record_with_an_odd_command_is_still_logged` | Cache row, log | row without `scan` / `reachability`; `command` = 5, None, a string, a dict | `ROW_INCOMPLETE`, analysed, next run a HIT; logged | pass |
+| `test_removed_option_lines_are_listed` | Edit | `--require-hashes` deleted | in `removed_options` | pass |
+| `test_module_runs_as_a_program_and_fails_closed` | Real process | `python -m backend.cavr.pip_shim install pypdf==6.19.0 --install` in an empty directory | exit 2, `POLICY_MISSING`, "install: refused" | pass |
+| `test_live_pip_wrapper_installs_only_with_the_flag_and_only_the_verified_wheel` (`CAVR_LIVE=1`) | Real PyPI, OSV and pip | denylisted name; decide only; `--install` | exit 3 and nothing installed; nothing installed; `pypdf.__version__ == "6.19.0"` in the venv, second run a cache hit | pass |
+
+### Defects found and fixed
+
+| # | Found by | Finding | Outcome |
+|---|---|---|---|
+| 1 | Reading the old `pip_shim.py` | It ran real pip for every command with the user's arguments plus `--index-url http://127.0.0.1:8000/simple/`, verified nothing first, and parsed option values as package names | Rewritten; pip is reached only after VERIFIED and with a fixed command |
+| 2 | Deferred review items (batch 1-3) | `-r` could read any file on disk into the record; no limit on nested `-r`; a FIFO blocked; `parse_pip_command(None)` raised; removed option lines were invisible | Fixed in `capture.py` and `manifest_parser.py`, each with a test |
+| 3 | Deferred review items (batch 9-11) | A second line for the same release was skipped; `_log` could raise and stored URL passwords; an incomplete cache row gave `INTERNAL_ERROR` on every run | Fixed in `pipeline.py`, each with a test |
+| 4 | Writing the capture tests | `-r https://user:pass@host/reqs.txt` was reported as a missing local file and the reason contained the password | Reported as "requirements file given as a URL"; reasons are redacted too |
+
+### Known limitations / deferred
+
+- pip downloads the files a second time. Only bytes with the verified SHA-256 can be installed, but the network is used twice.
+- The pipeline picks the wheel and evaluates markers for the interpreter that runs the wrapper. With `--cavr-python` pointing at a different Python version or platform, pip may want another file; `--require-hashes` then makes pip fail (nothing unverified is installed).
+- pip's global (machine-wide) configuration file is still read by pip under `--isolated`; the index is set explicitly on the command line, other settings from that file are not controlled.
+- Only `pip install` is handled. `pip list`, `pip uninstall` and the rest return UNRESOLVED and are not passed to pip.
+- A requirements file inside the project directory is read whatever it is: `-r .env` would copy the lines of `.env` into `errors[].raw`.
+- `removed_options` is evidence only; removing `--require-hashes` from a requirements file does not change the verdict.
+- A root requirement's marker is still ignored (`pkg==1; python_version < "3"` is verified and would be installed).
+- The wrapper is not put on `PATH` as `pip` by anything in this repository; it runs as `python -m backend.cavr.pip_shim`.
+
+### Tool disclosure (Ch 8.7)
+
+- **Generated by Claude Code:** `pip_shim.py`, the changes in `capture.py`, `pipeline.py`, `manifest_parser.py`, all tests, these notes, the commit.
+- **Reviewed / changed by Maryam:** nothing yet.
+- **Verified by:** the pytest runs, the run of the new cases against the old sources, the 17 fault injections and the live run with real pip listed above.
+
+### Supervisor Q&A prep
+
+1. **pip downloads the package again after CAVR verified it. How do you know it installs the same file?**
+   The generated requirements file carries the SHA-256 that the pipeline computed from the bytes it analysed, and pip runs with `--require-hashes`, so pip refuses any file with another digest. `--no-deps` stops it from adding anything that is not in the file.
+2. **What if the user adds `--index-url` or `--no-binary` to the command?**
+   The capture marks the request as not fully captured, so the verdict is UNRESOLVED and pip is not run. Even on a VERIFIED verdict the user's arguments are not given to pip; it gets the fixed option list.
+3. **What does the wrapper do when the project has no policy file?**
+   UNRESOLVED `POLICY_MISSING`, exit code 2, before any download. It does not borrow another policy.

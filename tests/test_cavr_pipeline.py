@@ -14,74 +14,10 @@ from backend.cavr import pipeline
 from backend.cavr.manifest_parser import snapshot_requirements
 from backend.cavr.pipeline import ESCALATION, metrics, verify_request
 from backend.cavr.pypi_client import TransportError, registry_url
-from backend.cavr.storage import CavrStorage
 from backend.cavr.verdict_cache import lookup
 from backend.threat_repo.repository import seeds
-from test_cavr_support import (PYPDF_SHA256, PYPDF_WHEEL, REPO, FakeIndex, build_wheel, sha256_file, synthetic_advisory,
-                               write_osv_cache)
-
-INVOICEHUB = REPO / "demo_project" / "InvoiceHub"
-RECORDED_6_19_0 = json.loads((REPO / "tests" / "test_cavr_data" / "osv-pypdf-6.19.0.json").read_text())["response"].get("vulns", [])
-POLICY = {
-    "project_task_description": "Invoice PDF text extraction",
-    "allowed_scopes": ["FILE_READ:invoice_documents", "FILE_WRITE:scratch_tmp", "PROCESS_EXEC:none", "NETWORK_CONNECT:none"],
-    "approved_requirements": ["pypdf==6.19.0", "demo==1.0", "top==1.0", "helper==2.0", "native==1.0"],
-    "denied_packages": [{"name": "reqeusts", "reason": "typosquat of requests"}],
-}
-UNGUARDED = "\n\ndef quick(path):\n    return PdfReader(path)\n"
-CLEAN_DEMO = {"demo/__init__.py": "def run():\n    return 1\n"}
-USES_DEMO = "import demo\n\n\ndef go():\n    return demo.run()\n"
-
-
-class World:
-    """One project directory, one package index, one cache database, one advisory cache."""
-
-    def __init__(self, tmp_path):
-        self.tmp_path = tmp_path
-        self.project = tmp_path / "project"
-        shutil.copytree(INVOICEHUB / "app", self.project / "app")
-        for name in ("requirements.txt", "dependencies.lock.json"):
-            shutil.copy(INVOICEHUB / name, self.project / name)
-        self.index = FakeIndex()
-        self.index.add_pypdf()
-        self.store = CavrStorage(tmp_path / "cavr.sqlite3")
-        self.osv_dir = tmp_path / "osv"
-        self.advisories("pypdf", "6.19.0", RECORDED_6_19_0)
-        self.policy = json.loads(json.dumps(POLICY))
-        self.builds = 0
-
-    def advisories(self, name, version, vulns):
-        write_osv_cache(self.osv_dir, name, version, vulns)
-
-    def add(self, name, version, files=None, requires=(), lock=True, **wheel_args):
-        """Build a wheel, serve it, record "no advisories" for it and (by default) pin it in the lockfile."""
-        self.builds += 1
-        wheel = build_wheel(self.tmp_path / f"build{self.builds}", name, version, files=files, requires=requires, **wheel_args)
-        self.index.add(name, version, wheel)
-        self.advisories(name, version, [])
-        if lock:
-            path = self.project / "dependencies.lock.json"
-            lockfile = json.loads(path.read_text())
-            lockfile["packages"].append({"name": name, "version": version, "ecosystem": "PyPI"})
-            path.write_text(json.dumps(lockfile))
-        return wheel
-
-    def write(self, relative, text):
-        target = self.project / relative
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(text)
-
-    def verify(self, request="pip install pypdf==6.19.0", **overrides):
-        args = {"transport": self.index, "quarantine_dir": self.tmp_path / "quarantine", "advisory_cache_dir": self.osv_dir,
-                "live_advisories": False}
-        args.update(overrides)
-        return verify_request(request, args.pop("project_dir", self.project), args.pop("policy", self.policy),
-                              args.pop("store", self.store), **args)
-
-    def cache_rows(self):
-        with self.store.connect() as connection:
-            return [dict(row) for row in connection.execute("SELECT * FROM verdict_cache").fetchall()]
-
+from test_cavr_support import (CLEAN_DEMO, PYPDF_SHA256, PYPDF_WHEEL, RECORDED_6_19_0, UNGUARDED, USES_DEMO, World, build_wheel,
+                               sha256_file, synthetic_advisory)
 
 @pytest.fixture
 def world(tmp_path):
@@ -642,3 +578,65 @@ def test_verifying_does_not_install_or_run_the_package(world):
     assert importlib.util.find_spec("demo") is None  # not installed into this interpreter
     exec(compile(source, "demo/__init__.py", "exec"), {})  # really running it does create the marker
     assert marker.exists()
+
+
+# --- step 12: items deferred from the batch 9-11 review ------------------------------------------------------------------
+
+def test_the_same_line_twice_is_verified_once(world):
+    verdict = world.verify("pip install pypdf==6.19.0 pypdf==6.19.0")
+    assert outcome(verdict) == ("VERIFIED", "verdict", "ALL_CHECKS_PASSED"), verdict["reason"]
+    assert only(verdict)["package"] == "pypdf" and len(world.index.downloads()) == 1
+
+
+@pytest.mark.parametrize("lines", [
+    f"pypdf==6.19.0 --hash=sha256:{PYPDF_SHA256}\npypdf==6.19.0 --hash=sha256:{'0' * 64}\n",   # the second hash is wrong
+    f"pypdf==6.19.0\npypdf==6.19.0 --hash=sha256:{'0' * 64}\n",
+    "pypdf==6.19.0\npypdf[crypto]==6.19.0\n",                                                 # the second line adds an extra
+])
+def test_one_release_asked_for_twice_in_different_ways_is_unresolved(world, lines):
+    """Before step 12 the second line was skipped, so its hash and its extra were never checked."""
+    world.write("reqs.txt", lines)
+    verdict = world.verify("pip install -r reqs.txt")
+    assert verdict["status"] == "UNRESOLVED"
+    assert [(p["status"], p["rule"]) for p in verdict["packages"]] == [("VERIFIED", "ALL_CHECKS_PASSED"), ("UNRESOLVED", "DUPLICATE_REQUIREMENT")]
+    assert outcome(verdict) == ("UNRESOLVED", "capture", "DUPLICATE_REQUIREMENT")
+    assert_metric_fields(verdict)
+    assert set(verdict["packages"][0]) == set(verdict["packages"][1])
+
+
+def test_a_caller_made_record_with_an_odd_command_is_still_logged(world):
+    from backend.cavr.capture import parse_pip_command
+    for command in (5, None, "pip install pypdf==6.19.0", {"a": 1}):
+        record = parse_pip_command("pip install pypdf==6.19.0", cwd=world.project)
+        record["command"] = command
+        verdict = world.verify(record)
+        assert verdict["status"] == "VERIFIED" and verdict["logged"] is True
+    assert len(world.store.get_verdict_log()) == 4
+
+
+def test_url_passwords_do_not_reach_the_verdict_log(world):
+    from backend.cavr.capture import parse_pip_command
+    captured = world.verify("pip install pypdf==6.19.0 --index-url https://alice:hunter2@example.invalid/simple")
+    assert captured["status"] == "UNRESOLVED" and "hunter2" not in json.dumps(captured)
+    record = parse_pip_command("pip install pypdf==6.19.0", cwd=world.project)
+    record["command"] = ["pip", "install", "pypdf==6.19.0", "--proxy", "http://bob:hunter2@proxy.invalid:8080"] + ["x" * 600]
+    assert world.verify(record)["logged"] is True
+    log = world.store.get_verdict_log()
+    assert "hunter2" not in json.dumps(log) and "***@proxy.invalid" in log[0]["requested"]
+    assert all(len(row["requested"]) <= pipeline.MAX_LOGGED_REQUEST for row in log)
+
+
+@pytest.mark.parametrize("stored", [{"status": "VERIFIED"}, {"status": "VERIFIED", "stage": "verdict", "rule": "X", "reason": "y", "escalation": None},
+                                    {"status": "REJECTED", "scan": [], "reachability": None}])
+def test_a_cache_row_that_is_not_a_complete_analysis_is_a_miss_and_is_replaced(world, stored):
+    from backend.cavr.verdict_cache import store as store_verdict
+    first = world.verify(store=None)
+    fields = only(first)["key_fields"]
+    assert store_verdict(world.store, fields, stored)["stored"] is True and lookup(world.store, fields)["hit"] is True
+    verdict = world.verify()
+    assert outcome(verdict) == ("VERIFIED", "verdict", "ALL_CHECKS_PASSED") and verdict["cache_hit"] is False
+    package = only(verdict)
+    assert package["cache"]["lookup"] == "ROW_INCOMPLETE" and package["cache"]["stored"] is True
+    assert package["evidence"]["analysis_from_cache"] is False and package["evidence"]["scan"] != []
+    again = world.verify()
+    assert again["cache_hit"] is True and only(again)["cache"]["lookup"] == "HIT"

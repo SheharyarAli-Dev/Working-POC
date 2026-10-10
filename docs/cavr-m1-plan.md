@@ -388,6 +388,15 @@ Found in the batch 9-11 review (2026-10-10, MINOR items, all derived by reading)
   is not in this branch's scope; state it as a limitation in the report. -> Maryam.
 - The fix commit for this review has not been reviewed again.
 
+Handled in step 12 (2026-10-10), each with a test: `capture.py` cap on `-r` files (100 per command), `-r` only
+inside the project directory and never a URL, FIFO / device refused before `open`, `parse_pip_command(None)`, the five
+nice-to-have command forms; removed option lines of an edit (`removed_options`); `pipeline.py` duplicate release in one
+request (`DUPLICATE_REQUIREMENT`), `_log` inside the `try` and redacted, incomplete cache row treated as a miss
+(`ROW_INCOMPLETE`); the `manifest_parser.py` docstring.
+Still open after step 12: a requirements file inside the project is read whatever it is (`-r .env`); a root
+requirement's marker is ignored; other pip commands are not passed through; `--cavr-python` for another Python version
+relies on pip's hash check failing. -> M2 / Maryam.
+
 ## Verification
 
 - `.venv/bin/python -m pytest -q` before every commit (offline).
@@ -413,6 +422,6 @@ Found in the batch 9-11 review (2026-10-10, MINOR items, all derived by reading)
 - [x] 9 C4 capability contract (committed 2026-10-10, `a188cb6`; batch review fix in the next commit)
 - [x] 10 verdict cache (committed 2026-10-10, `d8e6367`)
 - [x] 11 pipeline (committed 2026-10-10, `c5c0ef4`; batch review fixes in the next commit)
-- [ ] 12 pip wrapper
+- [x] 12 pip wrapper (committed 2026-10-10)
 - [ ] 13 dashboard API
 - [ ] 14 orchestrator analyzer
