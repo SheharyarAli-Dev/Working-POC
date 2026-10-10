@@ -35,6 +35,7 @@ The wrapper's own options (anywhere before a `--`):
     --cavr-policy FILE    the project policy (default: $CAVR_POLICY, else DIR/cavr-policy.json)
     --cavr-python PATH    the interpreter whose pip installs (default: the one running this)
     --cavr-json           print the whole verdict as JSON instead of the summary
+                          (the summary names the first three advisory ids; the JSON has all)
 
 A policy file that is missing is not replaced by another one: the verdict is UNRESOLVED.
 Only `pip install` is handled. Any other pip command is UNRESOLVED and is not passed on.
@@ -50,6 +51,7 @@ from pathlib import Path
 
 from packaging.version import InvalidVersion, Version
 
+from backend.cavr.advisories import FIRST_IDS, summarise_ids
 from backend.cavr.pipeline import verify_request
 from backend.cavr.requirement_gate import load_json_file
 from backend.cavr.storage import CavrStorage
@@ -266,8 +268,13 @@ def _render_package(package: dict) -> list[str]:
         lines.append(f"  contract: {contract.get('rule')}, {len(contract.get('call_sites') or [])} call site(s), "
                      f"digest {contract.get('digest')}")
     for advisory in evidence.get("advisories") or []:
-        ids = ", ".join(str(match.get("id")) for match in advisory.get("affected") or [])
-        lines.append(f"  advisories: {advisory.get('name')} {advisory.get('version')} {advisory.get('rule')}" + (f" ({ids})" if ids else ""))
+        ids = [str(match.get("id")) for match in advisory.get("affected") or []]
+        line = f"  advisories: {advisory.get('name')} {advisory.get('version')} {advisory.get('rule')}"
+        if ids:
+            # A long list would be one unreadable line: the count and the first ids here, every id in the JSON.
+            line += f": {len(ids)} advisories: {summarise_ids(ids)}"
+            line += " (every id: --cavr-json)" if len(ids) > FIRST_IDS else ""
+        lines.append(line)
     for scan in evidence.get("scan") or []:
         lines.append(f"  scan: {scan.get('package')} {scan.get('rule')} ({scan.get('python_files')} Python files)")
     for sink in reachability.get("sinks") or []:

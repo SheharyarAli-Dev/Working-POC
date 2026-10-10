@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from backend.cavr.advisories import check_advisories, match_advisory
+from backend.cavr.advisories import FIRST_IDS, check_advisories, match_advisory, summarise_ids
 from backend.integrations.osv_adapter import OSV
 from backend.orchestrator.hashing import digest
 
@@ -87,6 +87,33 @@ def test_recorded_pypdf_5_1_0_is_rejected_with_the_advisory_ids(tmp_path):
     entry = next(e for e in result["affected"] if e["id"] == "GHSA-php9-fj8v-98fj")
     assert entry["fixed_versions"] == ["6.19.0"] and "CVE-2026-102998" in entry["aliases"]
     assert "GHSA-23w6-3w8w-8484" in result["reason"]
+
+
+def test_a_long_advisory_list_is_a_count_and_the_first_three_ids_in_the_reason_and_whole_in_the_result(tmp_path):
+    result = check(tmp_path, "pypdf", "5.1.0", RECORDED_5_1_0)
+    ids = [entry["id"] for entry in result["affected"]]
+    assert FIRST_IDS == 3 and len(ids) == 97
+    assert result["reason"] == f"pypdf 5.1.0 is affected by 97 known advisories: {ids[0]}, {ids[1]}, {ids[2]} and 94 more"
+    assert not any(advisory_id in result["reason"] for advisory_id in ids[3:])
+    # The evidence is not shortened: every one of the 97 is in the result with its aliases and fixed versions.
+    assert all(entry["id"] and "fixed_versions" in entry and "aliases" in entry for entry in result["affected"])
+
+
+@pytest.mark.parametrize("count, expected", [(0, ""), (1, "A-1"), (2, "A-1, A-2"), (3, "A-1, A-2, A-3"),
+                                             (4, "A-1, A-2, A-3 and 1 more"), (97, "A-1, A-2, A-3 and 94 more")])
+def test_summarise_ids_names_the_first_three_and_counts_the_rest(count, expected):
+    assert summarise_ids([f"A-{number}" for number in range(1, count + 1)]) == expected
+
+
+def test_the_other_reasons_that_list_ids_are_summarised_the_same_way(tmp_path):
+    git_only = [synthetic(f"SYNTH-07{number:02d}", {"type": "GIT", "events": [{"introduced": "0"}]}) for number in range(1, 6)]
+    unknown = check(tmp_path / "a", "demo", "1.0", git_only)
+    assert outcome(unknown) == ("UNRESOLVED", "RANGE_UNSUPPORTED") and len(unknown["unknown"]) == 5
+    assert unknown["reason"].endswith(": SYNTH-0701, SYNTH-0702, SYNTH-0703 and 2 more")
+    outside = [synthetic(f"SYNTH-08{number:02d}", ecosystem({"introduced": "2.0"})) for number in range(1, 5)]
+    disagreement = check(tmp_path / "b", "demo", "1.0", outside)
+    assert outcome(disagreement) == ("UNRESOLVED", "RANGE_DISAGREEMENT") and len(disagreement["not_affected"]) == 4
+    assert disagreement["reason"].endswith(": SYNTH-0801, SYNTH-0802, SYNTH-0803 and 1 more")
 
 
 def test_recorded_pypdf_6_19_0_has_no_known_vulnerability(tmp_path):

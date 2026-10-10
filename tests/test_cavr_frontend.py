@@ -119,8 +119,8 @@ def dashboard(tmp_path, monkeypatch):
     return Dashboard(tmp_path, monkeypatch)
 
 
-def render(tmp_path, *views) -> list:
-    """The text of each view, as a list of the pieces of text between its tags."""
+def render_html(tmp_path, *views) -> list:
+    """The HTML of each view."""
     if shutil.which("node") is None or not (FRONTEND / "node_modules" / "esbuild").is_dir():
         pytest.skip("needs Node.js and frontend/node_modules (npm --prefix frontend install)")
     work = tmp_path / "render"
@@ -130,7 +130,16 @@ def render(tmp_path, *views) -> list:
     assert done.returncode == 0, done.stderr
     rendered = json.loads(done.stdout)["html"]
     assert len(rendered) == len(views)
-    return [[html.unescape(piece).strip() for piece in re.split(r"<[^>]+>", markup) if piece.strip()] for markup in rendered]
+    return rendered
+
+
+def pieces_of(markup) -> list:
+    return [html.unescape(piece).strip() for piece in re.split(r"<[^>]+>", markup) if piece.strip()]
+
+
+def render(tmp_path, *views) -> list:
+    """The text of each view, as a list of the pieces of text between its tags."""
+    return [pieces_of(markup) for markup in render_html(tmp_path, *views)]
 
 
 def run_data(dashboard, scenario) -> dict:
@@ -276,3 +285,36 @@ def test_the_metrics_tab_with_an_empty_log_shows_dashes(dashboard, tmp_path):
     assert table_rows(tab, "fast_gate_ms by cache lookup", 4, 3) == [[found, "0", DASH, DASH] for found in ("HIT", "MISS", "NOT_REACHED")]
     assert after(tab, "Cache hit rate, all verdicts") == DASH and after(tab, "Cache hit rate, lookups only") == DASH
     assert tab.count("No verdict has been logged yet.") == 3      # the pairs table, the legend, the last verdicts
+
+
+# --- issue 4: long advisory lists -----------------------------------------------------------------------------------
+
+def test_a_long_advisory_list_is_a_count_three_ids_and_a_closed_section_with_all_of_them(dashboard, tmp_path):
+    data = run_data(dashboard, "known_vulnerable")
+    affected = data["proof"]["cavr_verdict"]["packages"][0]["evidence"]["advisories"][0]["affected"]
+    ids = [entry["id"] for entry in affected]
+    assert len(ids) == 97
+    (markup,) = render_html(tmp_path, {"view": "overview", **data})
+    summary = f"97 advisories affect pypdf 5.1.0: {ids[0]}, {ids[1]}, {ids[2]} and 94 more"
+    # The full list is inside one <details> element, which is closed until it is clicked.
+    assert markup.count("<details") == 1 and "<details open" not in markup
+    before, rest = markup.split("<details", 1)
+    inside, behind = rest.split("</details>", 1)
+    outside = pieces_of(before) + pieces_of(behind)
+    assert summary in outside and "97 affect this version" in outside
+    assert [advisory_id for advisory_id in ids[3:] if any(advisory_id in piece for piece in outside)] == []
+    listed = pieces_of("<details" + inside)
+    assert listed[0] == "Show all 97 advisories" and [advisory_id for advisory_id in ids if advisory_id not in listed] == []
+    fixed = next(entry for entry in affected if entry["id"] == "GHSA-php9-fj8v-98fj")
+    assert listed[listed.index(fixed["id"]) + 1:][:3] == [", ".join(fixed["aliases"]), ", ".join(fixed["fixed_versions"]),
+                                                          fixed["summary"]]
+    # And where the same list is as JSON.
+    assert f'href="/api/cavr/proof/{data["proof"]["run_id"]}"' in behind
+
+
+def test_the_advisory_card_without_advisories(dashboard, tmp_path):
+    verified, blocked = run_data(dashboard, "verified"), run_data(dashboard, "not_on_allowlist")
+    clean, not_asked = render_html(tmp_path, {"view": "overview", **verified}, {"view": "overview", **blocked})
+    assert "<details" not in clean and "<details" not in not_asked
+    assert "0 affect this version" in pieces_of(clean) and "pypdf 6.19.0: NO_KNOWN_VULNERABILITY" in " ".join(pieces_of(clean))
+    assert after(pieces_of(not_asked), "OSV advisories") == DASH       # the gate blocked the request: OSV was never asked

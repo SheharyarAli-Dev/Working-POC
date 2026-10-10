@@ -38,6 +38,7 @@ from backend.orchestrator.hashing import digest
 from backend.threat_repo.package_records import affected
 
 MAX_AGE_DAYS = 30
+FIRST_IDS = 3  # how many advisory ids a one-line summary names; the result always holds all of them
 FUTURE_TOLERANCE_DAYS = 0.01  # about 15 minutes of clock difference
 
 
@@ -95,17 +96,28 @@ def check_advisories(name, version, cache_dir, live: bool = False, max_age_days:
     if fields["affected"]:
         ids = [match["id"] for match in fields["affected"]]
         return result("REJECTED", "KNOWN_VULNERABILITY",
-                      f"{name} {version} is affected by {len(ids)} known advisories: {', '.join(ids[:5])}"
-                      + (" ..." if len(ids) > 5 else ""))
+                      f"{name} {version} is affected by {len(ids)} known advisories: {summarise_ids(ids)}")
     if fields["unknown"]:
         ids = [match["id"] for match in fields["unknown"]]
         return result("UNRESOLVED", "RANGE_UNSUPPORTED",
-                      f"{len(ids)} advisories have ranges that cannot be evaluated: {', '.join(ids[:5])}")
+                      f"{len(ids)} advisories have ranges that cannot be evaluated: {summarise_ids(ids)}")
     if fields["not_affected"]:
         ids = [match["id"] for match in fields["not_affected"]]
         return result("UNRESOLVED", "RANGE_DISAGREEMENT",
-                      f"OSV lists {len(ids)} advisories for {name} {version} whose ranges do not contain it: {', '.join(ids[:5])}")
+                      f"OSV lists {len(ids)} advisories for {name} {version} whose ranges do not contain it: {summarise_ids(ids)}")
     return result("OK", "NO_KNOWN_VULNERABILITY", f"OSV lists no advisory that affects {name} {version}")
+
+
+def summarise_ids(ids, limit: int | None = None) -> str:
+    """`A, B, C and 94 more`: the first `limit` ids (default FIRST_IDS) and how many are left out.
+
+    Only for a line a person reads. The lists in the result (`affected`, `unknown`,
+    `not_affected`) are never shortened, so the JSON always holds every id.
+    """
+    limit = FIRST_IDS if limit is None else limit
+    ids = [str(advisory_id) for advisory_id in ids]
+    left_out = len(ids) - limit
+    return ", ".join(ids[:limit]) + (f" and {left_out} more" if left_out > 0 else "")
 
 
 def match_advisory(name: str, version: str, vuln: dict) -> dict:
