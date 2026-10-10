@@ -927,7 +927,7 @@ The 16 MINOR items of the review are listed in `docs/cavr-m1-plan.md` under "Kno
 ## Step 4 — C3 fetch PyPI release metadata and verify artifact SHA-256 (2026-10-10)
 
 Plan commit 4, `feat(cavr): C3 fetch PyPI release metadata and verify artifact SHA-256`.
-Review: REVIEW_LINE_STEP_4
+Reviewed by cavr-reviewer (1 batch pass over steps 4-8, by reading the code; the reviewer ran pytest only); batch verdict: fix first; 0 BLOCKER; 6 MINOR open.
 
 ### Ch 6 Implementation
 
@@ -941,7 +941,7 @@ Review: REVIEW_LINE_STEP_4
 | | `_parse_release`, `_request_problem`, `_allowed_file_url`, `_sha256_of_file`, `_result` | Validate the response / the request / the file URL; hash a file by reading it back; build the result dict. |
 | | `MAX_REGISTRY_BYTES` 20 MiB, `MAX_ARTIFACT_BYTES` 200 MiB, `DEADLINE_SECONDS` 120 | Budgets. |
 | `tests/test_cavr_support.py` (new, 126 lines) | `build_wheel`, `file_entry`, `registry_response`, `FakeIndex`, `pypdf_registry_response`, `sha256_file` | Test helpers shared by steps 4-8, no tests. `build_wheel` writes a real zip; `FakeIndex` is a transport that serves real file bytes and a response whose digest is computed from them. |
-| `tests/test_cavr_pypi_client.py` (new, 443 lines) | | 35 test functions, 82 cases, all offline. |
+| `tests/test_cavr_pypi_client.py` (new, 442 lines) | | 35 test functions, 82 cases, all offline. |
 | `tests/test_cavr_live.py` (new, 25 lines) | | 2 live tests, skipped unless `CAVR_LIVE=1`. |
 | `docs/cavr-m1-plan.md` | | Progress box 4 ticked; the deferred item "Gate, local versions" marked as handled here. |
 
@@ -1049,7 +1049,7 @@ The tests were written before `pypi_client.py` but first run after it; all 82 pa
 ## Step 5 — C3 read wheel metadata safely (2026-10-10)
 
 Plan commit 5, `feat(cavr): C3 read wheel metadata safely`.
-Review: REVIEW_LINE_STEP_5
+Reviewed by cavr-reviewer (1 batch pass over steps 4-8, by reading the code; the reviewer ran pytest only); batch verdict: fix first; 0 BLOCKER; 3 MINOR open.
 
 ### Ch 6 Implementation
 
@@ -1164,7 +1164,7 @@ Run on 2026-10-10:
 ## Step 6 — C3 transitive tree and subtree digest (2026-10-10)
 
 Plan commit 6, `feat(cavr): C3 transitive tree and subtree digest`.
-Review: REVIEW_LINE_STEP_6
+Reviewed by cavr-reviewer (1 batch pass over steps 4-8, by reading the code; the reviewer ran pytest only); batch verdict: fix first; 0 BLOCKER; 2 MINOR open.
 
 ### Ch 6 Implementation
 
@@ -1282,7 +1282,7 @@ None found by the tests in this step.
 ## Step 7 — C3 OSV check with real version ranges (2026-10-10)
 
 Plan commit 7, `feat(cavr): C3 OSV check with real version ranges`.
-Review: REVIEW_LINE_STEP_7
+Reviewed by cavr-reviewer (1 batch pass over steps 4-8, by reading the code; the reviewer ran pytest only); batch verdict: fix first; 0 BLOCKER; 2 MINOR open.
 
 ### Ch 6 Implementation
 
@@ -1400,7 +1400,7 @@ Run on 2026-10-10:
 ## Step 8 — C3 light AST risk scan of wheel sources (2026-10-10)
 
 Plan commit 8, `feat(cavr): C3 light AST risk scan of wheel sources`.
-Review: REVIEW_LINE_STEP_8
+Reviewed by cavr-reviewer (1 batch pass over steps 4-8, by reading the code; the reviewer ran pytest only); batch verdict: fix first; 1 BLOCKER, fixed in the batch fix commit; 3 MINOR open.
 
 ### Ch 6 Implementation
 
@@ -1515,3 +1515,74 @@ simply the total size of the files in `files_scanned`.
 3. **Does scanning run any package code?**
    No. Files are read from the zip into memory and given to `ast.parse`; nothing is imported or
    extracted (`test_scanning_does_not_execute_the_package`).
+
+## Steps 4-8 — batch review fix (2026-10-10)
+
+The fix commit after `c72b56a`, `fix(cavr): read .pth files the way site.py does`.
+Steps 4-8 were committed as `00b9332`, `3ba4970`, `3cb1a35`, `b7c98cf`, `c72b56a`. The sections above describe
+the code as committed there; this section lists what the fix commit changed. The fix has not been reviewed again.
+
+### Ch 6 Implementation
+
+| File | Function | Change |
+|---|---|---|
+| `backend/cavr/ast_scan.py` (227 -> 236 lines) | `_scan` | A `.pth` file is decoded with `utf-8-sig` (UTF-8, optional BOM), as `site.addpackage` does. Before, it went through `_decode`, which honours a PEP 263 coding line. Not UTF-8 -> `PARSE_ERROR` finding -> UNRESOLVED `SOURCE_NOT_PARSED`. `.py` files still use `_decode`. |
+| `tests/test_cavr_ast_scan.py` (280 -> 301 lines) | | +2 test functions, +5 cases. |
+| `docs/cavr-m1-plan.md` | | Commit hashes in the progress list; the 15 MINOR items under "Known issues deferred". |
+
+### Design decisions
+
+| Decision | Alternatives considered | Why |
+|---|---|---|
+| Decode `.pth` exactly as the interpreter does | Keep the cookie-aware decode and also try UTF-8 | The scan must see the same lines Python would execute. One decoding, taken from `site.py`, is the only one that matters. |
+| `.pth` that is not UTF-8 -> UNRESOLVED | Decode with the locale encoding like `site.py`'s fallback | The fallback depends on the machine that installs the package; CAVR cannot know it, so the content is unknown. |
+
+### Requirements covered
+
+FR-6 (Fail-Closed Security Policy, ID from `RequirementsTab.tsx`, Maryam to confirm): an executable `.pth`
+can no longer be reported as a completed scan. Acceptance check:
+`test_pth_is_decoded_as_site_py_does_whatever_its_coding_cookie_says`.
+
+### Ch 7 Test cases
+
+Run on 2026-10-10 after the fix:
+
+- `.venv/bin/python -m pytest tests/test_cavr_*.py -q` -> 668 passed, 4 skipped (663 + 5 new).
+- `.venv/bin/python -m pytest -q` -> 726 passed, 7 failed, 4 skipped (the same 7 baseline tests).
+- Before the fix the 5 new cases were run against the committed code: 2 failed, 3 passed.
+
+| Test ID | Purpose | Input | Expected | Result |
+|---|---|---|---|---|
+| `test_pth_is_decoded_as_site_py_does_whatever_its_coding_cookie_says` (4) | Hidden import line | `# coding: cp037` + `import os; os.system('id')`; the same with `utf-16`; a UTF-8 BOM before `import`; `import<TAB>os` | UNRESOLVED `PTH_EXECUTES_CODE`; sink `os.system` | pass (cases 1 and 2 failed before the fix: OK `SCAN_COMPLETE`, and `SOURCE_NOT_PARSED`) |
+| `test_pth_that_is_not_utf8_is_unresolved` | Unknown encoding | `import os # \xff\xfe` | UNRESOLVED `SOURCE_NOT_PARSED` | pass |
+
+### Defects found and fixed
+
+| # | Found by | Finding | Outcome |
+|---|---|---|---|
+| 1 | cavr-reviewer (BLOCKER, step 8, by reading) | A `.pth` file starting with `# coding: cp037` was decoded as EBCDIC, so its `import os; os.system('id')` line was not seen: the scan returned OK `SCAN_COMPLETE` with a harmless `PTH_FILE` finding, while Python would run the line at start-up | Reproduced here against `c72b56a` (result OK), then fixed |
+
+### Known limitations / deferred
+
+The 15 MINOR items of the review are listed in `docs/cavr-m1-plan.md` under "Known issues deferred" (found in
+the batch 4-8 review). One of them was a wrong line count in the Step 4 notes (443 -> 442), corrected in this
+commit. The others were not changed. The reviewer derived every finding by reading and did not run the full
+suite or open the recorded OSV file.
+
+### Tool disclosure (Ch 8.7)
+
+- **Generated by Claude Code:** the review (the read-only `cavr-reviewer` subagent), the fix, the 5 new test cases, these notes, the commit.
+- **Reviewed / decided by Maryam:** nothing in this commit yet. The fix was made without a stop, as `/cavr-batch` says for BLOCKERs.
+- **Verified by:** the pytest runs above. The reviewer did not see the fix.
+
+### Supervisor Q&A prep
+
+1. **How do you know the scanner reads a `.pth` file the way the interpreter will?**
+   It uses the same decoding as `site.addpackage` (UTF-8 with an optional BOM) and the same rule for an
+   executable line (starts with `import` + space or tab). A file that is not UTF-8 is UNRESOLVED.
+2. **Why was this a fail-open and not just a wrong label?**
+   The result was OK `SCAN_COMPLETE`, so the pipeline would have had no reason to stop, while the file
+   runs a shell command at every interpreter start.
+3. **Is the same true for `.py` files?**
+   No. For `.py` the interpreter itself honours the coding line, so `_decode` (PEP 263) is the matching
+   decoding there (`test_source_with_a_declared_encoding_is_decoded_with_it`).

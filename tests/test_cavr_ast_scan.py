@@ -278,3 +278,24 @@ def test_every_result_has_the_same_keys(tmp_path):
     good = scan_wheel(PYPDF_WHEEL)
     bad = scan_wheel(tmp_path / "missing.whl")
     assert set(good) == set(bad) and "coverage" in good
+
+
+# --- batch review fix: a .pth file is read the way site.py reads it ----------------------------------------------
+
+@pytest.mark.parametrize("pth", [
+    b"# coding: cp037\nimport os; os.system('id')\n",       # a coding cookie must not change how the file is read
+    b"# -*- coding: utf-16 -*-\nimport os; os.system('id')\n",
+    b"\xef\xbb\xbfimport os; os.system('id')\n",            # UTF-8 BOM before the import line
+    b"import\tos; os.system('id')\n",
+])
+def test_pth_is_decoded_as_site_py_does_whatever_its_coding_cookie_says(tmp_path, pth):
+    result = scan_wheel(wheel(tmp_path, {"demo/__init__.py": CLEAN, "x.pth": pth}))
+    assert outcome(result) == ("UNRESOLVED", "PTH_EXECUTES_CODE")
+    assert [sink["sink"] for sink in result["sinks"]] == ["os.system"]
+    assert result["pth_files"][0]["executable_lines"] != []
+
+
+def test_pth_that_is_not_utf8_is_unresolved(tmp_path):
+    # site.py falls back to the locale encoding here, which CAVR cannot know: not covered.
+    result = scan_wheel(wheel(tmp_path, {"demo/__init__.py": CLEAN, "x.pth": b"import os # \xff\xfe\n"}))
+    assert outcome(result) == ("UNRESOLVED", "SOURCE_NOT_PARSED")
