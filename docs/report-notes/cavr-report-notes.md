@@ -234,3 +234,130 @@ Not on that list but true today:
    Today we cannot: every test replaces `Popen`. The command was corrected to match the Dockerfile by reading, not by running Docker. What this step guarantees is the safe direction only, and only for the `sandbox_runner` path: there, nothing unobserved becomes VERIFIED, and nothing runs on the host. The legacy dashboard path in `counterfactual.py` still has two routes to VERIFIED without observation (the `dormant-exfil` hardcoded baseline and fabricated trigger runs 1..n); both are removed in step 13.
 3. **Why is a failed import or a timeout NOT_OBSERVED rather than REJECTED?**
    REJECTED needs an observed violation. A failed import or a timeout shows the package was not exercised, which is "unknown", and the branch rule is unknown -> UNRESOLVED.
+
+## Step 0b — Accept either monitor mode in controlled dormant execution (2026-10-10)
+
+Plan commit 0b. One test changed; no product code changed.
+
+### Ch 6 Implementation
+
+| File | Change |
+|---|---|
+| `tests/test_modules.py::test_controlled_dormant_execution` | Two assertions that pinned `execution_mode == 'PINNED_INERT_LAB_PYTHON_AUDIT'` and `monitor == 'PYTHON_AUDIT'` are replaced by a lookup table `monitor_for` and a loop over both runs. Net +6 / -2 lines. |
+
+No function, class or module was added. Key logic of the new check:
+
+1. `monitor_for` lists the four execution modes `backend/cavr/sandbox.py::run_counterfactual` can produce
+   (`PINNED_INERT_LAB_PYTHON_AUDIT`, `PINNED_INERT_LAB_STRACE`, `docker`, `podman`) and the monitor each one must report
+   (`PYTHON_AUDIT` for the first, `strace` for the other three).
+2. For the normal run and the counterfactual run: the `execution_mode` must be one of the four keys.
+3. For the same two runs: `monitor` must equal the value listed for that `execution_mode`.
+
+Unchanged, as the plan requires: `status == 'REJECTED'`, both exit codes 0, equal `functional_text`,
+canary not received in the normal run and received in the counterfactual run, no `SECRET_ACCESS` in the
+normal run, `causal_confirmed`, causal-graph `kind`, and trace files exist.
+
+### Design decisions
+
+| Decision | Alternatives | Why |
+|---|---|---|
+| Check the (execution mode, monitor) pair, not two independent "one of" lists | `assert mode in {...}` and `assert monitor in {'PYTHON_AUDIT','strace'}` separately | Separate lists would accept an inconsistent result such as Python-audit mode labelled `strace`. The pair check is as permissive about the machine and stricter about consistency. |
+| Check both runs | Keep checking only the normal run, as before | Both runs are produced with the same `backend` and `use_strace` values in `sandbox.py`, so this costs nothing. The loop applies the same mode/monitor check to each run separately; it does not compare the two runs with each other. The old test did not check the counterfactual run's mode at all. |
+| Do not force a mode by patching `availability()` | Monkeypatch tool availability so the test always runs Python-audit mode | The plan asks to accept either mode. Forcing one would hide the other mode's behaviour on machines that have strace or Docker. |
+| Leave `causal_confirmed` as it is, although it fails under strace (see Defects) | Relax it to make the test green under strace | The plan says to change only the mode assertions. The failure is a real defect in `runtime_monitor.py`, not a test problem. |
+
+### Requirements covered
+
+No `FR-CAVR-NN` identifiers exist in this repository (see Step 0). This step implements no requirement;
+it changes how an existing test for FR-4 "Adaptive Counterfactual Activation" (ID from
+`frontend/src/components/cavr/RequirementsTab.tsx`, **Maryam to confirm against the SRS**) treats the
+machine it runs on. Acceptance check: `test_controlled_dormant_execution` no longer fails on the mode
+assertions when strace is on `PATH`.
+
+### Ch 7 Test cases
+
+This machine has no strace, docker or podman installed. To exercise strace mode, a real strace 6.19
+binary (Ubuntu package `strace_6.19+ds-0ubuntu5_amd64.deb`, with `libunwind8`) was unpacked into a
+temporary directory with `apt-get download` + `dpkg -x` and put on `PATH` for single test runs. Nothing
+was installed system-wide and nothing from it is in the repository.
+
+| Test ID | Purpose | Input | Expected | Result |
+|---|---|---|---|---|
+| `test_controlled_dormant_execution` (old assertions, no strace) | Baseline | Python-audit mode | pass | pass |
+| `test_controlled_dormant_execution` (old assertions, strace on `PATH`) | Show the old test fails on a machine with strace | strace mode | fail on the mode assertion | fail, line 30: `'PINNED_INERT_LAB_STRACE' == 'PINNED_INERT_LAB_PYTHON_AUDIT'` |
+| `test_controlled_dormant_execution` (new assertions, no strace) | Python-audit mode still accepted | Python-audit mode | pass | pass |
+| `test_controlled_dormant_execution` (new assertions, strace on `PATH`) | strace mode accepted | strace mode | mode assertions pass | mode assertions pass; **the test still fails** later, at the unchanged `causal_confirmed` assertion (see Defects) |
+| docker / podman pairs in `monitor_for` | Container modes accepted | Docker or Podman available | pass | **not run** (neither is installed) |
+
+Suite runs after the change, without strace (the normal state of this machine):
+
+- `.venv/bin/python -m pytest tests/test_cavr_*.py -q` -> 82 passed.
+- `.venv/bin/python -m pytest -q` -> 140 passed, 7 failed. The 7 are the baseline failures
+  (`tests/test_api_replay.py` 1, `tests/test_integration.py` 6). No new failures.
+
+Full suite with strace on `PATH`, run twice: 138 passed / 9 failed, then 139 passed / 8 failed. Both
+include the 7 baseline failures and `test_controlled_dormant_execution`. The first run also failed
+`tests/test_cavr_targeted.py::test_pinned_fixture_runtime_modes_and_counterfactual`; its failing
+assertion was not captured. That test passed in the second full run, 4 of 4 times alone, and in a run of
+the whole file (6 passed), all under strace.
+
+### Defects found and fixed
+
+Found while doing the step:
+
+| # | Found by | Finding | Outcome |
+|---|---|---|---|
+| 1 | Running the old test with real strace | The test required Python-audit mode, so it failed on any machine with strace | Fixed by this step (mode assertions only) |
+| 2 | Running the new test with real strace | In strace mode no `NETWORK_CONNECT` event is recorded, so no threat correlation is produced and `causal_confirmed` is false. Events per run, lab package `scenarios/cavr_controlled/invoice_pdf_lab.py`: strace counterfactual = `EXECUTE_BINARY` 1, `FILE_READ` 203, `FILE_WRITE` 2, `SECRET_ACCESS` 1; Python-audit counterfactual = `FILE_READ` 116, `FILE_WRITE` 1, `SECRET_ACCESS` 1, `NETWORK_CONNECT` 1. Cause: `backend/cavr/runtime_monitor.py::normalize` skips every trace line containing ` = -1 `, and the connect in the real trace is `connect(4, {sa_family=AF_INET, sin_port=htons(18765), sin_addr=inet_addr("127.0.0.1")}, 16) = -1 EINPROGRESS`, a non-blocking connect that is in progress, not a failed one. The canary was still received (`canary_received` true) and the verdict was still `REJECTED`. | **Not fixed.** Outside commit 0b (test-only). Needs Maryam's decision on where it goes |
+| 3 | Full suite with strace | `test_pinned_fixture_runtime_modes_and_counterfactual` failed once in two full runs under strace | **Not diagnosed.** Not reproduced alone |
+
+Reviewed by cavr-reviewer (2 passes); verdict: fix first, BLOCKERs fixed; test change confirmed correct; 9 MINOR open, listed below.
+
+| # | Level | Finding | Outcome |
+|---|---|---|---|
+| M1 | MINOR | 0b does not make the test green on a strace machine (still fails at `tests/test_modules.py:39`), and the plan's deferred list has no entry for it. Suggested a deferred entry or a new commit 0c | Open, no decision yet |
+| M2 | MINOR | Defect 2 is wider than stated: `runtime_monitor.py:6` drops every failed syscall, so in a `--network none` container a failed connect or a failed open of a secret file leaves no event (from reading, not run) | Open, no decision yet. Notes wording not changed |
+| M3 | MINOR | The cause of defect 2 is stated as proven, but no fix was tried, so it is not shown that it alone makes the test pass | Open. Notes wording not changed |
+| M4 | MINOR | "no threat correlation is produced" should be "no correlation with `causal_confirmed` true"; the seed rules were not read | Open. Notes wording not changed |
+| M5 | MINOR | Lead for defect 3, unverified: `lab_harness.py` listener has a 1.5 s accept timeout that may expire under `strace -f` or full-suite load | Open, not investigated |
+| M6 | MINOR | `.claude/commands/cavr-batch.md` contradicts the plan's Working rules (Claude never commits; one commit at a time) | Open, Maryam's decision. Not part of 0b |
+| M7 | MINOR | `reports/scenario-validation.json` was rewritten by the reviewer's full-suite run | Not staged; to be restored before staging |
+| M8 | MINOR | The pair check is nearly tautological (both values come from the same variables in `sandbox.py`); no test feeds a recorded strace trace through `normalize` | Open, suggested with the defect-2 fix |
+| M9 | MINOR | FR-4 mapping is loose: `RequirementsTab.tsx` ties FR-4 to `counterfactual.py`, this test exercises `analyzer.py` and `sandbox.py` | Open; "Maryam to confirm" kept |
+
+### Known limitations / deferred
+
+- `test_controlled_dormant_execution` is still red on a machine with strace, now for defect 2 instead of
+  the mode check. The plan's sentence that the test "fails on any machine with strace or Docker" stays
+  true until `normalize` handles `EINPROGRESS`.
+- Docker and Podman modes were not executed. `sandbox.py` runs the same `strace` inside the container
+  and uses the same `normalize`, so defect 2 is expected there too; this is read from the code, not run.
+- The `monitor_for` table repeats mode names that `sandbox.py` holds as string literals. A new mode
+  added there fails this test until the table is updated.
+- This commit does not tick the 0b progress box in `docs/cavr-m1-plan.md`.
+
+### Tool disclosure (Ch 8.7)
+
+- **Generated by Claude Code:** the edit to `tests/test_modules.py`, the strace experiment (downloading
+  and unpacking the package into a temporary directory, the probe run that counted events per mode), the
+  diagnosis of defect 2, and these notes.
+- **Reviewed / decided by Maryam:** approved commit 0b and its limits in the plan; read both reviewer
+  reports; chose to fix the BLOCKERs and the three pass-2 wording items only, and set the wording of the
+  review line. Has not decided on defects 2 and 3 or on M1-M6, M8 and M9.
+- **Verified by:** pytest runs listed above, in Python-audit mode and with a real strace 6.19. Not
+  verified: docker and podman modes. The `cavr-reviewer` agent (read-only Claude Code subagent) did not
+  run strace mode.
+
+### Supervisor Q&A prep
+
+1. **Why does a test accept several monitor modes instead of fixing one?**
+   The lab picks the strongest monitor the machine has: a container, else strace, else Python audit
+   events. The security claims the test checks (canary only in the counterfactual run, `REJECTED`) must
+   hold in every mode. Pinning one mode made the test pass only on machines without strace or Docker.
+2. **Does accepting more modes weaken the test?**
+   The mode check is stricter in one way: the monitor must match the execution mode, and both runs are
+   checked. Every behavioural assertion is unchanged.
+3. **Is the lab verdict the same under strace and under Python audit?**
+   The verdict was `REJECTED` and the canary was received in both. The evidence differs: under strace
+   the network connect is missing from the events because `normalize` drops the `EINPROGRESS` line, so
+   `causal_confirmed` is false there. This is an open defect, found by this step and not yet fixed.

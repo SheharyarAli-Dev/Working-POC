@@ -27,8 +27,12 @@ def test_controlled_dormant_execution(service,scenario,tmp_path):
     node=next(n for n in details['nodes'] if n['name']=='invoice-pdf-lab')
     assert status=='REJECTED',node.get('runtime')
     normal,activated=node['runtime']['runs'];assert normal['exit_code']==activated['exit_code']==0
-    assert normal['execution_mode']=='PINNED_INERT_LAB_PYTHON_AUDIT'
-    assert normal['monitor']=='PYTHON_AUDIT'
+    # sandbox.py picks the monitor from what the machine has (docker/podman, else strace, else Python audit).
+    # Any of them is acceptable, but the monitor must be the one that belongs to the execution mode.
+    monitor_for={'PINNED_INERT_LAB_PYTHON_AUDIT':'PYTHON_AUDIT','PINNED_INERT_LAB_STRACE':'strace','docker':'strace','podman':'strace'}
+    for run in (normal,activated):
+        assert run['execution_mode'] in monitor_for,run['execution_mode']
+        assert run['monitor']==monitor_for[run['execution_mode']],(run['execution_mode'],run['monitor'])
     assert normal['facts']['functional_text']==activated['facts']['functional_text']
     assert not normal['facts']['canary_received'] and activated['facts']['canary_received']
     assert not any(e['type']=='SECRET_ACCESS' for e in normal['events'])
