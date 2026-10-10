@@ -43,7 +43,8 @@ export const CausalGraphTab: React.FC<CausalGraphTabProps> = ({ state }) => {
       nodes = nodes.filter((n: any) => n.kind !== 'environment predicate');
     }
     if (!showDependencies) {
-      nodes = nodes.filter((n: any) => !n.id.includes('sub-telemetry-hook'));
+      // A dependency is a package node other than the package that was asked for.
+      nodes = nodes.filter((n: any) => n.kind !== 'package' || String(n.id).includes(state.package));
     }
     const validIds = new Set(nodes.map((n: any) => n.id));
     edges = edges.filter((e: any) => validIds.has(e.source) && validIds.has(e.target));

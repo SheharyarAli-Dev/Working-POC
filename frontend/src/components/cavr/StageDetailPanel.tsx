@@ -7,7 +7,7 @@ interface StageDetailPanelProps {
 }
 
 export const StageDetailPanel: React.FC<StageDetailPanelProps> = ({ state }) => {
-  const { stepIndex, explainSimply, package: pkgName, version: pkgVer, verdict, policyState } = state;
+  const { stepIndex, explainSimply, verdict, policyState } = state;
 
   // The pipeline's verdict (from /api/cavr/proof) and the payloads of the stages that ran.
   // The step index of a run is the last stage that ran: 0 request, 1 gate, 2 artifact / tree / OSV,
@@ -22,7 +22,9 @@ export const StageDetailPanel: React.FC<StageDetailPanelProps> = ({ state }) => 
   const stageDescriptions = [
     {
       title: "Step 1: Capture (C1)",
-      what: `Request received: 'pip install ${pkgName}==${pkgVer}'. It is verified before anything is installed.`,
+      what: state.request
+        ? `Request received: '${state.request}'. It is verified before anything is installed.`
+        : "No request yet. Choose one of the requests above.",
       why: "A request is only as trustworthy as what is actually downloaded for it, so it is checked first.",
       evidence: state.runId ? `Run ${state.runId}.` : "No run yet.",
       next: afterThis("Requirement gate (C2).")
