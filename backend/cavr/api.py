@@ -24,7 +24,9 @@ Demo conditions. A scenario may name a condition that changes the network betwee
 PyPI: "tampered_wheel" flips one bit of every downloaded wheel, "network_off" fails every
 request. The pipeline then runs unchanged and gives the verdict it would give in that
 situation. A condition can only make a verdict worse, never better, and it is written into
-every event and into the proof (`demo_condition`).
+every event and into the proof (`demo_condition`). Such a run gets no store: it is not written
+to the verdict log, so it is not in the report numbers of `/api/cavr/metrics`, and it neither
+reads nor writes the verdict cache.
 
 Not run on this path: the sandbox, the counterfactual engine, the causal graph, repair,
 re-verification and reconstruction (M2). Their fields in the events are null.
@@ -38,7 +40,7 @@ from pathlib import Path
 from typing import AsyncGenerator
 from urllib.parse import urlsplit
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, StreamingResponse
 from pydantic import BaseModel
 
 from backend.cavr import requirement_gate
@@ -48,6 +50,7 @@ from backend.cavr.context_extractor import SAMPLE_PROJECT_DIR
 from backend.cavr.pipeline import metrics as pipeline_metrics, verify_request
 from backend.cavr.pypi_client import FILES_HOST, HttpxTransport, TransportError
 from backend.cavr.storage import CavrStorage
+from backend.cavr.verdict_cache import KEY_FIELDS, lookup as cache_lookup
 
 cavr_router = APIRouter()
 storage = CavrStorage()
@@ -146,55 +149,6 @@ def publish_event(run_id: str, step_index: int, phase: str, substep: str, event_
                 "data": payload, "timestamp": ts}  # the last two are the old names of payload and ts
     RUN_EVENTS.setdefault(run_id, []).append(envelope)
 
-# ----------------- PEP 503 PACKAGE INDEX -----------------
-@cavr_router.get("/simple/", response_class=HTMLResponse)
-def pep503_root():
-    pkgs = storage.get_trusted_packages()
-    links = "".join([f'<a href="/simple/{p["name"]}/">{p["name"]}</a>\n' for p in pkgs])
-    return f"""<!DOCTYPE html>
-<html>
-<head><title>ASENT Local PEP 503 Package Index</title></head>
-<body>
-<h1>ASENT Secure Package Index</h1>
-{links}
-</body>
-</html>"""
-
-@cavr_router.get("/simple/{package}/", response_class=HTMLResponse)
-def pep503_package_index(package: str):
-    trusted = storage.get_trusted_package(package)
-    if not trusted:
-        return HTMLResponse(
-            f"""<!DOCTYPE html><html><body><h1>Links for {package}</h1><p>No verified distributions available</p></body></html>""",
-            status_code=404
-        )
-    filename = f"{trusted['name']}-{trusted['version']}-py3-none-any.whl"
-    sha = trusted["sha256"]
-    return f"""<!DOCTYPE html>
-<html>
-<head><title>Links for {package}</title></head>
-<body>
-<h1>Links for {package}</h1>
-<a href="/simple/{package}/{filename}#sha256={sha}">{filename}</a>
-</body>
-</html>"""
-
-@cavr_router.get("/simple/{package}/{filename}")
-def pep503_download(package: str, filename: str):
-    trusted = storage.get_trusted_package(package)
-    if trusted:
-        return JSONResponse({"status": "RELEASED", "package": package, "filename": filename, "sha256": trusted["sha256"]})
-    
-    raise HTTPException(
-        status_code=403,
-        detail={
-            "error": "BLOCKED_BY_AGENT_SENTINEL",
-            "package": package,
-            "filename": filename,
-            "reason": "Hostile/unverified package blocked by ASENT assurance gate. Unauthorized installation rejected."
-        }
-    )
-
 # ----------------- CAVR CORE API -----------------
 @cavr_router.get("/api/cavr/scenarios")
 def list_scenarios():
@@ -203,87 +157,22 @@ def list_scenarios():
 
 @cavr_router.get("/api/cavr/cache")
 def get_cache():
-    return storage.get_trusted_packages()
+    """What is in the 8-field verdict cache: one row per stored analysis, newest first.
 
-@cavr_router.post("/api/cavr/cache")
-def add_cache(name: str, version: str, sha256: str, source: str = "PyPI Verified", capabilities: str = ""):
-    return storage.add_trusted_package(name, version, sha256, source, capabilities)
-
-@cavr_router.get("/api/cavr/dialog/cache")
-def dialog_cache():
-    pkgs = storage.get_trusted_packages()
-    return {
-        "title": "Trusted Package Cache",
-        "description": "Cryptographically pinned and verified Python packages safe for AI coding agents.",
-        "packages": pkgs,
-        "total_packages": len(pkgs),
-        "explanation": "A Cache HIT occurs when both the package name and exact SHA-256 match a pre-verified entry, skipping hostile execution. A Hash Mismatch signals that the artifact bytes were modified, triggering immediate quarantine."
-    }
-
-@cavr_router.get("/api/cavr/dialog/action")
-def dialog_action():
-    return {
-        "title": "Action: Static AST Inspection & Anomaly Detection",
-        "subtitle": "Deep lexical, syntax tree, and metadata validation before sandbox dispatch",
-        "inspection_steps": [
-            {"step": "eval() / exec() Sinks", "detail": "Flags dynamic code compilation and runtime string evaluation.", "severity": "CRITICAL"},
-            {"step": "Subprocess & Shell Calls", "detail": "Flags os.system, subprocess.Popen, and shell=True invocations.", "severity": "HIGH"},
-            {"step": "Raw Socket Creation", "detail": "Flags socket.socket and raw outbound egress hooks.", "severity": "CRITICAL"},
-            {"step": "Base64 & Hex Obfuscation", "detail": "Detects staged payloads decoded right before execution.", "severity": "HIGH"},
-            {"step": "Setup.py Install Hooks", "detail": "Flags cmdclass install-time script execution.", "severity": "CRITICAL"},
-            {"step": "Typosquatting & Homoglyphs", "detail": "Computes Levenshtein distance against trusted packages.", "severity": "CRITICAL"},
-            {"step": "Metadata Sanity Checks", "detail": "Detects abnormal version leaps (>90) and empty descriptions.", "severity": "MEDIUM"}
-        ],
-        "priority_formula": {
-            "formula": "priority = (sink_risk × reachability_confidence × novelty) / estimated_run_cost",
-            "worked_example": "Trigger 'os.getenv(AWS_SECRET_ACCESS_KEY)' reaches socket.connect sink: (9.5 × 0.95 × 1.0) / 1.2 = 7.52 Priority Score"
-        },
-        "policy_states": [
-            {"state": "VERIFIED", "alias": "ALLOW", "description": "No malicious behavior observed under our tests. Contract satisfied."},
-            {"state": "RESTRICTED", "alias": "ALLOW with restrictions", "description": "Permitted with strictly narrowed sandbox capabilities and blocked syscalls."},
-            {"state": "UNRESOLVED", "alias": "NEEDS_REVIEW", "description": "Fails closed. Ambiguous predicates or budget limit reached."},
-            {"state": "REJECTED", "alias": "BLOCK", "description": "Decisive capability violation, credential read, or malicious egress detected."}
-        ]
-    }
-
-@cavr_router.get("/api/cavr/dialog/environment")
-def dialog_environment():
-    return {
-        "title": "Environment: Multi-Layer Hostile Code Sandbox",
-        "subtitle": "Disposable containerized isolation preventing escape and monitoring syscalls",
-        "dockerfile_summary": {
-            "base_image": "python:3.12-slim",
-            "user": "sandbox (UID: 10001, unprivileged non-root)",
-            "observation_layer": "sys.addaudithook + optional strace syscall tracer",
-            "harness": "/opt/asent/harness.py"
-        },
-        "lockdown_flags": [
-            {"flag": "--network none", "name": "Network Isolation", "desc": "All socket creation and external egress is disabled."},
-            {"flag": "--read-only", "name": "Read-Only Root Filesystem", "desc": "Container rootfs cannot be written to or modified."},
-            {"flag": "--tmpfs /scratch:rw,noexec,nosuid,size=64m", "name": "Ephemeral Scratchpad", "desc": "Disposable memory-backed storage with execution disabled."},
-            {"flag": "--user 10001:10001", "name": "Non-Root Context", "desc": "Prevents UID 0 privilege escalation attacks."},
-            {"flag": "--cap-drop ALL", "name": "Drop All Linux Capabilities", "desc": "Removes NET_RAW, SYS_ADMIN, and raw system control capabilities."},
-            {"flag": "--security-opt no-new-privileges", "name": "No Privilege Gain", "desc": "Disallows setuid / setgid binary privilege elevation."},
-            {"flag": "--security-opt seccomp=asent-seccomp.json", "name": "Seccomp Filter", "desc": "Restricts allowable kernel syscalls to minimal safe set."},
-            {"flag": "--memory 256m --cpus 0.5 --pids-limit 64", "name": "Resource Quotas", "desc": "Hard limits preventing denial-of-service, fork bombs, and CPU hogging."},
-            {"flag": "timeout 30s", "name": "Hard Watchdog Timeout", "desc": "Process is forcibly killed if execution exceeds 30 seconds."}
-        ],
-        "counterfactual_conditions_synthesized": [
-            "Fake Environment Variables (e.g. AWS_SECRET_ACCESS_KEY, CI, PROD_FLAG)",
-            "Fake Credential Files (e.g. ~/.aws/credentials, ~/.ssh/id_rsa)",
-            "Spoofed Hostname and User (socket.gethostname, getpass.getuser)",
-            "Harness-level Time Shim & Warp (simulating delayed triggers)"
-        ],
-        "observation_method": "Python 3.12 Runtime Audit Hooks (sys.addaudithook) + seccomp filters",
-        "tests_run": [
-            "Artifact SHA-256 hash re-verification",
-            "Planting fake honeytoken credentials (~/.aws/credentials, AWS_SECRET_ACCESS_KEY)",
-            "Zero-index throwaway installation",
-            "Import execution test and declared contract callable verification",
-            "Adaptive multi-run counterfactual frontier exploration"
-        ],
-        "limitations": "Bounded by declared container isolation. eBPF kernel tracing is not accessible in rootless container environments. Conditions not triggered stay unresolved. Never claims universal absence of malware."
-    }
+    Every row is an analysis CAVR really did; `sha256` is the SHA-256 of the wheel it downloaded.
+    Rows whose integrity digest does not match are left out, as the pipeline would ignore them.
+    A row is not a promise for the next request: it is reused only when all eight key fields
+    match again, and OSV is asked on every run. (The keys `source`, `status`, `capabilities`
+    and `added_at` are the ones the dashboard's cache dialog reads.)
+    """
+    rows = []
+    for row in storage.list_cached_verdicts():
+        if cache_lookup(storage, {field: row[field] for field in KEY_FIELDS})["hit"]:
+            rows.append({"name": row["name"], "version": row["version"], "sha256": row["artifact_sha256"],
+                         "source": "CAVR verdict cache", "status": row["status"], "added_at": row["stored_at"],
+                         "capabilities": f"analysis for contract {row['contract_digest'][:12]}, policy {row['policy_version'][:12]}",
+                         "key_fields": {field: row[field] for field in KEY_FIELDS}})
+    return rows
 
 @cavr_router.get("/api/cavr/metrics")
 def get_metrics():
@@ -423,14 +312,18 @@ def demo_condition(body: InterceptRequest):
 
 
 def verify_dashboard_request(request, condition) -> dict:
-    """Run the pipeline for the dashboard project. Blocking: it uses the network."""
-    transport, live = TRANSPORT, LIVE_ADVISORIES
+    """Run the pipeline for the dashboard project. Blocking: it uses the network.
+
+    Under a demo condition the pipeline gets no store. The outcome of such a run was arranged
+    by the demo, so it must not count in the cache hit rate or the latency percentiles.
+    """
+    transport, live, store = TRANSPORT, LIVE_ADVISORIES, storage
     if condition == "tampered_wheel":
-        transport = TamperingTransport(TRANSPORT or HttpxTransport())
+        transport, store = TamperingTransport(TRANSPORT or HttpxTransport()), None
     elif condition == "network_off":
-        transport, live = OfflineTransport(), False
+        transport, live, store = OfflineTransport(), False, None
     try:
-        return verify_request(request, PROJECT_DIR, requirement_gate.load_json_file(requirement_gate.POLICY_PATH), storage,
+        return verify_request(request, PROJECT_DIR, requirement_gate.load_json_file(requirement_gate.POLICY_PATH), store,
                               transport=transport, quarantine_dir=QUARANTINE_DIR, advisory_cache_dir=ADVISORY_CACHE_DIR,
                               live_advisories=live)
     except Exception as exc:  # the pipeline returns verdicts and should not raise; if it does, that is "unknown"
@@ -536,7 +429,7 @@ def verdict_events(verdict: dict, condition=None) -> list[tuple]:
             events.append((3, "P4", "CacheLookup", "cache_result", cache["lookup"], {
                 "result": cache["lookup"], "package": package.get("package"), "sha256": artifact.get("sha256"),
                 "key": cache.get("key"), "key_fields": package.get("key_fields"), "stored": cache.get("stored"),
-                "reason": cache.get("reason"), "cache_hit": package.get("cache_hit"),
+                "reason": cache.get("reason"), "cache_hit": package.get("cache_hit"), "demo_condition": condition,
                 "message": f"Verdict cache: {cache['lookup']} on the 8-field key. {cache.get('reason') or ''}",
                 "plain_explanation": "Looked for an earlier analysis of exactly this file, tree, project and policy."}))
         contract = evidence.get("contract")
@@ -550,7 +443,7 @@ def verdict_events(verdict: dict, condition=None) -> list[tuple]:
             events.append((4, "P3_P4_P6", "StaticActionInspection", "action_completed", str(contract.get("rule")), {
                 "state": "INSPECTING", "step_index": 4, "project_context": verdict.get("project"),
                 "capability_contract": contract, "scan": scans, "reachability": reachability,
-                "analysis_from_cache": evidence.get("analysis_from_cache"),
+                "analysis_from_cache": evidence.get("analysis_from_cache"), "demo_condition": condition,
                 "message": f"Contract: {contract.get('rule')} ({len(contract.get('call_sites') or [])} call sites). "
                            f"Scan: {len(scans)} wheels, {len(sinks)} sink calls judged.",
                 "plain_explanation": "Read how the project uses the package, scanned the package's code without running it, "

@@ -2024,8 +2024,8 @@ Run on 2026-10-10 after the fix:
 
 ## Step 12 — pip wrapper runs the pipeline before pip (2026-10-10)
 
-Plan commit 12, `feat(cavr): pip wrapper runs the pipeline before pip`.
-Review: see the "Steps 12-14 — batch review" section.
+Plan commit 12, `feat(cavr): pip wrapper runs the pipeline before pip` (`1e17034`).
+Reviewed by cavr-reviewer (1 batch pass over steps 12-13; it ran both suites, findings derived by reading); batch verdict: fix first; 0 BLOCKERs in this step's code, 1 wrong count in these notes (corrected); 5 MINOR open.
 
 ### Ch 6 Implementation
 
@@ -2045,7 +2045,7 @@ Review: see the "Steps 12-14 — batch review" section.
 | | `_verify_package`, `ANALYSIS_KEYS` | A sound cache row that is not a complete analysis is a miss (`ROW_INCOMPLETE`); the package is analysed again and the row replaced. |
 | | `_log`, `MAX_LOGGED_REQUEST` | Built entirely inside the `try`; the logged request is redacted and cut to 500 characters. |
 | `backend/cavr/manifest_parser.py` (167 -> 170 lines) | `capture_requirements_edit` | New field `removed_options`: option lines of the old file that are not in the new one. Docstring corrected (`_diff`). |
-| Tests | `tests/test_cavr_pip_shim.py` (new, 394 lines, 33 functions, 73 cases); additions in `test_cavr_capture.py` (+11 functions, 20 cases), `test_cavr_pipeline.py` (+5 functions, 9 cases), `test_cavr_manifest.py` (+1), `test_cavr_live.py` (+1 live test); `World` and its constants moved from `test_cavr_pipeline.py` to `test_cavr_support.py` unchanged | |
+| Tests | `tests/test_cavr_pip_shim.py` (new, 394 lines, 33 functions, 73 cases); additions in `test_cavr_capture.py` (+11 functions, 19 cases), `test_cavr_pipeline.py` (+5 functions, 9 cases), `test_cavr_manifest.py` (+1), `test_cavr_live.py` (+1 live test); `World` and its constants moved from `test_cavr_pipeline.py` to `test_cavr_support.py` unchanged | |
 
 Key algorithm (`main`): (1) wrapper options out, usage error -> exit 2; (2) `verify_request` on the remaining pip command;
 (3) if `--install` and `install_plan(verdict)` gives lines, write them to a file and run pip with the fixed options;
@@ -2146,8 +2146,9 @@ Run on 2026-10-10:
 
 ## Step 13 — dashboard API uses the pipeline (2026-10-10)
 
-Plan commit 13, `refactor(cavr): dashboard API uses the pipeline`.
-Review: see the "Steps 12-14 — batch review" section.
+Plan commit 13, `refactor(cavr): dashboard API uses the pipeline` (`ca5a0e2`).
+Reviewed by cavr-reviewer (1 batch pass over steps 12-13); batch verdict: fix first; 3 BLOCKERs in this step, fixed in the batch fix commit (see "Steps 12-14 — batch review"); 1 BLOCKER in `CavrModule.tsx` (outside the scope) open for Maryam; 11 MINOR open.
+This section describes the code as committed in `ca5a0e2`.
 **Not complete as the plan words it:** the five scenario chips, the timeline labels and the proof drawer are in
 `frontend/src/components/CavrModule.tsx`, which is outside the allowed scope and was not edited. See "Known limitations".
 
@@ -2171,7 +2172,7 @@ Review: see the "Steps 12-14 — batch review" section.
 | `backend/cavr/pipeline.py` | `verify_request` | `project.skipped_directories` added to every verdict (deferred item). |
 | `backend/cavr/sample_project/invoice_extractor/reader.py`, `requirements.txt` | | The dashboard's project now creates and uses every `PdfReader` inside `apply_configuration(jbig2dec_binary=None)` and asks for `pypdf==6.19.0`. |
 | `backend/cavr/project_policy.json` | `approved_requirements` | `pypdf==4.2.0` -> `pypdf>=5,<7`, so both scenario versions pass the gate and OSV decides about 5.1.0. |
-| `frontend/src/components/cavr/` (11 files) | `types.ts`, `OverviewTab`, `RequirementsTab`, `CapabilityContractTab`, `TriggersTab`, `CounterfactualTab`, `CausalGraphTab`, `RepairTab`, `AssuranceTab`, `MetricsTab`, `StageDetailPanel` | Read the new evidence (`proofData.cavr_verdict`, `resolution`, `actionData`, `certificate`) and show `fast_gate_ms`, `cache_hit`, `escalated`, `escalation`. Every built-in sample value was removed: a tab without data says so. |
+| `frontend/src/components/cavr/` (11 files) | `types.ts`, `OverviewTab`, `RequirementsTab`, `CapabilityContractTab`, `TriggersTab`, `CounterfactualTab`, `CausalGraphTab`, `RepairTab`, `AssuranceTab`, `MetricsTab`, `StageDetailPanel` | Read the new evidence (`proofData.cavr_verdict`, `resolution`, `actionData`, `certificate`) and show `fast_gate_ms`, `cache_hit`, `escalated`, `escalation`. The built-in sample data was removed from every branch that can render on this path: a tab without data says so. `RepairTab.tsx` still has default values inside its repair branch (a default cost breakdown and three fixed ticks per candidate), which cannot render while `repair` is null. |
 | Tests | `tests/test_cavr_api.py` (new, 28 functions, 48 cases), one live test in `tests/test_cavr_live.py` | |
 
 No longer imported by `api.py`: `fixtures/scenarios.py`, `resolver.py`, `reverifier.py`, `reconstructor.py`, `triggers.py`,
@@ -2253,7 +2254,7 @@ Run on 2026-10-10:
   for an empty list; the sandbox console panel appears after every verdict. The new scenarios are served by
   `GET /api/cavr/scenarios` and run by `POST /api/cavr/run?scenario=<id>`. Needs Maryam's decision.
 - The frontend was type-checked and built, not looked at in a browser.
-- `/api/cavr/cache`, `/simple/…` and the three `/api/cavr/dialog/*` texts still describe the old trusted-package list and the sandbox. They are not in the verdict path. The seed hashes in `storage.SEED_PACKAGES` were not checked against PyPI.
+- As committed in `ca5a0e2`: `/api/cavr/cache`, `/simple/…` and the three `/api/cavr/dialog/*` texts still served the old trusted-package list and sandbox texts. Changed by the batch fix commit (next section). The seed hashes in `storage.SEED_PACKAGES` were not checked against PyPI; they are no longer served.
 - The legacy modules listed above are dead code for the dashboard; removing them is a separate change.
 - Run state is in memory (last 200 runs); a restart loses streams and proofs, not the verdict log.
 - One package per run is shown in the events; a request with several packages has all of them in the proof only.
@@ -2272,4 +2273,134 @@ Run on 2026-10-10:
 2. **Can a scenario make a package look better than it is?**
    No. A condition replaces the transport, so it can only cause a hash mismatch or a network failure. `expected_status` is text for the chip; `test_expected_status_of_a_scenario_is_not_used` shows a "verified" chip returning REJECTED.
 3. **Where do the cache hit rate and the latency numbers on the Metrics tab come from?**
-   From `verdict_log`, one row per `verify_request` call, through `pipeline.metrics`. Nothing is kept in memory and there are no default numbers.
+   From `verdict_log`, one row per `verify_request` call, through `pipeline.metrics`. Nothing is kept in memory and there are no default numbers. Runs under a demo condition are not logged (since the batch fix commit), so they are not in these numbers. BLOCK rows are in them and download nothing, which lowers the percentiles; that is stated as a limit.
+
+## Step 14 — orchestrator analyzer delegates to the pipeline: NOT implemented, stopped for a decision (2026-10-10)
+
+Plan commit 14, `refactor(cavr): orchestrator analyzer delegates to the pipeline`. No code was changed and nothing was
+committed for this step. `backend/cavr/analyzer.py` is as it was.
+
+### Why it stopped
+
+The plan says about `tests/test_modules.py`: "If commit 14 needs any other expectation in that file changed, stop and ask first."
+It does. Measured on 2026-10-10 with the repository's own data:
+
+| Question | Call | Answer |
+|---|---|---|
+| What advisory evidence does `analyze()` accept today for pypdf 6.19.0? | `OSV().query("pypdf", "6.19.0", live=False, max_age_days=30)` | `available: True`, mode `PYPI ADVISORY METADATA (dated)`, `age_days` 14.82, `vulnerabilities: []` |
+| What does the pipeline say for the same data? | `advisories.check_advisories("pypdf", "6.19.0", ROOT / "advisories", live=False)` | UNRESOLVED `ADVISORIES_UNAVAILABLE`: "OSV could not be asked; only PyPI's advisory list is available, which has no version ranges to check" |
+
+`tests/test_modules.py::test_cavr_safe_cache_and_advisory` asserts `first[0] == 'VERIFIED'` for the safe scenario, offline.
+The only advisory data in `advisories/` (the directory `analyze()` reads) for that scenario is the recorded registry response
+`advisories/registry-f9283cc3….json` (retrieved 2026-09-25), which the current analyzer accepts and the pipeline, by
+design (step 7), does not. (`tests/test_cavr_data/osv-pypdf-6.19.0.json` is a recorded OSV answer for the same release;
+it is test data and `analyze()` does not read it.) If `analyze()` delegates its PyPI nodes to `verify_request`, that scenario becomes UNRESOLVED and
+the test fails; the orchestrator's decision for the safe scenario would change with it.
+
+### What is needed from Maryam (one of)
+
+- **A.** Delegate and accept UNRESOLVED when no OSV answer is available; change the expectation in
+  `tests/test_modules.py` (and tell the orchestrator's owner that the safe scenario is no longer accepted offline).
+- **B.** Delegate and give the orchestrator path a real, dated OSV answer for pypdf 6.19.0 in `advisories/`
+  (a new file outside this branch's scope; like every dated answer it stops counting after 30 days).
+- **C.** Delegate everything except the advisory step, keeping the analyzer's acceptance of PyPI's advisory list.
+  This keeps a second, weaker advisory rule and is not what "one path" means.
+- **D.** Leave `analyze()` alone for M1.
+
+### Other findings while reading (no change made)
+
+- The recorded registry response is accepted for 30 days (`advisory_max_age_days`). From 2026-10-25 the current
+  `analyze()` returns UNRESOLVED for the safe scenario too, and `test_cavr_safe_cache_and_advisory` fails without any code change.
+- A delegated `analyze()` still needs its own handling of `ecosystem: LOCAL` lab nodes (the sandbox counterfactual path of
+  `test_controlled_dormant_execution`), the "required rule coverage" check (`TRIG-ENV` disabled -> UNRESOLVED), a policy
+  mapping from `policy.json` (`dependencies.allowed`) to the gate's `approved_requirements`, and an offline transport
+  that serves the lockfile's local artifact and the recorded registry response. None of this is written.
+
+### Tool disclosure (Ch 8.7)
+
+- **Generated by Claude Code:** this note and the two measurements above. No code.
+- **Reviewed / decided by Maryam:** the decision is open.
+
+## Steps 12-14 — batch review (2026-10-10)
+
+One cavr-reviewer pass over `git diff 6823387..HEAD` (steps 12 and 13; step 14 has no code). Verdict: fix first.
+This section lists what the fix commit, `fix(cavr): keep demo runs out of the report numbers and drop the old trusted-package endpoints`, changed.
+The fix has not been reviewed again.
+
+### Ch 6 Implementation
+
+| File | Function | Change |
+|---|---|---|
+| `backend/cavr/api.py` (585 -> 478 lines) | `verify_dashboard_request` | A run under a demo condition gets `store=None`: it is not written to `verdict_log`, and it neither reads nor writes the verdict cache. |
+| | `get_cache` | `GET /api/cavr/cache` now lists the sound rows of the 8-field verdict cache (name, version, SHA-256 of the analysed wheel, status, stored time, key fields). It no longer serves the seeded "trusted packages". |
+| | removed | `GET /simple/`, `GET /simple/{package}/`, `GET /simple/{package}/{filename}`, `POST /api/cavr/cache`, `GET /api/cavr/dialog/cache`, `/action`, `/environment`. No caller in the repository (searched `*.py`, `*.ts`, `*.tsx`, `*.js`, `*.json`, `*.sh`, `*.html`); `README.md` line 168 still mentions `/simple/`. |
+| | `verdict_events` | `demo_condition` is now in the cache and the contract / scan event too, so every event carries it. |
+| `backend/cavr/storage.py` | `list_cached_verdicts(limit=200)` | Rows of `verdict_cache`, newest first. |
+| `frontend/src/components/cavr/AssuranceTab.tsx` | chain blocks | The constant `isBroken = false` and the "valid" styling are gone; only "Verify Chain" says whether the chain is intact. |
+| `tests/test_cavr_api.py` (28 -> 31 functions, 48 -> 58 cases) | | See below. |
+
+Key algorithm (`get_cache`): for each stored row, `verdict_cache.lookup` on the row's own eight fields; the row is listed only when that lookup is a hit, which means its integrity digest and key are consistent.
+
+### Design decisions
+
+| Decision | Alternatives considered | Why |
+|---|---|---|
+| Demo runs get no store | Log them under a `demo:<id>` source that `metrics` skips | The numbers are for the supervisor's report; an arranged hash mismatch or a 1 ms "network off" run is not a measurement. No store also means such a run cannot touch the cache. Cost: demo runs are not in "Last verdicts". |
+| Old endpoints deleted | Escape the HTML and relabel the rows | `/simple/` served no files, `pip_shim.py` no longer uses it, and the dialog texts are not fetched by the frontend. Less code to defend. |
+| `/api/cavr/cache` shows the verdict cache | Return an empty list | The dashboard's cache dialog then shows what CAVR really analysed, with real hashes. |
+
+### Requirements covered
+
+No `FR-CAVR-NN` identifiers exist in this repository; IDs are from `RequirementsTab.tsx` (Maryam to confirm).
+
+| ID | Title | What this fix covers | Acceptance check |
+|---|---|---|---|
+| none listed | Supervisor report: cache hit rate, p50 / p95 `fast_gate_ms` | Only real requests are counted | `test_runs_under_a_demo_condition_are_not_in_the_log_the_cache_or_the_metrics` |
+| none listed | CLAUDE.md "No fixture-faked results" | No seeded list presented as verified | `test_cache_endpoint_lists_the_real_verdict_cache_and_no_seed_rows` |
+
+### Ch 7 Test cases
+
+Run on 2026-10-10 after the fix:
+
+- `.venv/bin/python -m pytest tests/test_cavr_*.py -q` -> 1159 passed, 7 skipped.
+- `.venv/bin/python -m pytest -q` -> 1217 passed, 7 failed, 7 skipped (the same 7 baseline tests).
+- `CAVR_LIVE=1 … tests/test_cavr_live.py` -> 7 passed (real PyPI, OSV and pip).
+- `npx tsc -b` exit 0. Not opened in a browser.
+
+| Test ID | Purpose | Input | Expected | Result |
+|---|---|---|---|---|
+| `test_runs_under_a_demo_condition_are_not_in_the_log_the_cache_or_the_metrics` | BLOCKER 1 | tampered and network-off runs, then a plain run, then network-off again | `logged` false; log and cache empty; after the plain run exactly 1 verdict, `{"VERIFIED": 1}` | pass |
+| `test_what_the_pipeline_is_given_under_each_condition` (changed) | BLOCKER 1 | three runs | stores given: `[store, None, None]` | pass |
+| `test_metrics_come_from_the_verdict_log` (changed) | BLOCKER 1 | 2 verified, 2 blocked, 2 demo runs | 4 verdicts, hit rate 0.25, `{"BLOCK": 2, "VERIFIED": 2}` | pass |
+| `test_cache_endpoint_lists_the_real_verdict_cache_and_no_seed_rows` | BLOCKER 2 | empty; one verified run; one BLOCK; a row edited in SQLite | `[]`; one row with SHA-256 `7e5d6e73…8d14`; still one; `[]` | pass |
+| `test_endpoints_of_the_old_trusted_package_list_are_gone` (8) | BLOCKER 2 | the seven removed routes, one with `<img …>` in the path | 404 (405 for `POST /api/cavr/cache`) | pass |
+
+### Defects found and fixed
+
+| # | Found by | Finding | Outcome |
+|---|---|---|---|
+| 1 | cavr-reviewer | Demo-condition runs were written to `verdict_log` like real results and counted in the hit rate and p50 / p95 | No store for such runs |
+| 2 | cavr-reviewer | Endpoints kept from the old `api.py`: a seeded list served as "PyPI Verified / TRUSTED" with hashes nobody checked, a POST that let anyone add to it, and `/simple/{package}/` writing the URL parameter into HTML unescaped (read, not executed) | Endpoints removed; `/api/cavr/cache` serves the real verdict cache |
+| 3 | cavr-reviewer | Notes: "20 cases" for the capture additions (it is 19); "every built-in sample value was removed" (defaults remain in `RepairTab.tsx`'s repair branch and `AssuranceTab` styled every block as valid) | Notes corrected; `AssuranceTab` cleaned |
+| 4 | cavr-reviewer | `frontend/src/components/CavrModule.tsx` prints "VERIFIED MATCH" for every run, "Counterfactual Container Runs (1)" for an empty list, "Matches" on a timer for the Re-verify button, fixed timings, the sandbox panel after every verdict, and the old chips | **Not fixed: outside the allowed scope.** Open for Maryam |
+
+### Known limitations / deferred
+
+- BLOCKER 4 above is open. Until `CavrModule.tsx` is changed the page shows false text around real results; step 13 stays unchecked in the plan.
+- 18 MINOR items are listed in `docs/cavr-m1-plan.md` under "Found in the batch 12-13 review". The ones to know for the report: the run is not marked finished if something fails after the pipeline (the stream would then never end); p50 / p95 include BLOCK rows; `--proxy user:pass@host` without a scheme is not redacted; a demo "tampered" run shares the quarantine directory with real runs; the wrapper does not print which policy file it used; `python -m pip` runs with the current directory on `sys.path`.
+- The table `trusted_packages` and `storage.SEED_PACKAGES` still exist; nothing serves them.
+
+### Tool disclosure (Ch 8.7)
+
+- **Generated by Claude Code:** the review (the read-only `cavr-reviewer` subagent), the fixes, the 10 new test cases, these notes, the commit.
+- **Reviewed / decided by Maryam:** nothing in this commit yet. Open for her: `CavrModule.tsx`; step 14 (options A-D).
+- **Verified by:** the pytest runs and the live run above. The reviewer did not see the fix.
+
+### Supervisor Q&A prep
+
+1. **Is VERIFIED for pypdf 6.19.0 a property of CAVR or of a demo project written to pass?**
+   Of both inputs, and the tests show each direction: the same wheel with a reader outside the guard is UNRESOLVED with an escalation (`test_reader_outside_the_guard_is_unresolved_with_the_escalation`), and the same project with an advisory for the version is REJECTED. The sample project was changed to use the guard and the policy to `pypdf>=5,<7`; both are stated as set-up choices.
+2. **Why does the dashboard policy allow pypdf 5.1.0, a version with 97 advisories?**
+   So that the scenario shows the advisory check working after the allowlist: the gate permits it and OSV rejects it. An allowlist entry is a range the project accepts, not a statement that every version in it is free of advisories.
+3. **The wrapper lets the caller name the policy file and the project. What stops an agent from pointing it at a permissive policy?**
+   Nothing in M1; the policy location is an input. `policy_version` (the digest of the policy) is in every verdict and in the cache key, but the path of the file is not printed. That is a listed limit.

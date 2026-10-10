@@ -286,6 +286,11 @@ class CavrStorage:
             row = conn.execute("SELECT * FROM verdict_cache WHERE cache_key=?", (cache_key,)).fetchone()
             return dict(row) if row else None
 
+    def list_cached_verdicts(self, limit: int = 200) -> list[dict]:
+        with self.connect() as conn:
+            rows = conn.execute("SELECT * FROM verdict_cache ORDER BY stored_at DESC LIMIT ?", (limit,)).fetchall()
+            return [dict(r) for r in rows]
+
     def put_cached_verdict(self, row: dict) -> None:
         columns = self.VERDICT_CACHE_COLUMNS
         with self.connect() as conn:
