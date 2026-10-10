@@ -161,6 +161,7 @@ class Service:
             if m in proposal.applicability():
                 proposal_run=run.model_copy(update={'candidate_snapshot':snapshot(branch)})
                 results[m]=self._module(m,proposal,proposal_run,bus,'repair-verification')
+        artifact_ok=any(x['kind']=='cavr.repair_candidate_checked' and x['data'].get('artifact_identity_valid') for x in self.store.events(run.run_id))
         functional_ok=False;security_ok=False;fixture_check=None
         if 'CAVR' in needs and artifact_ok:
             candidate_src=branch/'vendor'/'invoice_pdf_safe.py'
@@ -176,7 +177,6 @@ class Service:
                 for rr in runs:violations.extend(verify_runtime(cnode.get('contract',{}),rr.get('events',[]),rr.get('facts',{}).get('receiver_payloads')))
             security_ok=bool(cnode and runs and not violations and all(not rr.get('facts',{}).get('canary_received') for rr in runs))
             bus.emit('repair.functional_security_check',{'functional_verified':functional_ok,'security_verified':security_ok,'fixture_result':fixture_check,'violations':violations})
-        artifact_ok=any(x['kind']=='cavr.repair_candidate_checked' and x['data'].get('artifact_identity_valid') for x in self.store.events(run.run_id))
         repair_candidates=[{'name':'invoice-pdf-safe','version':'1.0.0','level':3,'api_slice':'extract_invoice_text(bytes) -> str','files_changed':len(set(changed_files)),'candidate_id':'local-safe-adapter-v1'}]
         verified_candidate_ids=['local-safe-adapter-v1'] if artifact_ok and functional_ok and security_ok else []
         ranked=rank_repairs(next((n for n in current.get('CAVR',{}).get('details',{}).get('nodes',[]) if n['name']=='invoice-pdf-lab'),{'name':'invoice-pdf-lab','version':'1.0.0'}),repair_candidates,verified_candidate_ids=verified_candidate_ids) if 'CAVR' in needs else []
