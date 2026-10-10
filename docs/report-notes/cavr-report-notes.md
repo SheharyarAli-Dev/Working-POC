@@ -3,7 +3,7 @@
 ## Step 0 — Refuse host execution of unpinned package source (2026-10-10)
 
 Plan commit 0, `fix(cavr): refuse host execution of unpinned package source`.
-Status when these notes were written: code and tests are in the working tree, **not committed**.
+Status: committed by Maryam on 2026-10-10 as `3be14db`.
 Four reviewer passes were run. Pass 4 reviewed the pass-3 fixes; its findings and their outcomes
 are listed under "Reviewer pass 4" below. The pass-4 changes (one test and these notes) have not
 been reviewed again.

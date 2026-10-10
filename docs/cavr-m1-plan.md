@@ -265,7 +265,7 @@ Found in the commit 0 review pass 4 (2026-10-10) and deliberately not fixed ther
 
 ## Progress
 
-- [ ] 0 refuse host execution of unpinned package source (code written 2026-10-10, awaiting review/commit)
+- [x] 0 refuse host execution of unpinned package source (committed 2026-10-10, `3be14db`)
 - [ ] 0b accept either monitor mode in `test_controlled_dormant_execution`
 - [ ] 1 C1 pip command capture
 - [ ] 2 C1 requirements.txt edit capture

@@ -26,9 +26,19 @@ What to do:
    - Security issues: executing package code on the host, unbounded downloads, unsafe zip
      extraction, secrets in logs.
    - Code that is hard for a student to explain to a supervisor (overly clever, unexplained magic).
-5. Report in this format:
-   - **Verdict:** OK to commit / Fix first
+5. Classify every problem as exactly one of:
+   - **BLOCKER**: a fail-open path, a security hole, false or unverified evidence,
+     a failing test, or wrong facts in the report notes.
+   - **MINOR**: style, cosmetic issues, nice-to-have tests.
+   If you are unsure which one a problem is, say why in one line and classify it as BLOCKER.
+6. Report in this format:
+   - **Verdict:** OK to commit / Fix first.
+     "OK to commit" when there are no BLOCKERs, even if there are MINOR items.
+     "Fix first" only when there is at least one BLOCKER.
    - **Test result:** pass/fail counts
-   - **Problems:** numbered list, each with file:line, why it matters, and a suggested fix
+   - **BLOCKERs:** numbered list, each with file:line, why it matters, and a suggested fix.
+     Write "None" if there are none.
+   - **MINOR (suggestions only, do not block the commit):** numbered list, each with file:line
+     and a one-line suggestion.
    - **Questions the supervisor might ask about this change:** 2–3 questions
 Keep it short. Do not repeat the code back.
