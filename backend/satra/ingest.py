@@ -152,6 +152,10 @@ def require_ref(repo_dir, ref_text):
 
 
 def resolve_commit(repo_dir, sha):
+    if isinstance(sha, str) and 4 <= len(sha) < 40 and re.match(r"^[0-9a-fA-F]+$", sha):
+        found = run_git(repo_dir, "rev-parse", "--verify", "--quiet", sha + "^{commit}", tolerate=True).strip()
+        if SHA_PATTERN.match(found):
+            sha = found
     require_sha(sha)
     kind = run_git(repo_dir, "cat-file", "-t", sha, tolerate=True).strip()
     if kind != "commit":

@@ -44,6 +44,17 @@ def test_create_verified_repair_branch(tmp_path):
     branches = run_git(repo, "branch", "--list", expected_branch).strip()
     assert expected_branch in branches
 
+    # Test idempotency and resilience when branch is checked out
+    run_git(repo, "checkout", expected_branch)
+    result_repeat = create_verified_repair_branch(
+        repo_dir=repo,
+        base_sha=head_sha,
+        run_id="run-test-02",
+        changed_files=["app/security.py"],
+    )
+    assert result_repeat["branch"] == expected_branch
+
+
 
 def test_push_repair_branch_if_allowed(tmp_path):
     settings_no_push = SatraSettings(

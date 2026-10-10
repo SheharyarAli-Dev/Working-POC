@@ -4513,10 +4513,26 @@ code, pre {
   box-shadow: 0 4px 14px rgba(16, 185, 129, 0.4);
 }
 
-.satra-approve-push-btn:hover {
+.satra-approve-push-btn:hover:not(:disabled) {
   background: #059669 !important;
   transform: translateY(-1px);
   box-shadow: 0 6px 18px rgba(16, 185, 129, 0.5);
+}
+
+.satra-approve-push-btn:disabled {
+  opacity: 0.65;
+  cursor: not-allowed !important;
+  transform: none !important;
+  box-shadow: none !important;
+}
+
+@keyframes satra-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.satra-spinner {
+  animation: satra-spin 1s linear infinite;
 }
 
 

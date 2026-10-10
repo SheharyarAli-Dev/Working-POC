@@ -561,7 +561,12 @@ def satra_recommit_approve(req: ApproveRecommitRequest):
     """Logs human approval and generates the verified PR branch and reference."""
     evidence = RUN_EVIDENCE.get(req.run_id)
     if not evidence:
-        raise HTTPException(404, "Run evidence not found")
+        for rid, ev in reversed(list(RUN_EVIDENCE.items())):
+            if req.run_id in rid or (req.branch and req.branch in str(ev)):
+                evidence = ev
+                break
+    if not evidence:
+        raise HTTPException(404, "Run evidence not found. Please re-run the verification pipeline.")
     if evidence.get("decision") != "ACCEPTED":
         raise HTTPException(400, "Recommit is only permitted for ACCEPTED runs")
 
@@ -572,14 +577,18 @@ def satra_recommit_approve(req: ApproveRecommitRequest):
         settings = load_settings()
         repo_dir = ensure_repository(settings)
         repair = evidence.get("repair") or {}
-        made = create_verified_repair_branch(
-            repo_dir,
-            evidence["commit"],
-            req.run_id,
-            [repair.get("target_file")] if repair.get("target_file") else [],
-            repair=repair
-        )
-        pushed = push_repair_branch_if_allowed(repo_dir, made["branch"], settings)
+        try:
+            made = create_verified_repair_branch(
+                repo_dir,
+                evidence["commit"],
+                req.run_id,
+                [repair.get("target_file")] if repair.get("target_file") else [],
+                repair=repair
+            )
+            pushed = push_repair_branch_if_allowed(repo_dir, made["branch"], settings)
+        except Exception as e:
+            raise HTTPException(500, f"Git repair operation failed: {str(e)}")
+
         commit_sha = made.get("commit_sha") or (made["branch"].split("/")[-1] if "/" in made["branch"] else evidence["commit"][:7])
         entry = {
             "run_id": req.run_id,
@@ -592,12 +601,15 @@ def satra_recommit_approve(req: ApproveRecommitRequest):
             "message": made["commit_message"]
         }
         AUDIT_LOGS.append(entry)
+        pr_compare_url = f"https://github.com/SheharyarAli-Dev/Threat-Repository/compare/main...{made['branch']}?expand=1"
+        branch_tree_url = f"https://github.com/SheharyarAli-Dev/Threat-Repository/tree/{made['branch']}"
         return {
             "status": "PUSHED_TO_ORIGIN" if pushed.get("pushed") else "APPROVED_LOCAL_BRANCH",
             "branch": made["branch"],
             "commit_sha": commit_sha,
             "commit_url": f"https://github.com/SheharyarAli-Dev/Threat-Repository/commit/{commit_sha}",
-            "pr_url": f"https://github.com/SheharyarAli-Dev/Threat-Repository/tree/{made['branch']}",
+            "pr_url": pr_compare_url,
+            "branch_url": branch_tree_url,
             "pr_number": int(hashlib.sha256(req.run_id.encode()).hexdigest()[:4], 16) % 900 + 100,
             "pushed": pushed.get("pushed", False),
             "audit_entry": entry
