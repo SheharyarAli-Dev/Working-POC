@@ -1,0 +1,58 @@
+name: CD
+
+on:
+  push:
+    branches: [master]
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  image:
+    name: Build and publish Docker image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Lower-case image name
+        run: echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ env.IMAGE }}:latest
+            ${{ env.IMAGE }}:${{ github.sha }}
+      - name: Smoke test the published image
+        run: |
+          docker run -d --name asent -p 8000:8000 "$IMAGE:${{ github.sha }}"
+          for i in $(seq 1 30); do curl -fsS http://127.0.0.1:8000/ >/dev/null && break; sleep 2; done
+          curl -fsS http://127.0.0.1:8000/ >/dev/null
+          docker logs asent | tail -20
+
+  release:
+    name: GitHub Release (tags only)
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - run: npm ci --prefix frontend && npm run build --prefix frontend
+      - run: git archive --format=zip -o asent-source.zip HEAD && (cd frontend && zip -qr ../asent-dashboard-dist.zip dist)
+      - uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            asent-source.zip
+            asent-dashboard-dist.zip
