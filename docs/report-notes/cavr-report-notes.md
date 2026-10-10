@@ -1586,3 +1586,122 @@ suite or open the recorded OSV file.
 3. **Is the same true for `.py` files?**
    No. For `.py` the interpreter itself honours the coding line, so `_decode` (PEP 263) is the matching
    decoding there (`test_source_with_a_declared_encoding_is_decoded_with_it`).
+
+## Step 9 — C4 capability contract from real imports and call sites (2026-10-10)
+
+Plan commit 9, `feat(cavr): C4 capability contract from real imports and call sites`.
+Review: one cavr-reviewer batch pass over steps 9-11; outcome in the "Steps 9-11 — batch review" section.
+
+### Ch 6 Implementation
+
+| File | Function / constant | What it does |
+|---|---|---|
+| `backend/cavr/context_extractor.py` (rewritten, 92 -> 233 lines) | `extract_project_context(project_dir=None)` | Reads every `.py` file of the project, parses it with `ast` (bytes in, so a PEP 263 coding line is honoured), and returns `result`, `rule`, `reason`, `project_dir`, `files` (path + SHA-256), `sources_digest`, `imports`, `call_sites`, `references`, `star_imports`, `parse_errors`, `not_read`, `skipped_directories`. The old `git diff` subprocess and the `used_apis` / `files_touched` / `git_diff` / `project_name` keys are gone (nothing read them). |
+| | `usage_of(context, import_names)` | The imports, call sites, references and star imports whose top-level module is one of `import_names`. Relative imports never match. |
+| | `_Uses` (an `ast.NodeVisitor`) | Per file: builds `local name -> real dotted name` from the import statements, then records each use of such a name once: `call`, `decorator` (a bare `@name`), or `reference`. |
+| | `_python_files` | `os.walk` without following links. Skips dot-directories, `__pycache__`, `node_modules` and virtual environments (a directory holding `pyvenv.cfg`); a symbolic link is listed under `not_read`. |
+| | `MAX_FILES` 5000, `MAX_FILE_BYTES` 2 MiB, `MAX_TOTAL_BYTES` 50 MiB | Budgets. |
+| `backend/cavr/capability_contract.py` (`infer_capability_contract` rewritten, 143 -> 247 lines) | `infer_capability_contract(distribution, context=None, policy=None, knowledge=None)` | The contract of one distribution in one project. Returns `result`, `rule`, `reason`, `package`, `version`, `import_names`, `import_names_source`, `imports`, `call_sites`, `references`, `star_imports`, `entry_modules`, `allowed`, `denied`, `conflicts`, `capability_rules`, `task_description`, `vocabulary`, `sources_digest`, `authority`, `contract_rows`, `summary`, `digest`. |
+| | `vocabulary(knowledge=None)` | The capability names of the threat-repository behaviour rules, in one spelling (`behavior_rules.normalize_name`). 10 names with the seed rules. |
+| | `_capabilities` | Policy `allowed_scopes` + matching capability rules -> `allowed`, `denied`, `conflicts`. |
+| | `_import_names`, `_entry_modules`, `_is_context`, `_contract` | Import names from the wheel metadata; dotted entry names for step 11; context shape check; one place that builds the result and its digest. |
+| | `infer(context, node)` | Unchanged (orchestrator path, replaced in step 14). |
+| `backend/cavr/wheel_meta.py` (260 -> 265 lines) | `_headers` | A METADATA or WHEEL header block with parser defects is UNRESOLVED (`METADATA_INVALID` / `NOT_A_WHEEL`). Deferred item from the batch 4-8 review. |
+| `backend/cavr/api.py` | 2 lines | Passes `project_policy.json` to `infer_capability_contract`. |
+| `frontend/src/components/cavr/CapabilityContractTab.tsx` | 4 lines | The confidence figure is shown only when a row has one (the new rows have none). |
+| `tests/test_cavr_contract.py` (new, 478 lines) | | 43 test functions, 64 cases. |
+| `tests/test_cavr_wheel_meta.py` | | +2 test functions. |
+
+Key algorithm, `infer_capability_contract`:
+
+1. Capabilities: each `allowed_scopes` entry `CAPABILITY:scope` is a grant, or a denial when the scope is `none`. A capability rule applies when every word of its `task` is in the policy's `project_task_description`. Allowed = granted by the policy and not denied by an applying rule; everything else in the vocabulary is denied.
+2. Import names = the wheel's `import_names` + `undeclared_import_names` (step 5), never the distribution name.
+3. `usage_of` selects the project's imports and uses of those names. No import, or an import that is never used -> UNRESOLVED `NO_CALL_SITE_AUTHORITY`; `from pkg import *` -> UNRESOLVED `STAR_IMPORT`; a project that was not fully read -> UNRESOLVED with the context's rule.
+4. `digest` = SHA-256 of the canonical JSON of the contract (lists sorted) including `sources_digest`; `reason`, `version` and the dashboard rows are left out.
+
+### Design decisions
+
+| Decision | Alternatives considered | Why |
+|---|---|---|
+| Import names from the wheel (`top_level.txt`, else RECORD, else the archive) plus undeclared names | Guess from the distribution name; the alias table in `context_service.py` | `invoice-tools` may install `invtools`. A guess attributes the wrong project code (`test_import_name_comes_from_top_level_txt_not_from_the_distribution_name`). |
+| `sources_digest` (all project `.py` files) is part of the contract digest | Hash only imports and call sites | The verdict also depends on the code around a call site: changing `apply_configuration(jbig2dec_binary=None)` to another value keeps every call site the same. Without the sources the cache would return the old VERIFIED (`test_digest_changes_when_the_guard_changes_but_the_call_sites_do_not`). Cost: any `.py` edit in the project is a cache miss. |
+| Allowed = policy grant minus task-rule denial; default deny | Rule `required` list alone; policy alone; the hardcoded PDF rule of the old code | The policy is the project owner's statement; the rule is a floor the policy cannot lift. A conflict is recorded in `conflicts`, the stricter side wins. |
+| Rule chosen by the words of its `task` in `project_task_description` | A rule id per package in the policy; `if name == "pypdf"` as before | No policy change and no package names in code. Open for Maryam: an explicit policy key would be easier to defend than word matching. |
+| Imported but never used -> UNRESOLVED | Treat the import as authority | An unused import says nothing about what the project needs from the package. |
+| A reference (base class, `except` clause, bare decorator) counts as a use | Calls only | `class M(pkg.Base)` is real use without a call. |
+| Star import of the package -> UNRESOLVED | Follow the names | The names it binds are decided by the package, not visible in the project source. |
+| Symbolic link or unparseable project file -> context UNRESOLVED | Skip the file | An unread file may hold the call site that breaks the guard; `hashing.files` (orchestrator) also refuses links. |
+| Malformed `allowed_scopes` -> UNRESOLVED; a missing key grants nothing | Ignore bad entries | A typo in a grant must not silently become something else; "no grants" is a definite, safe contract. |
+| A bare package name is accepted as `distribution` | Raise | `api.py` has no wheel until step 13; it gets the policy rows and an UNRESOLVED authority instead of a guessed one. |
+
+### Requirements covered
+
+No `FR-CAVR-NN` identifiers exist in this repository; IDs are from `RequirementsTab.tsx` (Maryam to confirm).
+
+| ID | Title | What this step covers | Acceptance check |
+|---|---|---|---|
+| FR-3 | Capability Contract Inference | Required / denied capabilities from AST call sites, the policy and the threat-repository rules | `test_invoicehub_contract_for_pypdf`, `test_policy_grants_and_task_rule_denies` |
+| FR-6 | Fail-Closed Security Policy | Unused package, star import, unread project, unknown import names, bad policy -> UNRESOLVED | `test_unused_package_has_no_call_site_authority`, `test_unresolved_project_context_makes_the_contract_unresolved`, `test_malformed_allowed_scopes_is_unresolved` |
+| NFR-2 | Deterministic & No Paid LLM | Pure `ast`; stable digest | `test_digest_is_stable_across_reordering` |
+
+### Ch 7 Test cases
+
+Run on 2026-10-10:
+
+- `.venv/bin/python -m pytest tests/test_cavr_*.py -q` -> 734 passed, 4 skipped (668 + 66 new).
+- `.venv/bin/python -m pytest -q` -> 792 passed, 7 failed, 4 skipped (the same 7 baseline tests).
+- All 64 contract cases passed on the first run with the code. To check that they can fail, 8 one-line faults were put into the code one at a time (sources left out of the digest, rule denial ignored, import name guessed from the distribution name, unused import accepted, alias not resolved, symlink followed, parse error ignored, call sites not sorted); each made at least one test fail, and the files were restored.
+
+| Test ID | Purpose | Input | Expected | Result |
+|---|---|---|---|---|
+| `test_plain_import_and_call_site` | Basic record | `import pypdf` + `pypdf.PdfReader('a.pdf')` | 1 import, call site `app/read.py:3 pypdf.PdfReader` | pass |
+| `test_aliased_import_is_resolved_to_the_real_module` | Aliased import | `import pypdf as p`; `p.PdfReader(x)` | symbol `pypdf.PdfReader`, expression `p.PdfReader` | pass |
+| `test_from_x_import_y_as_z` | `from x import y as z` | `from pypdf import PdfReader as R`; `R(...)` | symbol `pypdf.PdfReader`, expression `R` | pass |
+| `test_submodule_imports`, `test_decorator_and_base_class_uses`, `test_a_chain_is_recorded_once_and_arguments_are_visited` | Other forms | `import a.b`, `import a.b as g`, `except` clause, `@functools.cache`, base class, nested calls | Right symbol and kind, each chain once | pass |
+| `test_local_names_and_relative_imports_are_not_attributed` | No false attribution | Local `PdfReader`, `from .helpers import PdfReader`, `self.reader.PdfReader(3)` | No call sites | pass |
+| `test_virtualenvs_caches_and_hidden_directories_are_not_project_code` | File selection | `.venv`, `venv/pyvenv.cfg`, `node_modules`, `__pycache__`, `.git`, `build` | Only `app/a.py`, `build/b.py` read | pass |
+| `test_missing_project_directory_is_unresolved`, `test_a_project_file_that_cannot_be_parsed_makes_the_context_unresolved` (5), `test_symbolic_links_are_not_followed_and_make_the_context_unresolved`, `test_symlinked_directory_is_not_followed`, `test_budgets` | Failure cases | Missing dir; syntax error, NUL, unknown codec, bad bytes, 5000 parentheses; link to a file / directory outside; small budgets | UNRESOLVED `PROJECT_MISSING` / `SOURCE_NOT_PARSED` / `SOURCE_NOT_READ` / `PROJECT_BUDGET` | pass |
+| `test_reading_a_project_does_not_run_it` | No execution | A file that creates a marker when run | No marker after reading; marker appears when the file is really executed | pass |
+| `test_invoicehub_contract_for_pypdf` | Real project + real wheel | `demo_project/InvoiceHub`, `artifacts/pypdf-6.19.0-py3-none-any.whl` | OK; call sites `app/pdf_adapter.py:7 pypdf.apply_configuration`, `:8 pypdf.PdfReader`; allowed `FILE_READ`, `FILE_WRITE`; rule `CAP-PDF-001` | pass |
+| `test_import_name_comes_from_top_level_txt_not_from_the_distribution_name`, `test_undeclared_import_names_in_the_wheel_are_attributed_too` | Import-name mapping | Wheel `invoice-tools` with `top_level.txt` = `invtools`; a wheel with an undeclared package | `import invtools` attributed; `import invoice_tools` not | pass |
+| `test_distribution_without_usable_import_names_is_unresolved` (7) | Unknown mapping | Name only, empty list, a string, a non-identifier, no name, `None` | UNRESOLVED `IMPORT_NAMES_UNKNOWN` | pass |
+| `test_unused_package_has_no_call_site_authority`, `test_package_named_only_in_a_string_or_comment_is_not_imported`, `test_imported_but_never_used_has_no_call_site_authority` | Unused package | Project that only uses `json`; name in a comment / string; import without use | UNRESOLVED `NO_CALL_SITE_AUTHORITY` | pass |
+| `test_star_import_of_the_package_is_unresolved` | Star import | `from pypdf import *` | UNRESOLVED `STAR_IMPORT`; a star import of `os.path` does not matter | pass |
+| `test_policy_grants_and_task_rule_denies`, `test_without_a_matching_task_rule_only_the_policy_decides`, `test_http_client_task_selects_the_http_rule`, `test_disabled_rule_is_not_applied` | Capability derivation | Policy grants `NETWORK_CONNECT` for a PDF task; a task no rule matches; an HTTP-client task; `CAP-PDF-001` disabled | Grant refused with a `conflicts` entry; policy alone; `CAP-HTTP-001`; rule not applied | pass |
+| `test_malformed_allowed_scopes_is_unresolved` (9), `test_unusable_policy_is_unresolved` (4), `test_policy_without_allowed_scopes_grants_nothing` | Policy errors | Not a list, no scope, unknown capability, same capability twice; no policy | UNRESOLVED `CAPABILITY_POLICY_INVALID`; no key -> 0 allowed, 10 denied | pass |
+| `test_digest_is_stable_across_reordering` | Digest stable | Shuffled context lists, reversed policy keys and scopes, same project in another directory | Same digest | pass |
+| `test_digest_changes_when_a_new_call_site_appears`, `test_digest_changes_when_a_call_site_moves_or_is_removed` | Digest sensitive | `pypdf.PdfWriter()` added; a blank line added; a file removed | Different digests | pass |
+| `test_digest_changes_when_the_guard_changes_but_the_call_sites_do_not` | Cache safety | `jbig2dec_binary=None` -> `'x'` | Same call sites, different digest | pass |
+| `test_digest_changes_with_the_policy_the_rules_and_the_import_names` | Digest inputs | Fewer scopes; a rule edited; one more import name; an unrelated policy key | 4 different digests; unrelated key -> same digest | pass |
+| `test_a_line_that_is_not_a_header_inside_the_header_block_is_unresolved`, `test_malformed_wheel_file_is_unresolved` (`test_cavr_wheel_meta.py`) | Header defects | METADATA / WHEEL with a non-header line before a later field | UNRESOLVED `METADATA_INVALID` / `NOT_A_WHEEL` | pass |
+
+### Defects found and fixed
+
+| # | Found by | Finding | Outcome |
+|---|---|---|---|
+| 1 | Design, before coding | A contract digest made only of call sites would let the cache return a VERIFIED that was judged with the pypdf guard in place after the guard's argument was changed | `sources_digest` added to the digest; covered by a test |
+| 2 | Deferred item (batch 4-8 review) | `wheel_meta._headers` ignored parser defects, so a `Requires-Dist` after a non-header line was silently dropped | Fixed here with 2 tests |
+
+### Known limitations / deferred
+
+- Syntactic and per file: no scopes, no data flow. A call on an object (`reader.pages`), through `getattr`, or on a name re-exported by another project module is not a call site.
+- A project module with the same name as the package's import name is counted as the package.
+- A namespace package shared by several distributions (`google`) is attributed to each of them.
+- A name listed in `top_level.txt` but not shipped in the wheel is still matched.
+- The dashboard (`api.py`) shows the policy-derived rows with an UNRESOLVED authority until step 13.
+- Rule selection by task words is coarse; only two capability rules exist in the seed data.
+
+### Tool disclosure (Ch 8.7)
+
+- **Generated by Claude Code:** `context_extractor.py`, the new `infer_capability_contract`, the `wheel_meta._headers` fix, the `api.py` and `.tsx` lines, the tests, these notes, the commit.
+- **Reviewed / changed by Maryam:** nothing yet; the batch ran without stops. Open for her: the rule-selection method and the "imported but unused -> UNRESOLVED" choice.
+- **Verified by:** the pytest runs above and the 8 fault injections; the InvoiceHub call sites (`app/pdf_adapter.py:7` and `:8`) match the file.
+
+### Supervisor Q&A prep
+
+1. **How does CAVR know which package an `import` belongs to?**
+   From the wheel itself: `top_level.txt` (or RECORD, or the archive) lists the import names. The distribution name is never used as a guess.
+2. **Why is a package that the project never imports UNRESOLVED and not VERIFIED?**
+   The contract is "what this project needs from the package". With no call site there is nothing to derive it from, so no capability can be justified.
+3. **Why does the contract digest include all project source files?**
+   The verdict depends on the code around a call site, not only on the call site. Hashing the sources guarantees a cached verdict is only reused for the exact project state it was judged against.

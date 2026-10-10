@@ -135,8 +135,10 @@ export const CapabilityContractTab: React.FC<CapabilityContractTabProps> = ({ st
                       <td colSpan={5}>
                         <div className="matrix-detail-box">
                           <div className="detail-meta">
-                            <strong>Call Site Evidence:</strong> <code>{row.evidence}</code> · 
-                            <strong> Confidence Score:</strong> {int(row.confidence * 100)}%
+                            <strong>Evidence:</strong> <code>{row.evidence}</code>
+                            {typeof row.confidence === 'number' && (
+                              <> · <strong> Confidence Score:</strong> {int(row.confidence * 100)}%</>
+                            )}
                           </div>
                           <p className="detail-justification">{row.justification}</p>
                           {hasMismatch && (

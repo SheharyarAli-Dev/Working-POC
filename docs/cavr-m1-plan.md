@@ -326,6 +326,7 @@ Found in the batch 4-8 review (2026-10-10, MINOR items, all derived by reading) 
   `<filename>.rejected`. -> step 11.
 - `wheel_meta._headers`: parser defects are ignored (a non-header line inside the header block ends it
   silently). Treat non-empty `defects` as `METADATA_INVALID`. -> step 9.
+  **Handled in step 9** (`test_a_line_that_is_not_a_header_inside_the_header_block_is_unresolved`).
 - `wheel_meta.read_wheel` without an expected name and version skips the request identity check; the
   pipeline must always pass both. -> step 11.
 - `wheel_meta.check_entries`: the duplicate-name check lowercases but does not Unicode-normalise
@@ -366,7 +367,7 @@ Found in the batch 4-8 review (2026-10-10, MINOR items, all derived by reading) 
 - [x] 6 C3 transitive tree + subtree digest (committed 2026-10-10, `3cb1a35`; batch review fix in the next commit)
 - [x] 7 C3 OSV ranges (committed 2026-10-10, `b7c98cf`; batch review fix in the next commit)
 - [x] 8 C3 AST scan (committed 2026-10-10, `c72b56a`; batch review fix in the next commit)
-- [ ] 9 C4 capability contract
+- [x] 9 C4 capability contract (2026-10-10; hash in the batch 9-11 review commit)
 - [ ] 10 verdict cache
 - [ ] 11 pipeline
 - [ ] 12 pip wrapper

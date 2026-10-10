@@ -205,9 +205,14 @@ def _text(data: bytes, what: str) -> str:
 def _headers(data: bytes, what: str, rule: str):
     """The header block of METADATA or WHEEL (RFC 822 style; it ends at the first blank line)."""
     try:
-        return HeaderParser().parsestr(data.decode("utf-8"))
+        message = HeaderParser().parsestr(data.decode("utf-8"))
     except UnicodeDecodeError as exc:
         raise WheelProblem("UNRESOLVED", rule, f"{what} is not UTF-8: {exc}")
+    if message.defects:
+        # The parser stops reading headers at a line that is not one, so later fields would be silently lost.
+        raise WheelProblem("UNRESOLVED", rule, f"{what} has a malformed header block: "
+                           + ", ".join(type(defect).__name__ for defect in message.defects))
+    return message
 
 
 def _single(metadata, field: str) -> str:
