@@ -66,7 +66,9 @@ def build_wheel(directory, name, version, files=None, requires=(), tag="py3-none
     wheel = directory / f"{stem}-{version}-{tag}.whl"
     with zipfile.ZipFile(wheel, "w", zipfile.ZIP_DEFLATED) as archive:
         for path, data in entries.items():
-            archive.writestr(zipfile.ZipInfo(path, date_time=(2026, 1, 1, 0, 0, 0)), data)
+            info = zipfile.ZipInfo(path, date_time=(2026, 1, 1, 0, 0, 0))
+            info.compress_type = zipfile.ZIP_DEFLATED  # a ZipInfo does not take the archive's default
+            archive.writestr(info, data)
     return wheel
 
 

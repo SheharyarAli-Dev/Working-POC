@@ -1045,3 +1045,118 @@ The tests were written before `pypi_client.py` but first run after it; all 82 pa
 3. **What stops a huge or endless download?**
    The declared size is checked against the cap before downloading, the stream is cut when the received
    bytes pass the cap (the declared size is not trusted), and a 120 s wall-clock deadline applies.
+
+## Step 5 — C3 read wheel metadata safely (2026-10-10)
+
+Plan commit 5, `feat(cavr): C3 read wheel metadata safely`.
+Review: REVIEW_LINE_STEP_5
+
+### Ch 6 Implementation
+
+| File | Function / constant | What it does |
+|---|---|---|
+| `backend/cavr/wheel_meta.py` (new, 260 lines) | `read_wheel(path, expected_name=None, expected_version=None)` | Opens the wheel as a zip, checks all entries, then reads METADATA, WHEEL and top_level.txt or RECORD. Returns `result` (OK / REJECTED / UNRESOLVED), `rule`, `reason`, `name` (canonical), `metadata_name`, `version`, `requires_python`, `requires_dist`, `provides_extra`, `dist_info`, `entry_count`, `total_uncompressed`, `wheel_tags`, `root_is_purelib`, `import_names`, `import_names_source`, `undeclared_import_names`, `native_files`, `pth_files`. |
+| | `check_entries(archive)` | Budget and path checks over the zip directory, before any entry is read: entry count, total declared uncompressed size, compression ratio, unsafe paths, symlinks, encrypted entries, duplicate names. |
+| | `read_member(archive, info, limit=None)` | Bytes of one entry, refused when its declared size is over the limit. |
+| | `_read` | The body of `read_wheel`: finds the one top-level `*.dist-info`, parses METADATA, compares the three identities, reads WHEEL, derives import names. |
+| | `_requirement`, `_single`, `_version`, `_headers`, `_text` | Parse one `Requires-Dist`; require exactly one `Name` / `Version`; parse a version; parse an RFC 822 header block; decode UTF-8. |
+| | `_import_names(paths)`, `_unsafe_path(name)` | Top-level importable names in a list of paths; the path rule. |
+| | `MAX_ENTRIES` 20 000, `MAX_TOTAL_UNCOMPRESSED` 500 MiB, `MAX_MEMBER_BYTES` 8 MiB, `MAX_RATIO` 200, `RATIO_FLOOR_BYTES` 10 MiB | The zip budget. |
+| `tests/test_cavr_wheel_meta.py` (new, 336 lines) | | 38 test functions, 57 cases. |
+| `tests/test_cavr_support.py` | `build_wheel` | Entries are now really deflated (see defects). |
+| `docs/cavr-m1-plan.md` | | Progress box 5 ticked. |
+
+Key algorithm, `read_wheel`:
+
+1. `check_entries`: over budget -> UNRESOLVED `ZIP_BUDGET`; an entry that is absolute, has `..`, `.`, an empty part, a backslash, a drive letter, or is a symlink -> REJECTED `UNSAFE_PATH`; same name twice (ignoring case) -> UNRESOLVED `DUPLICATE_ENTRY`.
+2. Exactly one top-level `X.dist-info/` with a `METADATA` file, else `METADATA_MISSING` / `DIST_INFO_AMBIGUOUS`.
+3. METADATA header block: exactly one `Name` and one `Version`; every `Requires-Dist` must parse with `packaging` and must not be a URL, else `METADATA_INVALID`.
+4. METADATA name/version must equal the dist-info directory name and, when given, the requested name/version (canonical name, `Version` equality), else REJECTED `METADATA_MISMATCH`.
+5. Import names from `top_level.txt`, else `RECORD`, else the entry names; names present in the archive but not declared go to `undeclared_import_names`. `.so/.pyd/.dll/.dylib` -> `native_files`; `.pth` -> `pth_files`.
+
+### Design decisions
+
+| Decision | Alternatives considered | Why |
+|---|---|---|
+| Read from the zip in memory; extract nothing | `zipfile.extractall` into a temp directory | Nothing is written, so a hostile path cannot land anywhere. The path check still runs because pip would extract the file later. |
+| Check the whole zip directory before reading any entry | Check only the entries that are read | A bomb or an escaping path in an entry CAVR does not read still reaches pip at install time. |
+| Budget on declared sizes | Count bytes while decompressing everything | `zipfile` returns at most the declared size and raises on a CRC mismatch, so the declared sizes bound the reads. Decompressing 500 MiB just to count is slow. |
+| Ratio rule only above 10 MiB uncompressed | Ratio rule always | A tiny file of repeated characters has a high ratio and is harmless (`test_small_highly_compressible_wheel_is_not_a_bomb`). |
+| Unsafe path / symlink / identity mismatch -> REJECTED; everything unreadable -> UNRESOLVED | All UNRESOLVED | The first group is positive evidence that the file is not an honest wheel of that package. The second group is missing knowledge. |
+| Duplicate entry names -> UNRESOLVED | Use the last one, like `zipfile` | Two tools may pick different copies; CAVR cannot say which one would be installed. |
+| Parse METADATA with `email.parser.HeaderParser` | `packaging.metadata`; a regex | METADATA is defined as RFC 822 headers. The parser stops at the first blank line, the same boundary pip uses (`test_requires_dist_after_the_header_block_is_not_a_dependency`). |
+| `Requires-Dist` with a URL -> UNRESOLVED | Record it and continue | A URL dependency is not on PyPI and cannot be hash-checked by step 4. |
+| Declared import names + `undeclared_import_names` | Trust `top_level.txt` only | `top_level.txt` is written by the package author. A wheel that ships a `requests/` directory without declaring it is reported; step 9 decides what to do with it. |
+
+### Requirements covered
+
+No `FR-CAVR-NN` identifiers exist in this repository; IDs are from `RequirementsTab.tsx` (Maryam to confirm).
+
+| ID | Title | What this step covers | Acceptance check |
+|---|---|---|---|
+| none listed | CLAUDE.md goal C3, "transitive tree from real metadata (Requires-Dist)" | The real `Requires-Dist` lines of the real wheel | `test_pypdf_wheel_metadata`, `test_requires_dist_is_read_with_markers_and_extras` |
+| FR-6 | Fail-Closed Security Policy | Unreadable, over-budget or ambiguous wheel -> UNRESOLVED | `test_missing_metadata_is_unresolved`, `test_zip_bomb_is_stopped_by_the_compression_ratio`, `test_duplicate_entry_is_unresolved` |
+
+### Ch 7 Test cases
+
+Run on 2026-10-10:
+
+- `.venv/bin/python -m pytest tests/test_cavr_*.py -q` -> 506 passed, 2 skipped (449 + 57 new).
+- `.venv/bin/python -m pytest -q` -> 564 passed, 7 failed, 2 skipped (the same 7 baseline tests).
+- Before `wheel_meta.py` existed the test file failed at import (1 collection error).
+
+| Test ID | Purpose | Input | Expected | Result |
+|---|---|---|---|---|
+| `test_pypdf_wheel_metadata` | Real wheel | `artifacts/pypdf-6.19.0-py3-none-any.whl`, expected `pypdf` `6.19.0` | OK; 64 entries; 1 722 604 bytes uncompressed; 23 `Requires-Dist`; import name `pypdf` from RECORD; no native files | pass |
+| `test_name_or_version_mismatch_is_rejected` (3) | Name mismatch | pypdf wheel, expected `pypdf2` / `6.19.1` / `requests 2.0` | REJECTED `METADATA_MISMATCH` | pass |
+| `test_metadata_naming_another_package_than_its_dist_info_is_rejected`, `test_metadata_version_differing_from_its_dist_info_is_rejected` | Inner mismatch | `demo-1.0.dist-info/METADATA` says `requests` / `2.0` | REJECTED | pass |
+| `test_expected_name_and_version_are_compared_canonically` | No false alarm | `Foo_Bar 1.0` asked as `foo-bar 1.0.0` and `foo.BAR 1` | OK | pass |
+| `test_requires_dist_is_read_with_markers_and_extras`, `test_wheel_without_dependencies` | Dependencies | 4 lines with a marker, an extra marker, extras; none | Parsed fields; empty list | pass |
+| `test_unparseable_or_url_requires_dist_is_unresolved` (5) | Bad dependency line | garbage, empty, URL, `dep==`, `../dep` | UNRESOLVED `METADATA_INVALID` | pass |
+| `test_missing_metadata_is_unresolved`, `test_wheel_without_any_dist_info_is_unresolved` | Missing METADATA | Wheel built without it; zip with only code | UNRESOLVED `METADATA_MISSING` | pass |
+| `test_two_dist_info_directories_is_unresolved`, `test_nested_dist_info_is_not_the_wheels_metadata` | Which dist-info | Two top-level; one nested inside the package | `DIST_INFO_AMBIGUOUS`; OK with the top-level one | pass |
+| `test_unusable_metadata_is_unresolved` (8) | Bad METADATA | no Name, no Version, two Names, two Versions, bad version, `../demo`, empty, invalid UTF-8 | UNRESOLVED `METADATA_INVALID` | pass |
+| `test_requires_dist_after_the_header_block_is_not_a_dependency` | Header boundary | `Requires-Dist` after a blank line | OK, no dependency | pass |
+| `test_file_that_is_not_a_zip_is_unresolved`, `test_missing_file_and_directory_are_unresolved`, `test_truncated_wheel_is_unresolved`, `test_corrupted_metadata_bytes_are_unresolved`, `test_missing_wheel_file_is_unresolved` | Not a wheel | text file; no file / a directory / `None`; last 30 bytes cut; one byte of METADATA changed (CRC); no WHEEL file | UNRESOLVED `NOT_A_WHEEL` | pass |
+| `test_zip_bomb_is_stopped_by_the_compression_ratio` | Zip bomb | 30 MiB of zero bytes in a wheel under 100 KiB | UNRESOLVED `ZIP_BUDGET` ("ratio") | pass |
+| `test_total_uncompressed_size_budget`, `test_entry_count_budget`, `test_oversized_metadata_member_budget`, `test_small_highly_compressible_wheel_is_not_a_bomb` | Other budgets | Budgets lowered to 1000 bytes / 5 entries / 10 bytes; 200 KB of newlines | `ZIP_BUDGET` x3; OK | pass |
+| `test_entry_that_escapes_the_install_directory_is_rejected` (7), `test_symlink_entry_is_rejected` | Path checks | `../evil.py`, `demo/../../evil.py`, `/etc/cron.d/evil`, `C:/…`, backslashes, `./`, `//`; a symlink entry | REJECTED `UNSAFE_PATH` | pass |
+| `test_duplicate_entry_is_unresolved`, `test_entries_differing_only_in_case_are_unresolved`, `test_directory_entries_are_allowed` | Duplicates | Same name twice; `__INIT__.py`; a `demo/sub/` entry | `DUPLICATE_ENTRY` x2; OK | pass |
+| `test_import_names_from_top_level_txt`, `…_from_record_when_there_is_no_top_level_txt`, `…_from_the_archive_when_there_is_neither`, `test_data_directory_purelib_counts_and_scripts_do_not`, `test_importable_code_missing_from_top_level_txt_is_reported` | Import names | `python-dateutil` with `top_level.txt`; `PyYAML` with RECORD; neither; a `.data` directory; an undeclared `requests/` | The three sources; `hidden` and `speed` counted, scripts not; `undeclared_import_names == ["requests"]` | pass |
+| `test_native_and_pth_files_are_listed` | Native list | `.so`, `.pyd`, `.dll`, `.dylib`, `libz.so.1`, a `.pth`, `notes.so.txt` | 5 native files, 1 pth, the `.txt` not listed | pass |
+| `test_pypdf_wheel_without_expectations_still_reads`, `test_invalid_expected_version_is_unresolved`, `test_every_result_has_the_same_keys` | Shape | | Same key set on every outcome | pass |
+
+### Defects found and fixed
+
+| # | Found by | Finding | Outcome |
+|---|---|---|---|
+| 1 | `test_zip_bomb_is_stopped_by_the_compression_ratio` (first run) | The test helper `build_wheel` wrote every entry uncompressed: `ZipFile.writestr(ZipInfo, …)` uses the `ZipInfo`'s own compression type, not the archive's. The "bomb" was a 31 MB file, so the ratio rule was not exercised | Helper fixed (`info.compress_type = ZIP_DEFLATED`); the test asserts the wheel is under 100 KiB |
+| 2 | `test_pypdf_wheel_metadata` (first run) | The test expected the dependency text in the registry's form (`typing_extensions>=4.0; python_version < "3.11"`); the wheel's own METADATA says `typing_extensions >= 4.0; python_version < '3.11'` | Test corrected to the real line; `raw` is kept as written in the wheel |
+
+### Known limitations / deferred
+
+- RECORD hashes are not compared with the entries. The whole file's SHA-256 is already checked in step 4.
+- A legitimate wheel over 500 MiB uncompressed (large ML wheels) is UNRESOLVED.
+- `Requires-Python` is recorded, not enforced. -> step 6.
+- Nested archives inside the wheel are not opened.
+- `undeclared_import_names` is evidence only in this step. -> step 9.
+- Entry names are not checked for Windows reserved names or trailing dots.
+
+### Tool disclosure (Ch 8.7)
+
+- **Generated by Claude Code:** `wheel_meta.py`, `tests/test_cavr_wheel_meta.py`, the helper fix, these notes, the commit.
+- **Reviewed / changed by Maryam:** nothing yet; the batch ran without stops.
+- **Verified by:** the pytest runs above; the real pypdf wheel numbers (64 entries, 1 722 604 bytes, 23 dependency lines) were read from the file with `zipfile` before the test was written.
+
+### Supervisor Q&A prep
+
+1. **How do you read an untrusted zip safely?**
+   Nothing is extracted. `check_entries` first walks the zip directory: entry count, total size and
+   compression ratio against a budget, and every name against a path rule. Only then four small
+   metadata files are read, each with a size limit.
+2. **What is a zip bomb and how is it caught?**
+   A small file that expands to a huge one. The test wheel is under 100 KiB and declares 30 MiB; the
+   ratio (over 200:1 above 10 MiB) gives UNRESOLVED `ZIP_BUDGET` before anything is decompressed.
+3. **Why does the import name matter?**
+   The project writes `import yaml`, the package is called `PyYAML`. Step 9 needs the wheel's own list
+   (`top_level.txt` or RECORD) to connect project imports to the distribution that was verified.
