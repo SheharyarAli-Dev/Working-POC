@@ -30,6 +30,7 @@ What to do:
    - **BLOCKER**: a fail-open path, a security hole, false or unverified evidence,
      a failing test, or wrong facts in the report notes.
    - **MINOR**: style, cosmetic issues, nice-to-have tests.
+   Statements in the notes about review history or pass counts going stale are MINOR, never BLOCKER.
    If you are unsure which one a problem is, say why in one line and classify it as BLOCKER.
 6. Report in this format:
    - **Verdict:** OK to commit / Fix first.

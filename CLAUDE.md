@@ -33,3 +33,4 @@ Append to docs/report-notes/cavr-report-notes.md, under a heading "Step N — <t
 - **Tool disclosure (Ch 8.7):** what Claude Code generated, what Maryam reviewed/changed, and how it was verified.
 - **Supervisor Q&A prep:** 2–3 likely questions with short answers.
 Keep it factual and short; real file names, test names and numbers only. Never invent results.
+Record review outcomes in ONE line per step (number of passes, verdict, open MINOR count). Do not narrate review history.
