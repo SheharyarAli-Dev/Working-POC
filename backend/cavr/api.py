@@ -1,50 +1,106 @@
+"""Dashboard API of CAVR.
+
+`POST /api/cavr/intercept` takes a request (`pip install name==version`), runs the one
+verification path, `backend.cavr.pipeline.verify_request`, and publishes what that path found
+as a stream of events. Nothing here computes a verdict: every status, hash, advisory id and
+sink in an event is copied from the pipeline's verdict.
+
+How one run goes:
+
+1. `intercept_package_endpoint` makes a run id and starts `run_verification` in the background.
+2. `run_verification` publishes the "request received" event, calls `verify_dashboard_request`
+   in a worker thread (it downloads from PyPI and asks OSV), then publishes one event per
+   pipeline stage that ran (`verdict_events`), the verdict, and the final event.
+3. `GET /api/cavr/stream/{run_id}` replays the run's events from the first one and ends after
+   the last, so a client that connects late misses nothing.
+4. `GET /api/cavr/proof/{run_id}` returns the whole verdict.
+
+Every event is also appended to the run's hash chain (`assurance.EvidenceChain`).
+
+The project the dashboard verifies for is `PROJECT_DIR` (the sample invoice project) with the
+policy file `requirement_gate.POLICY_PATH`.
+
+Demo conditions. A scenario may name a condition that changes the network between CAVR and
+PyPI: "tampered_wheel" flips one bit of every downloaded wheel, "network_off" fails every
+request. The pipeline then runs unchanged and gives the verdict it would give in that
+situation. A condition can only make a verdict worse, never better, and it is written into
+every event and into the proof (`demo_condition`).
+
+Not run on this path: the sandbox, the counterfactual engine, the causal graph, repair,
+re-verification and reconstruction (M2). Their fields in the events are null.
+"""
 from __future__ import annotations
 import asyncio
-import difflib
-import hashlib
 import json
-import os
-import shutil
 import time
+import uuid
 from pathlib import Path
 from typing import AsyncGenerator
-from fastapi import APIRouter, HTTPException, Request, Response
+from urllib.parse import urlsplit
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
-from backend.config import DATA, ROOT
+from backend.cavr import requirement_gate
+from backend.cavr.assurance import EvidenceChain, certificate_for_verdict, generate_printable_html_certificate, verify_chain
+from backend.cavr.capture import redact
+from backend.cavr.context_extractor import SAMPLE_PROJECT_DIR
+from backend.cavr.pipeline import metrics as pipeline_metrics, verify_request
+from backend.cavr.pypi_client import FILES_HOST, HttpxTransport, TransportError
 from backend.cavr.storage import CavrStorage
-from backend.cavr.fixtures.scenarios import SCENARIOS, get_scenarios_list
-from backend.cavr.requirement_gate import POLICY_PATH, check_requirement_gate, load_json_file
-from backend.cavr.context_extractor import extract_project_context
-from backend.cavr.capability_contract import infer_capability_contract
-from backend.cavr.resolver import resolve_package
-from backend.cavr.triggers import discover_triggers
-from backend.cavr.counterfactual import CounterfactualEngine
-from backend.cavr.normalizer import normalize_events
-from backend.cavr.causal_graph import build_causal_graph
-from backend.cavr.repair_engine import calculate_repair_candidates
-from backend.cavr.reverifier import reverify_candidate
-from backend.cavr.reconstructor import reconstruct_environment
-from backend.cavr.assurance import EvidenceChain, verify_chain, generate_certificate, generate_printable_html_certificate
 
 cavr_router = APIRouter()
 storage = CavrStorage()
 
-# In-memory storage for live SSE queues, run data, proofs, and evidence chains
-RUN_QUEUES: dict[str, list[asyncio.Queue]] = {}
-RUN_METRICS_LIST: list[dict] = []
+# What the pipeline is given. Tests replace these; None means the pipeline's own default.
+PROJECT_DIR = SAMPLE_PROJECT_DIR
+TRANSPORT = None
+QUARANTINE_DIR = None
+ADVISORY_CACHE_DIR = None
+LIVE_ADVISORIES = True
+
+# Per-run state, in memory. The oldest runs are dropped after MAX_RUNS.
+MAX_RUNS = 200
+RUN_EVENTS: dict[str, list[dict]] = {}
+RUN_FINISHED: set[str] = set()
 RUN_PROOFS: dict[str, dict] = {}
 RUN_CHAINS: dict[str, EvidenceChain] = {}
 RUN_CERTIFICATES: dict[str, dict] = {}
-RUN_DATA_STORE: dict[str, dict] = {}
+
+ALIASES = {"VERIFIED": "ALLOW", "REJECTED": "BLOCK", "BLOCK": "BLOCK", "UNRESOLVED": "NEEDS_REVIEW"}
+NOT_RUN = "not run: the fast gate does not execute package code (deep analysis is M2)"
+
+# The dashboard's scenario chips. Each is a real request; `expected_status` says what the chip
+# is meant to show and is never used to compute anything.
+SCENARIOS = [
+    {"id": "verified", "display_name": "1. pypdf 6.19.0", "package": "pypdf", "version": "6.19.0", "condition": None,
+     "expected_status": "VERIFIED",
+     "description": "The real wheel from PyPI: hash, dependency tree, OSV, contract and sink reachability all pass."},
+    {"id": "known_vulnerable", "display_name": "2. pypdf 5.1.0 (OSV)", "package": "pypdf", "version": "5.1.0", "condition": None,
+     "expected_status": "REJECTED",
+     "description": "Permitted by the policy, but OSV lists advisories that affect this version."},
+    {"id": "denylisted", "display_name": "3. Denylisted name", "package": "requests-security", "version": "2.31.0",
+     "condition": None, "expected_status": "BLOCK",
+     "description": "On the project denylist: blocked by the requirement gate before anything is downloaded."},
+    {"id": "tampered_wheel", "display_name": "4. Tampered wheel", "package": "pypdf", "version": "6.19.0",
+     "condition": "tampered_wheel", "expected_status": "REJECTED",
+     "description": "One bit of the downloaded wheel is flipped on the way: its SHA-256 no longer matches the registry."},
+    {"id": "network_off", "display_name": "5. Network off", "package": "pypdf", "version": "6.19.0", "condition": "network_off",
+     "expected_status": "UNRESOLVED",
+     "description": "PyPI cannot be reached: nothing can be established, so nothing is verified."},
+]
+CONDITIONS = {
+    "tampered_wheel": "one bit of every downloaded wheel is flipped between PyPI and CAVR",
+    "network_off": "every request to PyPI fails and OSV is not asked live",
+}
+
 
 class InterceptRequest(BaseModel):
-    package: str
-    version: str = "1.0.0"
-    source_code: str | None = None
-    expected_hash: str | None = None
-    scenario_type: str = "custom" # "approved_benign", "known_vulnerable", "trigger_dependent", "transitive_risk", "typosquat", "custom"
+    package: str = ""
+    version: str = ""
+    scenario_type: str = "custom"   # a key of CONDITIONS turns that condition on; any other value changes nothing
+    request: str | None = None      # a whole pip command; when given it is used instead of package and version
+
 
 class AlternativeApprovalRequest(BaseModel):
     run_id: str
@@ -54,45 +110,41 @@ class AlternativeApprovalRequest(BaseModel):
     user: str = "Security Operator (Admin)"
     reason: str = "Operator reviewed alternative dependency"
 
-def publish_event(
-    run_id: str,
-    step_index: int,
-    phase: str,
-    substep: str,
-    event_type: str,
-    status: str,
-    payload: dict
-):
-    """
-    Standard SSE Event Schema:
-    {run_id, seq, ts, step_index, phase, substep, type, status, payload}
-    """
+
+class TamperingTransport:
+    """Demo condition "tampered_wheel": the real transport, with one bit flipped in every file from the files host."""
+
+    def __init__(self, inner):
+        self.inner = inner
+
+    def stream(self, url):
+        tamper = urlsplit(url).hostname == FILES_HOST
+        for chunk in self.inner.stream(url):
+            if tamper and chunk:
+                chunk = chunk[:-1] + bytes([chunk[-1] ^ 0x01])
+                tamper = False
+            yield chunk
+
+
+class OfflineTransport:
+    """Demo condition "network_off": every request fails the way a lost connection does."""
+
+    def stream(self, url):
+        raise TransportError("ConnectError: the network is off (dashboard demo condition)")
+        yield b""  # makes this a generator, like the real transport
+
+
+def publish_event(run_id: str, step_index: int, phase: str, substep: str, event_type: str, status: str, payload: dict):
+    """Append one event to the run: {run_id, seq, ts, step_index, phase, substep, type, status, payload}."""
     chain = RUN_CHAINS.get(run_id)
     seq = len(chain.records) + 1 if chain else 1
     ts = time.time()
-
-    # Record in cryptographic hash chain
     if chain:
         chain.add_record(phase=phase, event_type=event_type, data=payload, substep=substep)
-
-    envelope = {
-        "run_id": run_id,
-        "seq": seq,
-        "ts": ts,
-        "step_index": step_index,
-        "phase": phase,
-        "substep": substep,
-        "type": event_type,
-        "status": status,
-        "payload": payload,
-        # Backwards compatible fields for legacy listeners
-        "data": payload,
-        "timestamp": ts
-    }
-
-    if run_id in RUN_QUEUES:
-        for q in RUN_QUEUES[run_id]:
-            q.put_nowait(envelope)
+    envelope = {"run_id": run_id, "seq": seq, "ts": ts, "step_index": step_index, "phase": phase, "substep": substep,
+                "type": event_type, "status": status, "payload": payload,
+                "data": payload, "timestamp": ts}  # the last two are the old names of payload and ts
+    RUN_EVENTS.setdefault(run_id, []).append(envelope)
 
 # ----------------- PEP 503 PACKAGE INDEX -----------------
 @cavr_router.get("/simple/", response_class=HTMLResponse)
@@ -146,7 +198,8 @@ def pep503_download(package: str, filename: str):
 # ----------------- CAVR CORE API -----------------
 @cavr_router.get("/api/cavr/scenarios")
 def list_scenarios():
-    return get_scenarios_list()
+    return [{**scenario, "request": f"pip install {scenario['package']}=={scenario['version']}",
+             "condition_description": CONDITIONS.get(scenario["condition"])} for scenario in SCENARIOS]
 
 @cavr_router.get("/api/cavr/cache")
 def get_cache():
@@ -234,55 +287,10 @@ def dialog_environment():
 
 @cavr_router.get("/api/cavr/metrics")
 def get_metrics():
-    total_runs = len(RUN_METRICS_LIST)
-    if total_runs == 0:
-        return {
-            "total_runs": 0,
-            "verdict_distribution": {"ALLOW": 0, "BLOCK": 0, "NEEDS_REVIEW": 0},
-            "cache_hit_rate": 0.0,
-            "median_analysis_time_ms": 0,
-            "p95_analysis_time_ms": 0,
-            "avg_counterfactual_runs": 0,
-            "triggers_activated": 0,
-            "new_behaviors_counterfactual_vs_baseline": 0,
-            "repair_success_rate": 100.0,
-            "recent_runs": []
-        }
-
-    verdicts = {"ALLOW": 0, "BLOCK": 0, "NEEDS_REVIEW": 0}
-    cache_hits = 0
-    times = []
-    cf_runs_total = 0
-    triggers_total = 0
-    new_behaviors_total = 0
-
-    for r in RUN_METRICS_LIST:
-        v = r.get("verdict", "BLOCK")
-        verdicts[v] = verdicts.get(v, 0) + 1
-        if r.get("is_cache_hit"):
-            cache_hits += 1
-        times.append(r.get("duration_ms", 1200))
-        cf_runs_total += r.get("counterfactual_runs", 1)
-        triggers_total += r.get("triggers_activated", 0)
-        new_behaviors_total += r.get("new_behaviors_found", 0)
-
-    times.sort()
-    median_time = times[len(times)//2] if times else 0
-    p95_idx = int(len(times) * 0.95)
-    p95_time = times[min(p95_idx, len(times)-1)] if times else 0
-
-    return {
-        "total_runs": total_runs,
-        "verdict_distribution": verdicts,
-        "cache_hit_rate": round((cache_hits / total_runs) * 100, 1),
-        "median_analysis_time_ms": median_time,
-        "p95_analysis_time_ms": p95_time,
-        "avg_counterfactual_runs": round(cf_runs_total / total_runs, 1),
-        "triggers_activated": triggers_total,
-        "new_behaviors_counterfactual_vs_baseline": new_behaviors_total,
-        "repair_success_rate": 92.5,
-        "recent_runs": RUN_METRICS_LIST[-10:][::-1]
-    }
+    """The report numbers, from the verdict log: counts by status, cache hit rate, p50 / p95 of `fast_gate_ms`."""
+    report = pipeline_metrics(storage)
+    report["recent"] = storage.get_verdict_log(limit=10)
+    return report
 
 @cavr_router.get("/api/cavr/evidence/{run_id}/verify")
 def verify_run_evidence(run_id: str):
@@ -305,6 +313,13 @@ def get_certificate_html(run_id: str):
         raise HTTPException(404, f"No certificate found for run_id '{run_id}'")
     return generate_printable_html_certificate(cert)
 
+@cavr_router.get("/api/cavr/evidence/{run_id}/records")
+def get_evidence_records(run_id: str):
+    chain = RUN_CHAINS.get(run_id)
+    if not chain:
+        raise HTTPException(404, f"No evidence ledger found for run_id '{run_id}'")
+    return [{key: record[key] for key in ("seq", "phase", "substep", "type", "prev_hash", "sha256")} for record in chain.records]
+
 @cavr_router.get("/api/cavr/proof/{run_id}")
 def get_proof(run_id: str):
     if run_id in RUN_PROOFS:
@@ -319,7 +334,7 @@ def approve_alternative(body: AlternativeApprovalRequest):
     
     publish_event(
         run_id=body.run_id,
-        step_index=7,
+        step_index=RUN_EVENTS[body.run_id][-1]["step_index"] if RUN_EVENTS.get(body.run_id) else 0,
         phase="P12",
         substep="CleanReconstructionApproved",
         event_type="alternative.decision",
@@ -330,506 +345,241 @@ def approve_alternative(body: AlternativeApprovalRequest):
             "alternative": body.alternative,
             "approved": body.approved,
             "user": body.user,
-            "plain_explanation": f"Human operator {'approved' if body.approved else 'rejected'} alternative {body.alternative}. Fresh baseline constructed."
+            "plain_explanation": f"Human operator {'approved' if body.approved else 'rejected'} alternative {body.alternative}. Recorded in the audit log; nothing was installed."
         }
     )
     return {"status": "SUCCESS", "action": action, "alternative": body.alternative, "approved": body.approved}
 
 @cavr_router.get("/api/cavr/stream/{run_id}")
 async def cavr_stream(run_id: str, request: Request):
-    q: asyncio.Queue = asyncio.Queue()
-    if run_id not in RUN_QUEUES:
-        RUN_QUEUES[run_id] = []
-    RUN_QUEUES[run_id].append(q)
+    if run_id not in RUN_EVENTS:
+        raise HTTPException(404, f"No run '{run_id}'")
 
     async def event_generator() -> AsyncGenerator[str, None]:
-        try:
-            while not await request.is_disconnected():
-                try:
-                    ev = await asyncio.wait_for(q.get(), timeout=1.0)
-                    yield f"data: {json.dumps(ev)}\n\n"
-                except asyncio.TimeoutError:
-                    yield ": heartbeat\n\n"
-        finally:
-            if run_id in RUN_QUEUES and q in RUN_QUEUES[run_id]:
-                RUN_QUEUES[run_id].remove(q)
+        sent, idle = 0, 0
+        while True:
+            events = RUN_EVENTS.get(run_id, [])
+            if sent < len(events):
+                yield f"data: {json.dumps(events[sent])}\n\n"
+                sent, idle = sent + 1, 0
+                continue
+            if run_id in RUN_FINISHED or await request.is_disconnected():
+                break
+            idle += 1
+            if idle % 10 == 0:
+                yield ": heartbeat\n\n"
+            await asyncio.sleep(0.1)
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 
-# ----------------- WORKFLOW ORCHESTRATOR (13 PHASES) -----------------
+# ----------------- THE VERIFICATION RUN -----------------
 @cavr_router.post("/api/cavr/intercept")
 async def intercept_package_endpoint(body: InterceptRequest):
     return await launch_cavr_pipeline(body)
 
 @cavr_router.post("/api/cavr/run")
-async def run_scenario_endpoint(scenario: str = "approved_benign"):
-    req = InterceptRequest(package="pdf-clean-extractor", scenario_type=scenario)
-    return await launch_cavr_pipeline(req)
+async def run_scenario_endpoint(scenario: str = "verified"):
+    chosen = next((item for item in SCENARIOS if item["id"] == scenario), None)
+    if chosen is None:
+        raise HTTPException(404, f"No scenario '{scenario}'")
+    return await launch_cavr_pipeline(InterceptRequest(package=chosen["package"], version=chosen["version"],
+                                                       scenario_type=chosen["condition"] or chosen["id"]))
 
 async def launch_cavr_pipeline(body: InterceptRequest):
-    run_id = f"cavr-{int(time.time()*1000)}"
-    RUN_QUEUES[run_id] = []
+    run_id = f"cavr-{int(time.time() * 1000)}-{uuid.uuid4().hex[:6]}"
+    for old in list(RUN_EVENTS)[:max(len(RUN_EVENTS) - MAX_RUNS + 1, 0)]:
+        for runs in (RUN_EVENTS, RUN_PROOFS, RUN_CHAINS, RUN_CERTIFICATES):
+            runs.pop(old, None)
+        RUN_FINISHED.discard(old)
+    RUN_EVENTS[run_id] = []
     RUN_CHAINS[run_id] = EvidenceChain(run_id)
+    request = pip_request(body)
+    asyncio.create_task(run_verification(run_id, body))
+    return {"run_id": run_id, "request": request_text(request), "demo_condition": demo_condition(body),
+            "status": "INTERCEPTED", "stream_url": f"/api/cavr/stream/{run_id}"}
 
-    scenario_key = body.scenario_type
-    fixture = SCENARIOS.get(scenario_key)
 
-    if fixture:
-        pkg_name = fixture["name"]
-        pkg_ver = fixture["version"]
-        source_code = fixture["source_code"]
-    else:
-        pkg_name = body.package.strip()
-        pkg_ver = body.version.strip()
-        source_code = body.source_code or f"# Package {pkg_name}\ndef extract_invoice_text(b): return 'Clean'"
+def pip_request(body: InterceptRequest):
+    """The pip command to verify: the given command, or `pip install <package>==<version>` as one requirement token.
 
-    # Compute initial SHA-256
-    artifact_hash = hashlib.sha256(source_code.encode("utf-8")).hexdigest()
-    expected_hash = body.expected_hash or artifact_hash
+    The package and version are joined into a single token, so text after a space in either
+    cannot become a second argument or an option.
+    """
+    if body.request is not None:
+        return body.request
+    package, version = body.package.strip(), body.version.strip()
+    return ["pip", "install", f"{package}=={version}" if version else package]
 
-    # Save to quarantine directory
-    quarantine_dir = Path(DATA) / "quarantine" / run_id
-    quarantine_dir.mkdir(parents=True, exist_ok=True)
-    pkg_file = quarantine_dir / f"{pkg_name}.py"
-    pkg_file.write_text(source_code, encoding="utf-8")
 
-    storage.record_quarantine(run_id, pkg_name, pkg_ver, artifact_hash, str(pkg_file), status="QUARANTINED")
+def request_text(request) -> str:
+    return redact(request if isinstance(request, str) else " ".join(request))
 
-    # Start background task executing the 13 phases mapped to the 8 steps
-    asyncio.create_task(execute_full_cavr_pipeline(
-        run_id=run_id,
-        pkg_name=pkg_name,
-        pkg_ver=pkg_ver,
-        artifact_hash=artifact_hash,
-        expected_hash=expected_hash,
-        source_code=source_code,
-        quarantine_dir=quarantine_dir,
-        scenario_key=scenario_key,
-        fixture=fixture
-    ))
 
-    return {
-        "run_id": run_id,
-        "package": pkg_name,
-        "version": pkg_ver,
-        "sha256": artifact_hash,
-        "quarantine_dir": str(quarantine_dir),
-        "status": "INTERCEPTED",
-        "stream_url": f"/api/cavr/stream/{run_id}"
-    }
+def demo_condition(body: InterceptRequest):
+    """{"id", "description"} of the condition this request turns on, or None."""
+    if body.scenario_type in CONDITIONS:
+        return {"id": body.scenario_type, "description": CONDITIONS[body.scenario_type]}
+    return None
 
-async def execute_full_cavr_pipeline(
-    run_id: str,
-    pkg_name: str,
-    pkg_ver: str,
-    artifact_hash: str,
-    expected_hash: str,
-    source_code: str,
-    quarantine_dir: Path,
-    scenario_key: str,
-    fixture: dict | None
-):
-    start_time = time.time()
-    
-    # =========================================================================
-    # STEP 1 (Timeline index 0): Agent runs pip install -> Phase 1: Capture
-    # =========================================================================
-    publish_event(
-        run_id=run_id,
-        step_index=0,
-        phase="P1",
-        substep="Capture",
-        event_type="state_change",
-        status="RUNNING",
-        payload={
-            "state": "INTERCEPTED",
-            "step_index": 0,
-            "package": pkg_name,
-            "version": pkg_ver,
-            "message": f"CLI Intercept: Agent issued 'pip install {pkg_name}=={pkg_ver}'. Hooked via ASENT local PEP 503 proxy.",
-            "plain_explanation": f"The AI agent tried to install '{pkg_name}'. ASENT immediately captured the request before installation could begin."
-        }
-    )
-    await asyncio.sleep(0.6)
 
-    # =========================================================================
-    # STEP 2 (Timeline index 1): Index catches it and quarantines -> Phase 1 & Phase 2: Requirement Gate
-    # =========================================================================
-    gate_result = check_requirement_gate(pkg_name, pkg_ver)
-    
-    publish_event(
-        run_id=run_id,
-        step_index=1,
-        phase="P2",
-        substep="RequirementGate",
-        event_type="requirement_gate_evaluated",
-        status="PASSED" if gate_result["result"] == "PERMITTED" else "BLOCKED",
-        payload={
-            "state": "REQUIREMENT_CHECK",
-            "step_index": 1,
-            "rule_checked": gate_result["rule_checked"],
-            "policy_file_excerpt": gate_result["policy_file_excerpt"],
-            "result": gate_result["result"],
-            "reason": gate_result["reason"],
-            "message": f"Requirement Gate: {gate_result['result']} under rule '{gate_result['rule_checked']}'.",
-            "plain_explanation": f"Checked your project security policy: '{gate_result['rule_checked']}' evaluated to {gate_result['result']}."
-        }
-    )
-    await asyncio.sleep(0.6)
+def verify_dashboard_request(request, condition) -> dict:
+    """Run the pipeline for the dashboard project. Blocking: it uses the network."""
+    transport, live = TRANSPORT, LIVE_ADVISORIES
+    if condition == "tampered_wheel":
+        transport = TamperingTransport(TRANSPORT or HttpxTransport())
+    elif condition == "network_off":
+        transport, live = OfflineTransport(), False
+    try:
+        return verify_request(request, PROJECT_DIR, requirement_gate.load_json_file(requirement_gate.POLICY_PATH), storage,
+                              transport=transport, quarantine_dir=QUARANTINE_DIR, advisory_cache_dir=ADVISORY_CACHE_DIR,
+                              live_advisories=live)
+    except Exception as exc:  # the pipeline returns verdicts and should not raise; if it does, that is "unknown"
+        return {"status": "UNRESOLVED", "stage": "internal", "rule": "INTERNAL_ERROR",
+                "reason": f"the pipeline failed: {type(exc).__name__}: {exc}", "fast_gate_ms": None, "cache_hit": False,
+                "escalated": False, "escalation": None, "request": None, "gate": None, "lockfile": None, "project": None,
+                "packages": [], "policy_version": None, "analyzer_version": None, "logged": False}
 
-    # Anything but PERMITTED (BLOCK, or UNRESOLVED when the policy is missing or invalid) ends in a final BLOCK below.
-    # The analysis phases still run for research visibility.
-    is_gate_denied = (gate_result["result"] != "PERMITTED")
 
-    # =========================================================================
-    # STEP 3 (Timeline index 2): Quarantine -> Phase 5: Package Resolution & Transitive Tree
-    # =========================================================================
-    resolution = resolve_package(pkg_name, pkg_ver, source_code)
-    publish_event(
-        run_id=run_id,
-        step_index=2,
-        phase="P5",
-        substep="PackageResolution",
-        event_type="package_resolved",
-        status="RESOLVED",
-        payload={
-            "state": "QUARANTINED",
-            "step_index": 2,
-            "resolution": resolution,
-            "message": f"Artifact quarantined at read-only sandbox. Built transitive tree ({len(resolution['tree']['nodes'])} nodes, {resolution['vulnerability_count']} OSV findings).",
-            "plain_explanation": f"Locked package into quarantine. Scanned dependency tree against the offline OSV database."
-        }
-    )
-    await asyncio.sleep(0.6)
+async def run_verification(run_id: str, body: InterceptRequest) -> dict:
+    """One dashboard run: publish the request, run the pipeline, publish what it found. Returns the verdict."""
+    request, condition = pip_request(body), demo_condition(body)
+    shown = request_text(request)
+    publish_event(run_id, 0, "P1", "Capture", "state_change", "RUNNING", {
+        "state": "INTERCEPTED", "step_index": 0, "request": shown, "demo_condition": condition,
+        "message": f"Request received: '{shown}'. Verification started; nothing is installed.",
+        "plain_explanation": f"ASENT received the request '{shown}' and is checking it before anything is installed."})
+    verdict = await asyncio.to_thread(verify_dashboard_request, request, condition["id"] if condition else None)
+    for step_index, phase, substep, event_type, status, payload in verdict_events(verdict, condition):
+        publish_event(run_id, step_index, phase, substep, event_type, status, payload)
 
-    # =========================================================================
-    # STEP 4 (Timeline index 3): Cache Check -> Cache Check
-    # =========================================================================
-    trusted = storage.get_trusted_package(pkg_name, pkg_ver)
-    trusted_all = storage.get_trusted_packages()
-    
-    is_cache_hit = False
-    is_hash_mismatch = False
-
-    if trusted:
-        if trusted["sha256"].lower() == artifact_hash.lower() and scenario_key != "hash_mismatch":
-            is_cache_hit = True
-        else:
-            is_hash_mismatch = True
-
-    if is_cache_hit:
-        publish_event(
-            run_id=run_id,
-            step_index=3,
-            phase="P4",
-            substep="CacheHit",
-            event_type="cache_result",
-            status="HIT",
-            payload={
-                "result": "HIT",
-                "package": pkg_name,
-                "sha256": artifact_hash,
-                "message": f"Cache HIT: Cryptographic digest matches pre-verified record for '{pkg_name}'.",
-                "plain_explanation": f"We already know and trust this exact version of '{pkg_name}'. Releasing immediately."
-            }
-        )
-        await asyncio.sleep(0.5)
-
-        # Release directly
-        publish_event(
-            run_id=run_id,
-            step_index=7,
-            phase="P13",
-            substep="ReleaseFromCache",
-            event_type="state_change",
-            status="COMPLETED",
-            payload={
-                "state": "RELEASED",
-                "step_index": 7,
-                "verdict": "ALLOW",
-                "honesty_wording": "No malicious behavior observed under our tests (Verified cache record).",
-                "message": "Artifact verified from cache and released.",
-                "plain_explanation": "Verified package released to your project environment."
-            }
-        )
-        storage.update_quarantine_decision(run_id, "ALLOW")
-
-        # Record metrics
-        RUN_METRICS_LIST.append({
-            "run_id": run_id,
-            "package": pkg_name,
-            "verdict": "ALLOW",
-            "is_cache_hit": True,
-            "duration_ms": int((time.time() - start_time) * 1000),
-            "counterfactual_runs": 0,
-            "triggers_activated": 0,
-            "new_behaviors_found": 0
-        })
-        return
-
-    # Cache MISS or HASH_MISMATCH
-    cache_status = "HASH_MISMATCH" if is_hash_mismatch else "MISS"
-    publish_event(
-        run_id=run_id,
-        step_index=3,
-        phase="P4",
-        substep="CacheLookup",
-        event_type="cache_result",
-        status=cache_status,
-        payload={
-            "result": cache_status,
-            "package": pkg_name,
-            "sha256": artifact_hash,
-            "message": "Cache MISS: Package not in trusted store. Advancing to Static Action & Capability Inference." if not is_hash_mismatch else "Cache HASH_MISMATCH: Computed hash does not match store!",
-            "plain_explanation": "Package is new or unverified. Proceeding with deep code inspection."
-        }
-    )
-    await asyncio.sleep(0.6)
-
-    # =========================================================================
-    # STEP 5 (Timeline index 4): Action -> P3 Context, P4 Contract, P6 Triggers
-    # =========================================================================
-    # P3: Context Extraction
-    proj_context = extract_project_context()
-    
-    # P4: Capability Contract Inference
-    # No wheel on this path until plan step 13: the rows come from the policy, the call-site authority is unknown.
-    contract = infer_capability_contract(pkg_name, proj_context, load_json_file(POLICY_PATH))
-
-    # P6: Trigger Discovery
-    triggers_info = discover_triggers(source_code, filename=f"{pkg_name}.py")
-
-    publish_event(
-        run_id=run_id,
-        step_index=4,
-        phase="P3_P4_P6",
-        substep="StaticActionInspection",
-        event_type="action_completed",
-        status="INSPECTED",
-        payload={
-            "state": "INSPECTING",
-            "step_index": 4,
-            "project_context": proj_context,
-            "capability_contract": contract,
-            "triggers_info": triggers_info,
-            "message": f"Action Complete: Inferred capability contract ({contract['summary']['required_count']} req, {contract['summary']['denied_count']} denied). Discovered {triggers_info['total_triggers']} predicates.",
-            "plain_explanation": f"Inspected your project call sites and derived allowed capabilities. Found {triggers_info['total_triggers']} gated code triggers."
-        }
-    )
-    await asyncio.sleep(0.7)
-
-    # =========================================================================
-    # STEP 6 (Timeline index 5): Environment -> P7 Counterfactual Runs & P8 OS Observation
-    # =========================================================================
-    cf_engine = CounterfactualEngine(max_runs=4, max_seconds=20.0)
-
-    terminal_logs: list[str] = []
-    def on_sandbox_log(line: str):
-        terminal_logs.append(line)
-        publish_event(
-            run_id=run_id,
-            step_index=5,
-            phase="P8",
-            substep="TerminalStream",
-            event_type="sandbox_log",
-            status="RUNNING",
-            payload={"line": line}
-        )
-
-    cf_results = await cf_engine.run_exploration_loop(
-        quarantine_dir=quarantine_dir,
-        package_name=pkg_name,
-        source_code=source_code,
-        triggers_info=triggers_info,
-        run_id_prefix=run_id,
-        on_log=on_sandbox_log
-    )
-
-    # P8: OS Normalization
-    raw_observed = []
-    for r in cf_results["runs"]:
-        raw_observed.extend(r.get("behaviors_found", []))
-    
-    normalized_os = normalize_events(raw_observed)
-
-    publish_event(
-        run_id=run_id,
-        step_index=5,
-        phase="P7_P8",
-        substep="CounterfactualCompleted",
-        event_type="counterfactual_completed",
-        status="COMPLETED",
-        payload={
-            "state": "SANDBOXING",
-            "step_index": 5,
-            "counterfactual_results": cf_results,
-            "normalized_os": normalized_os,
-            "message": f"Environment Tested: Completed {cf_results['total_runs']} container runs. Stop reason: {cf_results['stop_reason']}",
-            "plain_explanation": f"Ran the package in isolated containers across {cf_results['total_runs']} simulated conditions. Tested fake credentials and network attempts."
-        }
-    )
-    await asyncio.sleep(0.7)
-
-    # =========================================================================
-    # STEP 7 (Timeline index 6): Verdict -> P9 Causal Graph, P10 Repair, P11 Re-verification
-    # =========================================================================
-    is_transitive_pkg = (scenario_key == "transitive_risk" or pkg_name == "invoice-utils")
-    causal_result = build_causal_graph(
-        package_name=pkg_name,
-        version=pkg_ver,
-        contract=contract,
-        triggers=triggers_info.get("ranked_triggers", []),
-        observed_runs=cf_results["runs"],
-        is_transitive=is_transitive_pkg
-    )
-
-    final_verdict = causal_result["alias_verdict"] # ALLOW / BLOCK / NEEDS_REVIEW
-    policy_state = causal_result["policy_state"]  # VERIFIED / RESTRICTED / REJECTED / UNRESOLVED
-
-    if is_gate_denied:
-        final_verdict = "BLOCK"
-        policy_state = "REJECTED"
-
-    # Evidence lines
-    evidence_lines = []
-    if is_gate_denied:
-        evidence_lines.append(f"Requirement Gate: {gate_result['result']} by rule '{gate_result['matched_rule']}'. {gate_result['reason']}")
-    if resolution.get("known_risk_signals"):
-        for sig in resolution["known_risk_signals"]:
-            evidence_lines.append(f"OSV Advisory: {sig['cve']} ({sig['severity']}) - {sig['summary']}")
-    if causal_result.get("violating_paths"):
-        for vp in causal_result["violating_paths"]:
-            evidence_lines.append(f"Causal Path: {vp['description']}")
-    if cf_results["comparison"]["new_behaviors_revealed_by_counterfactual"] > 0:
-        evidence_lines.append(f"Counterfactual: Revealed {cf_results['comparison']['new_behaviors_revealed_by_counterfactual']} hidden behavior(s) invisible to baseline run.")
-    if not evidence_lines and final_verdict == "ALLOW":
-        evidence_lines.append("Clean execution: 0 unauthorized network connects, 0 credential touches, 0 disallowed AST sinks.")
-
-    # P10: Minimal Safe Repair (if BLOCKED or REJECTED)
-    repair_data = None
-    reverify_data = None
-    if final_verdict in ("BLOCK", "NEEDS_REVIEW"):
-        repair_data = calculate_repair_candidates(pkg_name, pkg_ver, trusted_all, proj_context)
-        # P11: Re-verification for chosen candidate
-        if repair_data.get("chosen_candidate"):
-            reverify_data = reverify_candidate(repair_data["chosen_candidate"])
-
-    publish_event(
-        run_id=run_id,
-        step_index=6,
-        phase="P9_P10_P11",
-        substep="VerdictDecision",
-        event_type="verdict_computed",
-        status=final_verdict,
-        payload={
-            "verdict": final_verdict,
-            "policy_state": policy_state,
-            "honesty_wording": causal_result["honesty_wording"],
-            "evidence_lines": evidence_lines,
-            "causal_graph": causal_result["graph"],
-            "violating_paths": causal_result["violating_paths"],
-            "narrowed_capability_policy": causal_result.get("narrowed_capability_policy"),
-            "repair": repair_data,
-            "reverification": reverify_data,
-            "alternative_package": {
-                "package": repair_data["chosen_candidate"]["name"],
-                "version": repair_data["chosen_candidate"]["version"],
-                "level": repair_data["chosen_candidate"]["level_name"],
-                "reason": repair_data["chosen_candidate"]["justification"],
-                "confidence": "High (Level 4 Verified Replacement)",
-                "capabilities": "FILE_READ(invoice_documents)"
-            } if repair_data and repair_data.get("chosen_candidate") else None,
-            "message": f"Verdict Computed: {final_verdict} ({policy_state}).",
-            "plain_explanation": "Decision reached based on observed facts. " + ("No malicious behavior observed under our tests." if final_verdict == "ALLOW" else "Detected hostile behaviors or security violations.")
-        }
-    )
-    await asyncio.sleep(0.7)
-
-    # =========================================================================
-    # STEP 8 (Timeline index 7): Release or Block -> P12 Reconstruction & P13 Assurance Certificate
-    # =========================================================================
-    accepted_pkg = pkg_name if final_verdict == "ALLOW" else (repair_data["chosen_candidate"]["name"] if repair_data and repair_data.get("chosen_candidate") else None)
-    accepted_ver = pkg_ver if final_verdict == "ALLOW" else (repair_data["chosen_candidate"]["version"] if repair_data and repair_data.get("chosen_candidate") else None)
-
-    reconstruction = None
-    if accepted_pkg:
-        reconstruction = reconstruct_environment(accepted_pkg, accepted_ver or "1.0.0", artifact_hash)
-
-    # P13: Generate assurance certificate
+    last_step = RUN_EVENTS[run_id][-1]["step_index"]
     chain = RUN_CHAINS[run_id]
-    cert = generate_certificate({
-        "run_id": run_id,
-        "package": pkg_name,
-        "version": pkg_ver,
-        "sha256": artifact_hash,
-        "verdict": final_verdict,
-        "baseline_digest": reconstruction["baseline_digest"] if reconstruction else f"sha256:{hashlib.sha256(b'discarded').hexdigest()}",
-        "triggers_exercised": cf_results["total_runs"],
-        "triggers_unresolved": cf_results["residual_count"],
-        "residual_uncertainty": cf_results["residual_uncertainty"],
-        "terminal_hash": chain.last_hash
-    })
-    RUN_CERTIFICATES[run_id] = cert
-
-    # Proof data for drawer
+    certificate = RUN_CERTIFICATES[run_id] = certificate_for_verdict(run_id, verdict, chain.last_hash, condition)
+    artifact = _first_artifact(verdict)
     RUN_PROOFS[run_id] = {
-        "run_id": run_id,
-        "package": pkg_name,
-        "version": pkg_ver,
-        "verdict": final_verdict,
-        "policy_state": policy_state,
-        "image_digest": "sha256:7f9a2e8c1b50493817f5492d001e3b6289410ac0219582d92138a0f918e932b1",
-        "container_id": f"asent-{run_id[:8]}",
-        "docker_command": f"docker run --rm --network none --read-only --tmpfs /scratch:rw,noexec,size=64m asent-sandbox python /opt/asent/harness.py /pkg/{pkg_name}.py",
-        "counterfactual_runs": cf_results["runs"],
-        "hash_comparison": {
-            "declared_or_expected": expected_hash,
-            "actual_sha256": artifact_hash,
-            "matches": artifact_hash.lower() == expected_hash.lower()
-        },
-        "evidence_chain_root": chain.last_hash,
-        "evidence_records_count": len(chain.records),
-        "certificate_id": cert["certificate_id"]
+        "run_id": run_id, "request": shown, "demo_condition": condition,
+        "package": certificate["subject"]["package"], "version": certificate["subject"]["version"],
+        "verdict": ALIASES.get(verdict["status"], "NEEDS_REVIEW"), "policy_state": verdict["status"],
+        "cavr_verdict": verdict,
+        "hash_comparison": {"declared_or_expected": artifact.get("registry_sha256"), "actual_sha256": artifact.get("sha256"),
+                            "matches": artifact.get("rule") == "HASH_MATCH" if artifact else None},
+        "docker_command": NOT_RUN, "container_id": NOT_RUN, "image_digest": NOT_RUN, "counterfactual_runs": [],
+        "evidence_chain_root": chain.last_hash, "evidence_records_count": len(chain.records),
+        "certificate_id": certificate["certificate_id"],
     }
+    publish_event(run_id, last_step, "P13", "AssuranceFinalized", "state_change", "FINALIZED", {
+        "state": "DECIDED", "step_index": last_step, "verdict": ALIASES.get(verdict["status"], "NEEDS_REVIEW"),
+        "policy_state": verdict["status"], "certificate": certificate, "reconstruction": None, "demo_condition": condition,
+        "evidence_chain_summary": {"total_blocks": len(chain.records), "terminal_hash": chain.last_hash},
+        "message": f"Finished: {verdict['status']}. Nothing was installed.",
+        "plain_explanation": f"The check is finished: {verdict['status']}. Nothing was installed."})
+    RUN_FINISHED.add(run_id)
+    return verdict
 
-    next_state = "RELEASED" if final_verdict == "ALLOW" else "ALT_RECOMMENDED"
-    publish_event(
-        run_id=run_id,
-        step_index=7 if final_verdict == "ALLOW" else 6,
-        phase="P12_P13",
-        substep="AssuranceFinalized",
-        event_type="state_change",
-        status="FINALIZED",
-        payload={
-            "state": next_state,
-            "step_index": 7 if final_verdict == "ALLOW" else 6,
-            "verdict": final_verdict,
-            "policy_state": policy_state,
-            "reconstruction": reconstruction,
-            "certificate": cert,
-            "evidence_chain_summary": {
-                "total_blocks": len(chain.records),
-                "terminal_hash": chain.last_hash,
-                "verified": True
-            },
-            "message": f"Finalized: Verdict {final_verdict}. " + ("Artifact released into clean reconstructed environment." if final_verdict == "ALLOW" else "Malicious artifact blocked and quarantined. Safe alternative recommended for human approval."),
-            "plain_explanation": ("Clean package released safely!" if final_verdict == "ALLOW" else "Package blocked to protect your system. Review the recommended alternative.")
-        }
-    )
-    storage.update_quarantine_decision(run_id, final_verdict)
 
-    # Record run metrics
-    duration_ms = int((time.time() - start_time) * 1000)
-    RUN_METRICS_LIST.append({
-        "run_id": run_id,
-        "package": pkg_name,
-        "version": pkg_ver,
-        "verdict": final_verdict,
-        "policy_state": policy_state,
-        "is_cache_hit": False,
-        "duration_ms": duration_ms,
-        "counterfactual_runs": cf_results["total_runs"],
-        "triggers_activated": len(triggers_info.get("ranked_triggers", [])),
-        "new_behaviors_found": cf_results["comparison"]["new_behaviors_revealed_by_counterfactual"],
-        "timestamp": time.time()
-    })
+def verdict_events(verdict: dict, condition=None) -> list[tuple]:
+    """The events of one verdict, in pipeline order: (step_index, phase, substep, type, status, payload).
+
+    A stage that did not run has no event, so the last step index is the last stage that ran:
+    1 gate, 2 artifact / tree / advisories, 3 cache lookup, 4 contract / scan / sinks.
+    """
+    events = []
+    gate = verdict.get("gate") or {}
+    capture = verdict.get("request") or {}
+    rule = gate.get("rule") or verdict["rule"]
+    result = gate.get("result") or "UNRESOLVED"
+    reason = gate.get("reason") or verdict["reason"]
+    events.append((1, "P2", "RequirementGate", "requirement_gate_evaluated",
+                   {"PERMITTED": "PASSED", "BLOCK": "BLOCKED"}.get(result, "UNRESOLVED"), {
+        "state": "REQUIREMENT_CHECK", "step_index": 1, "result": result, "rule": rule, "matched_rule": rule,
+        "rule_checked": requirement_gate.RULE_TITLES.get(rule, rule), "reason": reason,
+        "policy_version": verdict.get("policy_version"), "decisions": gate.get("decisions") or [],
+        "policy_file_excerpt": json.dumps([decision.get("evidence") for decision in gate.get("decisions") or []], sort_keys=True),
+        "capture": {key: capture.get(key) for key in ("source", "complete", "requirements", "unsupported", "errors", "files")},
+        "lockfile": verdict.get("lockfile"), "demo_condition": condition,
+        "message": f"Requirement gate: {result} ({rule}). {reason}",
+        "plain_explanation": f"Checked the request against the project policy: {result}."}))
+
+    packages = verdict.get("packages") or []
+    last = 1
+    if packages:
+        package = packages[0]  # the dashboard shows one package; the proof holds all of them
+        evidence = package.get("evidence") or {}
+        artifact, tree = evidence.get("artifact") or {}, evidence.get("tree") or {}
+        advisories = evidence.get("advisories") or []
+        affected = [match for advisory in advisories for match in advisory.get("affected") or []]
+        if tree or artifact:
+            last = 2
+            events.append((2, "P5", "PackageResolution", "package_resolved", str(artifact.get("rule") or tree.get("rule")), {
+                "state": "QUARANTINED", "step_index": 2, "demo_condition": condition,
+                "resolution": {
+                    "package": package.get("package"), "version": package.get("version"),
+                    "sha256": artifact.get("sha256"), "registry_sha256": artifact.get("registry_sha256"),
+                    "hash_rule": artifact.get("rule"), "hash_reason": artifact.get("reason"), "filename": artifact.get("filename"),
+                    "tree": {"rule": tree.get("rule"), "reason": tree.get("reason"), "subtree_digest": tree.get("subtree_digest"),
+                             "nodes": [{key: node.get(key) for key in ("name", "version", "sha256", "filename")}
+                                       for node in tree.get("nodes") or []],
+                             "edges": tree.get("edges") or [], "problems": tree.get("problems") or []},
+                    "advisories": [{key: advisory.get(key) for key in ("name", "version", "result", "rule", "reason", "mode",
+                                                                       "retrieved_at", "advisory_count")}
+                                   for advisory in advisories],
+                    "vulnerability_count": len(affected),
+                    "known_risk_signals": [{"cve": match.get("id"), "aliases": match.get("aliases"),
+                                            "summary": match.get("summary"), "fixed_versions": match.get("fixed_versions")}
+                                           for match in affected]},
+                "message": f"Artifact: {artifact.get('rule')}. Tree: {tree.get('rule')}. {len(affected)} OSV advisories affect it.",
+                "plain_explanation": "Downloaded the real file, compared its SHA-256 with the registry, read its dependencies "
+                                     "and asked the OSV vulnerability database."}))
+        cache = package.get("cache") or {}
+        if cache.get("lookup"):
+            last = 3
+            events.append((3, "P4", "CacheLookup", "cache_result", cache["lookup"], {
+                "result": cache["lookup"], "package": package.get("package"), "sha256": artifact.get("sha256"),
+                "key": cache.get("key"), "key_fields": package.get("key_fields"), "stored": cache.get("stored"),
+                "reason": cache.get("reason"), "cache_hit": package.get("cache_hit"),
+                "message": f"Verdict cache: {cache['lookup']} on the 8-field key. {cache.get('reason') or ''}",
+                "plain_explanation": "Looked for an earlier analysis of exactly this file, tree, project and policy."}))
+        contract = evidence.get("contract")
+        if contract:
+            last = 4
+            reachability = evidence.get("reachability")
+            scans = [{key: scan.get(key) for key in ("package", "version", "result", "rule", "reason", "python_files", "sinks",
+                                                     "triggers", "dynamic_code", "parse_errors", "native_files",
+                                                     "not_scanned_files")} for scan in evidence.get("scan") or []]
+            sinks = (reachability or {}).get("sinks") or []
+            events.append((4, "P3_P4_P6", "StaticActionInspection", "action_completed", str(contract.get("rule")), {
+                "state": "INSPECTING", "step_index": 4, "project_context": verdict.get("project"),
+                "capability_contract": contract, "scan": scans, "reachability": reachability,
+                "analysis_from_cache": evidence.get("analysis_from_cache"),
+                "message": f"Contract: {contract.get('rule')} ({len(contract.get('call_sites') or [])} call sites). "
+                           f"Scan: {len(scans)} wheels, {len(sinks)} sink calls judged.",
+                "plain_explanation": "Read how the project uses the package, scanned the package's code without running it, "
+                                     "and judged each sensitive call against what the project allows."}))
+
+    status = verdict["status"]
+    events.append((last, "VERDICT", "Verdict", "verdict_computed", ALIASES.get(status, "NEEDS_REVIEW"), {
+        "verdict": ALIASES.get(status, "NEEDS_REVIEW"), "policy_state": status, "status": status, "stage": verdict["stage"],
+        "rule": verdict["rule"], "reason": verdict["reason"], "honesty_wording": honesty_wording(verdict),
+        "evidence_lines": [f"{verdict['stage']} / {verdict['rule']}: {verdict['reason']}"],
+        "fast_gate_ms": verdict.get("fast_gate_ms"), "cache_hit": verdict.get("cache_hit"),
+        "escalated": verdict.get("escalated"), "escalation": verdict.get("escalation"), "demo_condition": condition,
+        "causal_graph": None, "violating_paths": [], "repair": None, "reverification": None,  # not run on this path
+        "message": f"Verdict: {status} ({verdict['stage']} / {verdict['rule']}). {verdict['reason']}",
+        "plain_explanation": honesty_wording(verdict)}))
+    return events
+
+
+def honesty_wording(verdict: dict) -> str:
+    """One sentence that says what the verdict does and does not claim."""
+    rule = verdict.get("rule")
+    return {
+        "VERIFIED": "Every fast-gate check passed for this file and this project. No package code was run; "
+                    "this is not a claim that the package is safe.",
+        "REJECTED": f"A check failed ({rule}). The request must not be installed.",
+        "BLOCK": f"The project policy does not permit this request ({rule}). Nothing was downloaded.",
+    }.get(verdict.get("status"), f"Something could not be established ({rule}). Unknown is not treated as a pass.")
+
+
+def _first_artifact(verdict: dict) -> dict:
+    packages = verdict.get("packages") or []
+    return ((packages[0].get("evidence") or {}).get("artifact") or {}) if packages else {}

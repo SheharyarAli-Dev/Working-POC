@@ -109,3 +109,35 @@ def test_live_pip_wrapper_installs_only_with_the_flag_and_only_the_verified_whee
         assert installed_version() == "6.19.0"
     else:
         assert code_with_flag == 1 and installed_version() is None
+
+
+def test_live_dashboard_scenarios_are_real_requests(tmp_path, monkeypatch):
+    """Plan step 13: the five dashboard chips against the real PyPI and OSV, with the shipped project and policy."""
+    import asyncio
+
+    from backend.cavr import api
+
+    monkeypatch.setattr(api, "storage", CavrStorage(tmp_path / "dashboard.sqlite3"))
+    monkeypatch.setattr(api, "QUARANTINE_DIR", tmp_path / "quarantine")
+    monkeypatch.setattr(api, "ADVISORY_CACHE_DIR", tmp_path / "osv")
+    seen = {}
+    for scenario in api.SCENARIOS:
+        run_id = f"live-{scenario['id']}"
+        api.RUN_EVENTS[run_id] = []
+        api.RUN_CHAINS[run_id] = api.EvidenceChain(run_id)
+        body = api.InterceptRequest(package=scenario["package"], version=scenario["version"],
+                                    scenario_type=scenario["condition"] or scenario["id"])
+        seen[scenario["id"]] = asyncio.run(api.run_verification(run_id, body))
+    outcome = {key: (verdict["status"], verdict["rule"]) for key, verdict in seen.items()}
+    # Not asserted to be VERIFIED for ever: OSV may list 6.19.0 one day, and then REJECTED is the right answer.
+    assert outcome["verified"] in (("VERIFIED", "ALL_CHECKS_PASSED"), ("REJECTED", "KNOWN_VULNERABILITY")), seen["verified"]["reason"]
+    assert seen["verified"]["packages"][0]["evidence"]["artifact"]["sha256"] == PYPDF_SHA256
+    assert outcome["known_vulnerable"] == ("REJECTED", "KNOWN_VULNERABILITY"), seen["known_vulnerable"]["reason"]
+    vulnerable = seen["known_vulnerable"]["packages"][0]["evidence"]
+    assert vulnerable["artifact"]["rule"] == "HASH_MATCH" and vulnerable["artifact"]["filename"] == "pypdf-5.1.0-py3-none-any.whl"
+    assert "GHSA-7hfw-26vp-jp8m" in [match["id"] for advisory in vulnerable["advisories"] for match in advisory["affected"]]
+    assert outcome["denylisted"] == ("BLOCK", "DENYLIST")
+    assert outcome["tampered_wheel"] == ("REJECTED", "HASH_MISMATCH"), seen["tampered_wheel"]["reason"]
+    tampered = seen["tampered_wheel"]["packages"][0]["evidence"]["artifact"]
+    assert tampered["registry_sha256"] == PYPDF_SHA256 != tampered["sha256"] == sha256_file(tampered["path"])
+    assert outcome["network_off"] == ("UNRESOLVED", "REGISTRY_UNAVAILABLE")

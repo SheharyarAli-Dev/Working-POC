@@ -1,0 +1,475 @@
+"""The dashboard API on top of the pipeline (plan step 13). Offline.
+
+What is real here: the pipeline, the shipped dashboard project (`backend/cavr/sample_project`),
+the shipped policy (`backend/cavr/project_policy.json`), the pypdf 6.19.0 wheel with its recorded
+registry response, and the recorded OSV answers for pypdf 6.19.0 and 5.1.0.
+What is synthetic and labelled so: the wheel served as "pypdf 5.1.0" is built in the test (the
+real one is not in the repository); only its advisories are real. `SYNTH-` advisories are hand-written.
+"""
+import ast
+import asyncio
+import json
+import shutil
+from pathlib import Path
+
+import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
+from backend.cavr import api, requirement_gate
+from backend.cavr.assurance import certificate_for_verdict, generate_printable_html_certificate, verify_chain
+from backend.cavr.pipeline import ESCALATION
+from backend.cavr.pypi_client import FILES_HOST, TransportError, registry_url
+from backend.cavr.storage import CavrStorage
+from test_cavr_support import PYPDF_SHA256, PYPDF_WHEEL, REPO, UNGUARDED, World, synthetic_advisory
+
+RECORDED_5_1_0 = json.loads((REPO / "tests" / "test_cavr_data" / "osv-pypdf-5.1.0.json").read_text())["response"]["vulns"]
+SCENARIOS = {scenario["id"]: scenario for scenario in api.SCENARIOS}
+
+
+class Dashboard:
+    """The API module pointed at an offline index, with its own database and empty run state."""
+
+    def __init__(self, tmp_path, monkeypatch):
+        self.world = World(tmp_path)
+        self.index = self.world.index
+        # A stand-in file for pypdf 5.1.0 (synthetic), with the real recorded advisories for that version.
+        self.world.add("pypdf", "5.1.0", {"pypdf/__init__.py": "PdfReader = apply_configuration = None\n"}, lock=False)
+        self.world.advisories("pypdf", "5.1.0", RECORDED_5_1_0)
+        self.store = CavrStorage(tmp_path / "dashboard.sqlite3")
+        self.quarantine = tmp_path / "dashboard-quarantine"
+        for name, value in (("TRANSPORT", self.index), ("QUARANTINE_DIR", self.quarantine), ("LIVE_ADVISORIES", False),
+                            ("ADVISORY_CACHE_DIR", self.world.osv_dir), ("storage", self.store)):
+            monkeypatch.setattr(api, name, value)
+        for runs in (api.RUN_EVENTS, api.RUN_PROOFS, api.RUN_CHAINS, api.RUN_CERTIFICATES, api.RUN_FINISHED):
+            runs.clear()
+        self.count = 0
+
+    def run(self, scenario=None, **body):
+        """One run without HTTP. Returns (run id, verdict)."""
+        if scenario:
+            chosen = SCENARIOS[scenario]
+            body = {"package": chosen["package"], "version": chosen["version"], "scenario_type": chosen["condition"] or chosen["id"]}
+        self.count += 1
+        run_id = f"run-{self.count}"
+        api.RUN_EVENTS[run_id] = []
+        api.RUN_CHAINS[run_id] = api.EvidenceChain(run_id)
+        return run_id, asyncio.run(api.run_verification(run_id, api.InterceptRequest(**body)))
+
+    def events(self, run_id, event_type=None):
+        return [event for event in api.RUN_EVENTS[run_id] if event_type in (None, event["type"])]
+
+    def payload(self, run_id, event_type):
+        (event,) = self.events(run_id, event_type)
+        return event["payload"]
+
+
+@pytest.fixture
+def dashboard(tmp_path, monkeypatch):
+    return Dashboard(tmp_path, monkeypatch)
+
+
+def outcome(verdict):
+    return verdict["status"], verdict["stage"], verdict["rule"]
+
+
+def shape(dashboard, run_id):
+    return [(event["step_index"], event["type"]) for event in dashboard.events(run_id)]
+
+
+# --- the five scenario chips are real requests -----------------------------------------------------------------
+
+def test_scenario_list_is_five_real_requests():
+    listed = api.list_scenarios()
+    assert [(s["id"], s["request"], s["condition"], s["expected_status"]) for s in listed] == [
+        ("verified", "pip install pypdf==6.19.0", None, "VERIFIED"),
+        ("known_vulnerable", "pip install pypdf==5.1.0", None, "REJECTED"),
+        ("denylisted", "pip install requests-security==2.31.0", None, "BLOCK"),
+        ("tampered_wheel", "pip install pypdf==6.19.0", "tampered_wheel", "REJECTED"),
+        ("network_off", "pip install pypdf==6.19.0", "network_off", "UNRESOLVED"),
+    ]
+    assert all("source_code" not in scenario for scenario in listed)
+
+
+def test_pypdf_6_19_0_is_verified_for_the_shipped_project_and_policy(dashboard):
+    run_id, verdict = dashboard.run("verified")
+    assert outcome(verdict) == ("VERIFIED", "verdict", "ALL_CHECKS_PASSED"), verdict["reason"]
+    assert verdict["project"]["project_dir"] == str(api.PROJECT_DIR) and verdict["lockfile"]["present"] is False
+    assert shape(dashboard, run_id) == [(0, "state_change"), (1, "requirement_gate_evaluated"), (2, "package_resolved"),
+                                        (3, "cache_result"), (4, "action_completed"), (4, "verdict_computed"), (4, "state_change")]
+    assert run_id in api.RUN_FINISHED
+    # The hash on the dashboard is the SHA-256 of the downloaded bytes, next to the registry's.
+    resolution = dashboard.payload(run_id, "package_resolved")["resolution"]
+    assert resolution["sha256"] == resolution["registry_sha256"] == PYPDF_SHA256 and resolution["hash_rule"] == "HASH_MATCH"
+    assert resolution["tree"]["nodes"] == [{"name": "pypdf", "version": "6.19.0", "sha256": PYPDF_SHA256,
+                                            "filename": "pypdf-6.19.0-py3-none-any.whl"}]
+    assert resolution["vulnerability_count"] == 0 and resolution["known_risk_signals"] == []
+    assert dashboard.payload(run_id, "cache_result")["result"] == "MISS"
+    action = dashboard.payload(run_id, "action_completed")
+    assert action["capability_contract"]["rule"] == "CONTRACT_INFERRED"
+    assert [(c["file"], c["symbol"]) for c in action["capability_contract"]["call_sites"]] == [
+        ("invoice_extractor/reader.py", "pypdf.apply_configuration"), ("invoice_extractor/reader.py", "pypdf.PdfReader"),
+        ("invoice_extractor/reader.py", "pypdf.apply_configuration"), ("invoice_extractor/reader.py", "pypdf.PdfReader")]
+    assert [(s["file"], s["line"], s["verdict"]) for s in action["reachability"]["sinks"]] == [
+        ("pypdf/filters.py", 774, "GUARD_DISABLED"), ("pypdf/filters.py", 804, "GUARD_DISABLED")]
+    assert action["scan"][0]["rule"] == "SCAN_COMPLETE" and action["scan"][0]["python_files"] == 59
+    decided = dashboard.payload(run_id, "verdict_computed")
+    assert (decided["verdict"], decided["policy_state"], decided["status"]) == ("ALLOW", "VERIFIED", "VERIFIED")
+    assert decided["fast_gate_ms"] == verdict["fast_gate_ms"] > 0
+    assert (decided["cache_hit"], decided["escalated"], decided["escalation"]) == (False, False, None)
+    # Stages that do not exist on this path are null, not filled in.
+    assert decided["causal_graph"] is None and decided["repair"] is None and decided["reverification"] is None
+    assert "not a claim that the package is safe" in decided["honesty_wording"]
+    proof = api.get_proof(run_id)
+    assert proof["cavr_verdict"] == verdict and proof["hash_comparison"] == {
+        "declared_or_expected": PYPDF_SHA256, "actual_sha256": PYPDF_SHA256, "matches": True}
+    assert proof["docker_command"] == api.NOT_RUN and proof["counterfactual_runs"] == []
+    assert len(dashboard.index.downloads()) == 1
+
+
+def test_pypdf_5_1_0_is_rejected_by_osv_with_the_recorded_advisory_ids(dashboard):
+    run_id, verdict = dashboard.run("known_vulnerable")
+    assert outcome(verdict) == ("REJECTED", "advisories", "KNOWN_VULNERABILITY")
+    assert verdict["gate"]["result"] == "PERMITTED"  # the policy allows it; OSV is what rejects it
+    resolution = dashboard.payload(run_id, "package_resolved")["resolution"]
+    ids = [signal["cve"] for signal in resolution["known_risk_signals"]]
+    assert "GHSA-7hfw-26vp-jp8m" in ids and resolution["vulnerability_count"] == len(ids) == len(RECORDED_5_1_0) == 97
+    decided = dashboard.payload(run_id, "verdict_computed")
+    assert (decided["verdict"], decided["policy_state"]) == ("BLOCK", "REJECTED") and "GHSA-" in decided["reason"]
+    assert decided["demo_condition"] is None
+
+
+def test_denylisted_name_is_blocked_before_any_download(dashboard):
+    run_id, verdict = dashboard.run("denylisted")
+    assert outcome(verdict) == ("BLOCK", "gate", "DENYLIST")
+    assert dashboard.index.calls == [] and not dashboard.quarantine.exists()
+    assert shape(dashboard, run_id) == [(0, "state_change"), (1, "requirement_gate_evaluated"), (1, "verdict_computed"), (1, "state_change")]
+    gate = dashboard.payload(run_id, "requirement_gate_evaluated")
+    assert (gate["result"], gate["matched_rule"], gate["rule_checked"]) == ("BLOCK", "DENYLIST", "Explicit project denylist")
+    decided = dashboard.payload(run_id, "verdict_computed")
+    assert (decided["verdict"], decided["policy_state"]) == ("BLOCK", "BLOCK") and "Nothing was downloaded" in decided["honesty_wording"]
+    assert api.get_proof(run_id)["hash_comparison"] == {"declared_or_expected": None, "actual_sha256": None, "matches": None}
+    certificate = api.RUN_CERTIFICATES[run_id]
+    assert (certificate["status"], certificate["verdict"], certificate["rule"]) == ("BLOCK", "BLOCK", "DENYLIST")
+    assert "Nothing was downloaded" in certificate["bounded_trust_claim"]
+    assert certificate["subject"]["package"] == "requests-security" and certificate["subject"]["artifact_sha256"] is None
+    checks = certificate["security_checks"]
+    assert checks["requirement_gate"] == "DENYLIST"
+    assert {checks[key] for key in ("artifact_sha256", "dependency_tree", "osv_advisories", "capability_contract", "ast_scan",
+                                    "sink_reachability")} == {"NOT_REACHED"}
+
+
+def test_tampered_wheel_is_rejected_on_the_hash_of_the_bytes_that_arrived(dashboard):
+    run_id, verdict = dashboard.run("tampered_wheel")
+    assert outcome(verdict) == ("REJECTED", "artifact", "HASH_MISMATCH")
+    proof = api.get_proof(run_id)
+    comparison = proof["hash_comparison"]
+    assert comparison["declared_or_expected"] == PYPDF_SHA256 != comparison["actual_sha256"] and comparison["matches"] is False
+    assert proof["demo_condition"] == {"id": "tampered_wheel", "description": api.CONDITIONS["tampered_wheel"]}
+    # The file kept in quarantine is the real wheel with exactly one bit changed, and its hash is the one reported.
+    artifact = verdict["packages"][0]["evidence"]["artifact"]
+    arrived, original = Path(artifact["path"]).read_bytes(), PYPDF_WHEEL.read_bytes()
+    differing = [(a, b) for a, b in zip(arrived, original) if a != b]
+    assert len(arrived) == len(original) and len(differing) == 1 and bin(differing[0][0] ^ differing[0][1]).count("1") == 1
+    assert artifact["path"].endswith(".rejected") and comparison["actual_sha256"] == artifact["sha256"]
+    # Nothing after the hash check ran, and every event says the run was under a demo condition.
+    assert shape(dashboard, run_id) == [(0, "state_change"), (1, "requirement_gate_evaluated"), (2, "package_resolved"),
+                                        (2, "verdict_computed"), (2, "state_change")]
+    assert all(event["payload"]["demo_condition"]["id"] == "tampered_wheel" for event in dashboard.events(run_id))
+    assert api.RUN_CERTIFICATES[run_id]["demo_condition"]["id"] == "tampered_wheel"
+    assert (api.RUN_CERTIFICATES[run_id]["status"], api.RUN_CERTIFICATES[run_id]["verdict"]) == ("REJECTED", "BLOCK")
+
+
+def test_network_off_is_unresolved_and_the_real_transport_is_never_asked(dashboard):
+    run_id, verdict = dashboard.run("network_off")
+    assert outcome(verdict) == ("UNRESOLVED", "artifact", "REGISTRY_UNAVAILABLE")
+    assert dashboard.index.calls == []
+    decided = dashboard.payload(run_id, "verdict_computed")
+    assert (decided["verdict"], decided["policy_state"]) == ("NEEDS_REVIEW", "UNRESOLVED")
+    assert "Unknown is not treated as a pass" in decided["honesty_wording"]
+
+
+def test_what_the_pipeline_is_given_under_each_condition(dashboard, monkeypatch):
+    seen = []
+    real = api.verify_request
+
+    def recording(request, project_dir, policy, store, **options):
+        seen.append((project_dir, store, options))
+        return real(request, project_dir, policy, store, **options)
+
+    monkeypatch.setattr(api, "verify_request", recording)
+    monkeypatch.setattr(api, "LIVE_ADVISORIES", True)
+    monkeypatch.setattr(api, "ADVISORY_CACHE_DIR", dashboard.world.tmp_path / "no-advisories")
+    for scenario in ("denylisted", "network_off", "tampered_wheel"):
+        dashboard.run(scenario)
+    plain, offline, tampered = (options for _, _, options in seen)
+    assert all(project_dir == api.PROJECT_DIR and store is dashboard.store for project_dir, store, _ in seen)
+    assert plain["transport"] is dashboard.index and plain["live_advisories"] is True
+    assert isinstance(offline["transport"], api.OfflineTransport) and offline["live_advisories"] is False  # OSV is not asked live
+    assert isinstance(tampered["transport"], api.TamperingTransport) and tampered["transport"].inner is dashboard.index
+    assert tampered["live_advisories"] is True
+
+
+# --- a condition or a scenario name can never improve a verdict ------------------------------------------------
+
+def test_expected_status_of_a_scenario_is_not_used(dashboard):
+    dashboard.world.advisories("pypdf", "6.19.0", [synthetic_advisory("SYNTH-1301", "pypdf")])
+    _, verdict = dashboard.run("verified")
+    assert outcome(verdict) == ("REJECTED", "advisories", "KNOWN_VULNERABILITY") and "SYNTH-1301" in verdict["reason"]
+
+
+@pytest.mark.parametrize("scenario_type", ["tampered_wheel", "network_off", "verified", "approved_benign", "custom", ""])
+def test_no_scenario_type_turns_a_block_into_anything_else(dashboard, scenario_type):
+    _, verdict = dashboard.run(package="requests-security", version="2.31.0", scenario_type=scenario_type)
+    assert outcome(verdict) == ("BLOCK", "gate", "DENYLIST") and dashboard.index.calls == []
+
+
+@pytest.mark.parametrize("scenario_type, condition", [("tampered_wheel", "tampered_wheel"), ("network_off", "network_off"),
+                                                      ("verified", None), ("approved_benign", None), ("TAMPERED_WHEEL", None)])
+def test_only_the_two_named_conditions_change_the_transport(scenario_type, condition):
+    found = api.demo_condition(api.InterceptRequest(package="pypdf", version="6.19.0", scenario_type=scenario_type))
+    assert (found or {}).get("id") == condition
+
+
+def test_tampering_transport_flips_one_bit_of_files_only():
+    class Inner:
+        def stream(self, url):
+            yield b"abcd"
+            yield b"efgh"
+
+    transport = api.TamperingTransport(Inner())
+    assert b"".join(transport.stream(f"https://{FILES_HOST}/packages/x.whl")) == b"abceefgh"   # 'd' ^ 1 == 'e'
+    assert b"".join(transport.stream("https://pypi.org/pypi/x/1/json")) == b"abcdefgh"
+    assert b"".join(transport.stream(f"https://{FILES_HOST}.example.invalid/x.whl")) == b"abcdefgh"
+    with pytest.raises(TransportError):
+        list(api.OfflineTransport().stream("https://pypi.org/pypi/x/1/json"))
+
+
+# --- other verdicts and the metric fields ------------------------------------------------------------------------
+
+def test_second_run_is_a_cache_hit(dashboard):
+    dashboard.run("verified")
+    run_id, verdict = dashboard.run("verified")
+    assert verdict["status"] == "VERIFIED" and verdict["cache_hit"] is True
+    assert dashboard.payload(run_id, "cache_result")["result"] == "HIT"
+    assert dashboard.payload(run_id, "verdict_computed")["cache_hit"] is True
+    assert dashboard.payload(run_id, "action_completed")["analysis_from_cache"] is True
+
+
+def test_reader_outside_the_guard_is_unresolved_with_the_escalation(dashboard, tmp_path, monkeypatch):
+    project = tmp_path / "unguarded_project"
+    shutil.copytree(api.PROJECT_DIR, project)
+    reader = project / "invoice_extractor" / "reader.py"
+    reader.write_text(reader.read_text() + UNGUARDED)
+    monkeypatch.setattr(api, "PROJECT_DIR", project)
+    run_id, verdict = dashboard.run("verified")
+    assert outcome(verdict) == ("UNRESOLVED", "reachability", "SINK_REACHABLE")
+    decided = dashboard.payload(run_id, "verdict_computed")
+    assert (decided["verdict"], decided["policy_state"], decided["escalated"], decided["escalation"]) == (
+        "NEEDS_REVIEW", "UNRESOLVED", True, ESCALATION)
+    certificate = api.RUN_CERTIFICATES[run_id]
+    assert certificate["escalated"] is True and certificate["escalation"] == ESCALATION
+    assert certificate["security_checks"]["sink_reachability"] == "SINK_REACHABLE"
+
+
+@pytest.mark.parametrize("policy_text, rule", [(None, "POLICY_MISSING"), ("{broken", "POLICY_INVALID")])
+def test_missing_or_broken_policy_is_shown_as_unresolved_not_rejected(dashboard, tmp_path, monkeypatch, policy_text, rule):
+    path = tmp_path / "policy.json"
+    if policy_text is not None:
+        path.write_text(policy_text)
+    monkeypatch.setattr(requirement_gate, "POLICY_PATH", path)
+    run_id, verdict = dashboard.run("verified")
+    assert outcome(verdict) == ("UNRESOLVED", "gate", rule) and dashboard.index.calls == []
+    gate = dashboard.payload(run_id, "requirement_gate_evaluated")
+    assert (gate["result"], gate["matched_rule"]) == ("UNRESOLVED", rule)
+    assert dashboard.payload(run_id, "verdict_computed")["policy_state"] == "UNRESOLVED"
+
+
+def test_a_pipeline_fault_is_an_unresolved_run_that_still_finishes(dashboard, monkeypatch):
+    def broken(*args, **kwargs):
+        raise RuntimeError("disk on fire")
+
+    monkeypatch.setattr(api, "verify_request", broken)
+    run_id, verdict = dashboard.run("verified")
+    assert outcome(verdict) == ("UNRESOLVED", "internal", "INTERNAL_ERROR") and "disk on fire" in verdict["reason"]
+    assert run_id in api.RUN_FINISHED and dashboard.payload(run_id, "verdict_computed")["verdict"] == "NEEDS_REVIEW"
+
+
+# --- how the request is built --------------------------------------------------------------------------------------
+
+def test_package_and_version_are_one_requirement_token():
+    assert api.pip_request(api.InterceptRequest(package=" pypdf ", version=" 6.19.0 ")) == ["pip", "install", "pypdf==6.19.0"]
+    assert api.pip_request(api.InterceptRequest(package="pypdf")) == ["pip", "install", "pypdf"]
+    injected = api.pip_request(api.InterceptRequest(package="pypdf", version="6.19.0 --index-url https://example.invalid/simple"))
+    assert injected == ["pip", "install", "pypdf==6.19.0 --index-url https://example.invalid/simple"]
+    assert api.pip_request(api.InterceptRequest(request="pip install a==1 b==2")) == "pip install a==1 b==2"
+
+
+@pytest.mark.parametrize("body, status, rule", [
+    ({"package": "pypdf", "version": "6.19.0 --index-url https://example.invalid/simple"}, "UNRESOLVED", "CAPTURE_INCOMPLETE"),
+    ({"package": "pypdf --no-deps", "version": "6.19.0"}, "UNRESOLVED", "CAPTURE_INCOMPLETE"),
+    ({"package": "pypdf", "version": ""}, "BLOCK", "NOT_PINNED"),
+    ({"package": "", "version": ""}, "UNRESOLVED", "CAPTURE_INCOMPLETE"),
+    ({"package": "pdf-clean-extractor", "version": "1.0.0", "scenario_type": "approved_benign"}, "UNRESOLVED", "RELEASE_NOT_FOUND"),
+    ({"package": "dormant-exfil", "version": "1.2.0", "scenario_type": "trigger_dependent"}, "BLOCK", "NOT_ON_ALLOWLIST"),
+    ({"request": "pip install pypdf==6.19.0 --index-url https://example.invalid/simple"}, "UNRESOLVED", "CAPTURE_INCOMPLETE"),
+    ({"request": "rm -rf /"}, "UNRESOLVED", "CAPTURE_INCOMPLETE"),
+])
+def test_requests_that_are_not_a_permitted_pinned_install(dashboard, body, status, rule):
+    """The `approved_benign` and `trigger_dependent` rows are what two chips of the old dashboard send: real verdicts too."""
+    run_id, verdict = dashboard.run(**body)
+    assert (verdict["status"], verdict["rule"]) == (status, rule)
+    assert dashboard.index.downloads() == [] and run_id in api.RUN_FINISHED
+
+
+def test_a_marker_in_the_version_field_does_not_change_what_is_reported(dashboard):
+    run_id, verdict = dashboard.run(package="pypdf", version='6.19.0; python_version > "1"')
+    assert verdict["status"] == "VERIFIED"
+    proof = api.get_proof(run_id)
+    assert (proof["package"], proof["version"]) == ("pypdf", "6.19.0") and proof["request"] == 'pip install pypdf==6.19.0; python_version > "1"'
+
+
+def test_url_passwords_are_not_in_events_proof_or_log(dashboard):
+    run_id, _ = dashboard.run(request="pip install pypdf==6.19.0 --index-url https://alice:hunter2@example.invalid/simple")
+    everything = json.dumps([api.RUN_EVENTS[run_id], api.get_proof(run_id), api.RUN_CERTIFICATES[run_id],
+                             dashboard.store.get_verdict_log(), api.get_evidence_records(run_id)])
+    assert "hunter2" not in everything and "***@example.invalid" in everything
+
+
+# --- the evidence chain and the certificate ---------------------------------------------------------------------------
+
+def test_every_event_is_in_the_hash_chain_and_tampering_is_detected(dashboard):
+    run_id, _ = dashboard.run("verified")
+    chain = api.RUN_CHAINS[run_id]
+    assert len(chain.records) == len(api.RUN_EVENTS[run_id]) == 7
+    assert [record["data"] for record in chain.records] == [event["payload"] for event in api.RUN_EVENTS[run_id]]
+    assert api.verify_run_evidence(run_id)["intact"] is True
+    records = api.get_evidence_records(run_id)
+    assert [r["sha256"] for r in records] == [r["sha256"] for r in chain.records] and records[1]["prev_hash"] == records[0]["sha256"]
+    # The certificate carries the chain hash as it was before the final event (which contains the certificate).
+    assert api.RUN_CERTIFICATES[run_id]["evidence_chain_root"] == chain.records[-2]["sha256"]
+    chain.records[2]["data"]["resolution"]["sha256"] = "0" * 64
+    broken = verify_chain(chain.records)
+    assert broken["intact"] is False and broken["broken_link_seq"] == 3
+
+
+def test_certificate_copies_the_verdict_and_invents_nothing(dashboard):
+    run_id, verdict = dashboard.run("verified")
+    certificate = api.RUN_CERTIFICATES[run_id]
+    evidence = verdict["packages"][0]["evidence"]
+    assert certificate["subject"] == {"package": "pypdf", "version": "6.19.0", "artifact_sha256": PYPDF_SHA256,
+                                      "registry_sha256": PYPDF_SHA256, "subtree_digest": evidence["tree"]["subtree_digest"],
+                                      "contract_digest": evidence["contract"]["digest"], "other_packages_in_request": []}
+    assert (certificate["status"], certificate["verdict"], certificate["rule"]) == ("VERIFIED", "ALLOW", "ALL_CHECKS_PASSED")
+    assert certificate["security_checks"] == {
+        "requirement_gate": "ALLOWED", "artifact_sha256": "HASH_MATCH", "dependency_tree": "TREE_BUILT",
+        "osv_advisories": ["NO_KNOWN_VULNERABILITY"], "capability_contract": "CONTRACT_INFERRED", "ast_scan": ["SCAN_COMPLETE"],
+        "sink_reachability": "NO_DENIED_SINK_REACHABLE", "sandbox_execution": "NOT_RUN (M2)"}
+    assert certificate["capability_obligations"] == [
+        {"obligation": row["capability"], "status": row["status"], "evidence": row["evidence"]}
+        for row in evidence["contract"]["contract_rows"]]
+    assert {key: certificate[key] for key in ("fast_gate_ms", "cache_hit", "escalated", "escalation")} == {
+        key: verdict[key] for key in ("fast_gate_ms", "cache_hit", "escalated", "escalation")}
+    assert any("not executed" in item["predicate"] for item in certificate["residual_uncertainty"])
+    assert "safe" not in certificate["bounded_trust_claim"].replace("not a claim that the package is safe", "")
+
+
+@pytest.mark.parametrize("verdict", [{}, {"status": "UNRESOLVED"}, {"status": "VERIFIED", "packages": []},
+                                     {"status": "UNRESOLVED", "request": {"requirements": ["pypdf==6.19.0"]}, "packages": []}])
+def test_certificate_of_a_verdict_without_evidence_claims_no_check(verdict):
+    certificate = certificate_for_verdict("run-x", verdict, "0" * 64)
+    assert certificate["subject"]["artifact_sha256"] is None and certificate["capability_obligations"] == []
+    checks = dict(certificate["security_checks"], sandbox_execution="NOT_REACHED")
+    assert set(checks.values()) == {"NOT_REACHED"}
+
+
+def test_printable_certificate_shows_the_real_values_and_escapes_them(dashboard):
+    run_id, _ = dashboard.run("verified")
+    page = api.get_certificate_html(run_id)
+    assert PYPDF_SHA256 in page and "VERIFIED" in page and "HASH_MATCH" in page and "NOT_RUN (M2)" in page
+    hostile = certificate_for_verdict("run-x", {"status": "UNRESOLVED", "reason": "<script>alert(1)</script>"}, "0" * 64)
+    assert "<script>" not in generate_printable_html_certificate(hostile)
+
+
+# --- over HTTP -------------------------------------------------------------------------------------------------------------
+
+@pytest.fixture
+def client(dashboard):
+    app = FastAPI()
+    app.include_router(api.cavr_router)
+    with TestClient(app) as test_client:
+        yield test_client
+
+
+def stream_events(client, stream_url):
+    text = client.get(stream_url).text
+    return [json.loads(line[len("data: "):]) for line in text.splitlines() if line.startswith("data: ")]
+
+
+def test_intercept_then_stream_then_proof_over_http(dashboard, client):
+    started = client.post("/api/cavr/intercept", json={"package": "pypdf", "version": "6.19.0", "scenario_type": "verified"}).json()
+    assert started["status"] == "INTERCEPTED" and started["request"] == "pip install pypdf==6.19.0" and started["demo_condition"] is None
+    events = stream_events(client, started["stream_url"])  # the stream ends by itself after the last event
+    assert [event["type"] for event in events] == ["state_change", "requirement_gate_evaluated", "package_resolved", "cache_result",
+                                                   "action_completed", "verdict_computed", "state_change"]
+    assert [event["seq"] for event in events] == list(range(1, 8)) and events[-1]["payload"]["state"] == "DECIDED"
+    assert events[5]["payload"]["policy_state"] == "VERIFIED"
+    run_id = started["run_id"]
+    # A client that connects after the run has finished still gets every event.
+    assert stream_events(client, started["stream_url"]) == events
+    proof = client.get(f"/api/cavr/proof/{run_id}").json()
+    assert proof["cavr_verdict"]["status"] == "VERIFIED" and proof["hash_comparison"]["actual_sha256"] == PYPDF_SHA256
+    assert client.get(f"/api/cavr/evidence/{run_id}/verify").json()["intact"] is True
+    assert client.get(f"/api/cavr/evidence/{run_id}/certificate.json").json()["subject"]["artifact_sha256"] == PYPDF_SHA256
+    assert len(client.get(f"/api/cavr/evidence/{run_id}/records").json()) == 7
+
+
+def test_scenario_endpoint_and_unknown_runs_over_http(dashboard, client):
+    started = client.post("/api/cavr/run", params={"scenario": "tampered_wheel"}).json()
+    assert started["demo_condition"]["id"] == "tampered_wheel"
+    events = stream_events(client, started["stream_url"])
+    assert events[-2]["payload"]["rule"] == "HASH_MISMATCH" and events[-2]["payload"]["policy_state"] == "REJECTED"
+    assert client.post("/api/cavr/run", params={"scenario": "nope"}).status_code == 404
+    assert client.get("/api/cavr/stream/nope").status_code == 404
+    assert client.get("/api/cavr/proof/nope").status_code == 404
+    assert client.get("/api/cavr/evidence/nope/records").status_code == 404
+    assert [scenario["id"] for scenario in client.get("/api/cavr/scenarios").json()] == list(SCENARIOS)
+
+
+def test_metrics_come_from_the_verdict_log(dashboard, client):
+    empty = client.get("/api/cavr/metrics").json()
+    assert empty == {"verdicts": 0, "cache_hits": 0, "cache_hit_rate": None, "fast_gate_ms_p50": None, "fast_gate_ms_p95": None,
+                     "by_status": {}, "recent": []}
+    verdicts = [dashboard.run("verified")[1], dashboard.run("verified")[1], dashboard.run("denylisted")[1], dashboard.run("network_off")[1]]
+    report = client.get("/api/cavr/metrics").json()
+    assert report["verdicts"] == 4 and report["cache_hits"] == 1 and report["cache_hit_rate"] == 0.25
+    assert report["by_status"] == {"BLOCK": 1, "UNRESOLVED": 1, "VERIFIED": 2}
+    times = sorted(verdict["fast_gate_ms"] for verdict in verdicts)
+    assert report["fast_gate_ms_p50"] == pytest.approx(times[1], abs=0.01) and report["fast_gate_ms_p95"] == pytest.approx(times[3], abs=0.01)
+    assert [row["status"] for row in report["recent"]] == ["UNRESOLVED", "BLOCK", "VERIFIED", "VERIFIED"]
+    assert report["recent"][0]["requested"] == "pip install pypdf==6.19.0"
+
+
+def test_old_runs_are_dropped(dashboard, client, monkeypatch):
+    monkeypatch.setattr(api, "MAX_RUNS", 2)
+    ids = []
+    for _ in range(3):
+        started = client.post("/api/cavr/intercept", json={"package": "requests-security", "version": "2.31.0"}).json()
+        stream_events(client, started["stream_url"])
+        ids.append(started["run_id"])
+    assert list(api.RUN_EVENTS) == ids[1:] and ids[0] not in api.RUN_PROOFS and ids[0] not in api.RUN_CHAINS
+    assert client.get(f"/api/cavr/stream/{ids[0]}").status_code == 404
+
+
+# --- the fixture modules are out of the verdict path ---------------------------------------------------------------------------
+
+def test_api_imports_none_of_the_fixture_or_simulation_modules():
+    tree = ast.parse(Path(api.__file__).read_text(encoding="utf-8"))
+    imported = {node.module for node in ast.walk(tree) if isinstance(node, ast.ImportFrom)}
+    imported |= {alias.name for node in ast.walk(tree) if isinstance(node, ast.Import) for alias in node.names}
+    gone = {"backend.cavr.fixtures.scenarios", "backend.cavr.fixtures", "backend.cavr.resolver", "backend.cavr.reverifier",
+            "backend.cavr.reconstructor", "backend.cavr.counterfactual", "backend.cavr.triggers", "backend.cavr.normalizer",
+            "backend.cavr.causal_graph", "backend.cavr.repair_engine", "hashlib"}
+    assert not imported & gone and "backend.cavr.pipeline" in imported
+    source = Path(api.__file__).read_text(encoding="utf-8")
+    assert "source_code" not in source and "sha256(" not in source

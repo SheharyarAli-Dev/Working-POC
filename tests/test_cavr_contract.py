@@ -487,7 +487,7 @@ def test_every_contract_has_the_same_keys_and_dashboard_rows(tmp_path):
 
 
 def test_dashboard_call_without_a_wheel_is_unresolved_not_a_guess():
-    """`api.py` has no wheel until step 13: the rows come from the policy, the authority is unknown."""
+    """A caller that gives only a name and no wheel: the rows come from the policy, the authority is unknown."""
     contract = infer_capability_contract("pypdf", extract_project_context(), POLICY)
     assert outcome(contract) == ("UNRESOLVED", "IMPORT_NAMES_UNKNOWN")
     assert contract["summary"]["denied_count"] == 8 and contract["package"] == "pypdf"

@@ -126,7 +126,9 @@ def verify_request(request, project_dir, policy, store, *, transport=None, quara
 
     context = extract_project_context(project_dir)
     fields["project"] = {"project_dir": context["project_dir"], "result": context["result"], "rule": context["rule"],
-                         "reason": context["reason"], "files": len(context["files"]), "sources_digest": context["sources_digest"]}
+                         "reason": context["reason"], "files": len(context["files"]), "sources_digest": context["sources_digest"],
+                         # Directories the contract and the proofs did not look into (virtual environments, dot-directories).
+                         "skipped_directories": context["skipped_directories"]}
     run = SimpleNamespace(policy=policy, lockfile=lockfile, context=context, store=store, transport=transport,
                           quarantine_dir=Path(quarantine_dir) if quarantine_dir is not None else Path(DATA) / "cavr" / "quarantine",
                           advisory_cache_dir=Path(advisory_cache_dir) if advisory_cache_dir is not None else Path(DATA) / "cavr" / "advisories",

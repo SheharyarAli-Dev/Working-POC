@@ -13,15 +13,15 @@ export const RequirementsTab: React.FC<RequirementsTabProps> = ({ state }) => {
     {
       id: "FR-1",
       name: "Intercept Before Execution",
-      desc: "Intercept package installation requests at the local package proxy before bytecode execution or setup.py hooks.",
-      module: "pip_shim.py / PEP 503 proxy",
+      desc: "Capture the pip install request and verify it before anything is installed or executed.",
+      module: "capture.py / pip_shim.py / api.py",
       event: "P1 Capture",
-      status: stepIndex >= 0 ? "PASS" : "PENDING"
+      status: state.runId ? "PASS" : "NOT_RUN"
     },
     {
       id: "FR-2",
       name: "Requirement Gate Enforcement",
-      desc: "Validate requested artifact against project_policy.json approved requirements, allowlist patterns, and denylist.",
+      desc: "Check the request against project_policy.json: denylist, exact pin, approved requirements, lockfile. Fails closed.",
       module: "requirement_gate.py",
       event: "P2 RequirementGate",
       status: gateResult ? (gateResult.result === "PERMITTED" ? "PASS" : "FAIL") : "NOT_RUN"
@@ -29,10 +29,10 @@ export const RequirementsTab: React.FC<RequirementsTabProps> = ({ state }) => {
     {
       id: "FR-3",
       name: "Capability Contract Inference",
-      desc: "Derive deterministic required/denied capabilities from AST call sites and project context without LLM hallucination.",
+      desc: "Derive allowed and denied capabilities from the project's real imports and call sites and the policy.",
       module: "capability_contract.py",
       event: "P4 ContractInference",
-      status: actionData?.capability_contract ? "PASS" : "NOT_RUN"
+      status: actionData?.capability_contract ? (actionData.capability_contract.result === "OK" ? "PASS" : "FAIL") : "NOT_RUN"
     },
     {
       id: "FR-4",
@@ -53,9 +53,9 @@ export const RequirementsTab: React.FC<RequirementsTabProps> = ({ state }) => {
     {
       id: "FR-6",
       name: "Fail-Closed Security Policy",
-      desc: "Map graph observations to 4 states (VERIFIED, RESTRICTED, REJECTED, UNRESOLVED). Ambiguous predicates fail closed.",
-      module: "policy.py / causal_graph.py",
-      event: "P9 PolicyEvaluation",
+      desc: "VERIFIED / REJECTED / UNRESOLVED / BLOCK with evidence. Anything unknown is UNRESOLVED.",
+      module: "pipeline.py",
+      event: "Verdict",
       status: verdict ? "PASS" : "NOT_RUN"
     },
     {
@@ -64,7 +64,7 @@ export const RequirementsTab: React.FC<RequirementsTabProps> = ({ state }) => {
       desc: "Search candidates across 4 repair levels minimizing disruption objective w1*deps + w2*dist + w3*calls + w4*risk.",
       module: "repair_engine.py",
       event: "P10 MinimalRepair",
-      status: repair ? "PASS" : (verdict === "ALLOW" ? "NOT_APPLICABLE" : "NOT_RUN")
+      status: repair ? "PASS" : "NOT_RUN"
     },
     {
       id: "FR-8",
@@ -72,7 +72,7 @@ export const RequirementsTab: React.FC<RequirementsTabProps> = ({ state }) => {
       desc: "Re-execute sample project tests and security obligations for chosen repair candidate inside fresh container.",
       module: "reverifier.py",
       event: "P11 Reverification",
-      status: reverification ? (reverification.all_passed ? "PASS" : "FAIL") : (verdict === "ALLOW" ? "NOT_APPLICABLE" : "NOT_RUN")
+      status: reverification ? (reverification.all_passed ? "PASS" : "FAIL") : "NOT_RUN"
     },
     {
       id: "FR-9",
@@ -96,15 +96,15 @@ export const RequirementsTab: React.FC<RequirementsTabProps> = ({ state }) => {
       desc: "Hardened sandbox: UID 10001, cap-drop ALL, no-new-privileges, read-only rootfs, 30s timeout.",
       module: "sandbox_runner.py",
       event: "SandboxLockdown",
-      status: "PASS"
+      status: counterfactualResults ? "PASS" : "NOT_RUN"
     },
     {
       id: "NFR-2",
       name: "Deterministic & No Paid LLM",
       desc: "Purely deterministic AST, NetworkX, and formal repair solver. Zero reliance on paid black-box LLM APIs.",
       module: "inspector.py / triggers.py",
-      event: "DeterministicEvaluation",
-      status: "PASS"
+      event: "Design property (not checked by a run)",
+      status: "NOT_EVALUATED"
     }
   ];
 
@@ -175,6 +175,7 @@ export const RequirementsTab: React.FC<RequirementsTabProps> = ({ state }) => {
                     {r.status === 'FAIL' && <span className="req-status fail"><XCircle size={12} /> FAIL</span>}
                     {r.status === 'NOT_APPLICABLE' && <span className="req-status na">N/A (Clean)</span>}
                     {r.status === 'NOT_RUN' && <span className="req-status pending"><Clock size={12} /> NOT RUN</span>}
+                    {r.status === 'NOT_EVALUATED' && <span className="req-status na">NOT EVALUATED</span>}
                   </td>
                 </tr>
               ))}

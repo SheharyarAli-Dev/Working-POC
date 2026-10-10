@@ -397,6 +397,19 @@ Still open after step 12: a requirements file inside the project is read whateve
 requirement's marker is ignored; other pip commands are not passed through; `--cavr-python` for another Python version
 relies on pip's hash check failing. -> M2 / Maryam.
 
+Open after step 13 (2026-10-10), needs Maryam's decision: `frontend/src/components/CavrModule.tsx` is outside the
+allowed scope and was not edited. It still holds the five old chips (labels and package names), the eight-step timeline
+with fixed timings, a proof drawer that prints "VERIFIED MATCH" for every run, and the sandbox console panel. The backend
+serves the five real scenarios at `GET /api/cavr/scenarios` and runs them with `POST /api/cavr/run?scenario=<id>`.
+Handled in step 13: NOT_OBSERVED chip in `CounterfactualTab.tsx`; NFR-1 / NFR-2 hardcoded PASS; both routes to VERIFIED
+without observation (the dashboard no longer calls `counterfactual.py`); stale docker command (the proof says "not run");
+UNRESOLVED gate shown as REJECTED; marker in the version field; `skipped_directories` in the verdict.
+Still open after step 13: `normalizer.py` maps NOT_OBSERVED to `FILE_READ`/`INFO` and `harness.py` / `image_digest`
+(legacy sandbox path, no longer called by the dashboard) -> M2; `/api/cavr/cache`, `/simple/` and the dialog texts still
+describe the old trusted-package list; `storage.SEED_PACKAGES` hashes not checked against PyPI; legacy modules
+(`resolver.py`, `reverifier.py`, `reconstructor.py`, `fixtures/scenarios.py`, `triggers.py`, `repair_engine.py`) are
+unused by the dashboard and still in the repository; the frontend was not checked in a browser.
+
 ## Verification
 
 - `.venv/bin/python -m pytest -q` before every commit (offline).
@@ -422,6 +435,7 @@ relies on pip's hash check failing. -> M2 / Maryam.
 - [x] 9 C4 capability contract (committed 2026-10-10, `a188cb6`; batch review fix in the next commit)
 - [x] 10 verdict cache (committed 2026-10-10, `d8e6367`)
 - [x] 11 pipeline (committed 2026-10-10, `c5c0ef4`; batch review fixes in the next commit)
-- [x] 12 pip wrapper (committed 2026-10-10)
-- [ ] 13 dashboard API
+- [x] 12 pip wrapper (committed 2026-10-10, `1e17034`)
+- [ ] 13 dashboard API (backend and `frontend/src/components/cavr/` committed 2026-10-10; the chips, timeline and proof
+      drawer in `frontend/src/components/CavrModule.tsx` are outside the allowed scope and unchanged: waiting for Maryam)
 - [ ] 14 orchestrator analyzer
