@@ -64,7 +64,9 @@ export const StageDetailPanel: React.FC<StageDetailPanelProps> = ({ state }) => 
         ? `${contract.rule}: ${shown(contract.summary?.required_count)} required, ${shown(contract.summary?.denied_count)} denied capabilities; ${(contract.call_sites || []).length} call sites.`
         : "Reading the project's imports and call sites.",
       why: "A sensitive call inside a wheel only matters when the contract does not allow it and the project's call sites can reach it.",
-      evidence: state.actionData
+      // "Nothing found" is a result of the scan. Without a sink judgement (the pipeline stopped before
+      // the scan, as for a version OSV rejects) there is no such result, only a dash.
+      evidence: state.actionData?.reachability
         ? (sinks.length
           ? sinks.map((sink: any) => `${sink.file}:${sink.line} ${sink.sink} ${sink.verdict}`).join('; ')
           : "No sensitive sink call found in the scanned wheels.")

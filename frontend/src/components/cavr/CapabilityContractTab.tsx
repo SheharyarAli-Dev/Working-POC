@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { CavrRunState } from './types';
+import { CavrRunState, NOT_COMPUTED } from './types';
 import { ChevronDown, ChevronRight, AlertTriangle, CheckCircle2, XCircle } from 'lucide-react';
 
 interface CapabilityContractTabProps {
@@ -18,6 +18,9 @@ export const CapabilityContractTab: React.FC<CapabilityContractTabProps> = ({ st
   const contractRows: any[] = contract?.contract_rows || [];
   // Sink calls the AST scan found in the wheels, each with the pipeline's judgement.
   const sinks: any[] = state.actionData?.reachability?.sinks || [];
+  // False when the pipeline stopped after the contract and before the scan (for example OSV rejected
+  // the version). Then no sink was looked for, and "nothing found" would be a result nobody computed.
+  const judged = !!state.actionData?.reachability;
 
   if (!contract) {
     return (
@@ -69,9 +72,11 @@ export const CapabilityContractTab: React.FC<CapabilityContractTabProps> = ({ st
               // Static findings only: sink calls in the wheels whose capability is this row's.
               const found = sinks.filter((sink: any) => cap.startsWith(sink.capability));
               const reachable = found.filter((sink: any) => sink.verdict === 'REACHABLE');
-              const observed = found.length === 0
-                ? "no sink call found"
-                : found.map((sink: any) => `${sink.file}:${sink.line} ${sink.verdict}`).join(', ');
+              const observed = !judged
+                ? NOT_COMPUTED
+                : found.length === 0
+                  ? "no sink call found"
+                  : found.map((sink: any) => `${sink.file}:${sink.line} ${sink.verdict}`).join(', ');
               const hasMismatch = reachable.length > 0;
 
               return (
@@ -100,13 +105,15 @@ export const CapabilityContractTab: React.FC<CapabilityContractTabProps> = ({ st
                     </td>
 
                     <td>
-                      <span className={`obs-cell ${hasMismatch ? 'obs-alert' : 'obs-clean'}`}>
+                      <span className={`obs-cell ${hasMismatch ? 'obs-alert' : (judged ? 'obs-clean' : '')}`}>
                         {observed}
                       </span>
                     </td>
 
                     <td>
-                      {hasMismatch ? (
+                      {!judged ? (
+                        <span>{NOT_COMPUTED}</span>
+                      ) : hasMismatch ? (
                         <span className="result-chip mismatch">
                           <XCircle size={12} /> Reachable sink: unresolved
                         </span>

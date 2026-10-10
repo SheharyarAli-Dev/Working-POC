@@ -1,5 +1,5 @@
 import React from 'react';
-import { CavrRunState } from './types';
+import { CavrRunState, NOT_COMPUTED } from './types';
 import { Crosshair } from 'lucide-react';
 
 interface TriggersTabProps {
@@ -56,7 +56,11 @@ export const TriggersTab: React.FC<TriggersTabProps> = ({ state }) => {
             </tr>
           </thead>
           <tbody>
-            {sinks.length === 0 ? (
+            {scans.length === 0 ? (
+              <tr><td colSpan={4}>The AST scan did not run for this request, so no sink was looked for.</td></tr>
+            ) : !reachability ? (
+              <tr><td colSpan={4}>The sinks found by the scan were not judged for this request.</td></tr>
+            ) : sinks.length === 0 ? (
               <tr><td colSpan={4}>No sensitive sink call was found in the scanned wheels.</td></tr>
             ) : sinks.map((sink: any, idx: number) => (
               <tr key={idx} className={`matrix-row ${sink.verdict === 'REACHABLE' ? 'mismatch-row' : ''}`}>
@@ -90,7 +94,9 @@ export const TriggersTab: React.FC<TriggersTabProps> = ({ state }) => {
             </tr>
           </thead>
           <tbody>
-            {triggers.length === 0 ? (
+            {scans.length === 0 ? (
+              <tr><td colSpan={3}>{NOT_COMPUTED}</td></tr>
+            ) : triggers.length === 0 ? (
               <tr><td colSpan={3}>No branch that gates a sink behind an environment or file check was found.</td></tr>
             ) : triggers.map((trigger: any) => (
               <tr key={`${trigger.package}:${trigger.id}`} className="matrix-row">

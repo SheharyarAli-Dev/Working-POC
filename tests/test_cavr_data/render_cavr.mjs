@@ -14,7 +14,7 @@
 //   chips        {scenarios}          the scenario chips for an answer of GET /api/cavr/scenarios
 //   timeline     {stages}             the six stages, each opened; `stages` of a proof, or null
 //   proof        {proof}              the proof drawer for an answer of GET /api/cavr/proof/{run_id}
-//   overview | requirements | assurance | stage
+//   overview | requirements | assurance | stage | contract | triggers
 //                {events, proof}      one tab, with the run state the page builds from the stream's events
 //   metrics      {metrics}            the Metrics tab for an answer of GET /api/cavr/metrics
 import fs from 'node:fs';
@@ -41,6 +41,8 @@ import { RequirementsTab } from ${from('cavr/RequirementsTab')};
 import { AssuranceTab } from ${from('cavr/AssuranceTab')};
 import { StageDetailPanel } from ${from('cavr/StageDetailPanel')};
 import { MetricsReport } from ${from('cavr/MetricsTab')};
+import { CapabilityContractTab } from ${from('cavr/CapabilityContractTab')};
+import { TriggersTab } from ${from('cavr/TriggersTab')};
 import { EMPTY_RUN, applyEvent } from ${from('cavr/runState')};
 
 // The run state exactly as the page builds it: the stream's events through the page's own reducer,
@@ -71,6 +73,8 @@ const VIEWS: Record<string, (props: any) => React.ReactElement> = {
   requirements: (props) => <RequirementsTab state={runState(props)} />,
   assurance: (props) => <AssuranceTab state={runState(props)} />,
   stage: (props) => <StageDetailPanel state={runState(props)} />,
+  contract: (props) => <CapabilityContractTab state={runState(props)} />,
+  triggers: (props) => <TriggersTab state={runState(props)} />,
   metrics: ({ metrics }) => <MetricsReport metrics={metrics} />,
 };
 

@@ -18,7 +18,10 @@ export const AdvisoryList: React.FC<AdvisoryListProps> = ({ resolution, runId })
     <div className="overview-card">
       <div className="card-header-row">
         <h5>OSV advisories</h5>
-        <span className="card-badge">{asked.length > 0 ? `${shown(resolution.vulnerability_count)} affect this version` : NOT_COMPUTED}</span>
+        {/* The count is null when OSV gave no answer for a package: then there is no "0 affect". */}
+        <span className="card-badge">
+          {resolution?.vulnerability_count != null ? `${resolution.vulnerability_count} affect this version` : NOT_COMPUTED}
+        </span>
       </div>
 
       {asked.length > 0 && (

@@ -8,7 +8,10 @@ interface OverviewTabProps {
 }
 
 export const OverviewTab: React.FC<OverviewTabProps> = ({ state }) => {
-  const { package: pkg, version: ver, verdict, policyState, honestyWording } = state;
+  const { verdict, policyState, honestyWording } = state;
+  // The proof's package and version when there is a proof; before it arrives, those of the chip that was clicked.
+  const pkg = state.proofData?.package || state.package;
+  const ver = state.proofData?.version || state.version;
   // Everything below is copied from the pipeline's verdict; nothing is filled in when it is missing.
   const v = state.proofData?.cavr_verdict;
   const resolution = state.resolution;
@@ -70,7 +73,7 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({ state }) => {
           <span className="stat-label"><Lock size={13} /> Artifact SHA-256</span>
           <strong className="stat-value mono">{hash ? `${hash.substring(0, 16)}...` : NOT_COMPUTED}</strong>
           <span className="stat-meta">
-            {resolution?.hash_rule ? `${resolution.hash_rule} against the registry digest` : 'SHA-256 of the downloaded file'}
+            Hash check: {shown(resolution?.hash_rule)}
           </span>
         </div>
 

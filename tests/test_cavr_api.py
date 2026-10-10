@@ -438,6 +438,32 @@ def test_timeline_values_of_the_failing_scenarios(dashboard):
     assert analysis["Python files scanned"] is None and analysis["sink calls judged"] is None
 
 
+def test_no_advisory_count_is_shown_when_osv_gave_no_answer(dashboard, monkeypatch):
+    """Network off and nothing saved from an earlier run: OSV was not asked, so "0 advisories" would be invented."""
+    monkeypatch.setattr(api, "ADVISORY_CACHE_DIR", dashboard.world.tmp_path / "no-advisories")
+    run_id, verdict = dashboard.run("network_off")
+    (advisory,) = verdict["packages"][0]["evidence"]["advisories"]
+    assert (advisory["result"], advisory["rule"], advisory["advisory_count"]) == ("UNRESOLVED", "ADVISORIES_UNAVAILABLE", None)
+    artifact = values(stages(run_id)["artifact"])
+    assert artifact["advisories"] == "ADVISORIES_UNAVAILABLE" and artifact["advisories that affect it"] is None
+    event = dashboard.payload(run_id, "package_resolved")
+    resolution = event["resolution"]
+    assert resolution["vulnerability_count"] is None and resolution["advisory_summary"] is None
+    assert resolution["known_risk_signals"] == [] and "OSV gave no answer" in event["message"] and "0 OSV" not in event["message"]
+    # With a saved answer (the other tests) the count is a real 0.
+    monkeypatch.setattr(api, "ADVISORY_CACHE_DIR", dashboard.world.osv_dir)
+    run_id, _ = dashboard.run("network_off")
+    assert values(stages(run_id)["artifact"])["advisories that affect it"] == 0
+    assert dashboard.payload(run_id, "package_resolved")["resolution"]["vulnerability_count"] == 0
+
+
+def test_a_demo_directory_that_cannot_be_named_is_an_unresolved_run_that_finishes(dashboard, monkeypatch):
+    monkeypatch.setattr(api, "QUARANTINE_DIR", Path("/"))       # "/" has no name to put "-demo" behind
+    run_id, verdict = dashboard.run("tampered_wheel")
+    assert outcome(verdict) == ("UNRESOLVED", "internal", "INTERNAL_ERROR") and run_id in api.RUN_FINISHED
+    assert dashboard.index.calls == []
+
+
 def test_no_stage_carries_a_time_of_its_own(dashboard):
     """The pipeline measures one time per request (`fast_gate_ms`). The timeline must not show a time per stage."""
     by_id = stages(dashboard.run("verified")[0])
@@ -696,8 +722,8 @@ def test_metrics_come_from_the_verdict_log(dashboard, client):
     empty = client.get("/api/cavr/metrics").json()
     no_rows = {"count": 0, "p50": None, "p95": None}
     assert empty == {
-        "verdicts": 0, "cache_hits": 0, "cache_hit_rate": None, "cache_lookups": 0, "cache_hit_rate_of_lookups": None,
-        "by_status": {}, "recent": [],
+        "verdicts": 0, "cache_hits": 0, "cache_hit_rate": None, "cache_lookups": 0, "cache_lookup_hits": 0,
+        "cache_hit_rate_of_lookups": None, "by_status": {}, "recent": [],
         "fast_gate_ms": {"by_status": {status: no_rows for status in ("VERIFIED", "REJECTED", "BLOCK", "UNRESOLVED")},
                          "by_cache_lookup": {found: no_rows for found in ("HIT", "MISS", "NOT_REACHED")},
                          "by_status_and_cache_lookup": []}}
@@ -708,7 +734,8 @@ def test_metrics_come_from_the_verdict_log(dashboard, client):
     dashboard.run("tampered_wheel")
     report = client.get("/api/cavr/metrics").json()
     assert report["verdicts"] == 5 and report["cache_hits"] == 1 and report["cache_hit_rate"] == 0.2
-    assert report["cache_lookups"] == 3 and report["cache_hit_rate_of_lookups"] == pytest.approx(1 / 3)
+    assert (report["cache_lookups"], report["cache_lookup_hits"]) == (3, 1)
+    assert report["cache_hit_rate_of_lookups"] == pytest.approx(1 / 3)
     assert report["by_status"] == {"BLOCK": 2, "REJECTED": 1, "VERIFIED": 2}
     close = lambda value: pytest.approx(value, abs=0.01)
     by_status = report["fast_gate_ms"]["by_status"]
