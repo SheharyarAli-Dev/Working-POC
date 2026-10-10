@@ -1,4 +1,5 @@
 import React from 'react';
+import { Code2, ShieldAlert, GitCommit } from 'lucide-react';
 
 interface SecurityRegion {
   file: string;
@@ -22,39 +23,57 @@ export const SatraDiffViewer: React.FC<SatraDiffViewerProps> = ({
   contract
 }) => {
   return (
-    <div className="bg-slate-900 border border-slate-800 rounded-lg p-4 space-y-3">
-      <div className="flex items-center justify-between">
+    <div className="satra-diff-box">
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
         <div>
-          <h3 className="text-sm font-semibold text-slate-200">AST Security Localization & Diff</h3>
-          <p className="text-xs text-slate-400">Security boundary mappings detected in candidate commit</p>
+          <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--ink-primary)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <Code2 size={16} color="#0284c7" />
+            <span>AST Security Localization &amp; Git Diff</span>
+          </div>
+          <p style={{ fontSize: '11px', color: 'var(--ink-muted)', marginTop: '2px' }}>
+            Security boundaries and changed functions localized from candidate commit
+          </p>
         </div>
         {contract && (
-          <span className="text-[11px] font-mono bg-blue-950/60 text-blue-400 border border-blue-500/30 px-2 py-0.5 rounded">
+          <span style={{
+            fontSize: '10.5px',
+            fontFamily: 'monospace',
+            fontWeight: 700,
+            background: '#e0f2fe',
+            color: '#0369a1',
+            padding: '3px 8px',
+            borderRadius: '4px',
+            border: '1px solid #bae6fd'
+          }}>
             Contract: {contract.rule_id || contract.subject || 'Formulated'}
           </span>
         )}
       </div>
 
       {regions && regions.length > 0 && (
-        <div className="space-y-1.5">
-          <div className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
-            Localized Security Regions ({regions.length})
+        <div style={{ marginBottom: '14px' }}>
+          <div style={{ fontSize: '10.5px', fontWeight: 700, color: 'var(--ink-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '6px', display: 'flex', alignItems: 'center', gap: '4px' }}>
+            <ShieldAlert size={12} color="#f59e0b" />
+            <span>Localized Security Regions ({regions.length})</span>
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+          <div className="satra-regions-grid">
             {regions.map((r, i) => (
-              <div
-                key={i}
-                className="p-2 bg-slate-950/60 border border-slate-800 rounded text-xs space-y-1"
-              >
-                <div className="flex items-center justify-between">
-                  <span className="font-mono text-blue-400 font-semibold">{r.file}</span>
-                  {r.lines && <span className="text-[10px] text-slate-500">L{r.lines}</span>}
+              <div key={i} className="satra-region-cell">
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
+                  <span style={{ fontFamily: 'monospace', color: '#0284c7', fontWeight: 700 }}>
+                    {r.file}
+                  </span>
+                  {r.lines && <span style={{ fontSize: '10px', color: 'var(--ink-faded)' }}>L{r.lines}</span>}
                 </div>
                 {r.function && (
-                  <div className="text-slate-300 font-mono text-[11px]">fn {r.function}()</div>
+                  <div style={{ fontSize: '11px', color: 'var(--ink-primary)', fontFamily: 'monospace', fontWeight: 600 }}>
+                    fn {r.function}()
+                  </div>
                 )}
                 {r.mapping_reason && (
-                  <div className="text-[11px] text-slate-400 line-clamp-2">{r.mapping_reason}</div>
+                  <div style={{ fontSize: '10.5px', color: 'var(--ink-muted)', marginTop: '3px' }}>
+                    {r.mapping_reason}
+                  </div>
                 )}
               </div>
             ))}
@@ -62,9 +81,12 @@ export const SatraDiffViewer: React.FC<SatraDiffViewerProps> = ({
         </div>
       )}
 
-      <div className="space-y-1.5">
-        <div className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Unified Git Diff</div>
-        <pre className="p-3 bg-slate-950 border border-slate-800 rounded font-mono text-[11px] text-slate-300 max-h-56 overflow-y-auto overflow-x-auto whitespace-pre-wrap">
+      <div>
+        <div style={{ fontSize: '10.5px', fontWeight: 700, color: 'var(--ink-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '6px', display: 'flex', alignItems: 'center', gap: '4px' }}>
+          <GitCommit size={12} />
+          <span>Unified Git Diff</span>
+        </div>
+        <pre className="satra-diff-pre">
           {diffText || '# No file diff available for this commit'}
         </pre>
       </div>
