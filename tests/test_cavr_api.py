@@ -19,12 +19,12 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from backend.cavr import api, requirement_gate
+from backend.cavr import api, pipeline, requirement_gate
 from backend.cavr.assurance import certificate_for_verdict, generate_printable_html_certificate, verify_chain
 from backend.cavr.pipeline import ESCALATION
 from backend.cavr.pypi_client import FILES_HOST, TransportError, registry_url
 from backend.cavr.storage import CavrStorage
-from test_cavr_support import PYPDF_SHA256, PYPDF_WHEEL, REPO, UNGUARDED, World, synthetic_advisory
+from test_cavr_support import PYPDF_SHA256, PYPDF_WHEEL, REPO, UNGUARDED, World, sha256_file, synthetic_advisory
 
 RECORDED_5_1_0 = json.loads((REPO / "tests" / "test_cavr_data" / "osv-pypdf-5.1.0.json").read_text())["response"]["vulns"]
 SCENARIOS = {scenario["id"]: scenario for scenario in api.SCENARIOS}
@@ -264,6 +264,10 @@ def test_what_the_pipeline_is_given_under_each_condition(dashboard, monkeypatch)
     for scenario in ("not_on_allowlist", "network_off", "tampered_wheel"):
         dashboard.run(scenario)
     plain, offline, tampered = (options for _, _, options in seen)
+    # A demo run downloads into a directory of its own, never into the quarantine of the real runs.
+    assert plain["quarantine_dir"] == dashboard.quarantine
+    assert offline["quarantine_dir"] == api.demo_quarantine_dir("network_off") != tampered["quarantine_dir"]
+    assert tampered["quarantine_dir"] == api.demo_quarantine_dir("tampered_wheel")
     assert all(project_dir == api.PROJECT_DIR for project_dir, _, _ in seen)
     # Only the plain run gets the store: a run under a demo condition is neither logged nor cached.
     assert [store for _, store, _ in seen] == [dashboard.store, None, None]
@@ -271,6 +275,78 @@ def test_what_the_pipeline_is_given_under_each_condition(dashboard, monkeypatch)
     assert isinstance(offline["transport"], api.OfflineTransport) and offline["live_advisories"] is False  # OSV is not asked live
     assert isinstance(tampered["transport"], api.TamperingTransport) and tampered["transport"].inner is dashboard.index
     assert tampered["live_advisories"] is True
+
+
+# --- the tampered-wheel run works on its own copy -----------------------------------------------------------------
+
+def state_of(path):
+    """The bytes of a file and what changes when it is rewritten or replaced: modification time and inode."""
+    status = path.stat()
+    return path.read_bytes(), status.st_mtime_ns, status.st_ino
+
+
+def test_a_tampered_run_never_deletes_or_alters_the_genuine_wheel_in_quarantine(dashboard):
+    _, verified = dashboard.run("verified")
+    genuine = Path(verified["packages"][0]["evidence"]["artifact"]["path"])
+    assert genuine == dashboard.quarantine / "pypdf-6.19.0-py3-none-any.whl" and sha256_file(genuine) == PYPDF_SHA256
+    before = state_of(genuine)
+
+    _, tampered = dashboard.run("tampered_wheel")
+    assert outcome(tampered) == ("REJECTED", "artifact", "HASH_MISMATCH")
+    rejected = Path(tampered["packages"][0]["evidence"]["artifact"]["path"])
+    # The file that arrived is kept as evidence in the demo's own directory, outside the real quarantine.
+    own = api.demo_quarantine_dir("tampered_wheel")
+    assert rejected == own / "pypdf-6.19.0-py3-none-any.whl.rejected" and rejected.is_file()
+    assert own != dashboard.quarantine and dashboard.quarantine not in own.parents and own not in dashboard.quarantine.parents
+    assert sha256_file(rejected) == tampered["packages"][0]["evidence"]["artifact"]["sha256"] != PYPDF_SHA256
+    # The genuine file is the same file with the same bytes, and nothing was added beside it.
+    assert state_of(genuine) == before and sha256_file(genuine) == PYPDF_SHA256
+    assert [path.name for path in dashboard.quarantine.iterdir()] == ["pypdf-6.19.0-py3-none-any.whl"]
+    # The real request afterwards is still a cache hit on that file.
+    _, again = dashboard.run("verified_again")
+    assert outcome(again) == ("VERIFIED", "verdict", "ALL_CHECKS_PASSED") and again["cache_hit"] is True
+    assert sha256_file(genuine) == PYPDF_SHA256
+
+
+def test_tampered_runs_before_and_after_leave_one_evidence_file_and_no_genuine_looking_wheel(dashboard):
+    for _ in range(2):
+        dashboard.run("tampered_wheel")
+    own = api.demo_quarantine_dir("tampered_wheel")
+    assert [path.name for path in own.iterdir()] == ["pypdf-6.19.0-py3-none-any.whl.rejected"]   # no .part, no .whl
+    assert not dashboard.quarantine.exists()            # the real quarantine was never even created
+    dashboard.run("network_off")
+    assert not dashboard.quarantine.exists() and not any(api.demo_quarantine_dir("network_off").glob("*"))
+
+
+def test_a_tampered_run_in_the_middle_of_a_real_run_does_not_change_the_real_verdict(dashboard, monkeypatch):
+    """The real run has downloaded and hashed its wheel and has not scanned it yet; a tampered demo run happens now.
+
+    With one shared quarantine the hash mismatch removed the real run's wheel, and the real run
+    ended UNRESOLVED / ARTIFACT_CHANGED.
+    """
+    real_contract = pipeline.infer_capability_contract
+    interleaved = []
+
+    def contract_after_a_tampered_run(*args, **kwargs):
+        if not interleaved:
+            interleaved.append(api.verify_dashboard_request(["pip", "install", "pypdf==6.19.0"], "tampered_wheel"))
+        return real_contract(*args, **kwargs)
+
+    monkeypatch.setattr(pipeline, "infer_capability_contract", contract_after_a_tampered_run)
+    _, verdict = dashboard.run("verified")
+    assert outcome(interleaved[0]) == ("REJECTED", "artifact", "HASH_MISMATCH")
+    assert outcome(verdict) == ("VERIFIED", "verdict", "ALL_CHECKS_PASSED"), verdict["reason"]
+    assert sha256_file(dashboard.quarantine / "pypdf-6.19.0-py3-none-any.whl") == PYPDF_SHA256
+
+
+def test_demo_directory_is_beside_the_real_quarantine_and_only_for_a_named_condition(dashboard, monkeypatch):
+    assert api.demo_quarantine_dir("tampered_wheel") == dashboard.quarantine.with_name("dashboard-quarantine-demo") / "tampered_wheel"
+    for not_a_condition in ("verified", "", "../x", None):
+        with pytest.raises(ValueError):
+            api.demo_quarantine_dir(not_a_condition)
+    monkeypatch.setattr(api, "QUARANTINE_DIR", None)        # the default: the pipeline's own quarantine directory
+    real = pipeline.default_quarantine_dir()
+    assert real.name == "quarantine" and api.demo_quarantine_dir("network_off") == real.parent / "quarantine-demo" / "network_off"
 
 
 def test_runs_under_a_demo_condition_are_not_in_the_log_the_cache_or_the_metrics(dashboard):

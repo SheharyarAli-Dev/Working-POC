@@ -28,7 +28,8 @@ request. The pipeline then runs unchanged and gives the verdict it would give in
 situation. A condition can only make a verdict worse, never better, and it is written into
 every event and into the proof (`demo_condition`). Such a run gets no store: it is not written
 to the verdict log, so it is not in the report numbers of `/api/cavr/metrics`, and it neither
-reads nor writes the verdict cache.
+reads nor writes the verdict cache. It downloads into a directory of its own
+(`demo_quarantine_dir`), so it cannot delete or change a wheel that a real run quarantined.
 
 Not run on this path: the sandbox, the counterfactual engine, the causal graph, repair,
 re-verification and reconstruction (M2). Their fields in the events are null.
@@ -50,7 +51,7 @@ from backend.cavr.advisories import FIRST_IDS, summarise_ids
 from backend.cavr.assurance import EvidenceChain, certificate_for_verdict, generate_printable_html_certificate, verify_chain
 from backend.cavr.capture import redact
 from backend.cavr.context_extractor import SAMPLE_PROJECT_DIR
-from backend.cavr.pipeline import metrics as pipeline_metrics, verify_request
+from backend.cavr.pipeline import default_quarantine_dir, metrics as pipeline_metrics, verify_request
 from backend.cavr.pypi_client import FILES_HOST, HttpxTransport, TransportError
 from backend.cavr.storage import CavrStorage
 from backend.cavr.verdict_cache import KEY_FIELDS, lookup as cache_lookup
@@ -324,20 +325,38 @@ def demo_condition(body: InterceptRequest):
     return None
 
 
+def demo_quarantine_dir(condition: str) -> Path:
+    """Where a run under a demo condition keeps what it downloads: a directory of its own, beside the real quarantine.
+
+    A hash mismatch removes an older file of the same name from the directory it downloaded
+    into (`pypi_client.fetch_artifact`: that file is not what the registry serves now). In a
+    shared directory that file was the genuine wheel of a real run, so a tampered demo run
+    deleted it. With its own directory a demo run cannot read, replace or delete a real file.
+    """
+    if condition not in CONDITIONS:
+        raise ValueError(f"not a demo condition: {condition!r}")
+    real = Path(QUARANTINE_DIR) if QUARANTINE_DIR is not None else default_quarantine_dir()
+    return real.with_name(real.name + "-demo") / condition
+
+
 def verify_dashboard_request(request, condition) -> dict:
     """Run the pipeline for the dashboard project. Blocking: it uses the network.
 
     Under a demo condition the pipeline gets no store. The outcome of such a run was arranged
-    by the demo, so it must not count in the cache hit rate or the latency percentiles.
+    by the demo, so it must not count in the cache hit rate or the latency percentiles. It
+    also gets its own quarantine directory (`demo_quarantine_dir`), so the tampered wheel is
+    the demo's own download and the genuine wheel of a real run is never deleted or altered.
     """
-    transport, live, store = TRANSPORT, LIVE_ADVISORIES, storage
+    transport, live, store, quarantine = TRANSPORT, LIVE_ADVISORIES, storage, QUARANTINE_DIR
     if condition == "tampered_wheel":
         transport, store = TamperingTransport(TRANSPORT or HttpxTransport()), None
+        quarantine = demo_quarantine_dir(condition)
     elif condition == "network_off":
         transport, live, store = OfflineTransport(), False, None
+        quarantine = demo_quarantine_dir(condition)
     try:
         return verify_request(request, PROJECT_DIR, requirement_gate.load_json_file(requirement_gate.POLICY_PATH), store,
-                              transport=transport, quarantine_dir=QUARANTINE_DIR, advisory_cache_dir=ADVISORY_CACHE_DIR,
+                              transport=transport, quarantine_dir=quarantine, advisory_cache_dir=ADVISORY_CACHE_DIR,
                               live_advisories=live)
     except Exception as exc:  # the pipeline returns verdicts and should not raise; if it does, that is "unknown"
         return {"status": "UNRESOLVED", "stage": "internal", "rule": "INTERNAL_ERROR",

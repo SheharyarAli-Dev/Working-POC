@@ -132,7 +132,7 @@ def verify_request(request, project_dir, policy, store, *, transport=None, quara
                          # Directories the contract and the proofs did not look into (virtual environments, dot-directories).
                          "skipped_directories": context["skipped_directories"]}
     run = SimpleNamespace(policy=policy, lockfile=lockfile, context=context, store=store, transport=transport,
-                          quarantine_dir=Path(quarantine_dir) if quarantine_dir is not None else Path(DATA) / "cavr" / "quarantine",
+                          quarantine_dir=Path(quarantine_dir) if quarantine_dir is not None else default_quarantine_dir(),
                           advisory_cache_dir=Path(advisory_cache_dir) if advisory_cache_dir is not None else Path(DATA) / "cavr" / "advisories",
                           live_advisories=live_advisories, osv=osv, knowledge=knowledge, environment=environment,
                           policy_version=policy_version(policy), analyzer_version=fields["analyzer_version"])
@@ -164,6 +164,11 @@ def verify_request(request, project_dir, policy, store, *, transport=None, quara
         return finish(worst["status"], worst["stage"], worst["rule"], f"{worst['package']}=={worst['version']}: {worst['reason']}")
     return finish("VERIFIED", *PASSED, f"{len(packages)} requested packages verified: " + ", ".join(
         f"{p['package']}=={p['version']}" for p in packages))
+
+
+def default_quarantine_dir() -> Path:
+    """Where downloaded wheels are kept when the caller names no directory."""
+    return Path(DATA) / "cavr" / "quarantine"
 
 
 def analyzer_version(knowledge=None) -> str:
