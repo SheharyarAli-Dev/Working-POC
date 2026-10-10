@@ -112,7 +112,7 @@ def test_live_pip_wrapper_installs_only_with_the_flag_and_only_the_verified_whee
 
 
 def test_live_dashboard_scenarios_are_real_requests(tmp_path, monkeypatch):
-    """Plan step 13: the five dashboard chips against the real PyPI and OSV, with the shipped project and policy."""
+    """The six dashboard chips, in order, against the real PyPI and OSV, with the shipped project and policy."""
     import asyncio
 
     from backend.cavr import api
@@ -136,8 +136,17 @@ def test_live_dashboard_scenarios_are_real_requests(tmp_path, monkeypatch):
     vulnerable = seen["known_vulnerable"]["packages"][0]["evidence"]
     assert vulnerable["artifact"]["rule"] == "HASH_MATCH" and vulnerable["artifact"]["filename"] == "pypdf-5.1.0-py3-none-any.whl"
     assert "GHSA-7hfw-26vp-jp8m" in [match["id"] for advisory in vulnerable["advisories"] for match in advisory["affected"]]
-    assert outcome["denylisted"] == ("BLOCK", "DENYLIST")
+    if outcome["verified"][0] == "VERIFIED":
+        # The second chip is the same request: a cache hit on what the first one stored.
+        assert outcome["verified_again"] == ("VERIFIED", "ALL_CHECKS_PASSED") and seen["verified_again"]["cache_hit"] is True
+        assert seen["verified"]["cache_hit"] is False
+    assert outcome["not_on_allowlist"] == ("BLOCK", "NOT_ON_ALLOWLIST") and seen["not_on_allowlist"]["packages"] == []
     assert outcome["tampered_wheel"] == ("REJECTED", "HASH_MISMATCH"), seen["tampered_wheel"]["reason"]
     tampered = seen["tampered_wheel"]["packages"][0]["evidence"]["artifact"]
     assert tampered["registry_sha256"] == PYPDF_SHA256 != tampered["sha256"] == sha256_file(tampered["path"])
+    # The tampered run kept its file in its own directory and left the genuine wheel of the real runs alone.
+    assert tampered["path"].startswith(str(api.demo_quarantine_dir("tampered_wheel")))
+    assert sha256_file(tmp_path / "quarantine" / "pypdf-6.19.0-py3-none-any.whl") == PYPDF_SHA256
+    assert sorted(path.name for path in (tmp_path / "quarantine").iterdir()) == ["pypdf-5.1.0-py3-none-any.whl",
+                                                                                 "pypdf-6.19.0-py3-none-any.whl"]
     assert outcome["network_off"] == ("UNRESOLVED", "REGISTRY_UNAVAILABLE")

@@ -381,8 +381,8 @@ def log_row(store, status, fast_gate_ms, cache_lookup, stage="verdict", rule="X"
 
 def test_verdicts_are_logged_and_the_report_numbers_come_from_the_log(world):
     assert metrics(world.store) == {
-        "verdicts": 0, "cache_hits": 0, "cache_hit_rate": None, "cache_lookups": 0, "cache_hit_rate_of_lookups": None,
-        "by_status": {},
+        "verdicts": 0, "cache_hits": 0, "cache_hit_rate": None, "cache_lookups": 0, "cache_lookup_hits": 0,
+        "cache_hit_rate_of_lookups": None, "by_status": {},
         "fast_gate_ms": {"by_status": {status: NO_ROWS for status in ("VERIFIED", "REJECTED", "BLOCK", "UNRESOLVED")},
                          "by_cache_lookup": {found: NO_ROWS for found in ("HIT", "MISS", "NOT_REACHED")},
                          "by_status_and_cache_lookup": []}}
@@ -391,7 +391,8 @@ def test_verdicts_are_logged_and_the_report_numbers_come_from_the_log(world):
     report = metrics(world.store)
     assert report["verdicts"] == 4 and report["cache_hits"] == 2 and report["cache_hit_rate"] == 0.5
     # The BLOCK never reached the cache, so it is not one of the lookups.
-    assert report["cache_lookups"] == 3 and report["cache_hit_rate_of_lookups"] == pytest.approx(2 / 3)
+    assert report["cache_lookups"] == 3 and report["cache_lookup_hits"] == 2
+    assert report["cache_hit_rate_of_lookups"] == pytest.approx(2 / 3)
     assert report["by_status"] == {"BLOCK": 1, "VERIFIED": 3}
     times = report["fast_gate_ms"]
     assert times["by_status"] == {
@@ -456,7 +457,11 @@ def test_a_rejection_by_osv_before_any_stored_analysis_is_logged_as_a_miss(world
 
 
 def test_a_verdict_log_made_before_the_lookup_was_logged_is_still_read(tmp_path):
-    """An existing database keeps its rows. Their lookup is unknown unless they were hits, and the report says so."""
+    """An existing database keeps its rows. Their lookup was not recorded, and the report says so for all of them.
+
+    An old hit is not counted as a lookup either: old misses cannot be told from old BLOCKs, so counting
+    only the old hits would make the hit rate of lookups too high.
+    """
     path = tmp_path / "old.sqlite3"
     with sqlite3.connect(path) as connection:
         connection.execute("""CREATE TABLE verdict_log(id INTEGER PRIMARY KEY AUTOINCREMENT, recorded_at TEXT NOT NULL,
@@ -470,11 +475,13 @@ def test_a_verdict_log_made_before_the_lookup_was_logged_is_still_read(tmp_path)
     assert [row["cache_lookup"] for row in store.get_verdict_log()] == [None, None, None]
     log_row(store, "VERIFIED", 1000.0, "MISS")
     report = metrics(store)
-    assert report["verdicts"] == 4 and report["cache_hits"] == 1
+    assert report["verdicts"] == 4 and report["cache_hits"] == 1 and report["cache_hit_rate"] == 0.25   # the old hit
     assert {found: row["count"] for found, row in report["fast_gate_ms"]["by_cache_lookup"].items()} == {
-        "HIT": 1, "MISS": 1, "NOT_REACHED": 0, "NOT_RECORDED": 2}
-    # Rows whose lookup is unknown are not counted as lookups: the rate is over what is known.
-    assert report["cache_lookups"] == 2 and report["cache_hit_rate_of_lookups"] == 0.5
+        "HIT": 0, "MISS": 1, "NOT_REACHED": 0, "NOT_RECORDED": 3}
+    # None of the three old rows is a lookup. The one new row is a miss: 0 hits of 1 lookup.
+    assert (report["cache_lookups"], report["cache_lookup_hits"], report["cache_hit_rate_of_lookups"]) == (1, 0, 0.0)
+    assert [(row["status"], row["cache_lookup"], row["count"]) for row in report["fast_gate_ms"]["by_status_and_cache_lookup"]] == [
+        ("BLOCK", "NOT_RECORDED", 1), ("VERIFIED", "MISS", 1), ("VERIFIED", "NOT_RECORDED", 2)]
     assert CavrStorage(path).get_verdict_log()[0]["cache_lookup"] == "MISS"      # opening it again changes nothing
 
 

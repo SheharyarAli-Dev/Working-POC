@@ -230,7 +230,19 @@ def test_the_overview_shows_the_verdict_and_dashes_for_what_was_not_computed(das
     assert "Cache hit: no" in block_view and "Escalation: " + DASH in block_view
     assert "VERDICT: ALLOW" in verified_view and after(verified_view, "POLICY STATE:") == "VERIFIED"
     assert after(verified_view, "Artifact SHA-256") == PYPDF_SHA256[:16] + "..."
-    assert "HASH_MATCH against the registry digest" in verified_view
+    # The hash result is the pipeline's rule, or a dash; never a sentence the page makes around a missing rule.
+    assert "Hash check: HASH_MATCH" in verified_view and "Hash check: " + DASH in block_view
+    # Package and version are the proof's, so they are right even when the page did not start the run itself.
+    assert [verified["proof"]["package"], verified["proof"]["version"]] == ["pypdf", "6.19.0"]
+    assert verified_view[verified_view.index("Package & Version") + 1:][:2] == ["pypdf", "6.19.0"]
+    assert block_view[block_view.index("Package & Version") + 1:][:2] == ["left-pad", "1.0"]
+
+
+def test_the_overview_of_a_run_without_a_download_names_the_rule_and_no_hash(dashboard, tmp_path):
+    (offline,) = render(tmp_path, {"view": "overview", **run_data(dashboard, "network_off")})
+    assert after(offline, "Artifact SHA-256") == DASH and "Hash check: REGISTRY_UNAVAILABLE" in offline
+    assert not [piece for piece in offline if "against the registry digest" in piece]
+    assert "DEMO CONDITION: network_off" in offline and "VERDICT: NEEDS_REVIEW" in offline
 
 
 def test_the_requirements_tab_prints_what_a_stage_returned_and_no_pass_of_its_own(dashboard, tmp_path):
@@ -242,6 +254,56 @@ def test_the_requirements_tab_prints_what_a_stage_returned_and_no_pass_of_its_ow
     assert [returned(requirement) for requirement in ("FR-3", "FR-4", "FR-5", "FR-7", "FR-8", "FR-9", "NFR-1", "NFR-2")] == [DASH] * 8
     assert returned("FR-10") == blocked["proof"]["certificate_id"]
     assert "PASS" not in table and "FAIL" not in table and "NOT RUN" not in table
+
+
+# --- review fix: no "nothing found" when nothing was scanned ---------------------------------------------------------
+
+NOTHING_FOUND = ("No sensitive sink call", "no sink call found", "Nothing found", "No reachable sink", "No branch that gates")
+
+
+def three_views(tmp_path, data):
+    return render(tmp_path, {"view": "stage", **data}, {"view": "contract", **data}, {"view": "triggers", **data})
+
+
+def test_a_run_rejected_before_the_scan_does_not_say_that_the_scan_found_nothing(dashboard, tmp_path):
+    """pypdf 5.1.0: the contract is inferred, then OSV rejects the request. No wheel was scanned and no sink was judged."""
+    data = run_data(dashboard, "known_vulnerable")
+    action = next(event for event in data["events"] if event["type"] == "action_completed")["payload"]
+    assert action["capability_contract"]["rule"] == "CONTRACT_INFERRED" and action["scan"] == [] and action["reachability"] is None
+    stage, contract, triggers = three_views(tmp_path, data)
+    for view in (stage, contract, triggers):
+        assert [piece for piece in view if any(text in piece for text in NOTHING_FOUND)] == [], view
+    assert after(stage, "EVIDENCE FOUND") == DASH
+    rows = len(action["capability_contract"]["contract_rows"])
+    assert rows > 0 and contract.count(DASH) == 2 * rows          # per row: the sink cell and the result cell
+    assert "The AST scan did not run for this request, so no sink was looked for." in triggers
+    assert "sinks not judged" in triggers
+
+
+def test_a_run_whose_scan_ran_still_shows_what_it_found(dashboard, tmp_path):
+    data = run_data(dashboard, "verified")
+    stage, contract, triggers = three_views(tmp_path, data)
+    assert after(stage, "EVIDENCE FOUND") == ("pypdf/filters.py:774 subprocess.run GUARD_DISABLED; "
+                                              "pypdf/filters.py:804 subprocess.run GUARD_DISABLED")
+    assert "pypdf/filters.py:774" in " ".join(triggers) and "GUARD_DISABLED" in triggers
+    assert "Nothing found" in contract or "No reachable sink" in contract     # the scan ran: these are results of it
+    # Constructed input, to reach the sentence for "scanned and nothing found": the same run with its sinks removed.
+    action = next(event for event in data["events"] if event["type"] == "action_completed")["payload"]
+    action["reachability"]["sinks"] = []
+    for scan in action["scan"]:
+        scan["sinks"], scan["triggers"] = [], []
+    stage, _, triggers = three_views(tmp_path, data)
+    assert after(stage, "EVIDENCE FOUND") == "No sensitive sink call found in the scanned wheels."
+    assert "No sensitive sink call was found in the scanned wheels." in triggers
+
+
+def test_the_advisory_card_shows_no_count_when_osv_gave_no_answer(dashboard, tmp_path, monkeypatch):
+    monkeypatch.setattr(api, "ADVISORY_CACHE_DIR", dashboard.world.tmp_path / "no-advisories")
+    data = run_data(dashboard, "network_off")
+    overview, timeline = render(tmp_path, {"view": "overview", **data}, {"view": "timeline", "stages": data["proof"]["stages"]})
+    assert after(overview, "OSV advisories") == DASH and "0 affect this version" not in overview
+    assert "ADVISORIES_UNAVAILABLE" in " ".join(overview)
+    assert after(timeline, "advisories that affect it") == DASH and after(timeline, "advisories") == "ADVISORIES_UNAVAILABLE"
 
 
 # --- issue 3: fast_gate_ms per verdict and per cache lookup ---------------------------------------------------------
@@ -273,6 +335,10 @@ def test_the_metrics_tab_lists_the_time_per_verdict_and_per_cache_lookup(dashboa
     # Two hit rates, each with what it is a rate of. No single percentile over all verdicts.
     assert after(tab, "Cache hit rate, all verdicts") == "25.0%" and "1 of 4 verdicts" in tab
     assert after(tab, "Cache hit rate, lookups only") == "33.3%" and "1 of 3 verdicts that reached the cache lookup" in tab
+    # The count beside the lookup rate is the number of logged HIT lookups, not the `cache_hit` column.
+    report["cache_hits"], report["cache_lookup_hits"] = 9, 1
+    (again,) = render(tmp_path, {"view": "metrics", "metrics": report})
+    assert "9 of 4 verdicts" in again and "1 of 3 verdicts that reached the cache lookup" in again
     assert not [piece for piece in tab if "Fast gate p50" in piece or "Fast gate p95" in piece]
     recent = table_rows(tab, "Last verdicts (verdict log)", 7, 4)
     assert [(row[2], row[5]) for row in recent] == [("BLOCK", "NOT_REACHED"), ("REJECTED", "MISS"), ("VERIFIED", "HIT"),

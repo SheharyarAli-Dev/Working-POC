@@ -190,20 +190,25 @@ def metrics(store) -> dict:
 
     Two hit rates: `cache_hit_rate` is hits / all verdicts (a BLOCK counts as "not a hit");
     `cache_hit_rate_of_lookups` is hits / verdicts that reached the cache lookup.
-    A row written before the lookup was logged is HIT when it was a hit and NOT_RECORDED otherwise.
+    A row written before the lookup was logged is NOT_RECORDED, also when it was a hit: its misses
+    cannot be told from BLOCKs, so counting only its hits would make the lookup rate too high.
+    `cache_lookup_hits` is therefore the number of rows logged as HIT, which can be smaller
+    than `cache_hits` (the `cache_hit` column) on a database that has such older rows.
     """
     rows = store.get_verdict_log()
     by_status = {status: [] for status in STATUSES}
     by_lookup = {found: [] for found in CACHE_LOOKUPS}
     by_pair = {}
     for row in rows:
-        found = row.get("cache_lookup") or ("HIT" if row["cache_hit"] else "NOT_RECORDED")
+        found = row.get("cache_lookup") or "NOT_RECORDED"
         for groups, key in ((by_status, row["status"]), (by_lookup, found), (by_pair, (row["status"], found))):
             groups.setdefault(key, []).append(row["fast_gate_ms"])
     hits = sum(1 for row in rows if row["cache_hit"])
-    lookups = len(by_lookup["HIT"]) + len(by_lookup["MISS"])
+    lookup_hits = len(by_lookup["HIT"])
+    lookups = lookup_hits + len(by_lookup["MISS"])
     return {"verdicts": len(rows), "cache_hits": hits, "cache_hit_rate": hits / len(rows) if rows else None,
-            "cache_lookups": lookups, "cache_hit_rate_of_lookups": len(by_lookup["HIT"]) / lookups if lookups else None,
+            "cache_lookups": lookups, "cache_lookup_hits": lookup_hits,
+            "cache_hit_rate_of_lookups": lookup_hits / lookups if lookups else None,
             "by_status": {status: len(times) for status, times in sorted(by_status.items()) if times},
             "fast_gate_ms": {
                 "by_status": {status: _time_summary(times) for status, times in by_status.items()},

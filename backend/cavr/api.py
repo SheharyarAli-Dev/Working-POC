@@ -348,13 +348,13 @@ def verify_dashboard_request(request, condition) -> dict:
     the demo's own download and the genuine wheel of a real run is never deleted or altered.
     """
     transport, live, store, quarantine = TRANSPORT, LIVE_ADVISORIES, storage, QUARANTINE_DIR
-    if condition == "tampered_wheel":
-        transport, store = TamperingTransport(TRANSPORT or HttpxTransport()), None
-        quarantine = demo_quarantine_dir(condition)
-    elif condition == "network_off":
-        transport, live, store = OfflineTransport(), False, None
-        quarantine = demo_quarantine_dir(condition)
     try:
+        if condition == "tampered_wheel":
+            transport, store = TamperingTransport(TRANSPORT or HttpxTransport()), None
+            quarantine = demo_quarantine_dir(condition)
+        elif condition == "network_off":
+            transport, live, store = OfflineTransport(), False, None
+            quarantine = demo_quarantine_dir(condition)
         return verify_request(request, PROJECT_DIR, requirement_gate.load_json_file(requirement_gate.POLICY_PATH), store,
                               transport=transport, quarantine_dir=quarantine, advisory_cache_dir=ADVISORY_CACHE_DIR,
                               live_advisories=live)
@@ -434,6 +434,7 @@ def verdict_events(verdict: dict, condition=None) -> list[tuple]:
         advisories = evidence.get("advisories") or []
         affected = [match for advisory in advisories for match in advisory.get("affected") or []]
         affected_ids = [str(match.get("id")) for match in affected]
+        affected_count = _affected_count(advisories)
         if tree or artifact:
             last = 2
             events.append((2, "P5", "PackageResolution", "package_resolved", str(artifact.get("rule") or tree.get("rule")), {
@@ -449,7 +450,7 @@ def verdict_events(verdict: dict, condition=None) -> list[tuple]:
                     "advisories": [{key: advisory.get(key) for key in ("name", "version", "result", "rule", "reason", "mode",
                                                                        "retrieved_at", "advisory_count")}
                                    for advisory in advisories],
-                    "vulnerability_count": len(affected),
+                    "vulnerability_count": affected_count,  # None when OSV gave no answer for a package
                     # For one line on the page: the count and the first ids. `known_risk_signals` below is the whole list.
                     "first_advisory_ids": affected_ids[:FIRST_IDS],
                     "advisory_summary": (f"{len(affected)} advisories affect {package.get('package')} {package.get('version')}: "
@@ -457,7 +458,8 @@ def verdict_events(verdict: dict, condition=None) -> list[tuple]:
                     "known_risk_signals": [{"cve": match.get("id"), "aliases": match.get("aliases"),
                                             "summary": match.get("summary"), "fixed_versions": match.get("fixed_versions")}
                                            for match in affected]},
-                "message": f"Artifact: {artifact.get('rule')}. Tree: {tree.get('rule')}. {len(affected)} OSV advisories affect it.",
+                "message": f"Artifact: {artifact.get('rule')}. Tree: {tree.get('rule')}. " + (
+                    "OSV gave no answer." if affected_count is None else f"{affected_count} OSV advisories affect it."),
                 "plain_explanation": "Downloaded the real file, compared its SHA-256 with the registry, read its dependencies "
                                      "and asked the OSV vulnerability database."}))
         cache = package.get("cache") or {}
@@ -526,8 +528,7 @@ def stage_summary(verdict: dict) -> list[dict]:
                      ("sha256 of the download", artifact.get("sha256")), ("registry sha256", artifact.get("registry_sha256")),
                      ("dependency tree", tree.get("rule")), ("files in the tree", _count(tree, "nodes")),
                      ("advisories", ", ".join(sorted({str(advisory.get("rule")) for advisory in advisories})) or None),
-                     ("advisories that affect it",
-                      sum(len(_list(advisory.get("affected"))) for advisory in advisories) if advisories else None)],
+                     ("advisories that affect it", _affected_count(advisories))],
         "cache": [("lookup", cache.get("lookup")), ("stored", cache.get("stored") if looked_up else None),
                   ("key", cache.get("key"))],
         "analysis": [("contract", contract.get("rule")), ("call sites", _count(contract, "call_sites")),
@@ -558,6 +559,18 @@ def _list(value) -> list:
 def _count(mapping: dict, key: str):
     """How many items the list `mapping[key]` has, or None when there is no such list."""
     return len(mapping[key]) if isinstance(mapping.get(key), list) else None
+
+
+def _affected_count(advisories: list):
+    """How many advisories affect the checked packages, or None when that is not known.
+
+    It is known only when OSV answered for every package (`advisory_count` is set). A record
+    such as ADVISORIES_UNAVAILABLE has an empty `affected` list because nothing was asked,
+    not because nothing was found, so it must not be counted as 0.
+    """
+    if not advisories or any(advisory.get("advisory_count") is None for advisory in advisories):
+        return None
+    return sum(len(_list(advisory.get("affected"))) for advisory in advisories)
 
 
 def honesty_wording(verdict: dict) -> str:

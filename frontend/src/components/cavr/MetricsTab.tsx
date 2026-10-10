@@ -99,7 +99,7 @@ export const MetricsReport: React.FC<{ metrics: any }> = ({ metrics }) => {
         <div className="kpi-card">
           <span className="kpi-title"><PieChart size={13} /> Cache hit rate, lookups only</span>
           <strong className="kpi-val">{percent(metrics.cache_hit_rate_of_lookups)}</strong>
-          <span className="kpi-sub">{shown(metrics.cache_hits)} of {shown(metrics.cache_lookups)} verdicts that reached the cache lookup</span>
+          <span className="kpi-sub">{shown(metrics.cache_lookup_hits)} of {shown(metrics.cache_lookups)} verdicts that reached the cache lookup</span>
         </div>
       </div>
 

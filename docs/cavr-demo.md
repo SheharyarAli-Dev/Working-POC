@@ -557,7 +557,9 @@ print("last verdicts (newest first):")
 for r in m["recent"]: print("  ", r["id"], r["status"], r["stage"], r["rule"], r["fast_gate_ms"], r["cache_lookup"], "|", r["requested"])'
 ```
 
-**Recorded output** (taken after cases 1-6 and one more click of chip 2, before the wrapper runs):
+**Recorded output** (taken before the wrapper runs, after cases 1-6 and one more click of chip 2,
+`RUN=$(run_scenario verified_again); show $RUN`, which is not one of the six cases; without that
+extra click you get 4 verdicts, 1 cache hit and 1 hit of 3 lookups):
 
 ```text
 {'verdicts': 5, 'cache_hits': 2, 'cache_hit_rate': 0.4, 'cache_lookups': 4, 'cache_hit_rate_of_lookups': 0.5, 'by_status': {'BLOCK': 1, 'REJECTED': 1, 'VERIFIED': 3}}
@@ -585,8 +587,9 @@ last verdicts (newest first):
 
 How to read it:
 
-- Rows 1-4 are cases 1-4. Row 5 is the extra click of chip 2 after case 5, made to show that the
-  genuine wheel was still there (it was: `HIT`). Cases 5 and 6 are not in the log, as intended.
+- Rows 1-4 are cases 1-4. Row 5 is the extra click of chip 2 after case 6. It says nothing about
+  the genuine wheel (every run downloads the wheel again); the `sha256sum` lines of case 5 are the
+  evidence for that. Cases 5 and 6 are not in the log, as intended.
 - There is no single p50 any more. The BLOCK took 2.17 ms and sits in its own row; it no longer
   pulls down the time reported for verifying a package.
 - `UNRESOLVED` has no logged request here (case 6 is a demo run), so its times are `None`
@@ -608,7 +611,8 @@ demo runs get no store.
 
 ## Things to know before you present
 
-Cases 1-6 all gave the expected verdict, stage and rule, and W1-W6 the expected exit codes.
+Cases 1-6 all gave the expected verdict, stage and rule, and the four wrapper runs (W1, W3, W4, W6)
+the expected exit codes.
 
 1. **The page was not opened in a browser for this file** (none is installed in the environment
    the script was recorded in). What was checked instead: the build succeeds; the app serves the
@@ -629,8 +633,8 @@ Cases 1-6 all gave the expected verdict, stage and rule, and W1-W6 the expected 
 7. **Tabs with no data on the fast gate** (Counterfactual Runs, Causal Graph, Repair) say "Not run",
    and the Environment box shows a dash: sandbox execution is deep analysis (M2).
 8. **An old `runtime` database** gets the new `cache_lookup` column when the app starts. Its older
-   rows are counted as `HIT` when they were hits and `NOT_RECORDED` otherwise; the demo uses a
-   fresh `runtime-demo`, so this does not appear there.
+   rows are listed as `NOT_RECORDED` and are not in the hit rate of lookups; the demo uses a fresh
+   `runtime-demo`, so this does not appear there.
 9. **Not run for this file:** `--install` (covered by the live test
    `test_live_pip_wrapper_installs_only_with_the_flag_and_only_the_verified_wheel`, last run on
    2026-10-10), the two variants of W4, and anything in a browser.
