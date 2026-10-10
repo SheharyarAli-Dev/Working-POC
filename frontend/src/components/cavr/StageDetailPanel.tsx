@@ -46,7 +46,7 @@ export const StageDetailPanel: React.FC<StageDetailPanelProps> = ({ state }) => 
       why: "The SHA-256 is computed from the downloaded bytes and compared with the registry digest; every dependency is checked the same way.",
       evidence: resolution
         ? (resolution.known_risk_signals?.length
-          ? `${resolution.known_risk_signals.length} OSV advisories affect this version (first: ${resolution.known_risk_signals[0].cve}).`
+          ? `OSV: ${shown(resolution.advisory_summary)}. The whole list is in the Overview tab and in the proof.`
           : `sha256 ${shown(resolution.sha256)}; registry ${shown(resolution.registry_sha256)}. OSV: ${shown((resolution.advisories || []).map((a: any) => a.rule).join(', '))}.`)
         : NOT_COMPUTED,
       next: afterThis("Look up the verdict cache on the 8-field key.")

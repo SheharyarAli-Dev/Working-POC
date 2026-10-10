@@ -181,6 +181,17 @@ def test_pypdf_5_1_0_is_rejected_by_osv_with_the_recorded_advisory_ids(dashboard
     decided = dashboard.payload(run_id, "verdict_computed")
     assert (decided["verdict"], decided["policy_state"]) == ("BLOCK", "REJECTED") and "GHSA-" in decided["reason"]
     assert decided["demo_condition"] is None
+    # One line for a person: the count and the first three ids. The whole list stays in the event and in the proof.
+    assert resolution["first_advisory_ids"] == ids[:3] == sorted(ids)[:3]
+    assert resolution["advisory_summary"] == f"97 advisories affect pypdf 5.1.0: {ids[0]}, {ids[1]}, {ids[2]} and 94 more"
+    assert decided["reason"] == f"pypdf==5.1.0: pypdf 5.1.0 is affected by 97 known advisories: {ids[0]}, {ids[1]}, {ids[2]} and 94 more"
+    in_proof = api.get_proof(run_id)["cavr_verdict"]["packages"][0]["evidence"]["advisories"][0]["affected"]
+    assert [entry["id"] for entry in in_proof] == ids
+
+
+def test_advisory_summary_is_null_when_no_advisory_affects_the_version(dashboard):
+    resolution = dashboard.payload(dashboard.run("verified")[0], "package_resolved")["resolution"]
+    assert (resolution["vulnerability_count"], resolution["first_advisory_ids"], resolution["advisory_summary"]) == (0, [], None)
 
 
 def test_denylisted_name_is_blocked_before_any_download(dashboard):

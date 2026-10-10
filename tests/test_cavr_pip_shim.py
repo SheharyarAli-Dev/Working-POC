@@ -381,6 +381,31 @@ def test_a_fault_in_the_pipeline_call_is_unresolved_not_a_traceback(shim, monkey
     assert code == 2 and shim.pip.calls == [] and "CAVR verdict: UNRESOLVED" in text and "disk on fire" in text
 
 
+# --- long advisory lists --------------------------------------------------------------------------------------------------
+
+def test_a_long_advisory_list_is_one_short_line_and_whole_in_the_json(shim):
+    many = [synthetic_advisory(f"SYNTH-{number:04d}", "pypdf") for number in range(1, 41)]
+    shim.world.advisories("pypdf", "6.19.0", many)
+    code, text = shim.run("install", "pypdf==6.19.0")
+    assert code == 1 and "CAVR verdict: REJECTED" in text
+    (line,) = [line for line in text.splitlines() if line.startswith("  advisories:")]
+    assert line == ("  advisories: pypdf 6.19.0 KNOWN_VULNERABILITY: 40 advisories: SYNTH-0001, SYNTH-0002, SYNTH-0003 and 37 more "
+                    "(every id: --cavr-json)")
+    assert "SYNTH-0004" not in text and max(len(line) for line in text.splitlines()) < 200
+    code, as_json = shim.run("install", "pypdf==6.19.0", "--cavr-json")
+    affected = json.loads(as_json)["verdict"]["packages"][0]["evidence"]["advisories"][0]["affected"]
+    assert code == 1 and [entry["id"] for entry in affected] == [advisory["id"] for advisory in many]
+
+
+def test_a_short_advisory_list_is_printed_whole(shim):
+    shim.world.advisories("pypdf", "6.19.0", [synthetic_advisory("SYNTH-0051", "pypdf"), synthetic_advisory("SYNTH-0052", "pypdf")])
+    _, text = shim.run("install", "pypdf==6.19.0")
+    assert "  advisories: pypdf 6.19.0 KNOWN_VULNERABILITY: 2 advisories: SYNTH-0051, SYNTH-0052\n" in text
+    assert "more" not in text.split("advisories: pypdf")[1].splitlines()[0]
+    _, clean = Shim(shim.world.tmp_path / "other").run("install", "pypdf==6.19.0")
+    assert "  advisories: pypdf 6.19.0 NO_KNOWN_VULNERABILITY\n" in clean
+
+
 # --- as a program ----------------------------------------------------------------------------------------------------
 
 def test_module_runs_as_a_program_and_fails_closed(tmp_path):

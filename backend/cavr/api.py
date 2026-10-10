@@ -46,6 +46,7 @@ from fastapi.responses import HTMLResponse, StreamingResponse
 from pydantic import BaseModel
 
 from backend.cavr import requirement_gate
+from backend.cavr.advisories import FIRST_IDS, summarise_ids
 from backend.cavr.assurance import EvidenceChain, certificate_for_verdict, generate_printable_html_certificate, verify_chain
 from backend.cavr.capture import redact
 from backend.cavr.context_extractor import SAMPLE_PROJECT_DIR
@@ -413,6 +414,7 @@ def verdict_events(verdict: dict, condition=None) -> list[tuple]:
         artifact, tree = evidence.get("artifact") or {}, evidence.get("tree") or {}
         advisories = evidence.get("advisories") or []
         affected = [match for advisory in advisories for match in advisory.get("affected") or []]
+        affected_ids = [str(match.get("id")) for match in affected]
         if tree or artifact:
             last = 2
             events.append((2, "P5", "PackageResolution", "package_resolved", str(artifact.get("rule") or tree.get("rule")), {
@@ -429,6 +431,10 @@ def verdict_events(verdict: dict, condition=None) -> list[tuple]:
                                                                        "retrieved_at", "advisory_count")}
                                    for advisory in advisories],
                     "vulnerability_count": len(affected),
+                    # For one line on the page: the count and the first ids. `known_risk_signals` below is the whole list.
+                    "first_advisory_ids": affected_ids[:FIRST_IDS],
+                    "advisory_summary": (f"{len(affected)} advisories affect {package.get('package')} {package.get('version')}: "
+                                         f"{summarise_ids(affected_ids)}") if affected else None,
                     "known_risk_signals": [{"cve": match.get("id"), "aliases": match.get("aliases"),
                                             "summary": match.get("summary"), "fixed_versions": match.get("fixed_versions")}
                                            for match in affected]},

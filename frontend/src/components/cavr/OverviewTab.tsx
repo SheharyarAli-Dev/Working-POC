@@ -1,5 +1,6 @@
 import React from 'react';
 import { CavrRunState, NOT_COMPUTED, shown } from './types';
+import { AdvisoryList } from './AdvisoryList';
 import { ShieldCheck, AlertOctagon, HelpCircle, CheckCircle, FileText, Clock, Cpu, Lock, AlertTriangle } from 'lucide-react';
 
 interface OverviewTabProps {
@@ -23,7 +24,7 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({ state }) => {
     findings.push(`Artifact: ${resolution.hash_rule}. ${resolution.hash_reason || ''}`);
   }
   if (resolution?.known_risk_signals?.length) {
-    findings.push(`OSV: ${resolution.known_risk_signals.length} advisories affect this version (first: ${resolution.known_risk_signals[0].cve}).`);
+    findings.push(`OSV: ${shown(resolution.advisory_summary)}.`);
   }
   if (v?.escalation) {
     findings.push(`Escalation: ${v.escalation}.`);
@@ -131,6 +132,9 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({ state }) => {
           )}
         </div>
       </div>
+
+      {/* OSV: the count and the first three ids, with the whole list in a closed section */}
+      <AdvisoryList resolution={resolution} runId={state.runId} />
     </div>
   );
 };
