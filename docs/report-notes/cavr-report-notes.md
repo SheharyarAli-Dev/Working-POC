@@ -923,3 +923,125 @@ The 16 MINOR items of the review are listed in `docs/cavr-m1-plan.md` under "Kno
    Nothing new is installed by it, so there is nothing for CAVR to download and check. Removing a
    `--hash` on a kept line is reported as MODIFIED. Removing an option line such as `--require-hashes`
    is not reported yet; it is in the deferred list.
+
+## Step 4 — C3 fetch PyPI release metadata and verify artifact SHA-256 (2026-10-10)
+
+Plan commit 4, `feat(cavr): C3 fetch PyPI release metadata and verify artifact SHA-256`.
+Review: REVIEW_LINE_STEP_4
+
+### Ch 6 Implementation
+
+| File | Function / constant | What it does |
+|---|---|---|
+| `backend/cavr/pypi_client.py` (new, 296 lines) | `fetch_artifact(name, version, quarantine_dir, transport=None, max_bytes=…, deadline_seconds=…, supported_tags=None)` | Reads `https://pypi.org/pypi/{name}/{version}/json`, picks the wheel, streams it into `quarantine_dir`, hashes the file on disk and compares with the registry digest. Returns `result` (OK / REJECTED / UNRESOLVED), `rule`, `reason` and the evidence fields `registry_url`, `files_listed`, `filename`, `url`, `registry_sha256`, `registry_size`, `sha256`, `size`, `path`, `upload_time`, `requires_python`. |
+| | `select_wheel(entries, name, version, supported_tags=None)` | Chooses one wheel: among wheels whose tags the running interpreter supports (`packaging.tags.sys_tags()`), the best-ranked one; filename breaks ties. A wheel entry with a wrong name, version or a directory part makes the response invalid. |
+| | `HttpxTransport.stream(url)` | Default transport: HTTPS GET with `httpx`, 15 s timeout, no redirects, status other than 200 -> `TransportError`. |
+| | `TransportError`, `registry_url(name, version)` | The one exception a transport raises; the JSON URL builder (name and version are percent-quoted). |
+| | `_chunks`, `_read_capped` | Read a body chunk by chunk with a byte cap (`_TooLarge`) and a wall-clock deadline. |
+| | `_parse_release`, `_request_problem`, `_allowed_file_url`, `_sha256_of_file`, `_result` | Validate the response / the request / the file URL; hash a file by reading it back; build the result dict. |
+| | `MAX_REGISTRY_BYTES` 20 MiB, `MAX_ARTIFACT_BYTES` 200 MiB, `DEADLINE_SECONDS` 120 | Budgets. |
+| `tests/test_cavr_support.py` (new, 126 lines) | `build_wheel`, `file_entry`, `registry_response`, `FakeIndex`, `pypdf_registry_response`, `sha256_file` | Test helpers shared by steps 4-8, no tests. `build_wheel` writes a real zip; `FakeIndex` is a transport that serves real file bytes and a response whose digest is computed from them. |
+| `tests/test_cavr_pypi_client.py` (new, 443 lines) | | 35 test functions, 82 cases, all offline. |
+| `tests/test_cavr_live.py` (new, 25 lines) | | 2 live tests, skipped unless `CAVR_LIVE=1`. |
+| `docs/cavr-m1-plan.md` | | Progress box 4 ticked; the deferred item "Gate, local versions" marked as handled here. |
+
+Key algorithm, `fetch_artifact`:
+
+1. Validate the request (name pattern, version parses with `packaging`, no local version). Bad -> UNRESOLVED, no network call.
+2. Read the JSON (capped). 404 -> `RELEASE_NOT_FOUND`; any other failure -> `REGISTRY_UNAVAILABLE`; the response must name the same canonical name and an equal version, else `REGISTRY_INVALID`. `info.yanked` must be exactly `false`.
+3. `select_wheel`, then check the chosen entry before any download: not yanked, URL is `https://files.pythonhosted.org/...`, a 64-hex `sha256` exists, `size` is a whole number and under the cap.
+4. Stream to `<filename>.<random>.part` inside the quarantine directory; stop over the cap or the deadline; the part file is deleted on every failure.
+5. Re-open the part file, SHA-256 it, rename it to `<filename>` (match -> OK `HASH_MATCH`) or `<filename>.rejected` (mismatch -> REJECTED `HASH_MISMATCH`).
+
+### Design decisions
+
+| Decision | Alternatives considered | Why |
+|---|---|---|
+| Stage result is `OK`, not `VERIFIED` | Reuse VERIFIED | VERIFIED is the final verdict of the whole pipeline (step 11). A matching hash alone must not read as a verdict. |
+| Hash the file after it is written, by reading it back | Hash the chunks while streaming | The plan asks for the digest of the bytes on disk. The evidence then describes the exact file later stages open. Cost: the file is read twice. |
+| Transport = one method `stream(url)` | Pass an `httpx.Client`; mock `httpx` in tests | A one-method interface lets tests serve real local files without patching a library. |
+| No redirects; file host must be exactly `files.pythonhosted.org` over https | Follow redirects; accept any URL in the JSON | The registry response is input. A response pointing at another host, `http://` or `file://` is refused before anything is fetched. |
+| A mismatching file is kept as `<name>.rejected` | Delete it; keep the `.whl` name | Kept as evidence, but no later stage can open it by its wheel name. |
+| `yanked` must be exactly `false` | Treat a missing flag as not yanked | Unknown -> UNRESOLVED (CLAUDE.md fail-closed rule). |
+| A broken wheel entry invalidates the whole response | Skip that entry and use another wheel | A response that lists a file of another package is not trustworthy as a whole. |
+| Wheel chosen for the running interpreter | Verify every wheel of the release; only accept `py3-none-any` | This is the file pip would install on this machine. Verifying all files is more downloads for no M1 benefit; pure-only would make packages with native wheels always UNRESOLVED. |
+| Local versions (`1.0+local`) -> UNRESOLVED here | Add a BLOCK rule to the gate | PyPI does not host local versions, so the fetch stage is where this is certain. The gate still permits it (pinned by a test); nothing is downloaded. |
+
+### Requirements covered
+
+No `FR-CAVR-NN` identifiers exist in this repository; the IDs are from `RequirementsTab.tsx` (Maryam to confirm).
+
+| ID | Title | What this step covers | Acceptance check |
+|---|---|---|---|
+| none listed | CLAUDE.md goal C3 (no FR in `RequirementsTab.tsx` covers artifact integrity; an ID is needed) | Real SHA-256 of the downloaded file vs the registry digest | `test_real_pypdf_wheel_matches_the_recorded_registry_digest`, `test_one_flipped_byte_is_rejected` |
+| FR-6 | Fail-Closed Security Policy | Network error, yanked, no wheel, bad response -> UNRESOLVED | `test_timeout_reading_the_registry_is_unresolved`, `test_yanked_release_is_unresolved`, `test_sdist_only_release_is_unresolved` |
+
+### Ch 7 Test cases
+
+Run on 2026-10-10:
+
+- `.venv/bin/python -m pytest tests/test_cavr_*.py -q` -> 449 passed, 2 skipped (367 before + 82 new; the 2 skipped are the live tests).
+- `.venv/bin/python -m pytest -q` -> 507 passed, 7 failed, 2 skipped (the same 7 baseline tests).
+- `CAVR_LIVE=1 .venv/bin/python -m pytest -q tests/test_cavr_live.py` -> 2 passed (real pypi.org, 8.6 s).
+
+| Test ID | Purpose | Input | Expected | Result |
+|---|---|---|---|---|
+| `test_real_pypdf_wheel_matches_the_recorded_registry_digest` | Match on a real artifact | `artifacts/pypdf-6.19.0-py3-none-any.whl` + recorded `advisories/registry-*.json` | OK `HASH_MATCH`; `sha256` = `7e5d6e73…e48d14` = digest of the file in quarantine; 395480 bytes | pass |
+| `test_one_flipped_byte_is_rejected` | Tampered artifact | Same wheel with one bit flipped in the middle | REJECTED `HASH_MISMATCH`; file kept as `….whl.rejected` | pass |
+| `test_truncated_download_is_rejected` | Short file | Last byte missing | REJECTED; sizes 395479 vs 395480 | pass |
+| `test_tmp_built_wheel_matches`, `test_registry_digest_of_another_file_is_rejected` | tmp-built wheel | Wheel built in the test; then registry digest `000…0` | OK; then REJECTED | pass |
+| `test_name_is_canonicalised_for_the_registry_url`, `test_version_is_compared_as_a_version_not_as_text` | Name / version forms | `PyPDF`; request `1.0.0` vs response `1.0` | OK | pass |
+| `test_invalid_request_is_unresolved_without_any_network_call` (11) | Bad request | empty / `../demo` / `demo/x` / `>=1.0` / `1.*` / `None` / a float | UNRESOLVED `INVALID_REQUEST`; zero calls | pass |
+| `test_local_version_is_unresolved_even_though_the_gate_permits_it` | Deferred gate item | `demo==1.0+local` | Gate PERMITTED; fetch UNRESOLVED; zero calls | pass |
+| `test_timeout_reading_the_registry_is_unresolved`, `test_transport_that_fails_with_an_os_error_is_unresolved` | Network loss | Transport raises | UNRESOLVED `REGISTRY_UNAVAILABLE` | pass |
+| `test_unknown_release_is_unresolved` | 404 | Unknown version | UNRESOLVED `RELEASE_NOT_FOUND` | pass |
+| `test_unusable_registry_response_is_unresolved` (13) | Bad response | HTML, empty, `[]`, `null`, no `urls`, other name, other version, invalid UTF-8 | UNRESOLVED `REGISTRY_INVALID`; no download | pass |
+| `test_oversized_registry_response_is_unresolved` | JSON cap | Cap set to 50 bytes | UNRESOLVED `REGISTRY_INVALID` | pass |
+| `test_yanked_release_is_unresolved`, `test_yanked_file_is_unresolved`, `test_yanked_flag_that_is_not_exactly_false_is_unresolved` (3) | Yanked | `yanked: true` on release / file; `None`, `"false"`, `0` | UNRESOLVED `YANKED`; no download | pass |
+| `test_sdist_only_release_is_unresolved`, `test_release_with_no_files_is_unresolved` | No wheel | Only a `.tar.gz`; empty `urls` | UNRESOLVED `NO_WHEEL` | pass |
+| `test_only_incompatible_platform_wheels_is_unresolved`, `test_select_wheel_takes_the_best_ranked_compatible_tag` | Wheel choice | `cp27-cp27m-win32` only; three wheels with a given tag order | `NO_COMPATIBLE_WHEEL`; best-ranked tag chosen | pass |
+| `test_wheel_entry_with_a_bad_filename_is_unresolved` (8) | Path / identity | `../x.whl`, `sub/x.whl`, other name, other version, `demo.whl`, a number | UNRESOLVED `REGISTRY_INVALID`; nothing written | pass |
+| `test_file_url_outside_the_pypi_file_host_is_unresolved` (8) | URL check | `http://`, other host, look-alike host, userinfo, port, `file://`, empty, `None` | UNRESOLVED `URL_NOT_ALLOWED`; only the JSON was requested | pass |
+| `test_missing_or_malformed_registry_digest_is_unresolved` (6), `test_uppercase_registry_digest_still_matches` | Registry digest | none / md5 only / short / non-hex / a number; upper case | `REGISTRY_DIGEST_MISSING`; upper case -> OK | pass |
+| `test_declared_size_over_the_cap_is_unresolved_before_downloading`, `test_stream_longer_than_the_cap_is_cut_off_and_unresolved`, `test_registry_size_that_is_not_a_whole_number_is_unresolved` (5) | Size cap | Cap 10; declared 5 but server sends more than 64; size `None`/`"12"`/`-1`/`1.5`/`True` | `TOO_LARGE` (no file left); `REGISTRY_INVALID` | pass |
+| `test_timeout_during_the_download_is_unresolved_and_leaves_no_file`, `test_missing_file_on_the_file_host_is_unresolved`, `test_download_slower_than_the_deadline_is_unresolved`, `test_quarantine_that_cannot_be_created_is_unresolved` | Download failure | Error after 10 bytes; 404 on the file; clock jumps 50 s per chunk; a file where the directory should be | UNRESOLVED `DOWNLOAD_FAILED`; quarantine empty | pass |
+| `test_second_fetch_replaces_the_quarantined_file`, `test_every_result_has_the_same_keys`, `test_recorded_response_is_the_real_registry_shape` | Shape / repeat | Two fetches; three different outcomes; the recorded file | Same path, one file; same key set; recorded digest = real wheel digest | pass |
+| `test_live_pypi_pypdf_wheel_matches_the_registry_digest`, `test_live_pypi_unknown_release_is_unresolved` (live) | Real network | `pypdf==6.19.0`; `pypdf==0.0.0.dev987654321` | OK with `7e5d6e73…`; `RELEASE_NOT_FOUND` | pass (with `CAVR_LIVE=1`) |
+
+### Defects found and fixed
+
+| # | Found by | Finding | Outcome |
+|---|---|---|---|
+| 1 | Own check while writing the code | `test_download_slower_than_the_deadline_is_unresolved` advanced the fake clock during the registry read too, so it would have ended in `REGISTRY_UNAVAILABLE` and not tested the download deadline | Test fixed before its first run: the clock moves only once the file download has started |
+
+The tests were written before `pypi_client.py` but first run after it; all 82 passed on that first run.
+
+### Known limitations / deferred
+
+- Trust is in the registry JSON over TLS: the digest and the file both come from PyPI. A compromised PyPI
+  serving a matching pair is not detected here. The project lockfile hash is compared in step 6.
+- The wheel is chosen for the interpreter that runs CAVR, not for the project's target interpreter. -> step 12.
+- Wheels only; an sdist-only release is UNRESOLVED (plan). No custom index, no mirror.
+- `requires_python` is recorded, not enforced. -> step 6.
+- Quarantine files are not cleaned up; a second fetch of the same file replaces the first. -> step 11.
+- No retry on a network error: one failure is UNRESOLVED.
+- `upload_time` is recorded as given by the registry and is not checked.
+
+### Tool disclosure (Ch 8.7)
+
+- **Generated by Claude Code:** `pypi_client.py`, the three test files, these notes, the commit.
+- **Reviewed / changed by Maryam:** nothing yet; the batch ran without stops as `/cavr-batch` says.
+- **Verified by:** the three pytest runs above, including the live run against pypi.org on 2026-10-10.
+
+### Supervisor Q&A prep
+
+1. **Where does the hash come from? Is anything faked?**
+   From the bytes written to the quarantine directory: the file is re-opened and SHA-256'd
+   (`_sha256_of_file`). In the offline test the bytes are the real pypdf wheel and the expected digest
+   is from a recorded pypi.org response; the live test does the same against pypi.org.
+2. **Why is a hash mismatch REJECTED but a timeout UNRESOLVED?**
+   A mismatch is positive evidence that the file is not the one the registry describes. A timeout is
+   missing evidence; CAVR does not know, so it says UNRESOLVED. Neither lets the install continue.
+3. **What stops a huge or endless download?**
+   The declared size is checked against the cap before downloading, the stream is cut when the received
+   bytes pass the cap (the declared size is not trusted), and a 120 s wall-clock deadline applies.
