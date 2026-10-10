@@ -461,6 +461,46 @@ and deliberately not fixed there:
 - The reviewer did not run the live tests and did not open the dashboard in a browser. The fix commit has not been
   reviewed again.
 
+Demo polish (2026-10-11), six issues listed by Maryam after the demo script, one commit each (`384ec4f` .. `cdbfa27`)
+and one review fix commit. Not plan steps; they close the open part of step 13. Handled, each with a test: the chips
+are six real requests read from `GET /api/cavr/scenarios` (chip 4 is `left-pad==1.0`, `NOT_ON_ALLOWLIST`); the page
+prints only API values and a dash for what was not computed ("VERIFIED MATCH", the fixed timeline, the sandbox panel
+and the Re-verify timer are gone); `hash_comparison.matches` is `None` when nothing was hashed; `fast_gate_ms` per
+status and per cache lookup, no overall percentile; demo runs have their own quarantine directory; long advisory
+lists as a count and three ids. From the earlier lists this also handles: the `CavrModule.tsx` BLOCKER of the batch
+12-13 review, "p50 / p95 include BLOCK rows", "a tampered_wheel demo run deletes the good wheel", the `OverviewTab`
+badge / list mismatch, and the `RequirementsTab` PASS / FAIL meaning and scope box.
+
+Found in the demo-polish review (2026-10-11, MINOR items, derived by reading) and deliberately not fixed there:
+
+- `api.verdict_events`: `advisory_summary` names the requested package but counts every node of the tree; wrong when a
+  dependency is the affected one. Not reachable with the shipped policy (pypdf has one node). -> next change to the file.
+- `ExpandableStep.tsx`: a green tick means "ran", so the artifact stage of a tampered run and the gate stage of a BLOCK
+  get a tick. Use a neutral marker, or colour by the stage's first value. -> Maryam (it is the look of the page).
+- `OverviewTab.tsx`: "Cache hit: no" for a BLOCK or an internal error; the cache was never reached. Print the cache
+  stage's `lookup` value or a dash.
+- `CavrModule.tsx` cache dialog: every row gets the CSS class `trusted`, also a cached REJECTED analysis.
+- `pipeline.cache_lookup_of`: a request with one HIT package and one that never reached the lookup, or a HIT followed by
+  `REQUEST_HASH_MISMATCH`, is logged `MISS`; `CACHE_UNAVAILABLE` counts as a lookup. Say so in the docstring or add a
+  value. -> next change to the file.
+- `storage.init_db`: two processes starting on an old database can both run `ALTER TABLE`; catch "duplicate column".
+- `Timeline.tsx`: `STAGE_NAMES` repeats `api.STAGE_TITLES` and stages are matched by index; no test compares the two.
+- Tests: the fixed-string check is a blocklist of 17 literals; the render tests run no click, fetch, effect or
+  `EventSource` and no intermediate state (a verdict without a proof); the harness does not render `Timeline` itself and
+  its `assurance` view is unused; `test_the_running_app_loads_none_of_the_fixture_or_simulation_modules` sees
+  import-time loading only; in `test_a_tampered_run_never_deletes_or_alters_the_genuine_wheel_in_quarantine` the last
+  "still a cache hit" assertion cannot detect a deletion (the bytes / mtime / inode assertions can).
+- `RepairTab.tsx`, `CounterfactualTab.tsx`, `CausalGraphTab.tsx`: the branches for data that the API never sends hold
+  hardcoded "OSV Clean" ticks and default costs. Unreachable today; delete or fix before M2.
+- `CavrModule.tsx` header and `RequirementsTab.tsx` scope box: static text still names counterfactual activation, sandbox
+  and typosquat defences that the fast gate does not do. Labels, not results. -> Maryam.
+- Hard to explain line by line: `pipeline._nearest_rank` (`-(-percent * n // 100)`), the three-way `setdefault` loop in
+  `pipeline.metrics`, the 25-line `values` literal in `api.stage_summary`.
+- `tests/test_cavr_data/render_cavr.mjs` requires `esbuild`, which is installed only as a dependency of vite.
+- The fix commit for this review has not been reviewed again. The page has not been opened in a browser.
+- Outside the review: `project_policy.json` approves `pdf-clean-extractor==1.0.0`, a name with no release on PyPI
+  (anyone could register it). -> Maryam.
+
 ## Verification
 
 - `.venv/bin/python -m pytest -q` before every commit (offline).
@@ -487,8 +527,8 @@ and deliberately not fixed there:
 - [x] 10 verdict cache (committed 2026-10-10, `d8e6367`)
 - [x] 11 pipeline (committed 2026-10-10, `c5c0ef4`; batch review fixes in the next commit)
 - [x] 12 pip wrapper (committed 2026-10-10, `1e17034`)
-- [ ] 13 dashboard API (backend and `frontend/src/components/cavr/` committed 2026-10-10, `ca5a0e2`, batch review fix in the
-      next commit; the chips, timeline and proof
-      drawer in `frontend/src/components/CavrModule.tsx` are outside the allowed scope and unchanged: waiting for Maryam)
+- [x] 13 dashboard API (backend and `frontend/src/components/cavr/` committed 2026-10-10, `ca5a0e2`, batch review fix in the
+      next commit; the chips, timeline and proof drawer in `frontend/src/components/CavrModule.tsx` done on 2026-10-11
+      at Maryam's request, `384ec4f` and `f705496`, see "Demo polish"; not yet opened in a browser)
 - [ ] 14 orchestrator analyzer (not started; stopped 2026-10-10: delegating changes the outcome of
       `tests/test_modules.py::test_cavr_safe_cache_and_advisory`, see "Open after step 13" and the Step 14 note)

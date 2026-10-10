@@ -2404,3 +2404,193 @@ Run on 2026-10-10 after the fix:
    So that the scenario shows the advisory check working after the allowlist: the gate permits it and OSV rejects it. An allowlist entry is a range the project accepts, not a statement that every version in it is free of advisories.
 3. **The wrapper lets the caller name the policy file and the project. What stops an agent from pointing it at a permissive policy?**
    Nothing in M1; the policy location is an input. `policy_version` (the digest of the policy) is in every verdict and in the cache key, but the path of the file is not printed. That is a listed limit.
+
+## Demo polish — six demo issues from the mid demo script (2026-10-11)
+
+Not a plan step: six issues Maryam listed after reading `docs/cavr-demo.md`, one commit each, on top of `82d2bd9`.
+Maryam named `frontend/src/components/CavrModule.tsx` and `docs/cavr-demo.md` in the request, so both were edited
+(they are outside the usual scope). With issues 1 and 2 the open part of plan step 13 (chips, timeline, proof drawer) is done.
+Reviewed by cavr-reviewer (1 pass over `82d2bd9..cdbfa27` and the uncommitted notes); verdict: fix first; 3 BLOCKERs, fixed in the fix commit `fix(cavr): no "nothing found" without a scan, no advisory count without an OSV answer` (not reviewed again); 16 MINOR, 4 fixed there, 12 open.
+
+| # | Issue | Commit |
+|---|---|---|
+| 1 | Chips are real requests through the real pipeline | `384ec4f` `feat(cavr): dashboard chips are six real requests from the scenario API` |
+| 2 | No hardcoded result string; a dash when a value was not computed | `f705496` `fix(cavr): CAVR tab shows only values of the API response, a dash when not computed` |
+| 3 | `fast_gate_ms` per verdict and per cache lookup | `02104d4` `fix(cavr): report fast_gate_ms per verdict and per cache lookup, not one p50` |
+| 4 | Long advisory lists | `03d627f` `fix(cavr): long advisory lists show the count and the first three OSV ids` |
+| 5 | Tampered-wheel run on its own copy | `42e2524` `fix(cavr): tampered-wheel demo run works on its own copy, never the genuine wheel` |
+| 6 | Build step first; cases 1-6 re-recorded through the dashboard API | `cdbfa27` `docs(cavr): demo script starts with the frontend build; cases 1-6 re-recorded through the dashboard API` |
+
+### Ch 6 Implementation
+
+| File | Function / constant | What it does |
+|---|---|---|
+| `backend/cavr/api.py` (478 -> 589 lines) | `SCENARIOS` | Six chips as data, in page order: `verified`, `verified_again`, `known_vulnerable`, `not_on_allowlist` (`left-pad==1.0`, replaces `denylisted`), `tampered_wheel`, `network_off`. `expected_status` and `description` are text for the chip only. |
+| | `stage_summary(verdict)`, `STAGE_TITLES` | The page's timeline: six stages (capture, gate, artifact, cache, analysis, verdict), each `{id, title, ran, values: [{label, value}]}`. Every value is copied from the verdict or is the length of one of its lists; not computed -> `None`; a stage with no value -> `ran: False`. Served as `stages` in `GET /api/cavr/proof/{run_id}`. |
+| | `HASH_MATCHES`, `run_verification` | `hash_comparison` carries the artifact `rule`; `matches` is `True` / `False` only for `HASH_MATCH` / `HASH_MISMATCH`, else `None`. |
+| | `verdict_events` | `resolution.first_advisory_ids` (first 3) and `resolution.advisory_summary`; `known_risk_signals` stays the whole list. |
+| | `demo_quarantine_dir(condition)`, `verify_dashboard_request` | A run under a demo condition downloads into `<quarantine>-demo/<condition>`; a name that is not a condition raises `ValueError`. Review fix: the call is inside the `try`, so a directory that cannot be named is UNRESOLVED `INTERNAL_ERROR`, not a run that never finishes. |
+| | `_affected_count(advisories)` (review fix) | The number of advisories that affect the packages, or `None` unless OSV answered for every package. Used for `vulnerability_count` and the timeline. |
+| `backend/cavr/pipeline.py` (377 -> 436 lines) | `metrics(store)`, `_time_summary`, `_nearest_rank`, `STATUSES`, `CACHE_LOOKUPS` | p50 / p95 of `fast_gate_ms` by status, by cache lookup and by the pair; two hit rates (`cache_hits` of all verdicts, `cache_lookup_hits` of `cache_lookups`). The keys `fast_gate_ms_p50` / `_p95` are removed. |
+| | `cache_lookup_of(verdict)`, `_log` | `HIT` / `MISS` / `NOT_REACHED` for the whole request, written to the verdict log. |
+| | `default_quarantine_dir()` | The one place the default quarantine path is written. |
+| `backend/cavr/storage.py` | `verdict_log.cache_lookup`, `record_verdict(..., cache_lookup=None)`, `init_db` | New column; an existing database gets it with `ALTER TABLE` (old rows keep `NULL`). |
+| `backend/cavr/advisories.py` | `summarise_ids(ids)`, `FIRST_IDS = 3` | `A, B, C and 94 more`. Used by the three reasons that list ids (they named five). The result's lists are not shortened. |
+| `backend/cavr/pip_shim.py` | `_render_package` | `advisories: pypdf 5.1.0 KNOWN_VULNERABILITY: 97 advisories: A, B, C and 94 more (every id: --cavr-json)`. |
+| `frontend/src/components/CavrModule.tsx` (1189 -> 669 lines) | `CavrModule`, `runScenario`, `handlePipelineEvent` | Chips from `GET /api/cavr/scenarios`, run with `POST /api/cavr/run?scenario=<id>`. Removed: the five fixture names, the eight-step timeline with fixed timings, the sandbox / honeytoken panel, "VERIFIED MATCH", the Re-verify "Matches" timer, the browser-side typosquat detector, the invented "7.52 Priority Score". The three dialogs print fields of the proof. |
+| `frontend/src/components/cavr/` (new) | `ScenarioChips.tsx`, `Timeline.tsx`, `ProofDrawer.tsx`, `AdvisoryList.tsx`, `runState.ts` (`EMPTY_RUN`, `applyEvent`) | The parts of the page that print API values, as components that take their data as props. `applyEvent` copies one stream event into the run state. |
+| `frontend/src/components/cavr/` (changed) | `types.ts` (`NOT_COMPUTED = '—'`, `shown()`, `StageSummary`, `Scenario`), `ExpandableStep.tsx`, `MetricsTab.tsx` (`MetricsReport`), `OverviewTab.tsx`, `RequirementsTab.tsx`, `StageDetailPanel.tsx`, `AssuranceTab.tsx`, `CausalGraphTab.tsx` | One constant for a missing value. Requirements tab: last column is what the stage returned, no PASS / FAIL of the page's own. Metrics tab: three tables in place of the p50 / p95 cards. |
+| `docs/cavr-demo.md` | | Step 1 is the frontend build; cases 1-6 are the six chips with re-recorded outputs; wrapper runs W1, W3, W4, W6 re-recorded. |
+| Tests | `tests/test_cavr_frontend.py` (new, 21 functions, 26 cases), `tests/test_cavr_data/render_cavr.mjs` (new), `test_cavr_api.py` (31 -> 48 functions, 58 -> 81 cases), `test_cavr_pipeline.py` (50 -> 55), `test_cavr_advisories.py` (37 -> 40), `test_cavr_pip_shim.py` (33 -> 35), `test_cavr_live.py` (1 changed) | |
+
+Key algorithm (`stage_summary`): take the first package of the verdict; for each of the six stages build a fixed list of
+(label, value) by reading the verdict (`evidence.artifact.rule`, `cache.lookup`, ...); `ran` = at least one value is not
+`None`. The page prints `shown(value)`, which is the dash for `None`.
+
+Key algorithm (`metrics`): read every row of `verdict_log`; put its `fast_gate_ms` into three groups (status, cache
+lookup, the pair); for each group sort the times and take the nearest-rank p50 and p95, `rank = ceil(percent * n / 100)`
+computed in whole numbers.
+
+### Design decisions
+
+| Decision | Alternatives considered | Why |
+|---|---|---|
+| Chips are fetched from the backend | Six names written into the page | The page then has no package name of its own; the list a chip sends is the list the tests check (`test_every_scenario_gives_the_verdict_its_chip_names`). |
+| Chip 2 is the same request as chip 1, with no condition | A scenario that forces a hit | A forced hit would be a faked result. It is a hit only when chip 1 stored an analysis; clicked first it is a miss, and a test says so. |
+| Chip 4 is `left-pad==1.0` (`NOT_ON_ALLOWLIST`) | Keep `requests-security` (`DENYLIST`) | Maryam's list. The denylist case keeps its test, through the request body. |
+| `fixtures/scenarios.py` is checked to be unloaded, not deleted | Delete it and `resolver.py` | The request was "from any path the page can trigger". Importing `backend.main` in a fresh interpreter does not load it (test), and no file under `backend/` except `resolver.py` imports it (grep). The test sees import-time loading only, not an import inside a function. Deleting dead modules is a separate change. |
+| The timeline is computed in the backend | Derive it in the page from the events | It can be tested in pytest, and the page only prints. The pipeline is one blocking call, so the stages are known together, at the verdict. |
+| No time per stage | Keep the fixed "12ms" labels, or time each stage | Only `fast_gate_ms` for the request is measured. Showing stage times would be inventing them. |
+| One dash constant (`NOT_COMPUTED`) | Words such as "pending", "not downloaded", "n/a" | Four tabs used eleven different words; one sign means "not computed" everywhere. |
+| No overall p50 / p95 | Keep it beside the per-status rows | It is the number that misled (2.72 ms). Leaving it invites quoting it. |
+| The cache lookup is logged per request | Derive "miss" from `cache_hit = 0` | A BLOCK or a failed download never looks anything up; counting it as a miss is wrong. Costs one nullable column. |
+| Old log rows are `NOT_RECORDED`, hits included | Count old hits as `HIT`; guess `MISS` for the rest | Old misses cannot be told from BLOCKs. Counting only the old hits made the lookup rate too high (reviewer). All of them are left out of `cache_hit_rate_of_lookups`. |
+| First 3 ids in reasons too (was 5) | Shorten only the display | One rule for the wrapper line, the reason and the page. The evidence lists are never shortened. |
+| Demo runs get their own quarantine directory | Stop `fetch_artifact` deleting the older file | Removing a stale file after a mismatch is right for real runs (added in step 11 with a test). The fault was sharing the directory. |
+| Render tests with `react-dom/server` | Add a JS test runner; source checks only | No new dependency (`esbuild` and `react-dom` are already installed for the build), and the real components are exercised with real API answers. |
+
+### Requirements covered
+
+No `FR-CAVR-NN` identifiers exist in this repository; IDs are from `RequirementsTab.tsx` (Maryam to confirm).
+
+| ID | Title | What this work covers | Acceptance check |
+|---|---|---|---|
+| FR-1 | Intercept Before Execution | Every chip is a captured `pip install` request through the pipeline | `test_every_scenario_gives_the_verdict_its_chip_names` |
+| FR-2 | Requirement Gate Enforcement | `left-pad==1.0` blocked before any download, shown as BLOCK with dashes after the gate | `test_left_pad_is_blocked_as_not_on_the_allowlist_before_any_download`, `test_a_stage_that_did_not_run_has_no_value_at_all` (4) |
+| FR-6 | Fail-Closed Security Policy | A value that was not computed is never shown as a result; no hash result when nothing was hashed | `test_timeline_of_a_verdict_without_evidence_claims_nothing` (4), `test_the_proof_drawer_prints_the_hash_result_of_each_run` |
+| none listed | Supervisor report: cache hit rate, p50 / p95 `fast_gate_ms` | Per verdict and per cache lookup | `test_blocks_do_not_move_the_latency_reported_for_verified_requests`, `test_percentiles_are_nearest_rank` (5) |
+| none listed | CLAUDE.md "No fixture-faked results" | No fixture name and no fixed result string on the page; demo runs cannot touch real files | `test_no_old_fixture_name_is_left_in_the_page`, `test_no_fixed_result_string_is_left_in_the_page`, `test_a_tampered_run_never_deletes_or_alters_the_genuine_wheel_in_quarantine` |
+
+### Ch 7 Test cases
+
+Run on 2026-10-11 after the review fix:
+
+- `.venv/bin/python -m pytest tests/test_cavr_*.py -q` -> 1227 passed, 7 skipped (was 1159 before this work; the 7 skips are the live tests).
+- `.venv/bin/python -m pytest -q` -> 1285 passed, 7 failed, 7 skipped (the same 7 baseline tests; was 1217 passed).
+- `CAVR_LIVE=1 .venv/bin/python -m pytest -q tests/test_cavr_live.py` -> 7 passed (real PyPI, OSV and pip).
+- `npm --prefix frontend run build` (`tsc -b && vite build`) succeeds.
+- Live, through the running app (`uvicorn backend.main:app`, fresh `runtime-demo`), at `42e2524`: the six chips in order gave
+  VERIFIED (miss, 3912.65 ms), VERIFIED (hit, 2117.81 ms), REJECTED `KNOWN_VULNERABILITY` (97 advisories), BLOCK
+  `NOT_ON_ALLOWLIST` (2.17 ms), REJECTED `HASH_MISMATCH`, UNRESOLVED `REGISTRY_UNAVAILABLE`. Outputs are in `docs/cavr-demo.md`.
+- Mutation check of the render tests (files restored): "VERIFIED MATCH" put back in the proof drawer and "did not run"
+  changed to "done" in the timeline -> 5 of the then 18 frontend cases failed (done before the review; not repeated for the review fix).
+- **Not checked in a browser** (none installed here). See "Known limitations".
+
+| Test ID | Purpose | Input | Expected | Result |
+|---|---|---|---|---|
+| `test_scenario_list_is_six_real_requests` | Issue 1 | `list_scenarios()` | the six requests in order, labels "1." to "6." | pass |
+| `test_every_scenario_gives_the_verdict_its_chip_names` | Issue 1 | the six chips in order, offline index | VERIFIED miss, VERIFIED hit, REJECTED OSV, BLOCK, REJECTED hash, UNRESOLVED | pass |
+| `test_the_again_chip_is_the_same_request_and_hits_the_cache_only_when_an_analysis_is_stored` | Issue 1, edge | chip 2 first on an empty cache, then again | MISS, then HIT | pass |
+| `test_left_pad_is_blocked_as_not_on_the_allowlist_before_any_download` | Issue 1 | `left-pad==1.0` | BLOCK `NOT_ON_ALLOWLIST`; index never asked; no quarantine directory | pass |
+| `test_the_running_app_loads_none_of_the_fixture_or_simulation_modules` | Issue 1 | `import backend.main` in a new interpreter | `fixtures.scenarios`, `resolver` and six more not in `sys.modules` | pass |
+| `test_no_old_fixture_name_is_left_in_the_page`, `test_the_page_names_no_package_of_its_own`, `test_chips_are_loaded_from_the_api_and_run_through_the_scenario_endpoint`, `test_the_chips_are_the_scenarios_of_the_backend` | Issue 1, page | sources; chips rendered from `list_scenarios()` | no old name, no package name; six labels of the backend | pass |
+| `test_timeline_of_a_verified_run_copies_the_verdict` | Issue 2 | verified run, then again | every stage ran with the verdict's values; second run: lookup HIT | pass |
+| `test_a_stage_that_did_not_run_has_no_value_at_all` (4), `test_timeline_values_of_the_failing_scenarios` | Issue 2, failure cases | BLOCK, tampered, network off, OSV-rejected | stages after the stop: `ran` false, every value `None`; OSV case: contract present, scan `None` | pass |
+| `test_no_stage_carries_a_time_of_its_own` | Issue 2 | verified run | the only time is `fast_gate_ms` | pass |
+| `test_timeline_of_a_verdict_without_evidence_claims_nothing` (4), `test_a_pipeline_fault_shows_only_the_verdict_stage` | Issue 2, edge | empty and malformed verdicts; a raising pipeline | no computed value; only the verdict stage ran | pass |
+| `test_network_off_is_unresolved_and_the_real_transport_is_never_asked` (changed) | Issue 2 | network off | `hash_comparison.matches` is `None`, not `False` | pass |
+| `test_no_fixed_result_string_is_left_in_the_page`, `test_a_value_that_was_not_computed_is_printed_as_a_dash` | Issue 2, page sources | 17 fixed strings, 11 old placeholders | none left; the dash is written in `types.ts` only | pass |
+| `test_the_page_before_any_run_shows_no_result` | Issue 2, render | the whole module, nothing fetched | no status word, target and all six stages a dash | pass |
+| `test_the_timeline_prints_what_each_stage_returned_and_a_dash_for_the_rest` (6) | Issue 2, render | the proof of each chip | every value printed; dashes = values not computed; "did not run" per stage | pass |
+| `test_the_proof_drawer_prints_the_hash_result_of_each_run` | Issue 2, render | verified, tampered, network off, BLOCK | `HASH_MATCH` true; `HASH_MISMATCH` false; rule and dashes; all dashes | pass |
+| `test_the_overview_shows_the_verdict_and_dashes_for_what_was_not_computed`, `test_the_overview_of_a_run_without_a_download_names_the_rule_and_no_hash`, `test_the_requirements_tab_prints_what_a_stage_returned_and_no_pass_of_its_own` | Issue 2, render | BLOCK, verified, network off | dash for the hash of a BLOCK; no PASS / FAIL anywhere | pass |
+| `test_verdicts_are_logged_and_the_report_numbers_come_from_the_log` (changed) | Issue 3 | miss, hit, BLOCK, hit | three groupings; lookups 3; rate of lookups 2/3; no overall percentile | pass |
+| `test_blocks_do_not_move_the_latency_reported_for_verified_requests` | Issue 3 | 2 VERIFIED (3000, 2000 ms), 5 BLOCK (1-4 ms) | VERIFIED p50 2000, p95 3000; BLOCK p50 2 | pass |
+| `test_percentiles_are_nearest_rank` (5) | Issue 3, edge | 1, 2, 20, 21, 100 rows | p50 / p95 by rank | pass |
+| `test_which_cache_lookup_is_logged_for_each_kind_of_verdict`, `test_a_rejection_by_osv_before_any_stored_analysis_is_logged_as_a_miss` | Issue 3 | network down, BLOCK, miss, hit, hit then OSV rejects | `NOT_REACHED`, `NOT_REACHED`, `MISS`, `HIT`, `HIT`; OSV first: `MISS` | pass |
+| `test_a_verdict_log_made_before_the_lookup_was_logged_is_still_read` | Issue 3, edge | a database with the old table and 3 rows (one a hit), then one new miss | column added; the 3 old rows `NOT_RECORDED`; 0 hits of 1 lookup | pass |
+| `test_a_run_rejected_before_the_scan_does_not_say_that_the_scan_found_nothing`, `test_a_run_whose_scan_ran_still_shows_what_it_found` | Review BLOCKER 1, render | pypdf 5.1.0 (no scan); verified; verified with its sinks removed (constructed) | no "nothing found" sentence and a dash; the two sinks; the sentence only when a scan result exists | pass |
+| `test_no_advisory_count_is_shown_when_osv_gave_no_answer`, `test_the_advisory_card_shows_no_count_when_osv_gave_no_answer` | Review BLOCKER 2 | network off with no saved OSV answer | count `None` / a dash, rule `ADVISORIES_UNAVAILABLE`; with a saved answer a real 0 | pass |
+| `test_a_demo_directory_that_cannot_be_named_is_an_unresolved_run_that_finishes` | Review MINOR 9 | quarantine directory `/` | UNRESOLVED `INTERNAL_ERROR`, run finished, nothing downloaded | pass |
+| `test_metrics_come_from_the_verdict_log` (changed), `test_the_metrics_tab_lists_the_time_per_verdict_and_per_cache_lookup`, `test_the_metrics_tab_with_an_empty_log_shows_dashes` | Issue 3, API and render | 5 logged runs and 2 demo runs; empty log | demo runs not counted; three tables; empty groups are dashes | pass |
+| `test_a_long_advisory_list_is_a_count_and_the_first_three_ids_in_the_reason_and_whole_in_the_result`, `test_summarise_ids_names_the_first_three_and_counts_the_rest` (6), `test_the_other_reasons_that_list_ids_are_summarised_the_same_way` | Issue 4 | 97 recorded advisories; 0-97 ids; GIT-only and out-of-range lists | "… A, B, C and 94 more"; result keeps all 97 | pass |
+| `test_a_long_advisory_list_is_one_short_line_and_whole_in_the_json`, `test_a_short_advisory_list_is_printed_whole` | Issue 4, wrapper | 40 synthetic advisories; 2; none | one line under 200 characters; `--cavr-json` has all 40 | pass |
+| `test_pypdf_5_1_0_is_rejected_by_osv_with_the_recorded_advisory_ids` (changed), `test_advisory_summary_is_null_when_no_advisory_affects_the_version` | Issue 4, API | pypdf 5.1.0; 6.19.0 | first 3 ids and summary; proof has 97; `None` when clean | pass |
+| `test_a_long_advisory_list_is_a_count_three_ids_and_a_closed_section_with_all_of_them`, `test_the_advisory_card_without_advisories` | Issue 4, render | pypdf 5.1.0; verified; BLOCK | one closed `<details>` with 97 ids; only 3 outside it; link to the proof JSON; dash when OSV was not asked | pass |
+| `test_a_tampered_run_never_deletes_or_alters_the_genuine_wheel_in_quarantine` | Issue 5 | verified, tampered, chip 2 | same bytes, modification time and inode; nothing added beside it; still a cache hit | pass |
+| `test_a_tampered_run_in_the_middle_of_a_real_run_does_not_change_the_real_verdict` | Issue 5, failure case | a tampered run between the real run's download and its scan | real run VERIFIED (before the fix: UNRESOLVED `ARTIFACT_CHANGED`) | pass |
+| `test_tampered_runs_before_and_after_leave_one_evidence_file_and_no_genuine_looking_wheel`, `test_demo_directory_is_beside_the_real_quarantine_and_only_for_a_named_condition`, `test_what_the_pipeline_is_given_under_each_condition` (changed) | Issue 5, edge | two tampered runs; names that are not conditions | one `.rejected` file; real quarantine never created; `ValueError` | pass |
+| `test_live_dashboard_scenarios_are_real_requests` (`CAVR_LIVE=1`, changed) | Issues 1 and 5, real PyPI + OSV | the six chips | as above; genuine wheel `7e5d6e73…8d14` after the tampered run | pass |
+
+### Defects found and fixed
+
+| # | Found by | Finding | Outcome |
+|---|---|---|---|
+| 1 | Demo script, item 2 | `hash_comparison.matches` was `False` for a run in which nothing was hashed | `None` unless the rule is `HASH_MATCH` / `HASH_MISMATCH` (issue 2) |
+| 2 | Demo script, item 6; new test | After a tampered run the genuine wheel was gone; a real run interleaved with it ended UNRESOLVED `ARTIFACT_CHANGED` (reproduced by the test before the fix) | Own directory for demo runs (issue 5) |
+| 3 | Reading `CavrModule.tsx` | Side effects (`fetch`, other `setState` calls) inside the `setRunState` updater; the run was only marked finished by the stream's error event | `applyEvent` is a pure function; `DECIDED` ends the run and reloads the cache box |
+| 4 | Reading `CavrModule.tsx` | Before any run the page showed `pip install dormant-exfil==1.2.0` as the intercepted target | A dash until the backend reports a request |
+| 5 | Running the live tests at the end | `test_live_dashboard_scenarios_are_real_requests` still read `outcome["denylisted"]`; it is skipped without `CAVR_LIVE=1`, so the offline suite did not show it | Test updated for the six chips; 7 live tests pass |
+| 6 | Rendering the page parts from the live answers | Overview printed "REGISTRY_UNAVAILABLE against the registry digest"; package and version came only from the clicked chip | "Hash check: <rule>"; package and version from the proof |
+| 7 | Own render test | The test listed the statuses in another order than `pipeline.STATUSES` | Test imports the constant |
+| 8 | cavr-reviewer (BLOCKER 1) | After chip 3 (`pypdf==5.1.0`) the stage panel, the Capability Contract tab and the Triggers tab said "no sink call found" / "Nothing found", although OSV rejected the request before any wheel was scanned (`scan: []`, `reachability: null`) | Those sentences are printed only when a sink judgement exists; otherwise a dash or "The AST scan did not run" |
+| 9 | cavr-reviewer (BLOCKER 2) | "0 advisories affect it" was shown when OSV gave no answer (network off on a fresh data directory): an `ADVISORIES_UNAVAILABLE` record has an empty `affected` list | `_affected_count` returns `None` unless OSV answered for every package |
+| 10 | cavr-reviewer (BLOCKER 3) | On a database with rows from before the `cache_lookup` column, old hits were counted as lookups and old misses were not, so the lookup hit rate was too high; these notes and the Q&A said the opposite | Every old row is `NOT_RECORDED`; `cache_lookup_hits` added and shown beside the rate; notes, Q&A and demo script corrected |
+| 11 | cavr-reviewer (MINOR 2-4, 9) | Demo script: an extra chip-2 click in the recorded metrics was not a command of the script and was said to show the genuine wheel survived (it cannot); "W1-W6" for four runs. `demo_quarantine_dir` was called outside the `try` | Reworded; call moved inside the `try`, with a test |
+
+### Known limitations / deferred
+
+- **The page was not opened in a browser.** Checked instead: the TypeScript build; the app serving the new bundle;
+  the six cases through the endpoints the page calls; the page's components rendered to HTML with `react-dom/server`
+  from offline runs (tests) and from the live answers. Not exercised: clicks, the `EventSource` stream in a browser,
+  layout and CSS. `runScenario`, `handlePipelineEvent` and the three dialogs have no automated test.
+- The render tests need Node.js and `frontend/node_modules`; without them every case that renders is skipped (19 of the 26).
+- What the frontend tests cannot show (reviewer): the fixed-string check is a list of 17 literals, so it cannot show that no other invented sentence exists (BLOCKER 1 was one); no test renders an intermediate state such as a verdict without a proof; the harness draws the stages with `ExpandableStep` itself and does not render `Timeline`; the `assurance` view is unused.
+- 12 MINOR items of the review are open and listed in `docs/cavr-m1-plan.md` ("Found in the demo-polish review"). The ones to know: a green tick in the timeline means "ran", not "passed"; "Cache hit: no" is shown for a BLOCK that never reached the cache; `advisory_summary` names the requested package even when a dependency is the affected one (not reachable with the shipped policy: pypdf has one node).
+- `frontend/tsconfig.tsbuildinfo` is tracked and rewritten by every build; it was restored and not committed (outside the scope).
+- The timeline fills in when the verdict is known, not stage by stage; there is no time per stage.
+- The header text of the module ("adaptively triggers dormant paths via counterfactual synthesis ...") and the box titles
+  ("STEP 3 · HOSTILE SANDBOX") were left as they are: they describe the project, not a run. The box now shows a dash.
+- `fixtures/scenarios.py`, `resolver.py` and the other legacy modules are still in the repository, unused by the app.
+- `project_policy.json` still approves `pdf-clean-extractor==1.0.0`, a name with no release on PyPI. Anyone could
+  register it. Not changed (it changes the policy version and the cache key). -> Maryam.
+- Metrics are over very few rows in the demo (1-3 per group): observations, not statistics. A cache hit was once
+  slower than the miss (4524.49 ms against 3912.65 ms): both download the wheel and ask OSV.
+- `api.approve_alternative`, the unfinished-run case in `run_verification` and the other MINOR items of the batch
+  12-13 review are unchanged.
+- Wrapper output for an UNRESOLVED download still prints `artifact: None`, `sha256 None`, `cache: None`.
+
+### Tool disclosure (Ch 8.7)
+
+- **Generated by Claude Code:** all code and test changes of the six commits, the render harness, the rewritten
+  `docs/cavr-demo.md` (its recorded blocks are real outputs of the commands shown), these notes, the commits.
+- **Reviewed / changed by Maryam:** she wrote the list of six issues and the expected verdict of each chip. Nothing in
+  the commits has been reviewed by her yet. Open for her: the wording left in the page header; the `pdf-clean-extractor`
+  policy entry; a browser dry run.
+- **Verified by:** the pytest runs above, the live tests, the live run of the six chips through the running app, the
+  mutation check of the render tests, `tsc` and `vite build`. No browser check.
+
+### Supervisor Q&A prep
+
+1. **How do you know the page shows what the pipeline found and not text written into the page?**
+   The page has no package name of its own (source tests), and its components are rendered in tests from real API
+   answers: every printed stage value equals the proof's value, and a value that was not computed is a dash. Putting
+   "VERIFIED MATCH" back makes those tests fail. The limit: a blocklist cannot prove that no invented sentence is left;
+   the reviewer found one ("no sink call found" when no scan ran), now fixed and tested.
+2. **Why is there no single p50 for the fast gate?**
+   Because a BLOCK takes about 2 ms and downloads nothing. With five BLOCKs in ten rows the median was 2.72 ms, which
+   says nothing about verifying a package. The times are given per verdict and per cache lookup, with the count beside them.
+3. **Is the cache-hit chip a real cache hit?**
+   Yes. It sends the same request as chip 1 and nothing else. It is a hit only because chip 1 stored an analysis under
+   the same eight key fields; on an empty cache the same chip is a miss
+   (`test_the_again_chip_is_the_same_request_and_hits_the_cache_only_when_an_analysis_is_stored`).
