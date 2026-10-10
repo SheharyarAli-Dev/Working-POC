@@ -329,7 +329,7 @@ Found in the batch 1-3 review (2026-10-10, MINOR items) and deliberately not fix
 - [x] 4 C3 PyPI fetch + SHA-256 (committed 2026-10-10; hash added in the batch-end commit)
 - [x] 5 C3 wheel metadata (committed 2026-10-10; hash added in the batch-end commit)
 - [x] 6 C3 transitive tree + subtree digest (committed 2026-10-10; hash added in the batch-end commit)
-- [ ] 7 C3 OSV ranges
+- [x] 7 C3 OSV ranges (committed 2026-10-10; hash added in the batch-end commit)
 - [ ] 8 C3 AST scan
 - [ ] 9 C4 capability contract
 - [ ] 10 verdict cache

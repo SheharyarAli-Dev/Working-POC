@@ -1278,3 +1278,121 @@ None found by the tests in this step.
    not a recursive walk, so `a->b->a` gives the same digest on every run.
 3. **Why UNRESOLVED when a dependency is not in the lockfile, instead of picking the newest version?**
    CAVR would be verifying a version it guessed, and pip might install another. Unknown -> UNRESOLVED.
+
+## Step 7 — C3 OSV check with real version ranges (2026-10-10)
+
+Plan commit 7, `feat(cavr): C3 OSV check with real version ranges`.
+Review: REVIEW_LINE_STEP_7
+
+### Ch 6 Implementation
+
+| File | Function / constant | What it does |
+|---|---|---|
+| `backend/cavr/advisories.py` (new, 188 lines) | `check_advisories(name, version, cache_dir, live=False, max_age_days=30, osv=None)` | Asks `backend.integrations.osv_adapter.OSV` (imported, not edited) and judges each advisory. Returns `result` (OK / REJECTED / UNRESOLVED), `rule`, `reason`, `mode`, `source`, `retrieved_at`, `age_days`, `response_sha256`, `live_error`, `advisory_count`, `affected`, `unknown`, `not_affected`, `withdrawn`. |
+| | `match_advisory(name, version, vuln)` | One OSV advisory -> `status` AFFECTED / NOT_AFFECTED / UNKNOWN / WITHDRAWN / OTHER_PACKAGE, with `id`, `aliases`, `summary`, `fixed_versions`. Range logic is `backend.threat_repo.package_records.affected` (imported, not edited). |
+| | `_entry_affects`, `_ranges`, `_is_for` | Call `affected` for one `affected[]` entry after a shape check; pick the entries for this PyPI package (canonical name). |
+| | `_age_days`, `_cached_age_days` | Age of an answer; age of the adapter's cache file (to tell "stale" from "missing"). |
+| `tests/test_cavr_advisories.py` (new, 402 lines) | | 37 test functions, 77 cases, offline. |
+| `tests/test_cavr_data/osv-pypdf-5.1.0.json`, `osv-pypdf-6.19.0.json` (new) | | Real api.osv.dev answers recorded on 2026-10-10: 97 advisories for pypdf 5.1.0 (trimmed to id, aliases, summary, dates, `affected[].package/ranges/versions`; 121 KB) and the empty object for 6.19.0. |
+| `tests/test_cavr_live.py` | | +2 live OSV tests (4 live tests in total). |
+| `docs/cavr-m1-plan.md` | | Progress box 7 ticked. |
+
+Key algorithm, `check_advisories`:
+
+1. `OSV.query(canonical name, version, "PyPI", live, max_age_days)`. Any exception, or `available` not true -> UNRESOLVED (`ADVISORIES_STALE` when the adapter's cache file exists and is too old, else `ADVISORIES_UNAVAILABLE`).
+2. The adapter's PyPI-registry fallback mode is not an OSV answer -> UNRESOLVED. An answer dated in the future -> `ADVISORIES_STALE`.
+3. `match_advisory` on every advisory: `affected()` walks the events of each ECOSYSTEM range (`introduced` inclusive, `fixed` exclusive, `last_affected` inclusive).
+4. Any AFFECTED -> REJECTED `KNOWN_VULNERABILITY`. Else any UNKNOWN -> UNRESOLVED `RANGE_UNSUPPORTED`. Else any NOT_AFFECTED / OTHER_PACKAGE -> UNRESOLVED `RANGE_DISAGREEMENT`. Else OK.
+
+### Design decisions
+
+| Decision | Alternatives considered | Why |
+|---|---|---|
+| Wrap `OSV` and `affected`, edit neither | Write a new client / matcher in `backend/cavr/` | The plan lists both under "Reuse (import, do not edit)"; `backend/integrations/` needs permission to touch. |
+| The range check is a second reading of what OSV returned | Trust OSV's answer alone; trust the range check alone | OSV answers per version. Agreement -> REJECTED. If the local check says "not affected" for an advisory OSV returned, one of the two is wrong, so the result is UNRESOLVED, not clean. |
+| GIT-only / unknown range type -> UNRESOLVED | Count as affected; ignore | CLAUDE.md: unknown -> UNRESOLVED. Ignoring it would fail open. |
+| AFFECTED beats UNKNOWN | UNRESOLVED whenever anything is unknown | One confirmed advisory is enough to reject; the unknown ones are still listed. |
+| PyPI registry fallback -> UNRESOLVED | Use PyPI's `vulnerabilities` list as the answer | That list has no ranges, so there is nothing to check, and the plan asks for OSV with real ranges. |
+| Stale has its own rule `ADVISORIES_STALE` | One rule for all "no answer" cases | The user's remedy differs: stale means "run once with network", unavailable may mean a damaged cache. |
+| Future-dated answer -> stale | Accept (the adapter does) | A cache file dated next year would otherwise never expire. |
+| `max_age_days` default 30 | A shorter default | It is the adapter's own default; the pipeline can pass a smaller value. Open for Maryam. |
+| Real recorded OSV data in `tests/test_cavr_data/`, trimmed; synthetic advisories only for shapes it lacks, ids `SYNTH-n` | Only hand-written advisories | The REJECTED case rests on real data; the synthetic ones test range arithmetic and are labelled. |
+| Tests set `retrieved_at` themselves | Store dated cache files | A stored file would go stale 30 days after recording and the tests would start failing. |
+
+### Requirements covered
+
+No `FR-CAVR-NN` identifiers exist in this repository; IDs are from `RequirementsTab.tsx` (Maryam to confirm).
+
+| ID | Title | What this step covers | Acceptance check |
+|---|---|---|---|
+| none listed | CLAUDE.md goal C3, "OSV with correct version-range checks" | Event-based range matching; REJECTED with advisory ids | `test_recorded_pypdf_5_1_0_is_rejected_with_the_advisory_ids`, `test_introduced_fixed_range`, `test_last_affected_range`, `test_multi_range` |
+| FR-6 | Fail-Closed Security Policy | No data, stale data, unsupported range -> UNRESOLVED | `test_no_data_is_unresolved`, `test_stale_cache_is_unresolved`, `test_git_only_range_is_unresolved` |
+
+### Ch 7 Test cases
+
+Run on 2026-10-10:
+
+- `.venv/bin/python -m pytest tests/test_cavr_*.py -q` -> 621 passed, 4 skipped (544 + 77 new; the 4 skipped are live tests).
+- `.venv/bin/python -m pytest -q` -> 679 passed, 7 failed, 4 skipped (the same 7 baseline tests).
+- `CAVR_LIVE=1 … tests/test_cavr_live.py` -> 4 passed. Live on 2026-10-10: pypdf 5.1.0 REJECTED; pypdf 6.19.0 OK, 0 advisories.
+- Before `advisories.py` existed the test file failed at import (1 collection error).
+
+| Test ID | Purpose | Input | Expected | Result |
+|---|---|---|---|---|
+| `test_recorded_pypdf_5_1_0_is_rejected_with_the_advisory_ids` | Real affected version | Recorded OSV answer, 97 advisories | REJECTED `KNOWN_VULNERABILITY`; 97 affected, ids sorted; `GHSA-php9-fj8v-98fj` fixed in 6.19.0 | pass |
+| `test_recorded_pypdf_6_19_0_has_no_known_vulnerability` | Real clean version | Recorded empty answer | OK `NO_KNOWN_VULNERABILITY` | pass |
+| `test_every_recorded_advisory_matches_5_1_0_and_most_do_not_match_6_19_0` | Range check on real data | The 97 advisories vs 5.1.0 and vs 6.19.0 | All AFFECTED; all NOT_AFFECTED | pass |
+| `test_introduced_fixed_range` (8) | introduced/fixed, just outside | Real advisory (introduced 0, fixed 6.19.0) vs 0.1, 5.1.0, 6.18.1, 6.19.0rc1, 6.19.0, 6.19, 6.19.0.post1, 7.0.0 | First four AFFECTED, last four NOT_AFFECTED | pass |
+| `test_introduced_above_zero` (4) | Lower bound | SYNTH: introduced 2.0, fixed 3.0 vs 1.9, 2.0, 2.5, 3.0 | NOT / AFFECTED / AFFECTED / NOT | pass |
+| `test_last_affected_range` (6) | last_affected | SYNTH: introduced 1.0, last_affected 1.5 vs 1.0, 1.4.9, 1.5, 1.5.0, 1.5.1, 0.9 | Inclusive at 1.5; 1.5.1 and 0.9 not affected | pass |
+| `test_the_old_rule_that_any_less_or_equal_range_affects_every_version_is_gone` | Old dashboard bug | SYNTH: last_affected 3.5.21 vs 3.5.21 and 4.0.0 | AFFECTED; NOT_AFFECTED | pass |
+| `test_multi_range` (7), `test_several_affected_entries_any_match_counts` | Multi-range | SYNTH: two intervals in one range + an open range; two `affected` entries | Inside any interval -> AFFECTED; gaps -> NOT_AFFECTED | pass |
+| `test_git_only_range_is_unknown`, `test_git_only_range_is_unresolved`, `test_git_range_next_to_a_matching_ecosystem_range_is_affected` | GIT-only | SYNTH: GIT range alone; GIT + ECOSYSTEM | UNKNOWN; UNRESOLVED `RANGE_UNSUPPORTED`; AFFECTED inside, UNKNOWN outside | pass |
+| `test_range_that_cannot_be_evaluated_is_unknown` (5), `test_unknown_event_after_introduced_counts_as_affected` | Odd ranges | Unparseable `fixed`, unknown type, no ranges and no versions, `events` / `ranges` a string; an unknown event name | UNKNOWN x5; AFFECTED (errs to the affected side) | pass |
+| `test_explicit_versions_list`, `test_advisory_for_another_package_or_ecosystem`, `test_package_name_is_matched_canonically`, `test_withdrawn_advisory_is_not_a_finding` | Other statuses | `versions` list; other name / npm / no `affected`; `Foo_Bar`; `withdrawn` set | AFFECTED/NOT; OTHER_PACKAGE; AFFECTED; WITHDRAWN and OK | pass |
+| `test_affected_wins_over_unknown`, `test_advisory_osv_returned_but_whose_range_excludes_the_version_is_unresolved`, `test_advisory_for_another_package_in_the_answer_is_unresolved` | Decision | GIT-only + affected; a real advisory fixed in 6.19.0 returned for 6.19.0; an advisory for another package | REJECTED; UNRESOLVED `RANGE_DISAGREEMENT` x2 | pass |
+| `test_no_data_is_unresolved` | No data | Empty cache directory, offline | UNRESOLVED `ADVISORIES_UNAVAILABLE` | pass |
+| `test_stale_cache_is_unresolved`, `test_cache_just_inside_the_age_limit_is_used`, `test_max_age_can_be_tightened`, `test_cache_dated_in_the_future_is_unresolved` | Stale | Cache 31 days old; 29.9 days; 2 days with limit 1; dated 400 days ahead | `ADVISORIES_STALE`; OK; `ADVISORIES_STALE` x2 | pass |
+| `test_cache_whose_content_was_edited_is_unresolved`, `test_cache_entry_for_another_version_is_not_used`, `test_unreadable_cache_file_is_unresolved` (4) | Damaged cache | Advisory removed without updating the digest; file of 2.0 renamed to 1.0's key; not JSON / `[]` / `{}` / bad date | UNRESOLVED `ADVISORIES_UNAVAILABLE` | pass |
+| `test_pypi_registry_fallback_is_not_osv_data` | Fallback mode | Only a `registry-*.json` file in the cache | UNRESOLVED `ADVISORIES_UNAVAILABLE` | pass |
+| `test_malformed_advisory_list_is_unresolved` (6), `test_adapter_failure_is_unresolved` (5) | Bad answers | `vulnerabilities` a string / `None` / `[5]` / no id / numeric id / a dict; adapter returns `None`, a string, `{}`, unavailable, or raises | `ADVISORIES_INVALID`; `ADVISORIES_UNAVAILABLE` | pass |
+| `test_live_answer_is_used_and_live_flag_is_passed_on`, `test_live_failure_falls_back_to_a_fresh_cache_and_says_so`, `test_live_failure_without_a_cache_is_unresolved` | Live path (offline) | Stub answer; `httpx.Client` made to fail with and without a 1-day-old cache | REJECTED, flags passed; OK with `live_error`; UNRESOLVED | pass |
+| `test_invalid_request_is_unresolved` (4), `test_every_result_has_the_same_keys` | Request / shape | empty name, bad version, `None` | UNRESOLVED `INVALID_REQUEST`, adapter not called; same keys | pass |
+| `test_live_osv_pypdf_5_1_0_is_rejected`, `test_live_osv_pypdf_6_19_0_gets_an_answer` (live) | Real OSV | Live query; then the same from the cache it wrote | REJECTED live and from cache; a live answer for 6.19.0 | pass (with `CAVR_LIVE=1`) |
+
+### Defects found and fixed
+
+| # | Found by | Finding | Outcome |
+|---|---|---|---|
+| 1 | Reading `package_records.affected` while writing the tests | A range with an event name it does not know (`{"until": …}`) after `introduced` is reported as affected, not as unknown. The first draft of the test expected UNKNOWN | Not a code defect: it errs to REJECTED. The expectation was corrected and the behaviour is pinned by `test_unknown_event_after_introduced_counts_as_affected` |
+| 2 | Reading `osv_adapter.py` | The adapter accepts a cache file dated in the future (negative age passes `age <= max_age_days`) and raises on an unreadable cache file | Handled in the wrapper: future date -> `ADVISORIES_STALE`; any adapter exception -> `ADVISORIES_UNAVAILABLE`. The adapter was not edited (Ali's area) |
+
+### Known limitations / deferred
+
+- Offline with no cache younger than `max_age_days`, every package is UNRESOLVED. The first run needs network.
+- The dashboard's `backend/cavr/osv_snapshot.json` and the `<=` rule in `resolver.py` are still in the
+  dashboard path. -> step 13.
+- Only the root package is checked by this function; the pipeline has to call it for every tree node. -> step 11.
+- Advisory severity is not read: any affecting advisory rejects, whatever its severity.
+- The recorded 5.1.0 file is trimmed (details, references, severity removed); the full answer is not stored.
+- `match_advisory` compares the explicit `versions` list as text, as `affected` does (`"1.0"` does not equal `"1.0.0"` there).
+- The two adapter weaknesses in defect 2 remain in `backend/integrations/osv_adapter.py` for its other callers.
+
+### Tool disclosure (Ch 8.7)
+
+- **Generated by Claude Code:** `advisories.py`, `tests/test_cavr_advisories.py`, the two live tests, the recording and trimming of the two OSV answers (`curl` to api.osv.dev on 2026-10-10), these notes, the commit.
+- **Reviewed / changed by Maryam:** nothing yet; the batch ran without stops.
+- **Verified by:** the pytest runs above, including the live OSV run.
+
+### Supervisor Q&A prep
+
+1. **What was wrong with the old OSV check and what is "correct" now?**
+   The dashboard path marked every version affected whenever a range contained `<=`. Now each range is
+   walked event by event: `introduced` opens it, `fixed` closes it (exclusive), `last_affected` closes it
+   (inclusive). pypdf 6.18.1 is affected by an advisory fixed in 6.19.0; 6.19.0 is not.
+2. **A cached VERIFIED verdict exists. Why ask OSV again?**
+   The wheel's bytes never change, but a new advisory can be published tomorrow. So the advisory answer
+   is not part of the cached verdict and is checked on every request (plan design step 7).
+3. **What happens offline?**
+   The adapter's dated cache is used if it is at most 30 days old and its digest still matches.
+   Otherwise the result is UNRESOLVED; CAVR never reports "no vulnerabilities" without an OSV answer.
