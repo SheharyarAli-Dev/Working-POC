@@ -1,19 +1,67 @@
 import json
 import os
+import re
 import subprocess
+import time
 from pathlib import Path
 
 from backend.satra.settings import SatraSettings, load_settings
-from backend.satra.ingest import run_git, git_environment
+from backend.satra.ingest import run_git, git_environment, require_allowed_url
 
 
 class RecommitError(Exception):
     pass
 
 
-def prepare_signed_commit_message(original_message: str, run_id: str, trailer: str = "ASENT-Verified-By: SATRA-RV") -> str:
+def prepare_trailer_tagged_commit_message(
+    original_message: str,
+    run_id: str,
+    approved_by: str = "ASENT Security Gate",
+    approved_at: str = None,
+    trailer: str = "ASENT-Verified-By: SATRA-RV",
+) -> str:
+    """
+    Formats the commit message with official audit trailers.
+    Trailers are metadata tags recorded in the commit body (not cryptographic GPG/SSH signatures).
+    """
     msg = original_message.strip()
-    return f"{msg}\n\n{trailer}\nASENT-Run-ID: {run_id}\n"
+    at = approved_at or time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime())
+    return (
+        f"{msg}\n\n"
+        f"{trailer}\n"
+        f"ASENT-Run-ID: {run_id}\n"
+        f"ASENT-Approved-By: {approved_by}\n"
+        f"ASENT-Approved-At: {at}\n"
+    )
+
+
+def prepare_signed_commit_message(original_message: str, run_id: str, trailer: str = "ASENT-Verified-By: SATRA-RV") -> str:
+    """Backward-compatible alias for prepare_trailer_tagged_commit_message."""
+    return prepare_trailer_tagged_commit_message(original_message, run_id, trailer=trailer)
+
+
+def get_unique_repair_branch_name(
+    repo: Path,
+    base_sha: str,
+    run_id: str,
+    branch_prefix: str = "satra/repair",
+) -> str:
+    """
+    Computes a repair branch name. If satra/repair/<sha7> already exists on remote origin
+    or locally, generates a new unique name: satra/repair/<sha7>-<run8> to never overwrite.
+    """
+    sha7 = base_sha[:7]
+    primary_name = f"{branch_prefix}/{sha7}"
+
+    remote_branches = run_git(repo, "ls-remote", "--heads", "origin", primary_name, tolerate=True).strip()
+    local_branches = run_git(repo, "branch", "--list", primary_name, tolerate=True).strip()
+
+    if not remote_branches and not local_branches:
+        return primary_name
+
+    clean_run = "".join(c for c in run_id if c.isalnum())
+    run8 = clean_run[-8:] if len(clean_run) >= 8 else (clean_run or "run1")
+    return f"{branch_prefix}/{sha7}-{run8}"
 
 
 def create_verified_repair_branch(
@@ -24,15 +72,17 @@ def create_verified_repair_branch(
     original_message: str = "fix(security): resolve verified assurance invariants",
     branch_prefix: str = "satra/repair",
     repair: dict = None,
+    approved_by: str = "ASENT Security Gate",
+    approved_at: str = None,
 ) -> dict:
     """
-    Phase 10: Local verified branch creation.
-    Creates a dedicated branch 'satra/repair/<sha7>' pointing to the verified repair commit
-    with the official signed trailer 'ASENT-Verified-By: SATRA-RV'.
+    Phase 10 / Phase F: Local verified branch creation.
+    Creates a dedicated non-colliding branch 'satra/repair/<sha7>' (or 'satra/repair/<sha7>-<run8>')
+    pointing to the verified repair commit with audit trailers.
     """
     repo = Path(repo_dir)
     sha7 = base_sha[:7]
-    branch_name = f"{branch_prefix}/{sha7}"
+    branch_name = get_unique_repair_branch_name(repo, base_sha, run_id, branch_prefix)
 
     # Determine default branch (main or master)
     default_branch = "main"
@@ -52,11 +102,11 @@ def create_verified_repair_branch(
     run_git(repo, "reset", "--hard", tolerate=True)
     run_git(repo, "clean", "-fd", tolerate=True)
 
-    # Use checkout -B to create or reset branch_name directly to base_sha
+    # Use checkout -B to create branch pointing to base_sha
     run_git(repo, "checkout", "-B", branch_name, base_sha)
 
-    # Format commit message with signature
-    commit_msg = prepare_signed_commit_message(original_message, run_id)
+    # Format commit message with audit trailers
+    commit_msg = prepare_trailer_tagged_commit_message(original_message, run_id, approved_by, approved_at)
     commit_sha = sha7
 
     if repair:
@@ -95,7 +145,6 @@ def create_verified_repair_branch(
         except Exception:
             pass
         finally:
-            # Switch back to original branch
             run_git(repo, "checkout", current_head, tolerate=True)
     else:
         run_git(repo, "checkout", current_head, tolerate=True)
@@ -111,22 +160,54 @@ def create_verified_repair_branch(
     }
 
 
-def push_repair_branch_if_allowed(repo_dir: Path, branch_name: str, settings: SatraSettings) -> dict:
+def push_repair_branch_if_allowed(
+    repo_dir: Path,
+    branch_name: str,
+    settings: SatraSettings,
+    approval_record: dict = None,
+) -> dict:
     """
-    Pushes repair branch to upstream forge ONLY if push_enabled is True in settings.
-    Otherwise safely logs that push is disabled per security policy.
+    Pushes repair branch to upstream forge ONLY if all security gates pass:
+    1. Not running inside test suite (PYTEST_CURRENT_TEST unset)
+    2. SATRA_ALLOW_PUSH == "1" in environment and push_enabled in settings
+    3. Explicit human approval record exists and is approved
+    4. Remote origin URL matches the strict allowlist
+    5. Normal push (NEVER -f / --force!)
     """
-    if not settings.push_enabled:
+    if "PYTEST_CURRENT_TEST" in os.environ:
         return {
             "pushed": False,
-            "reason": "Push disabled by policy (SATRA_ALLOW_PUSH=0). Branch exists locally.",
+            "reason": "Push refused: running under test runner (PYTEST_CURRENT_TEST is set)",
+            "branch": branch_name,
+        }
+
+    if not settings.push_enabled or os.environ.get("SATRA_ALLOW_PUSH") != "1":
+        return {
+            "pushed": False,
+            "reason": "Push disabled by policy (SATRA_ALLOW_PUSH != 1). Branch exists locally.",
+            "branch": branch_name,
+        }
+
+    if not approval_record or not approval_record.get("approved"):
+        return {
+            "pushed": False,
+            "reason": "Push refused: explicit human approval record is missing or not approved.",
             "branch": branch_name,
         }
 
     repo = Path(repo_dir)
+    origin_url = run_git(repo, "config", "--get", "remote.origin.url", tolerate=True).strip()
+    if origin_url and not require_allowed_url(origin_url, settings.allowlist):
+        return {
+            "pushed": False,
+            "reason": f"Push refused: remote URL '{origin_url}' is not in allowed forge list.",
+            "branch": branch_name,
+        }
+
     env = git_environment()
+    # Normal push — NO -f / --force!
     res = subprocess.run(
-        ["git", "-C", str(repo), "push", "-u", "-f", "origin", branch_name],
+        ["git", "-C", str(repo), "push", "-u", "origin", branch_name],
         capture_output=True,
         env=env,
         timeout=120,
@@ -142,23 +223,20 @@ def push_repair_branch_if_allowed(repo_dir: Path, branch_name: str, settings: Sa
 
     out = (res.stdout.decode("utf-8", "replace") + "\n" + res.stderr.decode("utf-8", "replace")).strip()
 
-    # Forward push to GitHub if origin is a local clone of the remote forge
-    origin_url = run_git(repo, "config", "--get", "remote.origin.url", tolerate=True).strip()
+    # Forward push to upstream if origin is a local clone of the remote forge
     if origin_url and os.path.isdir(origin_url):
         upstream = Path(origin_url)
         res_upstream = subprocess.run(
-            ["git", "-C", str(upstream), "push", "-u", "-f", "origin", branch_name],
+            ["git", "-C", str(upstream), "push", "-u", "origin", branch_name],
             capture_output=True,
             env=env,
             timeout=120,
         )
         if res_upstream.returncode == 0:
-            out += "\nForwarded to GitHub: " + (res_upstream.stdout.decode("utf-8", "replace") + res_upstream.stderr.decode("utf-8", "replace")).strip()
+            out += "\nForwarded to upstream: " + (res_upstream.stdout.decode("utf-8", "replace") + res_upstream.stderr.decode("utf-8", "replace")).strip()
 
     return {
         "pushed": True,
         "output": out,
         "branch": branch_name,
     }
-
-
