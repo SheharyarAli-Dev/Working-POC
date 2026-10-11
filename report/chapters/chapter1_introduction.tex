@@ -25,7 +25,7 @@ AI-assisted development increases the amount of code, dependency resolution and 
 
 \section{Problem Context and Motivation}
 \begin{sloppypar}
-For CAVR, the context is the moment a coding agent or a developer runs \texttt{pip install} or edits \path{requirements.txt}. The approved CAVR design records incidents in which a correctly named or legitimate package was still harmful: the 2022 \texttt{torchtriton} package on PyPI, which took precedence over a private dependency of the same name and collected system data and SSH files, and the 2024 Ultralytics compromise, where the published files were malicious although they came through the project's own release workflow. The lesson taken from both is that a package's name and its presence on the registry are not a security decision. \textbf{TODO: add references for these two incidents to \path{references/references.bib} (shared file) and cite them here.}
+For CAVR, the context is the moment a coding agent or a developer runs \texttt{pip install} or edits \path{requirements.txt}. A package name and its presence on a registry are not, by themselves, a security decision. The approved CAVR design therefore checks package provenance, known advisories, source behavior and the capabilities used by the project before reporting a verdict.
 \end{sloppypar}
 
 \begin{sloppypar}
@@ -89,7 +89,7 @@ The CAVR and SABLE lists are what the mid-stage prototypes implement. The SATRA-
 \midrule
 \endhead
 CAVR & Mid-stage prototype: capture of \texttt{pip install} commands and \path{requirements.txt} edits; requirement gate; download of the real PyPI wheel with a SHA-256 check; transitive tree; OSV advisory check; AST scan of wheel sources; capability contract from the project's call sites; verdict cache; pip wrapper; dashboard page with six real requests. & PyPI wheels only: no npm, no source distributions. No package is executed: sandbox execution, counterfactual activation, the causal graph, repair and re-verification are designed but not part of the mid stage. No detection-rate or false-positive result on a package corpus. Unknown or unsupported input ends \texttt{UNRESOLVED}.\\
-SATRA-RV & Design scope: Python web applications tested with pytest; the security families authentication, authorization and IDOR, SQL injection, command injection, path traversal, XSS, SSRF, CSRF and insecure deserialization; deterministic dictionary tests; adaptive tests from a local model after validation; sandboxed before-and-after verification. \textbf{TODO (SATRA-RV owner): which of these the mid-stage prototype implements.} & No dependency trust analysis and no infrastructure analysis; those are CAVR and SABLE. No hosted LLM API, model training or fine-tuning. No production execution and no live exploitation of third-party systems. No universal vulnerability coverage and no proof that an application is secure. Insufficient evidence ends \texttt{INCONCLUSIVE}.\\
+SATRA-RV & Mid-stage evidence in this report is limited to the SATRA test suite and integrated runs; shared-workflow examples remain \texttt{INCONCLUSIVE}. The design's broader vulnerability-family list, adaptive-test workflow and acceptance criteria are not claimed as completed or demonstrated here. & No dependency trust analysis and no infrastructure analysis; those are CAVR and SABLE. No hosted LLM API, model training or fine-tuning. No production execution and no live exploitation of third-party systems. No universal vulnerability coverage and no proof that an application is secure. Insufficient evidence ends \texttt{INCONCLUSIVE}.\\
 SABLE & Mid-stage prototype: local Terraform/HCL parsing for the supported resource subset, local modules and references; S3 buckets; selected inline IAM role-policy forms; baseline obligation checks; successor ranking; shared evidence freshness and final-gate integration. & No general Terraform interpreter, full AWS IAM evaluator, live AWS inspection, Terraform apply, arbitrary module expansion, production-scale performance claim, or independent real-world effectiveness result. Unsupported or unresolved semantics remain \texttt{UNKNOWN}.\\
 \bottomrule
 \end{longtable}
@@ -132,7 +132,7 @@ In the final gate a \texttt{REJECTED}, \texttt{REJECT} or \texttt{REGRESSED} res
 \end{sloppypar}
 
 \begin{sloppypar}
-\textbf{SATRA-RV.} In the design, success is observable when: (i) a candidate is accepted only if every mandatory gate passes, which means the targeted defect is removed, the trusted tests pass, the accepted adaptive tests pass, and there is no new security, functional or build regression; (ii) a contract violation, a failing trusted test or a new regression returns \texttt{REJECT}; and (iii) insufficient evidence returns \texttt{INCONCLUSIVE} and never \texttt{ACCEPT}. Every shared-workflow run in the executive summary that states a SATRA-RV result states \texttt{INCONCLUSIVE}, and the run in which SABLE was \texttt{PRESERVED} was sent to review for that reason. \textbf{TODO (SATRA-RV owner): which of these criteria were observed at the mid stage, and on which scenario.}
+\textbf{SATRA-RV.} The design's success criteria are: (i) accept a candidate only if every mandatory gate passes; (ii) reject a contract violation, failing trusted test or new regression; and (iii) return \texttt{INCONCLUSIVE}, never \texttt{ACCEPT}, when evidence is insufficient. The mid-stage evidence in this report does not demonstrate these acceptance criteria: retained shared-workflow runs report SATRA-RV as \texttt{INCONCLUSIVE}, including the run in which SABLE was \texttt{PRESERVED}.
 \end{sloppypar}
 
 \begin{sloppypar}
@@ -165,5 +165,5 @@ The SABLE analysis uses local fixture data and does not require personal data or
 \end{sloppypar}
 
 \begin{sloppypar}
-Tool-assisted development is disclosed per member. My use of Claude Code for the CAVR work is described in Section~\ref{sec:cavr}; the team-wide disclosure is in Chapter 8. \textbf{TODO: DEI statement, to be agreed by the team.}
+Tool-assisted development is disclosed per member. My use of Claude Code for the CAVR work is described in Section~\ref{sec:cavr}; the team-wide disclosure is in Chapter 8. A team-approved DEI statement was not available in the reviewed report archive, so none is asserted here.
 \end{sloppypar}

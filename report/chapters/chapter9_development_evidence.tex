@@ -4,9 +4,9 @@ This chapter records implementation, repository, testing, tool-use, and risk evi
 
 \section{Work Completed}
 
-The current SABLE contribution includes a local Terraform/HCL analysis pipeline, a bounded IAM/S3 authorization evaluator, successor correspondence, explicit outcomes of \texttt{PRESERVED}, \texttt{REGRESSED}, and \texttt{UNKNOWN}, baseline comparisons B0--B4, authored scenarios, and integration with the shared evidence/final-gate path. Automated tests cover expected results, unsupported and ambiguous inputs, stale evidence, input-hash mismatch, and evidence integrity. The unresolved-role-binding correction is commit \texttt{58b0a3d}, included in current branch head \texttt{753a55b}. The 27-pass local audit result was recorded on the correction-containing worktree; the earlier 44-pass CI result predates that correction.
+The current SABLE contribution includes a local Terraform/HCL analysis pipeline, a bounded IAM/S3 authorization evaluator, successor correspondence, explicit outcomes of \texttt{PRESERVED}, \texttt{REGRESSED}, and \texttt{UNKNOWN}, baseline comparisons B0--B4, authored scenarios, and integration with the shared evidence/final-gate path. Automated tests cover expected results, unsupported and ambiguous inputs, stale evidence, input-hash mismatch, and evidence integrity. The unresolved-role-binding correction is commit \texttt{58b0a3d}; it is included in verified combined commit \texttt{665b224} on \texttt{integration/sable-satra-cavr}. The 27-pass local audit and 44-pass initial CI results are historical, separate results; the focused shared-assurance CI on the combined snapshot passed 46 tests.
 
-The SABLE changes were pushed to the team's \texttt{sable} branch. The branch commit recorded below is the evidence point for the implementation described in this chapter; the focused GitHub Actions job for that commit completed successfully with 44 tests passing.
+The initial SABLE changes were published on the team's \texttt{sable} branch. The current verification point is the isolated combined branch \texttt{integration/sable-satra-cavr} at \texttt{665b224}; it contains the integrated CAVR, SATRA-RV, SABLE, and shared workflow snapshot. It is not merged into \texttt{master}. The SABLE shared-assurance job on this commit passed 46 tests.
 
 \subsection{Rendered Application Evidence}
 The integrated capture below comes from the shared ASENT Run Workflow, not from the dedicated SABLE page. It records run \texttt{104074afe883} for the \texttt{sable\_regressed} storage-refactor scenario. The displayed module outcomes are CAVR \texttt{VERIFIED}, SABLE \texttt{REGRESSED}, and SATRA \texttt{INCONCLUSIVE}, with an overall final decision of \texttt{BLOCK}. The trace shows a known obligation that does not hold and a candidate policy target changed through the storage module. Since SATRA is also inconclusive, the screenshot is not evidence that SABLE was the sole cause of the overall gate result.
@@ -38,8 +38,8 @@ A separate capture from the dedicated SABLE page covers the distinct \texttt{pol
 
 The two dedicated-page report figures are focused crops of the saved UI captures; only the visible area was trimmed for readability and the displayed application content was not changed. They support the distinct \texttt{policy\_rewrite\_wrong\_target} scenario, associated with local run \texttt{sable-1791646956750}: the \texttt{S3-APPROLE-CUSTOMERDATA} obligation and policy target change from \texttt{customer\_data} to \texttt{temp\_storage}. These are not screenshots of the integrated invoice-storage run above. None of the screenshots establishes live AWS behavior or applied infrastructure.
 
-\subsection{Current Shared-Workflow Rehearsal}
-At branch head \texttt{753a55b} on \texttt{sable}, the shared Run Workflow was executed for the three mid-evaluation outcomes. The run records completed with the following module and aggregate decisions:
+\subsection{Earlier Shared-Workflow Rehearsal}
+At branch head \texttt{753a55b} on \texttt{sable}, the shared Run Workflow was executed for three mid-evaluation outcomes. These earlier aggregate runs are kept separate from the latest dedicated SABLE module screenshots below. The run records completed with the following module and aggregate decisions:
 
 \small
 \setlength{\tabcolsep}{2pt}
@@ -61,6 +61,66 @@ The \texttt{PRESERVED} result is not an overall \texttt{ACCEPT}: the shared gate
 The current-checkout image for run \texttt{b6d358\allowbreak{}8ec006} is an intermediate UI capture. It visibly shows SABLE \texttt{UNKNOWN} and the \texttt{REVIEW} headline, but the gate explanation still says the candidate is waiting for evidence and the CAVR card has no current evidence. The persisted run subsequently reached \texttt{COMPLETE} with final-gate reasons \texttt{SATRA: INCONCLUSIVE} and \texttt{SABLE: UNKNOWN}. Browser runtime initialization blocked a fresh completed-state screenshot, so this intermediate image is not cited as proof of the final gate explanation. The runbook records the exact image path and limitation.
 \end{sloppypar}
 
+\subsection{Latest SABLE Module UI Demonstration}
+The following results are from the dedicated SABLE page exercised on the verified combined source snapshot at \texttt{665b224}. The UI displays the registered obligation, the baseline/candidate Terraform evidence, the analysis trace, a SABLE verdict, its SABLE-to-ASENT mapping, and an evidence-chain verification result. The mapping in this table is the SABLE module's displayed outcome; it is not a claim that the complete shared workflow has the same final decision for every run.
+
+\small
+\setlength{\tabcolsep}{5pt}
+\begin{longtable}{p{0.24\textwidth}p{0.20\textwidth}p{0.18\textwidth}p{0.22\textwidth}}
+\toprule
+\textbf{Scenario} & \textbf{SABLE verdict} & \textbf{SABLE mapping} & \textbf{Evidence chain}\\
+\midrule
+\endhead
+\path{rename_with_moved} & \texttt{PRESERVED} & \texttt{ACCEPT} & 9 of 9 records verified\\
+\path{privilege_widening} & \texttt{REGRESSED} & \texttt{BLOCK} & 9 of 9 records verified\\
+\path{split_to_two} & \texttt{UNKNOWN} & \texttt{REVIEW} & 7 of 7 records verified\\
+\bottomrule
+\end{longtable}
+\normalsize
+\setlength{\tabcolsep}{6pt}
+
+The preserved case uses an explicit Terraform \texttt{moved} block and retains the registered IAM role's S3 actions and customer-data resource scope. The privilege-widening case adds a wildcard action/resource grant on the identified successor and is classified as a known regression. The split case leaves two plausible successors too close for unique attribution; SABLE abstains with \texttt{UNKNOWN}. The authorization decision path is deterministic and does not rely on an LLM. The checks analyze supplied Terraform and IAM evidence; they do not apply infrastructure to AWS.
+
+\begin{figure}[p]
+    \centering
+    \includegraphics[width=0.98\textwidth,height=0.72\textheight,keepaspectratio]{figures/sable/rename-with-moved-chain-detail.png}
+    \caption[SABLE UI: preserved rename with move]{Dedicated SABLE UI evidence for \texttt{rename\_with\_moved}: preserved obligation, SABLE mapping \texttt{ACCEPT}, and an intact chain with nine records verified. Cropped from the original full-page capture for readability.}
+    \label{fig:sable-ui-preserved-evidence}
+\end{figure}
+\clearpage
+
+\begin{figure}[p]
+    \centering
+    \includegraphics[width=0.98\textwidth,height=0.72\textheight,keepaspectratio]{figures/sable/privilege-widening-chain-detail.png}
+    \caption[SABLE UI: privilege widening regression]{Dedicated SABLE UI evidence for \texttt{privilege\_widening}: the widened grant is classified \texttt{REGRESSED}/\texttt{BLOCK}; the evidence chain verifies nine records. Cropped from the original full-page capture for readability.}
+    \label{fig:sable-ui-regressed-evidence}
+\end{figure}
+\clearpage
+
+\begin{figure}[p]
+    \centering
+    \includegraphics[width=0.98\textwidth,height=0.72\textheight,keepaspectratio]{figures/sable/split-to-two-chain-detail.png}
+    \caption[SABLE UI: ambiguous split review]{Dedicated SABLE UI evidence for \texttt{split\_to\_two}: ambiguous correspondence returns \texttt{UNKNOWN}/\texttt{REVIEW}; the evidence chain verifies seven records. Cropped from the original full-page capture for readability.}
+    \label{fig:sable-ui-unknown-evidence}
+\end{figure}
+\clearpage
+
+\begin{figure}[p]
+    \centering
+    \includegraphics[width=0.96\textwidth,height=0.70\textheight,keepaspectratio]{figures/sable/registered-obligation-detail.png}
+    \caption[SABLE UI: registered obligation]{SABLE UI input evidence: the registered \texttt{S3-APPROLE-CUSTOMERDATA} principal, action, and resource scope. This is unaltered UI content cropped to the relevant panel.}
+    \label{fig:sable-ui-obligation-and-terraform}
+\end{figure}
+\clearpage
+
+\begin{figure}[p]
+    \centering
+    \includegraphics[width=0.96\textwidth,height=0.60\textheight,keepaspectratio]{figures/sable/terraform-diff-detail.png}
+    \caption[SABLE UI: Terraform baseline and candidate]{Baseline/candidate Terraform diff shown in the privilege-widening demonstration. The screenshot is cropped to the application panel; the displayed Terraform content is unchanged.}
+    \label{fig:sable-ui-terraform-diff}
+\end{figure}
+\clearpage
+
 \section{Work Remaining}
 
 The following items remain outside the evidence established by the focused SABLE CI run and the three current-checkout rehearsal runs:
@@ -68,7 +128,7 @@ The following items remain outside the evidence established by the focused SABLE
     \item broaden and document the supported Terraform and IAM model, including explicit handling for additional resource and policy constructs;
     \item expand independent evaluation beyond the 33 authored synthetic scenarios and investigate false-safe and false-regression cases;
     \item expand integrated Run Workflow validation beyond the three rehearsed scenarios, obtain a refreshed completed-state capture for the unknown run, and investigate the displayed SATRA \texttt{INCONCLUSIVE} result before claiming full-system acceptance;
-    \item verify the complete CI/CD workflow after the separate pipeline pull request is reviewed and merged; and
+    \item keep the combined CI workflow green on the integrated branch and verify the report/code branch merge sequence with the team; and
     \item consolidate the team's feedback/action register, design artefacts, and member-by-member contribution evidence in the report appendices.
 \end{itemize}
 
@@ -103,17 +163,19 @@ Repository branch & \href{https://github.com/SheharyarAli-Dev/Working-POC/tree/s
 SABLE commit & \href{https://github.com/SheharyarAli-Dev/Working-POC/commit/9a4dc3d9\allowbreak{}4626ec1f\allowbreak{}14683b74\allowbreak{}20f4640d\allowbreak{}97de20c7}{Commit \texttt{9a4dc3d9}} (pushed).\\
 Focused CI run & \href{https://github.com/SheharyarAli-Dev/Working-POC/actions/runs/38058431317}{SABLE shared assurance, run 38058431317} (success).\\
 CI/CD pipeline proposal & \href{https://github.com/SheharyarAli-Dev/Working-POC/pull/2}{Pull request 2: Add CI/CD pipeline} (open at check).\\
+Verified combined branch & \href{https://github.com/SheharyarAli-Dev/Working-POC/tree/integration/sable-satra-cavr}{integration/sable-satra-cavr} at commit \texttt{665b224}; isolated from \texttt{master}.\\
+Combined CI evidence & Core CI 38161406626, SATRA CI 38161406573, and SABLE shared assurance 38161406576 succeeded on the combined commit; see Chapter 8 for run links and test totals.\\
 \bottomrule
 \end{longtable}
 
-The run executes the focused SABLE and shared-gate test set. The separate CI/CD pull request remained open at the time of checking. This run does not validate that pull request’s full build, publishing, and release flow.
+The 44-test run executes the initial focused SABLE/shared-gate selection on commit \texttt{9a4dc3d}; it predates the unresolved-role-binding correction. The CI/CD pull-request status recorded in the earlier SABLE audit is historical and is separate from the successful combined-commit runs listed above.
 
 \section{Milestones and Commit Evidence}
 
-The initial published SABLE milestone was commit \texttt{9a4dc3d}, followed by its focused CI run. The unresolved-role-binding correction was then committed as \texttt{58b0a3d}; the current \texttt{sable} head is merge commit \texttt{753a55b}. The three completed shared-workflow rehearsal runs at that head are recorded above. Equivalent branch/commit records for CAVR and SATRA-RV and closure evidence for proposal-feedback actions are not included in this SABLE-focused verification set.
+The initial published SABLE milestone was commit \texttt{9a4dc3d}, followed by its focused CI run. The unresolved-role-binding correction was then committed as \texttt{58b0a3d}; it is included in the verified combined commit \texttt{665b224}. The three earlier shared-workflow rehearsal runs at SABLE head \texttt{753a55b} are recorded above. The integration branch establishes which module snapshots were tested together; it does not establish individual ownership for CAVR or SATRA-RV, and it does not supply the official proposal-action records.
 
 \begin{sloppypar}
-The narrowly scoped unresolved-role-binding correction in \path{backend/sable/authorization.py} and regression assertions in \path{tests/test_modules.py} were committed as \texttt{58b0a3d} and are included in the current \texttt{sable} branch head at \texttt{753a55b}. The correction-containing local focused selection passed 27 tests with 10 deselected; see Chapter 8 for its exact command and scope. The earlier 44-test CI result is from commit \texttt{9a4dc3d} and does not cover this correction.
+The narrowly scoped unresolved-role-binding correction in \path{backend/sable/authorization.py} and regression assertions in \path{tests/test_modules.py} were committed as \texttt{58b0a3d} and are included in combined commit \texttt{665b224}. The correction-containing local focused selection passed 27 tests with 10 deselected; see Chapter 8 for its exact command and scope. The initial 44-test CI result is from commit \texttt{9a4dc3d} and does not cover this correction; the combined-snapshot shared-assurance result was 46 passed.
 \end{sloppypar}
 
 \section{Tools and Tool-Assisted Development}

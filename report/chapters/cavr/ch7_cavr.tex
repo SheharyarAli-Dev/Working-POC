@@ -1,4 +1,4 @@
-% OWNER: Maryam Fatima
+﻿% OWNER: Maryam Fatima
 \section{CAVR Testing}\label{sec:cavr-testing}
 \begin{sloppypar}
 CAVR is tested at four levels. Unit tests cover each stage on its own (capture, gate, PyPI client, wheel metadata, tree, advisories, scan, contract, sink judgement, cache). Pipeline tests run \path{verify_request} end to end with a local transport that serves real file bytes, including the real \texttt{pypdf-6.19.0} wheel of 395\,480 bytes, and a registry answer whose digest is computed from those bytes. Interface tests cover the pip wrapper, the dashboard API over HTTP, and the page components rendered to HTML with Node.js. Seven live tests run against the real PyPI and OSV and are skipped unless \texttt{CAVR\_LIVE=1} is set. The advisory tests use two real OSV answers recorded on 2026-10-10: 97 advisories for pypdf 5.1.0 and the empty answer for pypdf 6.19.0. Synthetic advisories are used only for range shapes the real data lacks and are labelled \texttt{SYNTH-n}.
