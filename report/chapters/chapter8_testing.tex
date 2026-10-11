@@ -1,5 +1,16 @@
 \chapter{Testing and Early Validation}
-Testing at the FYP-1 Mid stage checks whether the implemented SABLE logic follows its stated rules on controlled inputs and whether current SABLE evidence is safely consumed by the shared gate. The results below are focused tests, not a full repository suite, live AWS validation, or independent evaluation on production Terraform.
+\begin{sloppypar}
+Testing at the FYP-1 Mid stage checks whether the implemented modules follow their stated rules on controlled inputs and whether the shared gate consumes current evidence safely. This report separates module tests, combined CI, and live UI demonstration evidence. It does not claim live AWS validation or independent evaluation on production Terraform.
+\end{sloppypar}
+
+\section{Integrated CI: Verified Mid-Evaluation Snapshot}
+The integrated test snapshot is commit \texttt{665b224} on \texttt{integration/sable-satra-cavr}. Three successful GitHub Actions runs cover this exact combined commit:
+\begin{itemize}
+    \item \textbf{Core CI, run 38161406626:} successful. \href{https://github.com/SheharyarAli-Dev/Working-POC/actions/runs/38161406626}{run link}.
+    \item \textbf{SATRA CI, run 38161406573:} 84 SATRA tests passed. All four required Docker sandbox checks ran without skips. The Docker-enabled full suite passed 1,427 tests, with 26 skipped and one warning. \href{https://github.com/SheharyarAli-Dev/Working-POC/actions/runs/38161406573}{run link}.
+    \item \textbf{SABLE shared assurance, run 38161406576:} 46 focused tests passed. \href{https://github.com/SheharyarAli-Dev/Working-POC/actions/runs/38161406576}{run link}.
+\end{itemize}
+The 26 skips in the broad suite comprise 19 frontend-render cases not run in that broad job and seven opt-in live-network tests. Frontend build/render checks ran separately. The local Windows Docker engine could not be started; the Docker-backed evidence above comes from the remote Docker-enabled CI runner. These results do not mean every test ran in the broad suite or that a live AWS deployment was exercised.
 
 \section{Testing Strategy}
 The local focused selection combines SABLE unit and fixture tests, the ground-truth isolation check, and the shared integration test. Cases include expected positive behavior, known wrong-target/weakening regressions, uncertainty at unsupported or ambiguous boundaries, and evidence binding/final-gate outcomes. The authored scenario fixtures are controlled test data rather than an independently sampled dataset.
@@ -10,7 +21,7 @@ The local focused selection combines SABLE unit and fixture tests, the ground-tr
     \item \textbf{Regression tests:} compare standalone and shared authorization behavior for unresolved role bindings and explicitly unrelated static roles.
     \item \textbf{Isolation test:} checks the SABLE decision path remains separate from benchmark ground-truth labels.
     \item \textbf{Shared integration test:} runs four shared \texttt{sable\_*} scenarios and asserts published SABLE evidence, candidate snapshot, SABLE input hash, integrity, and final decision.
-    \item \textbf{CI evidence:} the dedicated GitHub Actions SABLE job passed 44 tests on published commit \texttt{9a4dc3d94626ec1f14683b7420f4640d97de20c7}; it is a separate result from the local worktree audit below. A broader full-CI run reported eight failures. Its run link and failure-by-failure details were not available in the local records checked for this report, so the causes are not attributed here; the focused SABLE pass does not cover those broader failures.
+    \item \textbf{CI evidence:} the initial SABLE-focused CI passed 44 tests on commit \texttt{9a4dc3d}; after the unresolved-binding correction and integration, the shared-assurance job passed 46 tests on commit \texttt{665b224}. These are separate results on separate snapshots. The combined Docker-enabled suite result and its skips are recorded above.
 \end{itemize}
 
 \section{Test Cases}
@@ -44,7 +55,7 @@ The shared integration assertions establish that current SABLE evidence was publ
 \end{sloppypar}
 
 \begin{sloppypar}
-The separate GitHub Actions run named \textit{SABLE shared assurance} reported \textbf{44 passed in 5.59 seconds} on commit \path{9a4dc3d94626ec1f14683b7420f4640d97de20c7}. That CI result predates the evaluator correction described in Chapter 5. The correction was committed as \texttt{58b0a3d} and is included in current branch head \path{753a55b1daedc370f04a493eca31169e5083dc1a}; the correction-containing local audit selection reported above was a separate run. Neither result is a full repository-suite pass, live AWS test, or completed external comparative evaluation.
+The separate initial GitHub Actions run named \textit{SABLE shared assurance} reported \textbf{44 passed} on commit \path{9a4dc3d94626ec1f14683b7420f4640d97de20c7}. That result predates the unresolved-role-binding correction. The correction was committed as \texttt{58b0a3d}; it is included in combined commit \texttt{665b224}, whose focused shared-assurance job passed 46 tests. The correction-containing local selection reported above (27 passed, 10 deselected) was another distinct run. The Docker-enabled combined full-suite result is reported in the preceding section. None of these results establishes complete Terraform/AWS semantics or live-cloud behavior.
 \end{sloppypar}
 
 % Module test sections (each owned by its member, see OWNERS.md)
@@ -70,10 +81,11 @@ The audit compared \texttt{backend/sable/authorization.py} with \texttt{backend/
 
 \section{Current Validation Status}
 \begin{itemize}
-    \item \textbf{Verified locally:} 27 selected tests passed, 10 were deselected, and the process exited 0 on the current worktree.
-    \item \textbf{Verified in earlier CI:} 44 focused tests passed on the published SABLE commit; the local evaluator correction is not part of that recorded commit.
+    \item \textbf{Verified in local focused selection:} 27 selected tests passed and 10 were deselected; this was not the full suite.
+    \item \textbf{Verified in CI:} 44 focused tests passed on initial SABLE commit \texttt{9a4dc3d}; 46 focused shared-assurance tests passed on combined commit \texttt{665b224}, which includes the correction.
+    \item \textbf{Verified in Docker-enabled CI:} SATRA passed 84 tests and the combined full suite passed 1,427 with 26 skipped and one warning; all four required Docker checks ran without skips, and frontend build/render checks ran separately.
     \item \textbf{Verified for tested fixtures:} preserved, regressed, and unknown outcomes are differentiated, and four shared final-gate scenarios assert evidence binding and decisions.
-    \item \textbf{Not established:} complete Terraform/AWS semantics, live-cloud behavior, independent benchmark validity, production-scale performance, or comparative research advantage. The broader full-CI run had eight failures whose individual causes were not verified in the local evidence checked for this report; full-project readiness is therefore not claimed.
+    \item \textbf{Not established:} complete Terraform/AWS semantics, live-cloud behavior, independent benchmark validity, production-scale performance, or comparative research advantage. The Windows host did not provide a running Docker engine; Docker-dependent evidence is from CI.
 \end{itemize}
 
 The test evidence is early controlled validation. The scenario set is authored in-house; its outcomes are useful as regression checks but are not an independent estimate of real-world error rates.

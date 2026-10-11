@@ -1,5 +1,7 @@
 \chapter{Software Requirements}
+\begin{sloppypar}
 This chapter states only the SABLE requirements that can be checked against the current implementation and tests. The obligation used for the acceptance cases is \texttt{S3-APPROLE-CUSTOMERDATA}: the registered application role must retain \texttt{s3:GetObject} and \texttt{s3:PutObject} on the protected customer-data bucket's object scope.
+\end{sloppypar}
 
 \section{User Interactions / Use Cases}
 The reviewer supplies a baseline, a candidate Terraform snapshot, and the registered obligation; starts a SABLE run through the standalone or shared workflow; and inspects the verdict, reasons, and evidence. In the integrated workflow, the shared orchestrator stores SABLE evidence and reports the final gate decision.
@@ -57,12 +59,16 @@ No latency or scale target has been established in the evidence reported here. P
 The SABLE decision path is local and does not apply Terraform or call AWS. Shared evidence is bound to the candidate snapshot and module input hash and checked for integrity. The evaluator is bounded, not a full AWS authorization engine.
 
 \section{Acceptance Criteria}
+\begin{sloppypar}
 \begin{itemize}
     \item \textbf{AC-S1 (PRESERVED):} a valid trusted baseline and unique supported successor retain the required principal, actions, and S3 object scope; tests assert \texttt{PRESERVED}.
     \item \textbf{AC-S2 (REGRESSED):} supported evidence establishes a wrong target or a missing required action; tests assert \texttt{REGRESSED}, not a local-policy-only safe result.
     \item \textbf{AC-S3 (UNKNOWN):} ambiguous correspondence, unresolved binding, unsupported policy semantics, or unverified baseline prevents a justified safe verdict; tests assert \texttt{UNKNOWN}.
     \item \textbf{AC-S4 (shared gate):} current integrity-valid evidence maps to \texttt{ACCEPT}/\texttt{BLOCK}/\texttt{REVIEW} according to SABLE status, while stale or untrusted evidence cannot establish acceptance.
 \end{itemize}
+\end{sloppypar}
 
 \section{Requirements Traceability}
+\begin{sloppypar}
 FR-S1--S5 map to SABLE I2--I4 and the analyzer/parser/correspondence/authorization components. FR-S6--S8 map to I1 and the shared orchestrator/final gate. The named test files and direct expected values are listed in Appendix C. The four local shared-integration parameter cases are one parameterized test function; test counts reported in Chapter 8 must not be read as the count of distinct requirements.
+\end{sloppypar}

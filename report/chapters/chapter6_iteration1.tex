@@ -47,7 +47,7 @@ The shared workflow is implemented through the orchestrator and its front-end Ru
 
 \section{Completed Features / Module}
 
-The SABLE branch currently contains the following implemented features:
+The verified integrated snapshot contains the following SABLE features:
 \begin{itemize}
     \item parsing and normalization of supported Terraform resources, local modules, resource references, outputs, and \texttt{moved} blocks;
     \item a bounded authorization check for relevant IAM role policies and bucket policies, including required actions and resource scope;
@@ -87,15 +87,21 @@ The implementation uses Python 3.12, FastAPI and Pydantic for the API, \path{pyt
 Terraform CLI, Checkov, Trivy, and Docker/Podman are optional environment tools. Their absence is reported and can reduce scanner strength or isolation; the report does not imply that an unavailable external scan passed.
 
 \section{Reproducible Setup and Run Instructions}
+\begin{sloppypar}
 From the repository root in Windows PowerShell, run \texttt{powershell -ExecutionPolicy Bypass -File .\textbackslash{}scripts\textbackslash{}setup.ps1} once to create the Python environment, install dependencies, and build the frontend. Start the local app with \texttt{powershell -ExecutionPolicy Bypass -File .\textbackslash{}scripts\textbackslash{}start.ps1}, then open \texttt{http://127.0.0.1:8000} and select \textit{RUN WORKFLOW} for the shared path. Stop the server with \texttt{STOP\_ASENT.ps1}. Chapter 8 records the exact focused test command and result. On a Windows host where pytest's default temporary directory is inaccessible, pass a fresh writable \texttt{--basetemp} under the project. The demonstration requires no Terraform apply, AWS credentials, or cloud API access.
+\end{sloppypar}
 
 \section{Demonstration Evidence}
 
-The implementation and automated evidence can be checked directly: the \href{https://github.com/SheharyarAli-Dev/Working-POC/tree/sable}{SABLE branch}, its \href{https://github.com/SheharyarAli-Dev/Working-POC/commit/9a4dc3d94626ec1f14683b7420f4640d97de20c7}{published commit}, and the \href{https://github.com/SheharyarAli-Dev/Working-POC/actions/runs/38058431317}{focused GitHub Actions run}.
+\begin{sloppypar}
+The current integration snapshot and its focused CI evidence can be checked directly: the \href{https://github.com/SheharyarAli-Dev/Working-POC/tree/integration/sable-satra-cavr}{isolated integration branch}, \href{https://github.com/SheharyarAli-Dev/Working-POC/commit/665b224}{commit 665b224}, and \href{https://github.com/SheharyarAli-Dev/Working-POC/actions/runs/38161406576}{SABLE shared-assurance run 38161406576}.
+\end{sloppypar}
 
-The run executed on the listed SABLE commit and completed successfully with 44 focused SABLE/shared-gate tests passing. This CI result is reproducible repository evidence; it is not evidence of a live AWS deployment.
+The initial SABLE run on commit \texttt{9a4dc3d} completed with 44 focused SABLE/shared-gate tests passing. This is historical repository evidence; the combined-commit CI evidence is recorded in Chapter 8. Neither result establishes live AWS behavior.
 
-The current local worktree selection is reported with its exact command and result in Chapter 8: 27 passed, 10 deselected, including the four parameterized shared-gate cases. This selection includes the local evaluator correction described in Chapter 5 and is not the published commit's CI result. The retained integrated Run Workflow execution \texttt{104074afe883} displays SABLE \texttt{REGRESSED} and an overall ASENT decision of \texttt{BLOCK}; in this scenario SATRA is also \texttt{INCONCLUSIVE}, so the overall result must not be attributed to SABLE alone. Figure~\ref{fig:asent-shared-sable-regressed} in the development-evidence chapter records the shared workflow. The dedicated SABLE-page capture documents a separate customer-data wrong-target case and is identified separately.
+\begin{sloppypar}
+The correction-containing local selection is reported in Chapter 8: 27 passed and 10 deselected, including the four parameterized shared-gate cases. This local result is separate from both the initial SABLE CI result and the combined-commit CI result. An earlier retained integrated Run Workflow execution \texttt{104074afe883} displays SABLE \texttt{REGRESSED} and an overall ASENT decision of \texttt{BLOCK}; SATRA is also \texttt{INCONCLUSIVE} in that run, so the overall result is not attributed to SABLE alone. Figure~\ref{fig:asent-shared-sable-regressed} records that earlier shared workflow. The latest dedicated SABLE UI outcomes on combined source commit \texttt{665b224} are documented separately in Chapter 9.
+\end{sloppypar}
 
 % Module sections (each owned by its member, see OWNERS.md)
 \input{chapters/cavr/ch6_cavr}
@@ -103,4 +109,4 @@ The current local worktree selection is reported with its exact command and resu
 
 \section{Iteration Outcome}
 
-SABLE milestones I1--I4 are implemented (Chapter 4; Appendix A). Fix \texttt{58b0a3d} is included in SABLE head \texttt{753a55b}. Earlier CI passed 44 tests on \texttt{9a4dc3d}; later local tests including this fix passed 27, with 10 deselected.
+SABLE milestones I1--I4 are implemented for the bounded mid-evaluation model (Chapter 4; Appendix A). The unresolved-role-binding correction from \texttt{58b0a3d} is present in the verified combined snapshot \texttt{665b224} on \texttt{integration/sable-satra-cavr}. The initial focused CI result was 44 passed on \texttt{9a4dc3d}; the later correction-containing local selection was 27 passed with 10 deselected; the focused shared-assurance job on the combined snapshot was 46 passed. The integrated implementation is isolated from \texttt{master} pending team review.
