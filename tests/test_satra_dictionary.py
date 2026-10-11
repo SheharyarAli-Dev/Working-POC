@@ -26,6 +26,10 @@ def test_contract_runner_sanity_failure_gives_inconclusive(tmp_path):
     assert "Sanity" in res["reason"] or "runtime errors" in res["reason"]
 
 
+import sys
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="Requires bash and POSIX execution for satra_seed_threat_repo.sh")
 def test_tier1_rules_against_seed_repos(tmp_path):
     import os, subprocess
     from test_satra_gitkit import IDENTITY, start_repo, record
