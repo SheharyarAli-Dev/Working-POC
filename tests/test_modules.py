@@ -6,6 +6,8 @@ from backend.cavr.trigger_discovery import scan
 from backend.cavr.runtime_monitor import normalize
 from backend.cavr.repair import rank_repairs
 from backend.sable.analyzer import analyze as sable
+from backend.sable.authorization import evaluate_authorization
+from backend.sable.hcl_parser import parse as parse_hcl
 from backend.satra.analyzer import analyze as satra
 from backend.satra.security_contract import build
 from backend.satra.test_validator import preflight,killed,judge
@@ -129,6 +131,29 @@ def test_sable_unresolved_role_binding_with_valid_policy_is_unknown(scenario):
     assert authorization['grants'], 'the known valid policy should still be represented'
     assert any('aws_iam_role_policy.dynamic_extra: role binding unresolved' in item for item in authorization['unknown'])
 
+def test_sable_standalone_evaluator_fails_closed_on_unresolved_role_binding(scenario):
+    _,c=scenario('sable_preserved')
+    main=c.path/'infra/main.tf'
+    main.write_text(main.read_text()+'''\nresource "aws_iam_role_policy" "dynamic_extra" {
+  role = var.additional_role
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{ Effect = "Allow", Action = ["s3:*"], Resource = ["*"] }]
+  })
+}
+''')
+    model=parse_hcl(c.path/'infra')
+    result=evaluate_authorization(
+        model,
+        'aws_iam_role.app',
+        'module.storage.aws_s3_bucket.active_invoices',
+        ['s3:GetObject','s3:PutObject'],
+    )
+    assert not result.known
+    assert not result.holds
+    assert result.grants, 'the known registered-role policy must remain represented'
+    assert any('aws_iam_role_policy.dynamic_extra: role binding unresolved' in item for item in result.outside_model)
+
 def test_sable_explicitly_unrelated_role_binding_is_ignored(scenario):
     _,c=scenario('sable_preserved')
     main=c.path/'infra/main.tf'
@@ -146,6 +171,13 @@ resource "aws_iam_role_policy" "other_role" {
 ''')
     status,details,_=sable(c,lambda *a:None)
     assert status=='PRESERVED',details
+    standalone=evaluate_authorization(
+        parse_hcl(c.path/'infra'),
+        'aws_iam_role.app',
+        'module.storage.aws_s3_bucket.active_invoices',
+        ['s3:GetObject','s3:PutObject'],
+    )
+    assert standalone.known and standalone.holds
 
 def test_sable_unsupported_terraform_stays_unknown(scenario):
     _,c=scenario('sable_preserved')
@@ -174,6 +206,7 @@ def test_sable_unverified_baseline_and_empty_baseline(scenario):
     ('move_into_module','PRESERVED'),
     ('ambiguous_resolved_by_moved','PRESERVED'),
     ('policy_rewrite_wrong_target','REGRESSED'),
+    ('privilege_weakened_action','REGRESSED'),
     ('replacement_wrong_bucket','UNKNOWN'),
     ('ambiguous_set_three_candidates','UNKNOWN'),
 ])
@@ -197,6 +230,16 @@ def test_sable_refactor_and_correspondence_cases(tmp_path,scenario,case,wanted):
         assert details['successor']
         assert details['projected_authorization']['known']
         assert not details['projected_authorization']['holds']
+        if case in ('policy_rewrite_wrong_target','privilege_weakened_action'):
+            standalone=evaluate_authorization(
+                parse_hcl(candidate),
+                obligation['principal'],
+                details['successor'],
+                obligation['actions'],
+            )
+            assert standalone.known and not standalone.holds
+            if case=='privilege_weakened_action':
+                assert 's3:PutObject' in standalone.weakening
     else:
         assert details['successor'] is None
 
