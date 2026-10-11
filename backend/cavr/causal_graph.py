@@ -17,6 +17,9 @@ POLICY_ALIAS_MAP = {
     "REJECTED": "BLOCK"
 }
 
+# The only verdict_impact values a behaviour may carry. Anything else is not understood.
+KNOWN_VERDICT_IMPACTS = ("NEUTRAL", "VIOLATION", "UNRESOLVED")
+
 def build_causal_graph(
     package_name: str,
     version: str,
@@ -60,6 +63,10 @@ def build_causal_graph(
     violating_edges = set()
     has_secret_access = False
     has_network_egress = False
+    has_unobserved_run = False
+    has_violation = False
+    has_neutral = False
+    has_unknown_impact = False
 
     canary_id = "canary:~/.aws/credentials"
     endpoint_id = "endpoint:127.0.0.1:18765"
@@ -70,6 +77,15 @@ def build_causal_graph(
         for b in behaviors:
             action = b.get("action")
             res = b.get("resource", "")
+            impact = b.get("verdict_impact")
+            if impact == "UNRESOLVED":
+                has_unobserved_run = True
+            if impact == "VIOLATION":
+                has_violation = True
+            if impact == "NEUTRAL":
+                has_neutral = True
+            if impact not in KNOWN_VERDICT_IMPACTS:
+                has_unknown_impact = True
 
             if action == "SECRET_ACCESS":
                 has_secret_access = True
@@ -115,16 +131,22 @@ def build_causal_graph(
         })
 
     # 7. Compare observed behavior against capability contract
-    policy_state = "VERIFIED"
+    # Fail closed: UNRESOLVED unless a rule below says otherwise.
+    policy_state = "UNRESOLVED"
     narrowed_policy = None
 
-    if has_secret_access or has_network_egress:
+    if has_secret_access or has_network_egress or has_violation:
+        # Any observed violation rejects, including ones with no graph node (process spawn, write, harness BLOCK).
         policy_state = "REJECTED"
     elif package_name in ("requests-security", "reportlab-legacy"):
         policy_state = "REJECTED"
-    elif len(triggers) > 2 and not observed_runs:
+    elif has_unobserved_run or has_unknown_impact:
+        # A run that was never observed, or a behaviour whose impact is not one of
+        # KNOWN_VERDICT_IMPACTS, cannot support VERIFIED.
         policy_state = "UNRESOLVED"
-    elif any(r.get("status") == "REQUIRED" for r in contract.get("contract_rows", [])):
+    elif has_neutral:
+        # VERIFIED needs positive evidence: at least one observed NEUTRAL behaviour.
+        # No runs or no behaviours at all leaves the default, UNRESOLVED.
         policy_state = "VERIFIED"
 
     # Alias mapping
@@ -162,7 +184,7 @@ def build_causal_graph(
     return {
         "policy_state": policy_state,
         "alias_verdict": alias_verdict,
-        "honesty_wording": "No malicious behavior observed under our tests" if policy_state == "VERIFIED" else "Security policy violations detected",
+        "honesty_wording": {"VERIFIED": "No malicious behavior observed under our tests", "UNRESOLVED": "Behavior could not be observed; not verified"}.get(policy_state, "Security policy violations detected"),
         "narrowed_capability_policy": narrowed_policy,
         "violating_paths": violating_paths,
         "has_violations": len(violating_paths) > 0 or policy_state == "REJECTED",
@@ -170,7 +192,7 @@ def build_causal_graph(
             "nodes": nodes_export,
             "edges": edges_export
         },
-        "clean_message": "No prohibited path found in explored conditions" if not violating_paths else None
+        "clean_message": "No prohibited path found in explored conditions" if policy_state == "VERIFIED" else None
     }
 
 def build(name, triggers, events, receiver):
