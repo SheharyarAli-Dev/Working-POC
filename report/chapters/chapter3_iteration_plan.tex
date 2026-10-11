@@ -1,0 +1,30 @@
+\chapter{Proposal Feedback and Iteration Plan}
+\section{Proposal Feedback Summary}
+The proposal panel feedback and completed Form 10/action register were not available in the repository or the report-source archive reviewed for this SABLE update. No feedback or action is inferred here. The team must obtain the authoritative panel record and complete this section and Appendix A before submission.
+\section{Proposal Action Register}
+\textbf{Pending team confirmation:} the blank rows below are template fields, not evidence that no actions were assigned. Populate them only from the actual panel feedback, with the action taken, owner, status, and evidence.
+\begin{longtable}{p{0.06\textwidth}p{0.26\textwidth}p{0.23\textwidth}p{0.13\textwidth}p{0.16\textwidth}}
+\toprule
+No. & Feedback / Required Change & Action Taken & Status & Evidence\\
+\midrule
+1 & & & &\\
+2 & & & &\\
+3 & & & &\\
+\bottomrule
+\end{longtable}
+\section{Iteration Strategy}
+\begin{sloppypar}
+For SABLE, work proceeded from a bounded obligation and fixtures to parser/correspondence behavior, authorization projection, and integration with shared evidence. Focused tests were used to verify the observable outcomes. The comparative FYP-2 experiments described in Chapter 10 are future work and are not counted as completed prototype milestones.
+\end{sloppypar}
+\section{Iteration 1 Plan}
+\begin{sloppypar}
+The SABLE mid-scope deliverables are: I1 candidate snapshot/input-hash/evidence-integrity binding; I2 supported Terraform/HCL normalization for modules, references, and tested inline IAM policies; I3 verification of the registered baseline obligation; I4 successor correspondence and explicit \texttt{PRESERVED}/\texttt{REGRESSED}/\texttt{UNKNOWN} results. Chapter 4 and Appendix B map these deliverables to test assertions. The initial published implementation milestone is branch \texttt{sable} at commit \texttt{9a4dc3d9}; the unresolved-role-binding correction was subsequently committed as \texttt{58b0a3d} and is included in the current branch head \texttt{753a55b}.
+\end{sloppypar}
+\section{Iteration 2 Plan}
+Proposed SABLE continuation is to confirm the baseline comparison protocol, validate labels independently, execute the planned comparative evaluation, and broaden supported cases only where the research question requires it. No schedule, owner, or completed experiment is asserted here; the team and supervisor must confirm the plan.
+\section{Work Breakdown and Responsibilities}
+The repository evidence reviewed for this report supports the SABLE implementation and shared-gate contribution described in Chapter 9. A complete team task allocation, owner/date log, and contribution record for other modules were not verified in the source material reviewed. Confirm them against the team's records before submission.
+\section{Progress Against Plan}
+For SABLE I1--I4, the branch contains the snapshot/evidence path, supported normalization, baseline verification, successor selection, authorization projection, and explicit outcome tests. The focused local selection passed 27 tests with 10 deselected; the earlier published-commit CI selection passed 44. The evaluator correction was not in the initial published CI commit; it was subsequently committed as \texttt{58b0a3d} and is included in current branch head \texttt{753a55b}. These results establish selected checks, not completion of the later comparative research plan.
+\section{Delays, Deviations and Recovery Plan}
+The available evidence records no confirmed schedule baseline or approved delay/recovery log, so this report does not assign dates or declare a project-wide schedule deviation. The local test host's default pytest temporary directory was inaccessible; the selected tests passed using a fresh writable project-local \texttt{--basetemp}. Confirm any proposal-panel action or schedule impact from the team's official records.

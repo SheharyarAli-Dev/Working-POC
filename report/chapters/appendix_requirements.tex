@@ -1,0 +1,21 @@
+\chapter{Detailed Requirements}
+This appendix preserves the SABLE acceptance trace in a compact form. Requirement identifiers refer to Chapter 4.
+
+\setlength{\tabcolsep}{3pt}
+\begin{longtable}{p{0.09\textwidth}p{0.19\textwidth}p{0.32\textwidth}p{0.31\textwidth}}
+\toprule
+\textbf{ID} & \textbf{\shortstack[l]{Milestone/\\component}} & \textbf{\shortstack[l]{Acceptance\\condition}} & \textbf{\shortstack[l]{Test\\evidence}}\\
+\midrule
+FR-S1 & I2; HCL parser & Supported resources and local references normalize; unsupported expansion is surfaced. & \path{test_sable_real_hcl}; \path{test_sable_unsupported_terraform_stays_unknown}.\\
+FR-S2 & I3; baseline authorization & Registered obligation holds on baseline before continuity can be assessed. & \path{test_sable_real_hcl}; \path{test_sable_unverified_baseline_and_empty_baseline}.\\
+FR-S3 & I4; correspondence & Unique supported successor is selected; ambiguous or conflicting candidates abstain. & \path{test_sable_refactor_and_correspondence_cases}.\\
+FR-S4 & I4; authorization projection & Correct successor retains required S3 role/action/scope; wrong target and weakened action fail. & \path{test_sable_refactor_and_correspondence_cases}; \path{test_sable_real_hcl}.\\
+FR-S5 & I2/I3; bounded semantics & Unsupported semantics and unresolved role attachment remain unknown; known unrelated role binding can be ignored. & \path{test_sable_unsupported_iam_stays_unknown}; \path{test_sable_unresolved_role_binding_with_valid_policy_is_unknown}; evaluator-specific regression tests.\\
+FR-S6 & I1; evidence publication & SABLE evidence matches current candidate snapshot and input hash, with valid integrity. & \path{test_shared_sable_evidence_drives_final_gate}.\\
+FR-S7 & Shared final gate & Preserved accepts, regression blocks, unknown reviews for the SABLE-only integration cases. & Four parameter cases in \path{test_shared_sable_evidence_drives_final_gate}.\\
+FR-S8 & I1; evidence validation & Stale or untrusted evidence cannot establish acceptance. & \path{test_sable_final_gate_rejects_untrusted_evidence}.\\
+\bottomrule
+\end{longtable}
+\setlength{\tabcolsep}{6pt}
+
+The expected labels apply only to the named controlled fixtures and supported policy subset. They do not imply that arbitrary Terraform programs are fully interpreted.

@@ -1,0 +1,290 @@
+ FYP-1 Mid-Term Evaluation Guidelines & Rubrics
+ Comprehensive Assessment Guide and Rubrics for Form 2 (Presentation & Demo.) and Form 3
+ (Report Evaluation) of the FYP Handbook
+
+ Executive Overview & Supervisory Evaluation Protocol
+ The FYP-1 Mid Evaluation is a formative, supervisor-only assessment worth 20% of the overall FYP-1 grade.
+ Conducted around Week 8 of the semester, its primary objective is developmental: acting as a diagnostic
+ checkpoint where supervisors provide constructive coaching, verify implementation momentum, and
+ ensure required proposal corrections are fully addressed prior to the summative FYP-1 Final panel defense.
+ Key Evaluation Directives for Supervisors:
+
+ • Form 2 (Presentation & Demo - 100% scaled to Form 2 score): Evaluates implementation progress,
+ requirements precision, design evolution, repository hygiene, testing checks, and student ownership defense.
+
+ • Form 3 (Report Evaluation - 100% scaled to Form 3 score): Evaluates the FYP-1 mid report across 8 core CLO-
+ mapped criteria, checking report formatting, R&D depth, scope consistency, SRS requirements,
+ architecture/design models, implementation reproducibility, and responsible tool disclosure.
+ • Supervisory Action Gates: Enforces specific score caps and required action items (e.g., Panel Action Register
+ Form 10, Individual Contribution Adjustment Form 11, or mandatory rewrites) whenever weak or missing
+ evidence is detected.
+
+
+ Form 2 Rubric: Presentation and Demo Evaluation
+ Form 2 is used during the supervisory meeting to assess implementation state, design reasoning, and progress.
+ The table below details evaluation criteria with CLO alignment and mandatory gate actions.
+
+Criterion, CLO      What to Ask or        Exemplary           Good (70–           Developing        Marginal         Unsatisfactory     Action if No /
+& Max Marks         Observe               (85–100%)           84%)                (50–69%)          (30–49%)         (0–29%)            Weak Evidence
+                    (Evidence)
+
+
+1. Previous         Panel action          9–10 Marks: All     7–8 Marks:          5–6 Marks:        3–4 Marks:       0–2 Marks:         If No/ Weak: Cap
+Proposal Actions    register shows        proposal actions    Mostly addressed    Partially         One or two       Actions ignored,   progress/ process
+Addressed           each required         fully addressed     with minor          addressed;        addressed        unknown, or        marks and issue
+(FYP1-CLO6 | 10     change, status, and   with verifiable     documentation       actions noted     superficially;   completely         mandatory action.
+Marks)              live evidence link.   live evidence.      gaps.               but lack          directives       unaddressed.
+                                                                                  complete          remain.
+                                                                                  proof.
+
+
+
+2. Iteration Plan   Planned milestone     9–10 Marks:         7–8 Marks:          5–6 Marks:        3–4 Marks:       0–2 Marks:         If Weak: Require
+& Work              completed or delay    On or ahead of      Minor schedule      Behind            Significantly    No task tracking   revised iteration plan
+Breakdown           is justified with     plan with           slip with clear     schedule but      behind           or milestone log   with task owners.
+Progress            owner-assigned        justified delays    recovery plan       aware and         schedule with    exists.
+(FYP1-CLO2 | 10     recovery plan.        and realistic       and updated         tracking tasks.   no credible
+Marks)                                    buffers.            dates.                                recovery plan.
+
+
+3. Live Prototype   Meaningful core       21–25 Marks:        16–20 Marks:        11–15 Marks:      6–10 Marks:      0–5 Marks:         If No: Cap
+with Core           module works live     Meaningful core     Working live        Partial           Prototype        No working live    implementation and
+Module Demo         (not UI               module working      module, but         working           barely goes      module             live demo marks.
+(FYP1-CLO4 | 25     screenshots/          live with edge/     demonstration       functionality     beyond           demonstrated.
+Marks)              video); edge/         failure cases       limited to happy    with              proposal POC-
+                    failure cases         shown.              path.               noticeable        lite state.
+                    shown.                                                        hardcoded
+                                                                                  scaffolding.
+
+
+4. Requirements     User interactions,    9–10 Marks:         7–8 Marks: Good     5–6 Marks:        3–4 Marks:       0–2 Marks:         If Weak: Cap SRS
+& Acceptance        FRs/ NFRs, and        Precise, testable   requirements        Requirements      Generic,         Requirements       component marks
+Criteria Quality    acceptance checks     FRs/ NFRs           structure with      present but       copied, or       missing or         and require
+(FYP1-CLO2 | 10     are technically       connected           minor testability   static or         poorly           disconnected       correction.
+Marks)              correct and           directly to         gaps.               vaguely           structured       from system.
+                                                                                                                                                                 1
+
+
+
+
+                    aligned.              implementation.                         specified.        requirements.
+                                                                                                                                                                 Page
+
+
+
+
+                                             FSC, NUCES, Islamabad | FYP-1 Mid Evaluation Guidelines and Rubrics
+5. Design              Architecture plus      13–15 Marks:         10–12 Marks:        7–9 Marks:        4–6 Marks:        0–3 Marks:           If Diagrams Only: Cap
+Artefacts &            data/ process/         Artefacts match      Mostly updated      Original          Design            Diagrams are         design marks at 50%.
+Design Evolution       behavior artefacts     current code;        design models       proposal          diagrams          purely decorative
+(FYP1-CLO3 | 15        match code;            architectural        with minor          design            conflict with     or generated
+Marks)                 changes justified.     changes              notation gaps.      presented         actual            without
+                                              explained.                               with little       codebase          understanding.
+                                                                                       implementati      implementati
+                                                                                       on evolution.     on.
+
+
+6. Repository,         Tagged code,           9–10 Marks:          7–8 Marks:          5–6 Marks:        3–4 Marks:        0–2 Marks: No        If No: Cap process
+Milestone &            commit timeline,       Regular,             Mostly regular      Uneven            Sparse            evidence of          evidence at 40%
+Member                 task log, and          incremental          version control     commit            commits or        version control      maximum.
+Evidence               member                 commits from all     commits with        history but all   repo. history     or collaborative
+(FYP1-CLO6 | 10        ownership visible      members with         minor gaps.         members           dominated by      repo. practice.
+Marks)                 in repo.               meaningful                               contributed.      a single
+                                              messages.                                                  member.
+
+
+7. Testing &           Tests/validation       9–10 Marks:          7–8 Marks: Basic    5–6 Marks:        3–4 Marks:        0–2 Marks:           If No: Mark testing
+Early Validation       checks exist for       Systematic           test cases          High-level test   Testing           Zero evidence of     low even if live demo
+(FYP1-CLO4 | 10        current module;        unit/module          executed with       plan              mentioned         testing or           works.
+Marks)                 failure or edge        tests executed;      limited edge case   mentioned;        verbally but      empirical
+                       case discussed.        failure case         coverage.           execution         not               validation.
+                                              actively                                 results sparse.   demonstrated
+                                              discussed.                                                 or logged.
+
+
+8. Presentation,       Team coordination      9–10 Marks:          7–8 Marks: Solid    5–6 Marks:        3–4 Marks:        0–2 Marks:           If One Member
+Q&A, Team &            clear; tool-assisted   Confident,           presentation        One member        Significant       Student cannot       Weak: Trigger Form
+Tool Ownership         outputs defended       balanced team        with minor          carries           team              explain or defend    11 contribution
+(FYP1-CLO5 | 10        and thoroughly         defense; tool        participation       defense; tool     imbalance;        tool-generated       adjustment.
+Marks)                 understood.            usage fully          imbalance.          awareness is      poor technical    output.
+                                              owned and                                vague.            tool
+                                              explained.                                                 awareness.
+
+
+
+
+ Form 3 Rubric: Report Evaluation
+ Form 3 is used by supervisors to evaluate the written FYP-1 Mid Report. It maps directly to CLO1 through CLO5
+ and assesses structural completeness, research depth, requirements precision, design models, implementation
+ reproducibility, and responsible tool disclosure.
+
+   Criterion, CLO          What to Ask or              Exemplary       Good (70–        Developing        Marginal          Unsatisfactor       Supervisor
+   & Max Marks             Observe (Evidence)          (85–100%)       84%)             (50–69%)          (30–49%)          y (0–29%)           Gate Action
+
+
+  1. Report Format         Prescribed template         4.5–5.0         3.5–4.0          2.5–3.0           1.5–2.0           0–1.0 Marks:        Compliance Gate:
+  & Artefacts              followed; required          Marks:          Marks:           Marks:            Marks:            Fails prescribed    Cap relevant
+  Present                  sections, signatures,       Strictly        Follows          Structure         Noticeable        template or         report section
+  (FYP1-CLO2 | 5           and artefacts included.     adheres to      template well    followed, but     formatting        lacks multiple      marks if
+  Marks)                                               template; all   with minor       1–2 minor         deviations;       core required       formatting fails.
+                                                       mandatory       formatting       sections or       key structural    sections.
+                                                       sections and    flaws;           appendices        components
+                                                       artefacts       required         are               missing.
+                                                       present.        artefacts        incomplete.
+                                                                       present.
+
+
+  2. Problem               Report shows what was       13.0–15.0       10.5–12.5        7.5–10.0          4.5–7.0           0–4.0 Marks:        Red Flag Gate:
+  Formulation, R&D         studied, research gap,      Marks:          Marks: Solid     Marks:            Marks:            Superficial, off-   Require
+  & Gap Analysis           and complex challenge       Rigorous        domain           Descriptive       Generic or        topic, or           mandatory R&D
+  (FYP1-CLO1 | 15          addressed.                  literature      review; gap      literature        GenAI-            unoriginal R&D;     rewrite if review is
+  Marks)                                               synthesis;      and challenge    review; gap       summarized        cannot defend       weak/AI-slop.
+                                                       clearly         defined with     implied but       text; fails to    sources.
+                                                       isolates gap    minor depth      lacks critical    isolate
+                                                       and complex     gaps.            analysis.         technical gap.
+                                                       computing
+                                                       challenge.
+
+
+  3. Project Vision,       Scope, modules,             9.0–10.0        7.0–8.5          5.0–6.5           3.0–4.5           0–2.5 Marks:        Red Flag Gate:
+  Scope & Success          success criteria, and       Marks:          Marks: Well-     Marks: High-      Marks:            Vague,              Require
+  Criteria                 feasibility are clear and   Crystal-clear   defined          level vision      Ambiguous         contradictory,      mandatory Scope
+  (FYP1-CLO2 | 10          consistent with             scope,          scope/           present, but      scope or          or unfeasible       Table submission
+  Marks)                   proposal.                   modular         modules;         module            unrealistic       scope with no       if scope is vague.
+                                                                                                                                                                        2
+
+
+
+
+                                                       breakdown,      minor            boundaries        boundaries;       metrics.
+                                                       and testable    vagueness in
+                                                                                                                                                                        Page
+
+
+
+
+                                                  FSC, NUCES, Islamabad | FYP-1 Mid Evaluation Guidelines and Rubrics
+                                                   success           feasibility       are loosely         conflicts with
+                                                   metrics.          bounds.           defined.            proposal.
+
+
+ 4. Requirements     User interactions, FRs/       13.0–15.0         10.5–12.5         7.5–10.0            4.5–7.0          0–4.0 Marks:        SRS Gate: Cap SRS
+ & Acceptance        NFRs, and SRS                 Marks:            Marks: Well-      Marks: Basic        Marks:           Weak,               marks if
+ Criteria            acceptance checks are         Precise,          structured        FRs/NFRs            Incomplete       ambiguous, or       requirements are
+ (FYP1-CLO2 | 15     precise and testable.         numbered          requirements;     documented,         requirements;    copied              weak or non-
+ Marks)                                            FRs/ NFRs         acceptance        but                 user             requirements        testable.
+                                                   with              checks            acceptance          interactions     that cannot be
+                                                   verifiable        testable with     criteria are        and              tested.
+                                                   acceptance        minor gaps.       generic.            acceptance
+                                                   test checks.                                            checks
+                                                                                                           missing.
+
+
+ 5. Architecture &   Architecture,                 13.0–15.0         10.5–12.5         7.5–10.0            4.5–7.0          0–4.0 Marks:        Design Gate: Cap
+ Component/          components,                   Marks:            Marks: Clear      Marks:              Marks:           Missing             design marks if
+ Interface Design    dependencies, and             Detailed          architectural     Standard            Superficial      architecture or     diagrams are
+ (FYP1-CLO3 | 15     interfaces are clear and      architecture      layout;           architectural       architecture;    purely AI-          purely auto-
+ Marks)              justified.                    diagrams          component         diagram             component        generated           generated/
+                                                   with layer        interfaces        included, but       dependencies     decorative          unjustified.
+                                                   separation        documented.       interface           and interfaces   diagrams.
+                                                   and interface                       definitions         unclear.
+                                                   contracts.                          high-level.
+
+
+ 6. Data / Process   Appropriate ERD/              9.0–10.0          7.0–8.5           5.0–6.5             3.0–4.5          0–2.5 Marks:        Artefact Gate:
+ / Behavior Design   schema/ data flow/            Marks:            Marks:            Marks:              Marks:           Irrelevant,         Require project-
+ (FYP1-CLO3 | 10     activity/ sequence/           Flawless,         Accurate ERD/     Standard            Incomplete or    broken, or          specific artefact
+ Marks)              state diagram included        project-          UML diagrams      diagrams            generic          missing data/       re-submission if
+                     and explained.                specific          with minor        present, but        diagrams (e.g.   process/            irrelevant.
+                                                   design            notation          text                template ERD)    behavior
+                                                   models            errors; clearly   explanations        with weak        diagrams.
+                                                   thoroughly        explained.        are brief/          domain
+                                                   explained in                        generic.            connection.
+                                                   text.
+
+
+ 7.                  Completed module              13.0–15.0         10.5–12.5         7.5–10.0            4.5–7.0          0–4.0 Marks:        Reproducibility
+ Implementation      described with setup,         Marks:            Marks: Solid      Marks:              Marks: High-     Implementation      Gate: Cap
+ Documentation       main files/ classes/          Comprehensi       technical         Module              level code       description is      implementation
+ (FYP1-CLO4 | 15     functions, and technical      ve                description of    functionality       summary          non-                docs if setup is not
+ Marks)              decisions.                    documentati       core files/       described, but      without          reproducible or     reproducible.
+                                                   on; setup,        classes; setup    code                technical        progress is flat.
+                                                   classes,          steps clear.      structure/          setup or
+                                                   algorithms,                         decisions lack      decision
+                                                   and trade-                          detail.             rationale.
+                                                   offs clear.
+
+
+ 8. Testing Plan &   Test plan, early results,     13.0–15.0         10.5–12.5         7.5–10.0            4.5–7.0          0–4.0 Marks:        Tool Disclosure
+ Tool / Risk         external dependency/          Marks:            Marks: Clear      Marks: Basic        Marks:           Missing test        Gate: Tool-use
+ Disclosure          tool disclosure, and          Thorough          test plan and     test plan           Minimal test     plan, zero          item = 0 until full
+ (FYP1-CLO5 | 15     risks documented.             test plan; full   early             present;            plan; missing    validation, or      disclosure
+ Marks)                                            disclosure of     validation;       disclosure or       risk analysis    undisclosed         submitted.
+                                                   external/         transparent       risk analysis is    or incomplete    GenAI tool
+                                                   GenAI tools,      tool              high-level.         tool             usage.
+                                                   risks, and        disclosure.                           disclosure.
+                                                   privacy.
+
+
+
+
+Red Flags and Supervisory Action
+FYP-1 Mid is the supervisor's primary window to detect critical project risks and enforce corrective measures
+before students face the panel at FYP-1 Final. Supervisors should actively probe these red flags during meetings
+and execute the required administrative actions below.
+
+ Red Flag Indicator                              Meeting Probing Protocol                                 Possible Supervisory Action
+
+
+ Sudden Code Volumes:                          Ask student to walk through new code                       If unable to explain: cap implementation marks
+ Large code volume appears                     live at line/ function level. Ask what                     on Form 2. Issue a mandatory re-demo at a
+ between meetings with no                      changed, why, and what happens if a                        dedicated session before FYP-1 Final. Record in
+ matching increase in student                  core function is removed.                                  meeting log.
+ understanding.
+                                                                                                                                                                       3
+                                                                                                                                                                       Page
+
+
+
+
+                                            FSC, NUCES, Islamabad | FYP-1 Mid Evaluation Guidelines and Rubrics
+Stagnant Prototype Momentum:        Compare current demo against proposal              If momentum flat: set 3 specific, weekly
+Prototype shown at Mid is barely    notes. Ask: 'What new core business                demonstrable milestones. Warn student of
+more advanced than proposal         logic has been added since proposal                significant FYP-1 Final risk if recovery plan fails.
+POC-lite.                           defense?'
+
+
+Generic/ GenAI R&D Text:            Select one R&D paragraph during                    If paraphrased poorly: classify as GenAI
+Report sections grammatically       evaluation and ask student to explain              research synthesis without understanding.
+polished but factually generic      concepts in own words without reading              Enforce mandatory report rewrite backed by
+without project-specific depth.     page.                                              project evidence.
+
+
+Uneven Team Contribution:           Schedule brief 1-on-1 check-in with                If unable to defend: trigger Individual
+One member explains everything      quieter member. Ask them to                        Contribution Adjustment Form (Form 11 of the
+while another stays silent or       independently explain their owned                  FYP handbook). Assign individual 2-week
+defers continuously.                module architecture.                               milestone and record in log.
+
+
+Dishonest Milestone Logging:        Require live demonstration of output for           If demo fails: note dishonest milestone
+Milestone log shows tasks as        every claimed milestone before                     reporting in meeting log. Issue Panel Action
+'done', but demo state is           accepting status. Verbal confirmation is           Register (Form 10 of the FYP handbook) entry
+identical to 4 weeks ago.           insufficient.                                      requiring proof before FYP-1 Final.
+
+
+Ignored Proposal Panel Actions:     Open Panel Action Register during                  If ignored: cap progress marks on Form 2
+Proposal panel actions missing      session and verify each item against               Criterion 1. Issue missing actions formally and
+from Panel Action Register or       meeting observations and report                    require live evidence at next weekly meeting.
+lack evidence links.                evidence.
+
+
+
+
+                                                                                                                                              4
+                                                                                                                                              Page
+
+
+
+
+                                   FSC, NUCES, Islamabad | FYP-1 Mid Evaluation Guidelines and Rubrics
+

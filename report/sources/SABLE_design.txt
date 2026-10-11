@@ -1,0 +1,1013 @@
+                                                                                            ASENT | SABLE — Final Research Design
+
+
+
+
+                                                    ASENT
+                                                    SABLE
+                  Security Assurance by Baseline and Lineage Evaluation
+                   Refactoring-Aware Security-Boundary Assurance for Terraform
+
+
+
+Decision gate                                                   Final status
+
+Research direction                                              GREEN — lock the problem and build
+                                                                One problem: refactoring-induced security-boundary
+Core research object
+                                                                misbinding
+Security target                                                 One least-privilege role →protected S3 asset binding
+Core result                                                     PRESERVED / REGRESSED / UNKNOWN
+
+Scope                                                           Terraform/HCL + AWS S3/IAM authorization semantics
+Cost                                                            Local/open-source; no paid API/cloud dependency
+Duration                                                        Approximately 5 months
+                                                                Conditional on empirical advantage over the strongest
+Novelty status
+                                                                baseline
+
+
+Executive decision: SABLE is locked as a single research problem. The project does not claim a new scanner, new IAM policy
+language, new Terraform lineage system, or generic security-preservation framework. Its proposed contribution is the baseline
+security-obligation →candidate-correspondence →obligation-projection →attribution chain, evaluated against strong existing
+evidence.
+
+
+                                                       September 2026
+
+Module boundary and input: AI-assisted development produces the proposed change. ASENT routes the relevant
+change surface to the appropriate module. SABLE receives the trusted baseline Terraform and the
+changed/refactored Terraform and performs an independent infrastructure-security analysis.
+
+
+
+
+                                      FAST NUCES Islamabad FYP • September 2026 • SABLE
+                                                                                                    ASENT | SABLE — Final Research Design
+
+Document map
+ Section                                                              Answers
+
+ 1. Final problem                                                     What exactly is wrong in real life?
+ 2. Why this is not basic auditing                                    Why the target is an actual security-boundary problem
+ 3. Evidence and state of the art                                     What existing work already solves
+ 4. Exact residual gap                                                What remains after those solutions are taken seriously
+ 5. SABLE mechanism                                                   Exactly what the student builds
+ 6. Architecture and workflow                                         How the components interact
+ 7. Evaluation                                                        How the contribution is proved or killed
+ 8. CCP / stakeholders / feasibility                                  Why this is a complex, useful, student-scale problem
+ 9. ASENT relationship                                                Where SABLE sits beside CAVR and SATRA
+
+                                                                      Questions the panel is likely to ask and the factual answer
+ 10. Defense sheet
+                                                                      boundary
+ 11. References                                                       Sources and evidence status
+
+
+
+
+1. Final Problem Statement
+ One problem: Structural Terraform refactoring can change the relationship between an application role, a protected S3 data
+ asset, and the IAM/S3 policy realization that restricts access to that asset. The candidate configuration may remain valid and
+ may satisfy local policy checks, while it is no longer obvious that the previously verified least-privilege security boundary is still
+ attached to the intended logical asset.
+
+
+The problem is therefore not “does the new Terraform pass a security scan?” A scanner can answer that. The SABLE
+research problem is: after Terraform infrastructure is structurally refactored, a previously verified least-privilege
+authorization boundary may no longer be attached to the intended logical data asset. The key question is which
+candidate resource is the successor of the protected baseline asset and whether the same least-privilege boundary
+still governs that successor.
+
+
+
+
+                                          FAST NUCES Islamabad FYP • September 2026 • SABLE
+                                                                                           ASENT | SABLE — Final Research Design
+
+
+
+
+                                       Figure 1. The SABLE problem in one scenario.
+
+
+1.1 Concrete security obligation
+    Field                                                      Bounded definition
+
+                                                               A designated S3 bucket representing a protected application
+    Logical asset
+                                                               data asset.
+    Principal                                                  A designated application IAM role.
+                                                               A small, explicit set such as s3:GetObject / s3:PutObject for
+    Allowed actions
+                                                               the intended target.
+                                                               The policy must grant those actions to the designated
+    Target binding
+                                                               bucket/object scope and not to an unrelated asset.
+                                                               A refactor must not silently move the access boundary to
+    Forbidden condition                                        another logical asset, widen it, or leave the intended asset
+                                                               without the required restriction.
+                                                               Terraform resource/policy structure, references, module
+    Evidence                                                   topology, explicit move information when present, and policy
+                                                               semantics.
+
+
+
+
+1.2 Why one obligation is enough
+SABLE does not need three independent security controls. Encryption, logging, and public-access checks would turn
+the module into a compliance checklist. The chosen target is one richer relational obligation: a least-privilege
+authorization boundary must continue to protect the intended S3 data asset across structural Terraform change.
+Different Terraform constructs are evidence of that same boundary, not separate SABLE projects.
+
+1.3 Strong scenario families
+      resource renamed or moved into a module — included for robustness, not as the novelty by itself;
+      one resource split into two candidate resources;
+      two resources merged into one candidate resource;
+
+                                      FAST NUCES Islamabad FYP • September 2026 • SABLE
+                                                                                                ASENT | SABLE — Final Research Design
+      resource replacement with semantically similar successor;
+      parallel S3 assets with similar names and policies;
+      policy relationship rewritten while resource addresses also change;
+      security boundary valid on the wrong successor asset;
+      correct logical successor but widened or weakened authorization;
+      missing move metadata or conflicting correspondence evidence;
+      ambiguous successor set requiring UNKNOWN rather than a guess.
+
+
+2. Why this is a real security problem
+Security-sensitive infrastructure is not just a bag of independent attributes. AWS explicitly describes S3 least privilege
+in terms of who receives what permissions and on which S3 resources, and recommends granting only the actions
+required for a task. AWS also recommends examining bucket policies and related access-control mechanisms when
+determining whether data is publicly accessible or appropriately protected. [R1]
+
+That makes the SABLE target inherently relational: the security meaning depends on the relationship between
+principal, action, and resource. A structural Terraform change can alter those relationships even when the individual
+blocks still look reasonable.
+
+2.1 The modern trigger: AI-assisted Terraform evolution
+The immediate trigger is not “AI is bad.” AI-assisted repair and refactoring are simply an increasingly common source
+of rapid infrastructure changes. The relevant research record already documents that security can degrade during
+iterative LLM-driven Terraform repair. Our project research record reports 5,968 repair timelines and 4,440 iteration
+transitions in the 2026 ESEM study, with 3.3% of scenarios / 5.2% of transitions containing a genuine previously-
+passing security regression under the study’s stricter definition; the same record reports resource restructuring as
+the dominant classified root-cause category. [R2]
+    Evidence-status note: The R2 statistics were already captured in the ASENT research source record used for this design. Live
+    web retrieval of arXiv:2608.13404 was intermittently unavailable during final document assembly, so this document does not
+    pretend that those figures were freshly re-verified in this exact run.
+
+
+
+2.2 Why simple before/after scanning is insufficient as a research question
+Before/after security checking answers whether the candidate satisfies a policy as represented. It does not by itself
+encode the proposition “this is the same logical protected asset whose least-privilege obligation we previously
+verified.” That missing proposition matters most in split, merge, replacement, and multi-resource cases.
+SABLE therefore studies attribution, not generic scanning. A final scan remains useful — and becomes one of our
+strongest baselines — but it is not the complete research object.
+
+
+3. Existing solutions and the state of the art
+The research standard for this module is to acknowledge the strongest existing systems rather than compare against
+a strawman. The following boundary is therefore deliberate.
+    Existing approach               What it already solves          What SABLE must not claim       Residual SABLE question
+
+                                    Tracks declared                                                 Can the security boundary be
+                                    resource/module address                                         attributed to the correct
+    Terraform moved/refactoring                                     Not “we invented resource
+                                    changes through moved                                           logical successor when
+    support                                                         moves/lineage.”
+                                    blocks and related                                              structural change exceeds
+                                    refactoring mechanisms. [R3]                                    address history?
+
+
+                                          FAST NUCES Islamabad FYP • September 2026 • SABLE
+                                                                                               ASENT | SABLE — Final Research Design
+    Existing approach            What it already solves          What SABLE must not claim         Residual SABLE question
+
+                                 Static policy checks; graph                                       Can the baseline security
+    Checkov / graph-aware        checks can reason across S3     Not “we invented graph            obligation remain correctly
+    policies                     bucket/ACL relationships.       security checking.”               bound to the same logical
+                                 [R4]                                                              asset across change?
+                                 HCL/plan scanning and
+                                                                                                   What happens when
+                                 security/misconfiguration
+                                                                                                   candidate security facts exist
+                                 checks; its docs expose         Not “existing tools only scan
+    Trivy Terraform scanning                                                                       but their relation to the
+                                 limits around plan JSON and     one line.”
+                                                                                                   historical asset is
+                                 some inter-resource
+                                                                                                   ambiguous?
+                                 reference cases. [R5]
+                                 Layered oracle for LLM-
+                                                                                                   Can refactoring-aware
+                                 assisted Terraform repair;
+                                                                 Not a better generic repair       security-boundary attribution
+    TerraProbe                   validates more than targeted
+                                                                 verifier.                         add information beyond a
+                                 scanner success and
+                                                                                                   strong repair oracle?
+                                 exposes deceptive fixes. [R6]
+                                                                                                   Can a deterministic
+                                 Tool-grounded Terraform
+                                                                                                   attribution layer explain
+                                 repair using references,
+    TerraRepair                                                  Not another repair agent.         whether a previously
+                                 provider schema, scanner re-
+                                                                                                   established access boundary
+                                 check, and escalation. [R7]
+                                                                                                   followed the intended asset?
+                                 Explicit security constraints                                     Can Terraform-specific
+                                 and gated verification for      Not generic security-property     topology/correspondence
+    SCAFFOLD-CEGIS
+                                 iterative code refinement.      preservation.                     resolve structural ambiguity
+                                 [R8]                                                              in an access boundary?
+                                 Can monitor resource                                              Can the proposed local
+                                 configuration histories,                                          Terraform method provide
+    AWS Config / AWS security                                    Not “no one tracks
+                                 relationships, and                                                useful attribution before
+    services                                                     configuration history.”
+                                 compliance in live AWS                                            deployment, without cloud
+                                 environments. [R1]                                                access?
+
+
+
+
+3.1 Impact and hardest limitations of existing solutions
+The important question is not whether the existing tools are “good” or “bad.” They each solve real pieces. The
+research opportunity exists only if the remaining seam changes a security decision. The most important limitations
+relevant to SABLE are therefore:
+
+      Address continuity is not the same thing as security-obligation continuity. Terraform can preserve resource
+       identity across supported moves, but an IAM/S3 security relationship can still be rewritten, widened, rebound, or
+       become ambiguous.
+      Policy checking is usually candidate-centric. It can establish that a given candidate policy is compliant, but our
+       target is baseline-to-candidate attribution of the intended protected asset.
+      Repair verification is broader than SABLE. TerraProbe and TerraRepair show that safe Terraform repair needs
+       multiple layers; SABLE must therefore contribute a narrower attribution problem rather than duplicate repair
+       validation.
+      Cloud-state monitoring solves a different deployment-time problem. SABLE is intentionally pre-deployment and
+       local, so it can be reproduced without AWS credentials.
+      Generic “semantic preservation” is already a crowded claim. SABLE must remain Terraform-specific, obligation-
+       specific, benchmarked, and bounded.
+
+
+
+
+                                        FAST NUCES Islamabad FYP • September 2026 • SABLE
+                                                                                                ASENT | SABLE — Final Research Design
+
+3.2 What current state of the art tells us
+Terraform’s official refactoring documentation explicitly supports moving/renaming resources, moving modules,
+creating multiple instances, and splitting modules through moved blocks. [R3] Checkov already contains graph-
+based S3 access-control logic rather than only isolated attribute checks. [R4] TerraProbe shows that scanner-passing
+Terraform repairs can still be deceptive and reports strong disagreement between targeted finding removal and full
+multi-layer validation. [R6] TerraRepair shows that provider/reference grounding and escalation improve repair, but
+missing deployment-specific context remains an important boundary. [R7] SCAFFOLD-CEGIS demonstrates that
+security constraints can be carried through iterative refinement, so SABLE cannot claim the abstract idea of
+preserving security through change. [R8]
+
+
+4. Exact residual gap
+    Residual gap: After strong existing evidence is taken into account, we still need to test whether a bounded Terraform method
+    can attribute one previously verified least-privilege S3 security obligation to the correct candidate successor asset after
+    structural refactoring — and distinguish preserved, regressed, and unresolvable cases — more accurately than the strongest
+    simpler evidence combination.
+
+
+This is deliberately a hypothesis. We have not proven that existing tools fail on the benchmark. The benchmark exists
+to answer that question.
+
+4.1 The exact non-goals
+      Not a general Terraform scanner.
+      Not a general IAM analyzer for arbitrary AWS services.
+      Not an automatic Terraform repair engine.
+      Not a replacement for Terraform moved blocks or plan.
+      Not a theorem prover for arbitrary semantic equivalence.
+      Not a cloud deployment monitor.
+      Not an AI agent that supervises another AI agent.
+      Not “security is preserved because the new scanner passed.”
+
+4.2 Falsifiability rule
+The single most important rule is: if the strongest existing baseline can classify the same hard cases with equivalent
+accuracy, false-safe rate, false-regression rate, and evidence quality, the SABLE contribution is withdrawn or
+narrowed. The project does not rescue a failed novelty claim through wording.
+
+
+5. SABLE technical contribution
+SABLE is a deterministic, local analysis method built around a security-obligation projection chain.
+
+
+
+
+                                          FAST NUCES Islamabad FYP • September 2026 • SABLE
+                                                                                          ASENT | SABLE — Final Research Design
+
+
+
+
+                                         Figure 2. SABLE module architecture.
+
+
+5.1 Baseline security-obligation record
+ Field                                                       Example
+
+ obligation_id                                               S3-APPROLE-CUSTOMERDATA
+
+ principal                                                   aws_iam_role.app
+ actions                                                     s3:GetObject, s3:PutObject
+ protected_asset                                             aws_s3_bucket.customer_data
+ resource_scope                                              arn:aws:s3:::customer-data/*
+ authority_source                                            explicit benchmark policy + Terraform IAM policy document
+ baseline_evidence                                           trusted baseline passes independent policy predicate
+
+
+
+
+5.2 Correspondence evidence
+For each baseline asset, SABLE generates candidate successor hypotheses. Evidence is gathered from bounded
+signals: resource type, normalized attributes, references, module position, dependency context, policy-target
+relationship, and explicit Terraform move evidence where available. The method never treats a single weak signal
+such as name similarity as proof.
+
+5.3 Obligation projection
+The key step is to project the baseline authorization boundary onto each plausible successor. A candidate can fail in
+two different ways: the correct successor can have weaker authorization, or a valid authorization boundary can be
+attached to the wrong logical successor. SABLE must be able to distinguish those cases.
+
+5.4 Attribution states
+ Decision                                                    Defensible meaning
+
+ PRESERVED                                                   A unique high-confidence successor is established and the
+                                                             same modeled least-privilege obligation remains satisfied for
+
+                                    FAST NUCES Islamabad FYP • September 2026 • SABLE
+                                                                                        ASENT | SABLE — Final Research Design
+ Decision                                                    Defensible meaning
+
+                                                             that successor.
+                                                             The intended successor is established but the access
+ REGRESSED                                                   boundary is weakened/lost/misbound, or the obligation no
+                                                             longer holds for the logical asset.
+                                                             Correspondence is genuinely ambiguous, evidence conflicts,
+ UNKNOWN                                                     or the bounded policy semantics are insufficient for a safe
+                                                             conclusion.
+
+
+
+
+5.5 Why UNKNOWN is a feature, not an escape hatch
+A false PRESERVED result is the dangerous failure mode. UNKNOWN is therefore allowed only when evidence is
+quantitatively insufficient under fixed thresholds or when successor hypotheses conflict. The evaluation will measure
+UNKNOWN quality separately; a system that sends every difficult case to UNKNOWN has not solved the problem.
+
+5.6 Pseudocode-level decision logic
+    baseline = extract_obligation(baseline_tf)
+    candidates = generate_successor_hypotheses(baseline, candidate_tf)
+    scored = score_correspondence(baseline, candidates, evidence)
+    valid = filter_by_confidence_and_constraints(scored)
+    projected = project_obligation(baseline.obligation, valid)
+    security = evaluate_authorization(projected, candidate_tf)
+
+    if no_unique_successor(valid) or evidence_conflicts(valid):
+        decision = UNKNOWN
+    elif obligation_holds(security, intended_successor(valid)):
+        decision = PRESERVED
+    else:
+        decision = REGRESSED
+
+    emit_evidence(baseline, valid, projected, security, decision)
+
+
+
+
+                                    FAST NUCES Islamabad FYP • September 2026 • SABLE
+                                                                       ASENT | SABLE — Final Research Design
+
+6. End-to-end workflow
+
+
+
+
+                   FAST NUCES Islamabad FYP • September 2026 • SABLE
+                                                                                             ASENT | SABLE — Final Research Design
+                                            Figure 3. SABLE end-to-end workflow.
+
+
+6.1 Processing phases
+ Phase                                                          Student implementation
+                                                                Load trusted baseline and candidate Terraform files; record
+ Capture
+                                                                explicit change diff.
+                                                                Parse HCL, flatten module/resource addresses for analysis,
+ Normalize
+                                                                normalize policy documents and reference forms.
+                                                                Represent principal, actions, target S3 asset, and expected
+ Model obligation
+                                                                least-privilege relation.
+                                                                Construct candidate successor hypotheses from structural +
+ Build correspondence
+                                                                semantic evidence.
+                                                                Apply the baseline principal/action/resource boundary to
+ Project obligation
+                                                                each successor hypothesis.
+                                                                Evaluate policy semantics and resource relationships locally;
+ Verify                                                         use Terraform/Checkov/Trivy as evidence sources where
+                                                                useful.
+                                                                Separate true regression from legitimate re-expression and
+ Attribute
+                                                                unresolved ambiguity.
+                                                                Emit JSON/SARIF-style evidence record with matched nodes,
+ Report
+                                                                supporting signals, decision and uncertainty.
+
+
+
+
+6.2 Why deterministic rather than another AI agent
+SABLE requires no LLM in the security decision path. The AI-assisted development process may produce the
+candidate Terraform diff; SABLE independently evaluates that candidate against the trusted baseline.
+
+6.3 Local implementation boundary
+ Tool                                      Role                                       Cost
+
+                                           Core analysis engine, normalization,
+ Python 3                                                                             Free
+                                           matching, policy model
+ python-hcl2 / HCL parser                  Terraform parsing                          Free/open source
+ Terraform CLI                             Validation and optional plan generation    Free/local
+ Checkov                                   Security evidence + strong baseline        Free/open source
+                                           Optional independent IaC evidence +
+ Trivy                                                                                Free/open source
+                                           baseline
+ SQLite / JSON                             Scenario/evidence storage                  Free
+
+                                           Reproducible isolated benchmark
+ Docker (optional)                                                                    Free
+                                           execution
+
+
+ Hard cost boundary: The core SABLE decision must remain functional with all external AI APIs and cloud services unavailable.
+ No AWS account, paid API, commercial feed, or subscription scanner is required for the research claim.
+
+
+
+
+                                       FAST NUCES Islamabad FYP • September 2026 • SABLE
+                                                                                            ASENT | SABLE — Final Research Design
+
+7. Evaluation and decisive experiments
+The evaluation is the proof of the contribution. The benchmark is designed before final claims are accepted, and
+ground truth is hidden from SABLE.
+
+
+
+
+                                Figure 4. Baseline ladder and the only claimed contribution gap.
+
+
+7.1 Baseline ladder
+    Baseline                                                     Description
+
+    B0                                                           Candidate-only security policy/scanner check.
+    B1                                                           Before/after security-result comparison.
+    B2                                                           Terraform plan + explicit moved/resource identity evidence.
+                                                                 Graph/resource correspondence without baseline obligation
+    B3
+                                                                 projection.
+                                                                 Strongest reproducible combination of B0–B3 plus available
+    B4
+                                                                 plan/reference evidence.
+                                                                 Correspondence + obligation projection + ambiguity-aware
+    SABLE
+                                                                 attribution.
+
+
+
+7.2 Ground truth construction
+        Each scenario has a manually defined baseline logical asset and least-privilege obligation.
+        A separate review defines the intended candidate successor or successor set.
+        A separate policy oracle establishes whether the candidate access boundary is actually weaker, preserved, or
+         ambiguous.
+        Ground-truth labels are hidden from SABLE during evaluation.
+        The benchmark includes legitimate refactors so that “anything changed = regression” is penalized.
+
+
+                                        FAST NUCES Islamabad FYP • September 2026 • SABLE
+                                                                                             ASENT | SABLE — Final Research Design
+
+7.3 Core metrics
+    Metric                                 Definition                                  Why it matters
+                                           True regressions/misbindings
+    False-safe rate                                                                    Most safety-critical failure mode.
+                                           incorrectly reported as PRESERVED.
+
+                                           True REGRESSED cases correctly
+    Regression recall                                                                  Shows security sensitivity.
+                                           detected.
+                                           Legitimate preserved cases incorrectly
+    False-regression rate                                                              Shows usability.
+                                           flagged.
+
+                                           Correct logical successor selected
+    Correspondence accuracy                                                            Tests the core attribution mechanism.
+                                           when ground truth exists.
+                                           Fraction of UNKNOWN cases that
+    UNKNOWN precision                                                                  Prevents “UNKNOWN everything.”
+                                           genuinely lack a defensible decision.
+                                           Decisions with traceable baseline,
+    Evidence completeness                  successor, obligation, signals and policy   Makes the output auditable.
+                                           evidence.
+                                           Additional local runtime beyond
+    Analysis overhead                                                                  Tests student/practical viability.
+                                           strongest baseline.
+
+
+
+
+7.4 Required hard cases
+    Case                                                        What must happen
+                                                                PRESERVED when the same obligation is still attached to the
+    Legitimate move
+                                                                successor.
+                                                                Select the correct successor when evidence is sufficient;
+    Module split
+                                                                UNKNOWN when genuinely ambiguous.
+
+                                                                REGRESSED even if some candidate resource still satisfies
+    Wrong binding
+                                                                the same local policy.
+                                                                REGRESSED when actions/resources become broader than
+    Privilege widening
+                                                                baseline.
+    Policy relationship rewrite                                 Follow the relationship rather than the old resource name.
+    Conflicting evidence                                        UNKNOWN rather than arbitrary best-effort safety claim.
+
+
+
+
+7.5 Ablation studies
+      Remove explicit move evidence.
+      Remove dependency/reference context.
+      Remove policy-resource relationship evidence.
+      Remove ambiguity handling and force a best match.
+      Use correspondence without obligation projection.
+      Use obligation checking without correspondence.
+The ablations answer which part actually contributes. Without them, a panel can reasonably claim that a simpler
+resource matcher or scanner already did the work.
+
+7.6 Kill tests
+    Kill test                              Failure condition                           Action
+
+    K1 — Strong baseline equivalence       B4 matches SABLE on false-safe rate,        Withdraw novelty claim or kill SABLE.
+                                       FAST NUCES Islamabad FYP • September 2026 • SABLE
+                                                                                            ASENT | SABLE — Final Research Design
+ Kill test                                Failure condition                           Action
+
+                                          regression recall and evidence quality.
+                                          Moved/state identity alone solves the       Narrow to cases where security meaning
+ K2 — Address evidence suffices
+                                          hard structural cases.                      is not encoded by address history.
+                                          Benchmark transformations do not
+ K3 — No hard cases exist                 produce meaningful attribution              Kill the research problem as too weak.
+                                          ambiguity.
+                                          SABLE labels most hard cases                Redesign correspondence/obligation
+ K4 — UNKNOWN escape hatch
+                                          UNKNOWN without better safety.              model.
+                                          Local policy check alone resolves all       Drop SABLE and retain the simpler
+ K5 — Security predicate is trivial
+                                          cases.                                      baseline.
+                                          Ground truth, policy semantics or
+ K6 — Feasibility failure                 runtime cannot be produced reliably in      Narrow scope immediately or kill.
+                                          the planned window.
+
+
+ Green-light meaning: SABLE is approved to build because the problem and testable mechanism are now clear. “Green” does
+ not mean that an empirical novelty result has already been observed.
+
+
+
+
+8. CCP, stakeholders and student feasibility
+The project is a complex-computing problem because several interacting representations determine one safety-
+critical decision: Terraform structure, resource identity, IAM/S3 policy semantics, correspondence uncertainty, and
+historical baseline obligations.
+ CCP characteristic                                             SABLE evidence
+
+                                                                Allow legitimate refactoring while preserving least-privilege
+ Conflicting requirements
+                                                                security boundaries.
+                                                                Scanner-only, diff-only, move-only, and graph-only evidence
+ No obvious solution
+                                                                each answer a different piece.
+                                                                HCL parsing, Terraform semantics, IAM policy structure, graph
+ Depth of knowledge
+                                                                matching, uncertainty, empirical evaluation.
+                                                                A wrong successor match can cause a wrong security
+ Interdependence
+                                                                decision even when the candidate policy itself is valid.
+                                                                A candidate may look compliant while its relation to the
+ Ill-defined cause
+                                                                historical logical asset is ambiguous.
+                                                                Least-privilege failure can widen access to protected data.
+ Consequences                                                   AWS explicitly identifies least privilege as fundamental to
+                                                                reducing security risk. [R1]
+                                                                The experimental claim is the baseline-obligation attribution
+ Beyond standard practice
+                                                                chain, not generic scanning.
+
+
+
+
+8.1 Stakeholders
+ Stakeholder                              Need                                        SABLE output
+
+                                          Refactor safely without silently changing
+ Terraform / IaC developer                                                            Fast local decision + evidence.
+                                          who can access protected data.
+                                          Know whether the original access
+ Security reviewer                                                                    Baseline-to-candidate attribution trace.
+                                          boundary still holds after change.
+
+                                      FAST NUCES Islamabad FYP • September 2026 • SABLE
+                                                                                               ASENT | SABLE — Final Research Design
+ Stakeholder                                 Need                                        SABLE output
+
+                                             Avoid unnecessary blocks on legitimate      PRESERVED vs REGRESSED vs
+ Platform / infrastructure maintainer
+                                             structural refactors.                       UNKNOWN.
+
+                                             Maintain stable security requirements
+ Project owner                                                                           Reproducible assurance record.
+                                             over infrastructure evolution.
+
+
+
+
+8.2 Five-month plan
+ Month                                       Primary output                              Exit criterion
+
+                                             Scope freeze; obligation schema; HCL        Baseline cases and ground truth
+ 1
+                                             normalization; benchmark seed.              reproduce.
+                                             Resource graph + correspondence             Correct one-to-one successor matching
+ 2
+                                             prototype + policy semantic model.          on seed cases.
+                                             Obligation projection + attribution +       End-to-end local prototype on hard
+ 3
+                                             UNKNOWN handling.                           cases.
+                                             Strong baselines, ablations, adversarial
+ 4                                                                                       Measured comparison B4 vs SABLE.
+                                             benchmark expansion.
+                                             Final evaluation, performance, failure      Reproducible research package and
+ 5
+                                             analysis, documentation.                    conclusions.
+
+
+
+
+9. Relationship to CAVR, SATRA and ASENT
+The uploaded SATRA design provides the correct architectural lesson: each module owns one security boundary and
+publishes bounded evidence. SATRA is explicit that CAVR owns dependency/package behavior, SABLE owns IaC
+security non-regression/resource lineage, and SATRA owns security-test integrity. [A1]
+
+ Module                           Single security problem          Research object                  Integration evidence
+
+                                  Can the project trust a newly
+                                                                   Capability/security contract,
+                                  selected                                                          Dependency assurance
+ CAVR                                                              behavior evidence, repair +
+                                  dependency/package                                                evidence
+                                                                   re-verification. [A1]
+                                  behavior and repair?
+                                  Did a previously verified
+                                                                   Baseline obligation,
+                                  least-privilege infrastructure
+                                                                   successor correspondence,        Infrastructure security-
+ SABLE                            boundary remain bound to
+                                                                   obligation projection,           boundary evidence
+                                  the intended asset after
+                                                                   attribution.
+                                  Terraform restructuring?
+                                  Did the security-test oracle     Security obligation + targeted
+                                                                                                    Security-test integrity
+ SATRA                            remain effective after an AI-    security mutant + post-
+                                                                                                    evidence
+                                  assisted application change?     change test outcome. [A1]
+
+
+
+
+9.1 Where ASENT sits
+ Architecture wording: Use “AI-change security assurance gate” rather than “middleware.” ASENT conceptually sits between a
+ proposed AI-assisted change and the point at which that changed state is trusted/merged/deployed. It routes the change to the
+ appropriate specialized assurance module and aggregates bounded evidence.
+
+
+Conceptually:
+
+
+
+                                        FAST NUCES Islamabad FYP • September 2026 • SABLE
+                                                                                             ASENT | SABLE — Final Research Design
+    AI-assisted development
+             |
+             v
+       Proposed change
+             |
+             v
+    +-------------------------+
+    | ASENT assurance gate      |
+    +-------------------------+
+       |          |         |
+       v          v         v
+     CAVR       SABLE     SATRA
+     deps        IaC      app/tests
+       |          |         |
+       +---------+---------+
+                  |
+                  v
+            assurance evidence
+                  |
+                  v
+          accept / review / block
+                  |
+                  v
+            trusted next state
+
+9.2 Concrete CAVR/SABLE interaction
+A single feature request can touch dependencies and infrastructure. CAVR can produce a dependency-trust evidence
+record after its own analysis/repair. SABLE can independently produce an infrastructure security-boundary record for
+the Terraform portion of the same change. The handoff is evidence, not duplicated analysis.
+
+9.3 Concrete SABLE/SATRA interaction
+If one AI-generated candidate changes both infrastructure and application authorization tests, SABLE analyzes the
+infrastructure relation and SATRA analyzes the test oracle. Neither needs to perform the other module’s computation.
+The common ASENT layer combines their evidence for the change-level decision.
+
+
+10. Panel defense sheet
+ Likely panel question                                          SABLE answer boundary
+
+                                                                No. Checkov is an evidence source and baseline. The
+                                                                research question is whether the baseline least-privilege
+ “Is this just Checkov?”
+                                                                obligation remains bound to the correct logical asset after
+                                                                structural refactoring.
+                                                                Correct. SABLE does not replace them. Move evidence is one
+ “Terraform already has moved blocks.”                          input; it is insufficient for all security-meaning changes,
+                                                                especially split/merge/wrong-binding cases.
+                                                                Lineage is a mechanism, not the contribution. The
+ “So you are doing lineage?”                                    contribution is baseline security-obligation attribution after
+                                                                structural change.
+                                                                Because the target question is not only candidate
+ “Why do you need the baseline? Just scan the new file.”        compliance. It is whether the same protected asset still
+                                                                carries the same least-privilege boundary.
+
+ “Why S3/IAM?”                                                  Because the obligation is relational and security-critical:
+                                                                principal + actions + protected resource. AWS explicitly
+                                       FAST NUCES Islamabad FYP • September 2026 • SABLE
+                                                                                                 ASENT | SABLE — Final Research Design
+ Likely panel question                                             SABLE answer boundary
+
+                                                                   frames least privilege in those terms. [R1]
+                                                                   Because the FYP needs a bounded, measurable research
+ “Why not do all AWS services?”                                    problem. One resource family makes the benchmark and
+                                                                   algorithm defensible.
+                                                                   AI is the change source, not the trusted oracle. SABLE’s
+ “Where is the AI?”                                                decision path is deterministic so the assurance layer remains
+                                                                   independently checkable.
+                                                                   UNKNOWN is permitted. The project also has explicit kill
+ “What if your algorithm fails?”
+                                                                   tests; failure of the contribution is a valid research result.
+                                                                   Then the corresponding kill test fails and the SABLE novelty
+ “What if existing tools already solve it?”
+                                                                   claim is withdrawn.
+
+
+
+
+10.1 One-minute explanation
+“Terraform infrastructure is often refactored while features are being developed. Existing security tools can check the
+new configuration, and Terraform can track some resource moves. Our problem is harder: when the structure
+changes, did the least-privilege boundary that protected the original S3 data asset remain attached to the correct
+logical asset? SABLE builds a baseline security-obligation model, maps it to candidate successors using structural
+and semantic evidence, re-checks the authorization boundary, and conservatively reports preserved, regressed, or
+unknown. We test it against the strongest simpler baselines; if they do the same job, we kill our claim.”
+
+
+11. Limitations and controlled claims
+ Claim SABLE can make                                              Claim SABLE cannot make
+
+ “Within the supported Terraform/AWS S3/IAM model, this
+                                                                   “The entire AWS deployment is secure.”
+ obligation remained preserved on the identified successor.”
+ “This scenario is a demonstrated security-boundary
+                                                                   “Every future Terraform regression will be detected.”
+ regression under the benchmark ground truth.”
+ “This case is UNKNOWN because evidence is
+                                                                   “UNKNOWN means the system knows the change is safe.”
+ insufficient/conflicting.”
+ “The method reduced false-safe decisions relative to B4 on
+                                                                   “SABLE universally outperforms all security tools.”
+ the benchmark.”
+
+
+The core experiment uses a bounded policy model and local Terraform semantics. Deployment-time behavior,
+external state, unsupported AWS services, and arbitrary semantic equivalence remain future work.
+
+
+12. Final research lock
+ Item                                                              Locked decision
+
+                                                                   Refactoring-induced misbinding/regression of a previously
+ Problem
+                                                                   verified least-privilege S3 security boundary.
+                                                                   Designated application role must retain only intended access
+ Security obligation
+                                                                   to the designated protected S3 data asset.
+ Main artifact                                                     Terraform/HCL with AWS S3 + IAM policy relationships.
+                                                                   Baseline obligation model →successor correspondence →
+ Core mechanism
+                                                                   obligation projection →authorization verification →attribution.
+ Outputs                                                           PRESERVED / REGRESSED / UNKNOWN.
+
+                                          FAST NUCES Islamabad FYP • September 2026 • SABLE
+                                                                                                  ASENT | SABLE — Final Research Design
+ Item                                                               Locked decision
+
+ Strongest novelty test                                             B4 strongest reproducible existing evidence vs SABLE.
+
+                                                                    Python + Terraform CLI + open-source scanners/evidence,
+ Implementation
+                                                                    local only.
+ Timeline                                                           Approx. 5 months.
+ Final research rule                                                No rescue by wording if the kill tests fail.
+
+
+ Final green light: Build SABLE exactly within this boundary. Do not add extra controls, clouds, services, languages, AI agents, or
+ repair subsystems unless an empirical failure forces a justified narrowing or extension through supervisor review.
+
+
+
+
+13. References and source status
+I
+     Reference            Link                                                                                            Status
+D
+                                                                                                                          Official/cur
+     Amazon Web
+                                                                                                                          rent web
+     Services,
+[R                                                                                                                        source;
+     “Security best       https://docs.aws.amazon.com/AmazonS3/latest/userguide/security-best-practices.html
+1]                                                                                                                        live-verified
+     practices for
+                                                                                                                          during
+     Amazon S3.”
+                                                                                                                          assembly.
+     Agyekum &
+     Santos, “Does
+                                                                                                                          Carried
+     Fixing Break
+                                                                                                                          from the
+     Security? An
+                                                                                                                          ASENT
+     Empirical
+                                                                                                                          research
+     Study of
+                                                                                                                          source
+     Security
+[R                                                                                                                        record; live
+     Degradation in       https://arxiv.org/abs/2608.13404
+2]                                                                                                                        retrieval of
+     Iterative LLM-
+                                                                                                                          this exact
+     Driven
+                                                                                                                          page was
+     Infrastructure-
+                                                                                                                          unavailable
+     as-Code
+                                                                                                                          during final
+     Repair,”
+                                                                                                                          assembly.
+     arXiv:2608.134
+     04, 2026.
+
+                                                                                                                          Official/cur
+     HashiCorp                                                                                                            rent web
+[R   Developer,                                                                                                           source;
+                          https://developer.hashicorp.com/terraform/language/modules/develop/refactoring
+3]   “Refactor                                                                                                            live-verified
+     modules.”                                                                                                            during
+                                                                                                                          assembly.
+     Bridgecrew/Ch                                                                                                        Open-
+     eckov,                                                                                                               source
+     Terraform                                                                                                            implement
+[R                        https://github.com/bridgecrewio/checkov/blob/main/checkov/terraform/checks/graph_che
+     graph check                                                                                                          ation; live-
+4]                        cks/aws/S3PublicACLRead.yaml
+     example:                                                                                                             verified
+     S3PublicACLR                                                                                                         during
+     ead.                                                                                                                 assembly.
+                                                                                                                          Official/cur
+     Trivy,                                                                                                               rent web
+[R   Terraform                                                                                                            source;
+                          https://trivy.dev/docs/v0.54/coverage/iac/terraform/
+5]   coverage and                                                                                                         live-verified
+     limitations.                                                                                                         during
+                                                                                                                          assembly.
+
+                                          FAST NUCES Islamabad FYP • September 2026 • SABLE
+                                                                                              ASENT | SABLE — Final Research Design
+I
+     Reference         Link                                                                                           Status
+D
+     Alsaid,
+     Nebolisa &
+     Abbas,
+     “TerraProbe: A
+     Layered-
+     Oracle                                                                                                           Live-
+[R   Framework for                                                                                                    verified
+                       https://arxiv.org/abs/2606.26590
+6]   Detecting                                                                                                        during
+     Deceptive                                                                                                        assembly.
+     Fixes in LLM-
+     Assisted
+     Terraform,”
+     arXiv:2606.265
+     90, 2026.
+
+     Mengistu, Di
+     Rocco, Nguyen
+     & Di Ruscio,
+     “TerraRepair: A
+                                                                                                                      Live-
+     Tool-Grounded
+[R                                                                                                                    verified
+     LLM Agent for     https://arxiv.org/abs/2607.11390
+7]                                                                                                                    during
+     Infrastructure-
+                                                                                                                      assembly.
+     as-Code
+     Repair,”
+     arXiv:2607.113
+     90, 2026.
+
+     Chen et al.,
+     “SCAFFOLD-
+     CEGIS:
+     Preventing
+                                                                                                                      Live-
+     Latent Security
+[R                                                                                                                    verified
+     Degradation in    https://arxiv.org/abs/2603.08520
+8]                                                                                                                    during
+     LLM-Driven
+                                                                                                                      assembly.
+     Iterative Code
+     Refinement,”
+     arXiv:2603.085
+     20, 2026.
+
+                                                                                                                      Used as
+                                                                                                                      project-
+     ASENT SATRA
+                                                                                                                      basis
+     Final Research
+                                                                                                                      source for
+     Design, 24
+                                                                                                                      module
+[A   September
+                       Internal project file                                                                          boundaries
+1]   2026
+                                                                                                                      , student-
+     (uploaded
+                                                                                                                      scale
+     project
+                                                                                                                      scope and
+     source).
+                                                                                                                      evidence
+                                                                                                                      discipline.
+
+
+
+
+13.1 Research-source discipline
+This document deliberately distinguishes source-derived facts from the proposed SABLE hypothesis. Current official
+documentation and the recent TerraProbe/TerraRepair/SCAFFOLD-CEGIS papers were live-verified during assembly.
+The 2026 Terraform regression statistics from [R2] were already present in the project research record, but that exact
+arXiv page could not be freshly retrieved during final assembly; therefore those figures are not presented as newly re-
+verified in this run.
+
+                                          FAST NUCES Islamabad FYP • September 2026 • SABLE
+                                                    ASENT | SABLE — Final Research Design
+                End of document
+
+
+
+
+FAST NUCES Islamabad FYP • September 2026 • SABLE
+

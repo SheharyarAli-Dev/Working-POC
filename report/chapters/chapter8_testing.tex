@@ -1,0 +1,79 @@
+\chapter{Testing and Early Validation}
+Testing at the FYP-1 Mid stage checks whether the implemented SABLE logic follows its stated rules on controlled inputs and whether current SABLE evidence is safely consumed by the shared gate. The results below are focused tests, not a full repository suite, live AWS validation, or independent evaluation on production Terraform.
+
+\section{Testing Strategy}
+The local focused selection combines SABLE unit and fixture tests, the ground-truth isolation check, and the shared integration test. Cases include expected positive behavior, known wrong-target/weakening regressions, uncertainty at unsupported or ambiguous boundaries, and evidence binding/final-gate outcomes. The authored scenario fixtures are controlled test data rather than an independently sampled dataset.
+
+\section{Test Levels and Techniques}
+\begin{itemize}
+    \item \textbf{Unit and scenario tests:} parse fixture Terraform, check baseline obligations, rank successors, and assert module verdicts.
+    \item \textbf{Regression tests:} compare standalone and shared authorization behavior for unresolved role bindings and explicitly unrelated static roles.
+    \item \textbf{Isolation test:} checks the SABLE decision path remains separate from benchmark ground-truth labels.
+    \item \textbf{Shared integration test:} runs four shared \texttt{sable\_*} scenarios and asserts published SABLE evidence, candidate snapshot, SABLE input hash, integrity, and final decision.
+    \item \textbf{CI evidence:} the dedicated GitHub Actions SABLE job passed 44 tests on published commit \texttt{9a4dc3d94626ec1f14683b7420f4640d97de20c7}; it is a separate result from the local worktree audit below. A broader full-CI run reported eight failures. Its run link and failure-by-failure details were not available in the local records checked for this report, so the causes are not attributed here; the focused SABLE pass does not cover those broader failures.
+\end{itemize}
+
+\section{Test Cases}
+\setlength{\tabcolsep}{3pt}
+\begin{longtable}{p{0.26\textwidth}p{0.49\textwidth}p{0.17\textwidth}}
+\toprule
+\textbf{Test area / name} & \textbf{Expected result} & \textbf{Result}\\
+\midrule
+\path{test_sable_real_hcl} & Supported preserved fixtures return \texttt{PRESERVED}; regressed and widened fixtures return \texttt{REGRESSED}; the uncertain fixture returns \texttt{UNKNOWN}. & Passed\\
+\path{test_sable_refactor_and_correspondence_cases} & Supported rename/move cases preserve; wrong target and weakened action regress; replacement and competing successors remain unknown. & Passed\\
+Unsupported/unknown tests & Unsupported forms, unresolved bindings, and unverified baseline yield \texttt{UNKNOWN}. & Passed\\
+Authorization evaluator regression tests & Unresolved dynamic role binding is unknown in both evaluators; a statically known unrelated role does not invalidate the protected role's result. & Passed\\
+\path{test_shared_sable_evidence_drives_final_gate} & \texttt{sable\_preserved}: \texttt{PRESERVED}/\texttt{ACCEPT}; \texttt{sable\_regressed}: \texttt{REGRESSED}/\texttt{BLOCK}; \texttt{sable\_unknown} and unresolved binding: \texttt{UNKNOWN}/\texttt{REVIEW}. Evidence bindings and integrity also assert. & 4 cases passed\\
+\path{test_sable_final_gate_rejects_untrusted_evidence} & Stale, mismatched, or integrity-invalid evidence cannot establish acceptance. & Not selected in the reported local command\\
+\bottomrule
+\end{longtable}
+\setlength{\tabcolsep}{6pt}
+
+\section{Test Results}
+The exact local command executed from the repository root on the current worktree was:
+\begin{quote}\small\ttfamily\sloppy\noindent
+\path{.venv\Scripts\python.exe} -m pytest \\
+\path{tests/test_modules.py} \path{tests/test_sable_isolation.py} \\
+\path{tests/test_integration.py::test_shared_sable_evidence_drives_final_gate} \\
+-k sable --basetemp \path{.venv\.pytest_sable_mid_audit_20261011_c} -q
+\end{quote}
+Observed result: \textbf{27 passed, 10 deselected in 47.26s; exit code 0}. The \texttt{-k sable} filter restricts this command to test names containing \texttt{sable}; ten collected items were deselected. The passing selection covers SABLE parser/scenario, correspondence, obligation and uncertainty behavior, the standalone/shared evaluator regression cases, ground-truth isolation, and all four parameterized shared integration scenarios. It does not represent the complete test suite.
+
+\begin{sloppypar}
+The shared integration assertions establish that current SABLE evidence was published for the same candidate snapshot, its recomputed SABLE input hash matched, integrity was valid, and each case had the expected final-gate decision. In particular, \texttt{sable\_regressed} maps to \texttt{BLOCK}; \texttt{sable\_preserved} maps to \texttt{ACCEPT}; and the two unknown cases map to \texttt{REVIEW} in the SABLE-only integration setup.
+\end{sloppypar}
+
+\begin{sloppypar}
+The separate GitHub Actions run named \textit{SABLE shared assurance} reported \textbf{44 passed in 5.59 seconds} on commit \path{9a4dc3d94626ec1f14683b7420f4640d97de20c7}. That CI result predates the evaluator correction described in Chapter 5. The correction was committed as \texttt{58b0a3d} and is included in current branch head \path{753a55b1daedc370f04a493eca31169e5083dc1a}; the correction-containing local audit selection reported above was a separate run. Neither result is a full repository-suite pass, live AWS test, or completed external comparative evaluation.
+\end{sloppypar}
+
+% Module test sections (each owned by its member, see OWNERS.md)
+\input{chapters/cavr/ch7_cavr}
+\input{chapters/satra/ch7_satra}
+
+\section{Acceptance Testing / Validation}
+\begin{sloppypar}
+For the supported model, a \texttt{PRESERVED} verdict requires a verified baseline, a supported unique successor, and the registered principal/action/resource predicate holding on that successor. A supported known wrong-target or weakened-action case returns \texttt{REGRESSED}. Unresolved role binding, unsupported policy semantics, invalid baseline, or ambiguous correspondence returns \texttt{UNKNOWN}. In the shared gate, current integrity-valid SABLE evidence maps those three statuses to \texttt{ACCEPT}, \texttt{BLOCK}, and \texttt{REVIEW} respectively, subject to other applicable modules.
+\end{sloppypar}
+
+\begin{sloppypar}
+The retained integrated application capture documents a separate shared run \texttt{104074afe883}: CAVR \texttt{VERIFIED}, SABLE \texttt{REGRESSED}, SATRA \texttt{INCONCLUSIVE}, overall \texttt{BLOCK}. The dedicated SABLE page captures another wrong-target case. These application captures support the visible demonstrations described in Chapter 9; they do not substitute for the four-case test assertions or demonstrate live cloud behavior.
+\end{sloppypar}
+
+\section{Edge and Failure Cases}
+The selected fixture tests cover malformed HCL, unsupported module expansion and policy forms, unresolved role attachment, an unverified baseline, absent or competing successor evidence, a wrong policy target, and a weakened required action. In the shared test, evidence is also checked against the current snapshot and module input hash. These tests bound the supported behavior; they do not exhaust the Terraform language or all AWS authorization interactions.
+
+\section{Defects and Corrective Actions}
+\begin{sloppypar}
+The audit compared \texttt{backend/sable/authorization.py} with \texttt{backend/sable/policy\_semantics.py}. For the required cases, both agree on preserved authorization and known wrong-target/weakening regressions. They differed on an unresolved dynamic inline-policy role binding: the standalone evaluator could ignore it while the shared evaluator classified it as unknown. The standalone path now records that unresolved binding as outside-model evidence and returns an unknown authorization result. The regression tests also check that a binding to a statically known different role is still ignored. This is a narrow correction, not a broad evaluator rewrite.
+\end{sloppypar}
+
+\section{Current Validation Status}
+\begin{itemize}
+    \item \textbf{Verified locally:} 27 selected tests passed, 10 were deselected, and the process exited 0 on the current worktree.
+    \item \textbf{Verified in earlier CI:} 44 focused tests passed on the published SABLE commit; the local evaluator correction is not part of that recorded commit.
+    \item \textbf{Verified for tested fixtures:} preserved, regressed, and unknown outcomes are differentiated, and four shared final-gate scenarios assert evidence binding and decisions.
+    \item \textbf{Not established:} complete Terraform/AWS semantics, live-cloud behavior, independent benchmark validity, production-scale performance, or comparative research advantage. The broader full-CI run had eight failures whose individual causes were not verified in the local evidence checked for this report; full-project readiness is therefore not claimed.
+\end{itemize}
+
+The test evidence is early controlled validation. The scenario set is authored in-house; its outcomes are useful as regression checks but are not an independent estimate of real-world error rates.

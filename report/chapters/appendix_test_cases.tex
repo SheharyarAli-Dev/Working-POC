@@ -1,0 +1,20 @@
+\chapter{Detailed Test Cases}
+The local command and aggregate result are reported in Chapter 8. The cases below identify the expected behavior and the existing assertion location; the four shared-gate rows are parameter values of one test function.
+
+\setlength{\tabcolsep}{3pt}
+\begin{longtable}{p{0.24\textwidth}p{0.39\textwidth}p{0.26\textwidth}}
+\toprule
+\textbf{Case} & \textbf{Expected observable outcome} & \textbf{Assertion location}\\
+\midrule
+Supported module refactor, valid obligation & \texttt{PRESERVED}; baseline holds; selected successor and projected authorization hold. & \path{test_sable_real_hcl}; preserved parameters of \path{test_sable_refactor_and_correspondence_cases}.\\
+Policy rewritten to wrong bucket & \texttt{REGRESSED}; projected authorization is known and does not hold on successor. & \path{policy_rewrite_wrong_target} parameter of \path{test_sable_refactor_and_correspondence_cases}.\\
+Required action weakened & \texttt{REGRESSED}; missing action prevents the obligation from holding. & \path{privilege_weakened_action} parameter of \path{test_sable_refactor_and_correspondence_cases}.\\
+Competing successor candidates & \texttt{UNKNOWN}; no unjustified successor attribution. & \path{ambiguous_set_three_candidates} parameter of \path{test_sable_refactor_and_correspondence_cases}.\\
+Unsupported IAM Condition & \texttt{UNKNOWN}; projected authorization is not known. & \path{test_sable_unsupported_iam_stays_unknown}.\\
+Unresolved dynamic role binding & Standalone and shared evaluators do not claim known safe authorization; SABLE and shared gate yield \texttt{UNKNOWN}/\texttt{REVIEW}. & \path{test_sable_standalone_evaluator_fails_closed_on_unresolved_role_binding}; \path{test_shared_sable_evidence_drives_final_gate}.\\
+Known different role binding & Unrelated policy is ignored; intended preserved obligation remains valid. & \path{test_sable_explicitly_unrelated_role_binding_is_ignored}.\\
+Unverified baseline & No continuity claim; verdict is \texttt{UNKNOWN}. & \path{test_sable_unverified_baseline_and_empty_baseline}.\\
+Shared preserved / regressed / unknown / unresolved-binding cases & Expected pairs: \texttt{PRESERVED}/\texttt{ACCEPT}, \texttt{REGRESSED}/\texttt{BLOCK}, and two \texttt{UNKNOWN}/\texttt{REVIEW}. Evidence is current, input-bound, and integrity-valid. & Four parameter cases in \path{test_shared_sable_evidence_drives_final_gate}.\\
+\bottomrule
+\end{longtable}
+\setlength{\tabcolsep}{6pt}
