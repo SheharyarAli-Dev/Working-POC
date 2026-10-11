@@ -1,44 +1,169 @@
 \chapter{Introduction and Project Vision}
 \section{Project Overview}
-ASENT (Agent Sentinel) is a local assurance workflow for reviewing security evidence associated with proposed software changes. The repository contains three module paths: CAVR for dependency analysis, SATRA-RV for application-code analysis, and SABLE for infrastructure-as-code analysis. This report section documents the verified SABLE contribution and does not infer authorship or readiness for the other modules from their presence in the repository.
+\begin{sloppypar}
+ASENT (Agent Sentinel) is a local security-assurance gate that sits between AI-assisted development and the point where a generated or modified change is trusted, merged or handed off. It has three modules, one per security boundary: CAVR checks dependency requests, SATRA-RV checks application code, and SABLE checks Terraform infrastructure code. A shared orchestrator routes each change to the modules it concerns, stores their evidence, and gives one final decision of \texttt{ACCEPT}, \texttt{REVIEW} or \texttt{BLOCK}. The final decision is based on evidence from the modules, not on one AI system judging another.
+\end{sloppypar}
+
+This chapter introduces the project and treats the three modules in the same order under each heading: problem, objectives, scope, module description, success criteria and constraints. The implementation and test evidence for each module is written by its owner in Chapters 6 and 7.
 
 \section{Problem Statement}
-The SABLE problem is refactoring-induced security-boundary misbinding. A Terraform refactor can rename a resource, move it into a module, replace it, or introduce a competing resource. An IAM policy may remain syntactically valid and may grant the required actions, yet point to a different S3 bucket. A candidate-only policy check does not establish that the previously verified application-role obligation still protects the same logical data asset.
+\begin{sloppypar}
+AI-assisted development increases the amount of code, dependency resolution and infrastructure configuration that is produced or changed automatically. A candidate change can be unsafe in three different ways: a third-party dependency behaves maliciously, the application's security logic or its tests are weak, or a Terraform refactor silently rebinds a least-privilege authorization boundary. Requirements, plans, allowlists and lockfiles say what is intended. They do not show that what is about to be trusted matches that intent. ASENT addresses one bounded problem at each of the three boundaries.
+\end{sloppypar}
+
+\begin{sloppypar}
+\textbf{CAVR problem.} A dependency request can be permitted by the project and still be unsafe, because the exact release, the downloaded file, a transitive dependency or the package's behaviour may be compromised. CAVR therefore separates two questions. First: is this dependency request permitted by the approved project policy? Second: is the exact version, file and dependency tree that is about to be installed justified for this project? One allowlisted package shows why the first answer is not enough. The sample project's policy approves \texttt{pypdf>=5,<7}. Version 5.1.0 is inside that range and its file is genuine, yet OSV lists 97 advisories that affect it. Version 6.19.0 had no advisory when the runs were recorded, yet a copy with one bit changed on the way in is a different file under the same name. And the genuine 6.19.0 wheel calls \texttt{subprocess.run} in two places, while the policy grants no process execution. A check that the package name exists on the registry answers none of these.
+\end{sloppypar}
+
+\begin{sloppypar}
+\textbf{SATRA-RV problem.} A green ordinary test suite is not enough for application code produced or changed with AI assistance. A patch can keep or introduce an authorization or injection flaw, a repair can create a new regression, and generated tests can be weak or over-mocked. The reference case in the SATRA-RV design is a coding agent that modifies a Flask endpoint which required authentication and an ownership check. The patch makes the functional test pass, but the changed code path now permits unauthorized access; a static scanner may miss the semantic regression and the old suite may still pass. SATRA-RV treats the patch, the tests and the repair proposal as untrusted until independent evidence agrees.
+\end{sloppypar}
+
+\begin{sloppypar}
+\textbf{SABLE problem.} The SABLE problem is refactoring-induced security-boundary misbinding. A Terraform refactor can rename a resource, move it into a module, replace it, or introduce a competing resource. An IAM policy may remain syntactically valid and may grant the required actions, yet point to a different S3 bucket. A candidate-only policy check does not establish that the previously verified application-role obligation still protects the same logical data asset.
+\end{sloppypar}
 
 \section{Problem Context and Motivation}
-The bounded case is the relationship between an application IAM role, a protected S3 customer-data bucket, and the required object actions. The authorization obligation is relational: principal, actions, and resource scope must all agree. Resource names and Terraform addresses can change during refactoring, so correspondence requires evidence beyond name similarity. This is a pre-deployment local analysis problem; the current prototype does not apply Terraform or query live AWS state.
+\begin{sloppypar}
+For CAVR, the context is the moment a coding agent or a developer runs \texttt{pip install} or edits \path{requirements.txt}. The approved CAVR design records incidents in which a correctly named or legitimate package was still harmful: the 2022 \texttt{torchtriton} package on PyPI, which took precedence over a private dependency of the same name and collected system data and SSH files, and the 2024 Ultralytics compromise, where the published files were malicious although they came through the project's own release workflow. The lesson taken from both is that a package's name and its presence on the registry are not a security decision. \textbf{TODO: add references for these two incidents to \path{references/references.bib} (shared file) and cite them here.}
+\end{sloppypar}
+
+\begin{sloppypar}
+For SATRA-RV, the context is a change in which code, tests and assumptions can all change at once. Static scanners already find many known patterns and language models can already propose fixes. The harder question, and the one the design takes, is whether an AI-generated change is safe to accept. The bounded case is a Python web application and a fixed list of vulnerability families, with authentication, authorization and object-ownership checks first.
+\end{sloppypar}
+
+\begin{sloppypar}
+For SABLE, the bounded case is the relationship between an application IAM role, a protected S3 customer-data bucket, and the required object actions. The authorization obligation is relational: principal, actions, and resource scope must all agree. Resource names and Terraform addresses can change during refactoring, so correspondence requires evidence beyond name similarity. This is a pre-deployment local analysis problem; the current prototype does not apply Terraform or query live AWS state.
+\end{sloppypar}
+
+The related work and the research gap for all three modules are in Chapter 2.
 
 \section{Project Vision}
-ASENT's project vision is to combine attributable security evidence for proposed changes into a reviewable workflow decision. For SABLE, the mid-stage objective is narrower: check whether a registered S3/IAM obligation is preserved across supported Terraform changes, detect a known regression, and return uncertainty when available evidence cannot justify either conclusion.
+\begin{sloppypar}
+ASENT's vision is to combine attributable security evidence for a proposed change into one reviewable decision, using local and open-source tooling with no mandatory paid service. An uncertain result is never presented as safe: each module has its own outcome for ``not known'' (\texttt{UNRESOLVED} for CAVR, \texttt{INCONCLUSIVE} for SATRA-RV, \texttt{UNKNOWN} for SABLE), and the final gate sends such a result to review.
+\end{sloppypar}
+
+\begin{sloppypar}
+The full CAVR vision in the approved design goes from capture through counterfactual sandbox execution to verified repair. The mid-stage objective is narrower: a fast gate that verifies a real \texttt{pip install} request against the project policy, the real PyPI file, its dependency tree, the OSV advisories and a capability contract from the project's own code, and returns \texttt{VERIFIED}, \texttt{REJECTED}, \texttt{UNRESOLVED} or \texttt{BLOCK} with evidence.
+\end{sloppypar}
+
+\begin{sloppypar}
+The SATRA-RV vision in its approved design is a change-targeted evidence gate: an AI-generated application-code patch is accepted only after trusted security tests, validated adaptive tests and isolated before-and-after verification agree that the targeted defect is removed and no new regression is introduced.
+\end{sloppypar}
+
+\begin{sloppypar}
+For SABLE, the mid-stage objective is to check whether a registered S3/IAM obligation is preserved across supported Terraform changes, detect a known regression, and return uncertainty when available evidence cannot justify either conclusion.
+\end{sloppypar}
 
 \section{Project Objectives}
+The mid-stage objectives of CAVR are:
+\begin{enumerate}
+    \item Capture a real \texttt{pip install X==Y} command or a \path{requirements.txt} edit as a structured record before anything is downloaded.
+    \item Block at once any request that the project's allowlist, denylist, pin rule or lockfile does not permit.
+    \item Verify the real PyPI file: SHA-256 of the downloaded bytes against the registry digest, the transitive tree from real metadata, OSV advisories with version-range checks, and a light AST scan, with a verdict cache on an eight-field key.
+    \item Build a capability contract from the project's real imports and call sites and judge the package's sensitive calls against it.
+    \item Return \texttt{VERIFIED}, \texttt{REJECTED} or \texttt{UNRESOLVED} with evidence, and never turn an unknown into \texttt{VERIFIED}.
+\end{enumerate}
+The objectives of SATRA-RV, from its approved design, are:
+\begin{enumerate}
+    \item Snapshot the trusted baseline and the AI-generated candidate change.
+    \item Build a security change contract from the diff and the security semantics of the changed code.
+    \item Run deterministic dictionary tests, and adaptive tests only after they have passed validation.
+    \item Repair only from an evidence bundle, and verify the candidate in a disposable sandbox against the baseline.
+    \item Accept or reject the patch with an auditable evidence record.
+\end{enumerate}
+The mid-stage objectives of SABLE are:
 \begin{enumerate}
     \item Normalize the supported Terraform/HCL subset into resources, references, local-module outputs, and move records.
     \item Verify the registered obligation on the trusted baseline before making a continuity claim.
     \item Identify a supported successor using structural evidence and project the obligation onto it.
     \item Publish candidate-bound evidence for the shared gate and verify preserved, regressed, and uncertain outcomes with named tests.
 \end{enumerate}
+The CAVR and SABLE lists are what the mid-stage prototypes implement. The SATRA-RV list is the design; which of its objectives are complete at the mid stage is stated in the SATRA-RV sections of Chapter 6.
 
 \section{Project Scope}
-\begin{longtable}{p{0.22\textwidth}p{0.70\textwidth}}
+\setlength{\tabcolsep}{3pt}
+\begin{longtable}{p{0.13\textwidth}p{0.39\textwidth}p{0.39\textwidth}}
 \toprule
-\textbf{In the current SABLE prototype} & \textbf{Explicit boundary}\\
+\textbf{Module} & \textbf{In scope} & \textbf{Explicit boundary}\\
 \midrule
-Local Terraform/HCL parsing for the supported resource subset, local modules and references; S3 buckets; selected inline IAM role-policy forms; baseline obligation checks; successor ranking; shared evidence freshness and final-gate integration. & No general Terraform interpreter, full AWS IAM evaluator, live AWS inspection, Terraform apply, arbitrary module expansion, production-scale performance claim, or independent real-world effectiveness result. Unsupported or unresolved semantics remain unknown.\\
+\endhead
+CAVR & Mid-stage prototype: capture of \texttt{pip install} commands and \path{requirements.txt} edits; requirement gate; download of the real PyPI wheel with a SHA-256 check; transitive tree; OSV advisory check; AST scan of wheel sources; capability contract from the project's call sites; verdict cache; pip wrapper; dashboard page with six real requests. & PyPI wheels only: no npm, no source distributions. No package is executed: sandbox execution, counterfactual activation, the causal graph, repair and re-verification are designed but not part of the mid stage. No detection-rate or false-positive result on a package corpus. Unknown or unsupported input ends \texttt{UNRESOLVED}.\\
+SATRA-RV & Design scope: Python web applications tested with pytest; the security families authentication, authorization and IDOR, SQL injection, command injection, path traversal, XSS, SSRF, CSRF and insecure deserialization; deterministic dictionary tests; adaptive tests from a local model after validation; sandboxed before-and-after verification. \textbf{TODO (SATRA-RV owner): which of these the mid-stage prototype implements.} & No dependency trust analysis and no infrastructure analysis; those are CAVR and SABLE. No hosted LLM API, model training or fine-tuning. No production execution and no live exploitation of third-party systems. No universal vulnerability coverage and no proof that an application is secure. Insufficient evidence ends \texttt{INCONCLUSIVE}.\\
+SABLE & Mid-stage prototype: local Terraform/HCL parsing for the supported resource subset, local modules and references; S3 buckets; selected inline IAM role-policy forms; baseline obligation checks; successor ranking; shared evidence freshness and final-gate integration. & No general Terraform interpreter, full AWS IAM evaluator, live AWS inspection, Terraform apply, arbitrary module expansion, production-scale performance claim, or independent real-world effectiveness result. Unsupported or unresolved semantics remain \texttt{UNKNOWN}.\\
 \bottomrule
 \end{longtable}
+\setlength{\tabcolsep}{6pt}
+
+\begin{sloppypar}
+The mid-stage CAVR scope is the first four phases of the CAVR flow in the integrated ASENT design, which numbers the flow C1 to C12: C1 capture, C2 requirement gate, C3 fast package gate and C4 capability contract. The same design requires the verdict cache to be keyed on eight fields and names cache hit rate and p50/p95 latency as metrics to report; both are implemented and reported in Section~\ref{sec:cavr-demo}. The later phases, from escalation to deep analysis through repair and clean reconstruction, are the remaining CAVR work.
+\end{sloppypar}
 
 \section{Project Modules}
-ASENT's repository organizes dependency, application-code, and Terraform/infrastructure analysis under CAVR, SATRA-RV, and SABLE respectively. The shared orchestrator routes relevant changes, stores module evidence, and evaluates a final decision. Detailed behavior and ownership claims in this report are limited to SABLE and the shared gate behavior demonstrated by its tests.
+\setlength{\tabcolsep}{3pt}
+\begin{longtable}{p{0.12\textwidth}p{0.21\textwidth}p{0.37\textwidth}p{0.20\textwidth}}
+\toprule
+\textbf{Module} & \textbf{Input} & \textbf{What it does} & \textbf{Outcome}\\
+\midrule
+\endhead
+CAVR & A \texttt{pip install} command or a \path{requirements.txt} edit, the project directory and the project policy. & Captures the request, applies the requirement gate, downloads the real wheel and checks its SHA-256, builds the dependency tree, checks OSV, scans the wheel sources, and judges the package's sensitive calls against a contract taken from the project's call sites. & \texttt{VERIFIED}, \texttt{REJECTED}, \texttt{UNRESOLVED}, or \texttt{BLOCK} from the gate.\\
+SATRA-RV & A trusted baseline and an AI-generated candidate change to a Python web application. & Maps the changed lines to routes and security operations, builds a security change contract, runs trusted dictionary tests and validated adaptive tests, and verifies a repair in a disposable sandbox against the baseline. & \texttt{ACCEPT}, \texttt{REJECT}, \texttt{RETRY}, \texttt{INCONCLUSIVE}.\\
+SABLE & A trusted baseline, a candidate Terraform snapshot and a registered obligation. & Normalizes both snapshots, verifies the obligation on the baseline, identifies the successor of the protected resource from structural evidence, and evaluates the obligation on that successor. & \texttt{PRESERVED}, \texttt{REGRESSED}, \texttt{UNKNOWN}.\\
+Shared orchestrator & The candidate change and the evidence of the modules it concerns. & Routes the change to the relevant modules, stores their evidence bound to the candidate, and evaluates the final gate. & \texttt{ACCEPT}, \texttt{REVIEW}, \texttt{BLOCK}.\\
+\bottomrule
+\end{longtable}
+\setlength{\tabcolsep}{6pt}
+\begin{sloppypar}
+In the final gate a \texttt{REJECTED}, \texttt{REJECT} or \texttt{REGRESSED} result from any module blocks the change, and an unknown result from any module holds it for review. The CAVR fast gate described in this report is reached through the pip wrapper and the CAVR page. The shared orchestrator's dependency step still calls the older CAVR analyzer; moving it to the fast gate is open work, described in Section~\ref{sec:cavr}.
+\end{sloppypar}
 
 \section{Stakeholders and User Classes}
-The intended users are project developers and reviewers who need an inspectable decision before trusting a proposed change. The supervisor and evaluation panel assess the prototype and its evidence. The team must confirm the contribution and administrative records required for the complete report.
+\begin{itemize}
+    \item \textbf{Developer using a coding agent:} needs a fast automated answer and a clear reason when a request is blocked.
+    \item \textbf{Security reviewer:} needs evidence behind each module decision and an explicit statement of what is not known.
+    \item \textbf{CI or release engineer:} needs a machine-readable result. The CAVR pip wrapper returns a separate exit code for each verdict.
+    \item \textbf{Infrastructure maintainer:} needs legitimate Terraform refactoring to pass without silent least-privilege drift.
+    \item \textbf{Supervisor and evaluation panel:} assess the prototype and its evidence.
+\end{itemize}
 
 \section{Success Criteria}
-For this mid-stage SABLE scope, success is observable when: (i) a supported refactor preserving the registered obligation returns \texttt{PRESERVED}; (ii) a known wrong target or missing required action returns \texttt{REGRESSED}; (iii) an ambiguous successor, unresolved role binding, invalid baseline, or unsupported policy semantics does not return a safe verdict and instead returns \texttt{UNKNOWN}; and (iv) current SABLE evidence reaches the shared final gate with its candidate snapshot, input hash, and integrity checks intact. The requirement table and tests in Chapters 4 and 8 make these checks reproducible.
+\begin{sloppypar}
+\textbf{CAVR.} For the mid-stage scope, success is observable when: (i) a permitted, pinned request whose downloaded file matches the registry digest, with no OSV advisory and no reachable denied sink, returns \texttt{VERIFIED}; (ii) a file that does not match the registry digest, or a version OSV lists as affected, returns \texttt{REJECTED}; (iii) a request the policy does not permit returns \texttt{BLOCK} and nothing is downloaded; (iv) any unknown, such as an unreachable registry, a missing policy or an unused package, returns \texttt{UNRESOLVED} and never \texttt{VERIFIED}; and (v) every verdict carries its evidence and its \texttt{fast\_gate\_ms}. Criteria (i) to (iv) were each recorded on a real request: \texttt{pypdf==6.19.0}, \texttt{pypdf==5.1.0} and a tampered wheel, \texttt{left-pad==1.0}, and an unreachable registry.
+\end{sloppypar}
+
+\begin{sloppypar}
+\textbf{SATRA-RV.} In the design, success is observable when: (i) a candidate is accepted only if every mandatory gate passes, which means the targeted defect is removed, the trusted tests pass, the accepted adaptive tests pass, and there is no new security, functional or build regression; (ii) a contract violation, a failing trusted test or a new regression returns \texttt{REJECT}; and (iii) insufficient evidence returns \texttt{INCONCLUSIVE} and never \texttt{ACCEPT}. Every shared-workflow run in the executive summary that states a SATRA-RV result states \texttt{INCONCLUSIVE}, and the run in which SABLE was \texttt{PRESERVED} was sent to review for that reason. \textbf{TODO (SATRA-RV owner): which of these criteria were observed at the mid stage, and on which scenario.}
+\end{sloppypar}
+
+\begin{sloppypar}
+\textbf{SABLE.} For the mid-stage scope, success is observable when: (i) a supported refactor preserving the registered obligation returns \texttt{PRESERVED}; (ii) a known wrong target or missing required action returns \texttt{REGRESSED}; (iii) an ambiguous successor, unresolved role binding, invalid baseline, or unsupported policy semantics does not return a safe verdict and instead returns \texttt{UNKNOWN}; and (iv) current SABLE evidence reaches the shared final gate with its candidate snapshot, input hash, and integrity checks intact.
+\end{sloppypar}
+
+The requirement tables and tests in Chapters 4 and 7 make these checks reproducible.
 
 \section{Constraints and Assumptions}
-The baseline and registered obligation are treated as trusted inputs supplied by the project configuration. SABLE's conclusions are limited to parsed evidence and its documented model. Synthetic fixtures support controlled regression tests but do not establish behavior on deployed AWS resources or independent production repositories. The analysis is local and requires no cloud credentials.
+\begin{sloppypar}
+\begin{itemize}
+    \item \textbf{All modules.} The project uses local and open-source tooling. No paid API, paid cloud or commercial scanner is required. A result that is not known goes to review; it is never presented as safe.
+    \item \textbf{CAVR.} The project policy and the lockfile are trusted inputs; a project without a policy is \texttt{UNRESOLVED} and is not judged by another project's policy. The fast gate needs internet access to PyPI and OSV, and without it the answer is \texttt{UNRESOLVED}. CAVR verifies the wheel that pip would choose for the running interpreter; the development machine runs Python 3.14 and CI runs Python 3.12. The host, its kernel and the CAVR process itself are assumed trusted.
+    \item \textbf{SATRA-RV.} The baseline is a trusted input. The local language model is an untrusted generator of candidate tests and repairs; its output is validated before use and the deterministic gate makes the decision. Candidate code runs only in a local disposable sandbox. The security dictionary and the contract model are bounded, so an issue outside them can be missed.
+    \item \textbf{SABLE.} The baseline and registered obligation are treated as trusted inputs supplied by the project configuration. SABLE's conclusions are limited to parsed evidence and its documented model. Synthetic fixtures support controlled regression tests but do not establish behavior on deployed AWS resources or independent production repositories. The analysis is local and requires no cloud credentials.
+\end{itemize}
+\end{sloppypar}
 
 \section{Ethical, Legal and DEI Considerations}
-The demonstrated analysis uses local fixture data and does not require personal data or cloud credentials. Reports must distinguish synthetic fixtures and static analysis from live infrastructure evidence. Tool-assisted development and team-wide disclosures require confirmation from the individuals concerned; this report records only the SABLE-related tool use verified for this report update.
+\begin{sloppypar}
+CAVR follows the safe-research rules of its approved design. Forced-execution environments use inert canary values and never real credentials. No working malicious payload and no live look-alike package is published. A CAVR verdict is a research result about one file under one policy; it is not a public accusation against a package or its maintainer, and the report states the uncertainty and the assumptions behind each result. The fast gate installs nothing and runs no package code. It sends only the package name and version to PyPI and OSV, and no project source code leaves the machine. Credentials inside a request URL are removed before the request is printed or logged.
+\end{sloppypar}
+
+\begin{sloppypar}
+SATRA-RV runs candidate code only in a local sandbox and not against production or third-party systems. Its language model is local; no hosted LLM API is used, and the model is given only the evidence relevant to the changed security region.
+\end{sloppypar}
+
+\begin{sloppypar}
+The SABLE analysis uses local fixture data and does not require personal data or cloud credentials. Reports must distinguish synthetic fixtures and static analysis from live infrastructure evidence.
+\end{sloppypar}
+
+\begin{sloppypar}
+Tool-assisted development is disclosed per member. My use of Claude Code for the CAVR work is described in Section~\ref{sec:cavr}; the team-wide disclosure is in Chapter 8. \textbf{TODO: DEI statement, to be agreed by the team.}
+\end{sloppypar}
