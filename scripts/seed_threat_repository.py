@@ -4,7 +4,7 @@ import sys
 from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 from backend.config import ROOT
-from backend.satra.dictionary import RULES
+from backend.satra.seed_rules import RULES
 D=ROOT/'backend/threat_repo/seed';D.mkdir(exist_ok=True)
 STAMP='2026-09-26T00:00:00+00:00'
 def row(id,cat,name,description='',severity='INFO',source='SRC-ASENT',**data):return {'id':id,'category':cat,'name':name,'description':description,'severity':severity,'source_id':source,'enabled':True,'version':1,'updated_at':STAMP,'data':data}
