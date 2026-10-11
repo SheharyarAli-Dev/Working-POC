@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { CavrRunState } from './types';
+import { CavrRunState, NOT_COMPUTED } from './types';
 import { ChevronDown, ChevronRight, AlertTriangle, CheckCircle2, XCircle } from 'lucide-react';
 
 interface CapabilityContractTabProps {
@@ -13,24 +13,30 @@ export const CapabilityContractTab: React.FC<CapabilityContractTabProps> = ({ st
     setExpandedRows(prev => ({ ...prev, [cap]: !prev[cap] }));
   };
 
-  const contractRows = state.actionData?.capability_contract?.contract_rows || [
-    { capability: "FILE_READ(invoice_documents)", status: "REQUIRED", evidence: "invoice_extractor/reader.py:14", justification: "Local PDF stream reading via PdfReader", confidence: 0.98 },
-    { capability: "FILE_WRITE(scratch_tmp)", status: "OPTIONAL", evidence: "sandbox_scratchpad", justification: "Scratch buffer write permitted", confidence: 0.85 },
-    { capability: "NETWORK_CONNECT(unrestricted)", status: "DENIED", evidence: "project_policy.json", justification: "Offline invoice parser disallows external sockets", confidence: 1.0 },
-    { capability: "SECRET_READ(credentials)", status: "DENIED", evidence: "project_policy.json", justification: "No credential store access justified", confidence: 1.0 },
-    { capability: "PROCESS_EXEC", status: "DENIED", evidence: "project_policy.json", justification: "Subprocess creation strictly prohibited", confidence: 1.0 },
-    { capability: "PERSISTENCE_WRITE", status: "DENIED", evidence: "project_policy.json", justification: "Modifying system startup hooks prohibited", confidence: 1.0 },
-    { capability: "NATIVE_EXEC", status: "DENIED", evidence: "pure_python_policy", justification: "Unverified ELF/PE binaries forbidden", confidence: 0.95 }
-  ];
+  // The rows are the contract the pipeline inferred. Without a contract there is nothing to show.
+  const contract = state.actionData?.capability_contract;
+  const contractRows: any[] = contract?.contract_rows || [];
+  // Sink calls the AST scan found in the wheels, each with the pipeline's judgement.
+  const sinks: any[] = state.actionData?.reachability?.sinks || [];
+  // False when the pipeline stopped after the contract and before the scan (for example OSV rejected
+  // the version). Then no sink was looked for, and "nothing found" would be a result nobody computed.
+  const judged = !!state.actionData?.reachability;
 
-  // Observed capabilities from counterfactual runs
-  const observedActions = new Set<string>();
-  if (state.counterfactualResults?.runs) {
-    for (const r of state.counterfactualResults.runs) {
-      for (const b of (r.behaviors_found || [])) {
-        observedActions.add(b.action);
-      }
-    }
+  if (!contract) {
+    return (
+      <div className="evidence-tab-pane capability-pane">
+        <div className="tab-intro-card">
+          <div>
+            <h5>Capability Contract Matrix</h5>
+            <p>
+              {state.verdict
+                ? 'No contract was inferred for this request: the pipeline stopped before that stage.'
+                : 'The contract appears here when the pipeline has read the project.'}
+            </p>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -38,7 +44,7 @@ export const CapabilityContractTab: React.FC<CapabilityContractTabProps> = ({ st
       <div className="tab-intro-card">
         <div>
           <h5>Capability Contract Matrix</h5>
-          <p>Deterministic capability vocabulary derived from actual AST call sites in your sample invoice project vs observed dynamic behavior.</p>
+          <p>{contract.rule}: {contract.reason} Sinks are static findings from the AST scan; no package code was run.</p>
         </div>
         <div className="contract-legend">
           <span className="legend-chip required">REQUIRED (Justified)</span>
@@ -54,7 +60,7 @@ export const CapabilityContractTab: React.FC<CapabilityContractTabProps> = ({ st
               <th style={{ width: '30%' }}>Capability Scope</th>
               <th style={{ width: '15%' }}>Declared Contract</th>
               <th style={{ width: '15%' }}>Allowed Policy</th>
-              <th style={{ width: '20%' }}>Observed Dynamic</th>
+              <th style={{ width: '20%' }}>Sink calls in the wheels (static)</th>
               <th style={{ width: '20%' }}>Result Matrix</th>
             </tr>
           </thead>
@@ -63,28 +69,15 @@ export const CapabilityContractTab: React.FC<CapabilityContractTabProps> = ({ st
               const cap = row.capability;
               const isExpanded = !!expandedRows[cap];
 
-              // Check if observed
-              let observed = "NONE";
-              let hasMismatch = false;
-
-              if (cap.includes("FILE_READ")) {
-                observed = observedActions.has("FILE_READ") ? "OBSERVED (memory)" : "Clean";
-              } else if (cap.includes("NETWORK")) {
-                if (observedActions.has("NETWORK_CONNECT")) {
-                  observed = "SOCKET_CONNECT (127.0.0.1:18765)";
-                  hasMismatch = true;
-                }
-              } else if (cap.includes("SECRET_READ")) {
-                if (observedActions.has("SECRET_ACCESS")) {
-                  observed = "HONEYTOKEN_READ (~/.aws/credentials)";
-                  hasMismatch = true;
-                }
-              } else if (cap.includes("PROCESS_EXEC")) {
-                if (observedActions.has("PROCESS_CREATE")) {
-                  observed = "SUBPROCESS_SPAWNED";
-                  hasMismatch = true;
-                }
-              }
+              // Static findings only: sink calls in the wheels whose capability is this row's.
+              const found = sinks.filter((sink: any) => cap.startsWith(sink.capability));
+              const reachable = found.filter((sink: any) => sink.verdict === 'REACHABLE');
+              const observed = !judged
+                ? NOT_COMPUTED
+                : found.length === 0
+                  ? "no sink call found"
+                  : found.map((sink: any) => `${sink.file}:${sink.line} ${sink.verdict}`).join(', ');
+              const hasMismatch = reachable.length > 0;
 
               return (
                 <React.Fragment key={cap}>
@@ -112,19 +105,21 @@ export const CapabilityContractTab: React.FC<CapabilityContractTabProps> = ({ st
                     </td>
 
                     <td>
-                      <span className={`obs-cell ${hasMismatch ? 'obs-alert' : 'obs-clean'}`}>
+                      <span className={`obs-cell ${hasMismatch ? 'obs-alert' : (judged ? 'obs-clean' : '')}`}>
                         {observed}
                       </span>
                     </td>
 
                     <td>
-                      {hasMismatch ? (
+                      {!judged ? (
+                        <span>{NOT_COMPUTED}</span>
+                      ) : hasMismatch ? (
                         <span className="result-chip mismatch">
-                          <XCircle size={12} /> VIOLATION: Not Justified
+                          <XCircle size={12} /> Reachable sink: unresolved
                         </span>
                       ) : (
                         <span className="result-chip compliant">
-                          <CheckCircle2 size={12} /> Compliant
+                          <CheckCircle2 size={12} /> {found.length === 0 ? 'Nothing found' : 'No reachable sink'}
                         </span>
                       )}
                     </td>
@@ -135,14 +130,13 @@ export const CapabilityContractTab: React.FC<CapabilityContractTabProps> = ({ st
                       <td colSpan={5}>
                         <div className="matrix-detail-box">
                           <div className="detail-meta">
-                            <strong>Call Site Evidence:</strong> <code>{row.evidence}</code> · 
-                            <strong> Confidence Score:</strong> {int(row.confidence * 100)}%
+                            <strong>Evidence:</strong> <code>{row.evidence}</code>
                           </div>
                           <p className="detail-justification">{row.justification}</p>
                           {hasMismatch && (
                             <div className="mismatch-explanation">
                               <AlertTriangle size={14} />
-                              <span>Critical policy discrepancy: This capability was strictly DENIED by project contract, but malicious execution was observed during testing!</span>
+                              <span>The contract does not allow this capability and the project's call sites can reach the sink call. Deep analysis is required (M2).</span>
                             </div>
                           )}
                         </div>
@@ -158,7 +152,3 @@ export const CapabilityContractTab: React.FC<CapabilityContractTabProps> = ({ st
     </div>
   );
 };
-
-function int(val: number) {
-  return Math.round(val);
-}

@@ -173,7 +173,41 @@ class CavrStorage:
                 reason TEXT,
                 timestamp TEXT NOT NULL
             );
+
+            CREATE TABLE IF NOT EXISTS verdict_cache(
+                cache_key TEXT PRIMARY KEY,
+                ecosystem TEXT NOT NULL,
+                name TEXT NOT NULL,
+                version TEXT NOT NULL,
+                artifact_sha256 TEXT NOT NULL,
+                subtree_digest TEXT NOT NULL,
+                contract_digest TEXT NOT NULL,
+                policy_version TEXT NOT NULL,
+                analyzer_version TEXT NOT NULL,
+                status TEXT NOT NULL,
+                verdict_json TEXT NOT NULL,
+                stored_at TEXT NOT NULL,
+                integrity TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS verdict_log(
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                recorded_at TEXT NOT NULL,
+                source TEXT,
+                requested TEXT,
+                status TEXT NOT NULL,
+                stage TEXT,
+                rule TEXT,
+                fast_gate_ms REAL NOT NULL,
+                cache_hit INTEGER NOT NULL,
+                escalated INTEGER NOT NULL,
+                cache_lookup TEXT
+            );
             """)
+
+            # A database made before the cache lookup was logged gets the column; its old rows keep NULL.
+            if "cache_lookup" not in {column[1] for column in conn.execute("PRAGMA table_info(verdict_log)")}:
+                conn.execute("ALTER TABLE verdict_log ADD COLUMN cache_lookup TEXT")
 
             # Seed if table is empty
             count = conn.execute("SELECT COUNT(*) FROM trusted_packages").fetchone()[0]
@@ -244,4 +278,49 @@ class CavrStorage:
     def get_audit_logs(self, limit: int = 50) -> list[dict]:
         with self.connect() as conn:
             rows = conn.execute("SELECT * FROM audit_log ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
+            return [dict(r) for r in rows]
+
+    # --- verdict cache (rows are built and checked by backend/cavr/verdict_cache.py) ---
+
+    VERDICT_CACHE_COLUMNS = ("cache_key", "ecosystem", "name", "version", "artifact_sha256", "subtree_digest",
+                             "contract_digest", "policy_version", "analyzer_version", "status", "verdict_json",
+                             "stored_at", "integrity")
+
+    def get_cached_verdict(self, cache_key: str) -> dict | None:
+        with self.connect() as conn:
+            row = conn.execute("SELECT * FROM verdict_cache WHERE cache_key=?", (cache_key,)).fetchone()
+            return dict(row) if row else None
+
+    def list_cached_verdicts(self, limit: int = 200) -> list[dict]:
+        with self.connect() as conn:
+            rows = conn.execute("SELECT * FROM verdict_cache ORDER BY stored_at DESC LIMIT ?", (limit,)).fetchall()
+            return [dict(r) for r in rows]
+
+    def put_cached_verdict(self, row: dict) -> None:
+        columns = self.VERDICT_CACHE_COLUMNS
+        with self.connect() as conn:
+            conn.execute(f"INSERT OR REPLACE INTO verdict_cache({', '.join(columns)}) VALUES({', '.join('?' * len(columns))})",
+                         tuple(row[column] for column in columns))
+            conn.commit()
+
+    # --- verdict log (one row per verify_request; the report's hit rate and latency come from it) ---
+
+    def record_verdict(self, source, requested, status, stage, rule, fast_gate_ms: float, cache_hit: bool, escalated: bool,
+                       cache_lookup: str | None = None) -> int:
+        """`cache_lookup` is HIT, MISS or NOT_REACHED for the whole request (`pipeline.cache_lookup_of`)."""
+        recorded_at = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        with self.connect() as conn:
+            cur = conn.execute("""
+            INSERT INTO verdict_log(recorded_at, source, requested, status, stage, rule, fast_gate_ms, cache_hit, escalated,
+                                    cache_lookup)
+            VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (recorded_at, source, requested, status, stage, rule, float(fast_gate_ms), int(bool(cache_hit)),
+                  int(bool(escalated)), cache_lookup))
+            conn.commit()
+            return cur.lastrowid
+
+    def get_verdict_log(self, limit: int | None = None) -> list[dict]:
+        with self.connect() as conn:
+            rows = conn.execute("SELECT * FROM verdict_log ORDER BY id DESC" + (" LIMIT ?" if limit is not None else ""),
+                                (limit,) if limit is not None else ()).fetchall()
             return [dict(r) for r in rows]
