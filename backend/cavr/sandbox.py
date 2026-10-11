@@ -30,7 +30,7 @@ def run_counterfactual(source,pdf,outdir,emit):
             with tempfile.TemporaryDirectory(prefix='asent-cavr-') as d:
                 os.chmod(d,0o755);work=Path(d);shutil.copyfile(source,work/'package.py');shutil.copyfile(pdf,work/'invoice.pdf')
                 shutil.copyfile(ROOT/'backend/cavr/lab_harness.py',work/'harness.py')
-                dest=outdir/mode;dest.mkdir(exist_ok=True);os.chmod(dest,0o777)
+                dest=outdir/mode;dest.mkdir(exist_ok=True)
                 if engine:
                     user_flag=['-u',f"{os.getuid()}:{os.getgid()}"] if hasattr(os,'getuid') else [];cmd=[engine,'run','--rm',*user_flag,'--network','none','--read-only','--cap-drop','ALL','--cap-add','SYS_PTRACE','--security-opt','no-new-privileges','--memory','256m','--cpus','1','--pids-limit','64','--tmpfs','/tmp:rw,noexec,nosuid,size=32m','-v',str(work)+':/input:ro','-v',str(dest)+':/out:rw','-w','/tmp','asent-sandbox:local','strace','-f','-s','1024','-e','trace=%file,%network,%process','-o','/out/trace.log','python','-I','/input/harness.py',mode,'/input/package.py','/input/invoice.pdf']
                 else:
