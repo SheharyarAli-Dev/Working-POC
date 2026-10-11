@@ -34,6 +34,9 @@ def test_real_recorded_replay(service):
 def test_research_is_explicit_and_local(tmp_path):
     with pytest.raises(ValueError,match='opt-in'):load(tmp_path/'absent.json')
 
+import sys
+
+@pytest.mark.skipif(sys.platform == "win32", reason="Symlinks require POSIX filesystem or Windows Developer Mode")
 def test_snapshot_rejects_symlinks_and_cache_tampering(service,tmp_path):
     from backend.orchestrator.hashing import snapshot
     p=tmp_path/'repo';p.mkdir();(p/'app').symlink_to(ROOT/'backend',target_is_directory=True)

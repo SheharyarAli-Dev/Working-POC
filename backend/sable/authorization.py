@@ -215,7 +215,11 @@ def evaluate_authorization(
 
         # ── Inline role policy ──
         if rtype == "aws_iam_role_policy":
-            role_ref = str(unwrap(attrs.get("role", "")))
+            role_value = unwrap(attrs.get("role", ""))
+            if not isinstance(role_value, str) or not role_value.strip():
+                outside_model.append(f"{addr}: role binding unresolved")
+                continue
+            role_ref = role_value
             linked = role_ref in (
                 f"{principal_addr}.id",
                 f"{principal_addr}.name",
