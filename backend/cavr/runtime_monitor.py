@@ -3,7 +3,7 @@ import re
 def normalize(trace):
     events=[]
     for line in trace.splitlines():
-        if ' = -1 ' in line:continue
+        if ' = -1 ' in line and 'EINPROGRESS' not in line:continue
         kind=None;resource=None
         if 'connect(' in line and 'AF_INET' in line:
             kind='NETWORK_CONNECT';resource='127.0.0.1:18765' if '18765' in line else 'unresolved socket'
