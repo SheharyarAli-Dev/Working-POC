@@ -30,6 +30,8 @@ jobs:
           git config --global user.name "ASENT CI"
       - name: Verify test inventory is up to date
         run: python scripts/satra_test_inventory.py --check
+      - name: Build sandbox container image
+        run: bash scripts/satra_build_sandbox.sh
       - name: Run SATRA suite with JUnit report
         env:
           SATRA_ALLOW_HOST_EXEC: "1"
@@ -107,6 +109,8 @@ jobs:
         run: |
           git config --global user.email "ci@example.com"
           git config --global user.name "ASENT CI"
+      - name: Build sandbox container image
+        run: bash scripts/satra_build_sandbox.sh
       - name: Run full test suite
         env:
           SATRA_ALLOW_HOST_EXEC: "1"
