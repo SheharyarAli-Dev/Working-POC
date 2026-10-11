@@ -1,0 +1,115 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Lint (syntax + security scan)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements.lock.txt
+      - run: pip install -r requirements.lock.txt
+      - name: Byte-compile every backend file (catches syntax errors)
+        run: python -m compileall -q backend tests
+      - name: Bandit security scan (high severity fails the build)
+        run: bandit -r backend -q --severity-level high --confidence-level high -x backend/cavr/sample_project,backend/cavr/fixtures
+
+  module-tests:
+    name: Tests — ${{ matrix.module }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - module: CAVR
+            paths: tests/test_cavr_*.py
+          - module: SABLE
+            paths: tests/test_sable_isolation.py
+          - module: Shared + Threat repo
+            paths: tests/test_shared.py tests/test_threat_repository.py tests/test_document_intake.py
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements.lock.txt
+      - run: pip install -r requirements.lock.txt
+      - name: Use the documented no-container sandbox mode (Docker sandbox job is M2 work)
+        run: |
+          sudo systemctl stop docker.socket docker.service containerd.service || true
+          sudo mv /usr/bin/docker /usr/bin/docker.disabled || true
+          sudo mv /usr/bin/podman /usr/bin/podman.disabled || true
+          if command -v docker || command -v podman; then echo "container engine still on PATH"; exit 1; fi
+          echo "Docker disabled for tests"
+      - name: Run module tests
+        run: |
+          mkdir -p reports
+          shopt -s nullglob
+          python -m pytest -q ${{ matrix.paths }} --junitxml=reports/junit.xml
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: junit-${{ matrix.module }}
+          path: reports/junit.xml
+
+  integration-tests:
+    name: Full suite (integration)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements.lock.txt
+      - run: pip install -r requirements.lock.txt
+      - name: Use the documented no-container sandbox mode (Docker sandbox job is M2 work)
+        run: |
+          sudo systemctl stop docker.socket docker.service containerd.service || true
+          sudo mv /usr/bin/docker /usr/bin/docker.disabled || true
+          sudo mv /usr/bin/podman /usr/bin/podman.disabled || true
+          if command -v docker || command -v podman; then echo "container engine still on PATH"; exit 1; fi
+          echo "Docker disabled for tests"
+      - name: Run full test suite
+        run: |
+          git config --global user.email ci@example.com
+          git config --global user.name "ASENT CI"
+          mkdir -p reports
+          python -m pytest -q --junitxml=reports/pytest.xml
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: junit-full-suite
+          path: reports/pytest.xml
+
+  frontend:
+    name: Frontend build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci --prefix frontend
+      - run: npm run build --prefix frontend
+      - uses: actions/upload-artifact@v4
+        with:
+          name: frontend-dist
+          path: frontend/dist
