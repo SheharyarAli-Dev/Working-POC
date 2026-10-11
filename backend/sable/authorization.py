@@ -13,6 +13,7 @@ import json
 import re
 from typing import NamedTuple
 
+from backend.sable.policy_semantics import unresolved_role_binding
 from backend.sable.hcl_parser import unwrap, load_hcl
 
 
@@ -201,6 +202,12 @@ def evaluate_authorization(
     outside_model: list[str] = []
 
     principal_name = principal_node.get("attributes", {}).get("name") if principal_node else None
+    known_role_bindings = {
+        f"{addr}.{attribute}"
+        for addr, node in resources.items()
+        if node["type"] == "aws_iam_role"
+        for attribute in ("id", "name")
+    }
 
     for addr, node in resources.items():
         rtype = node["type"]
@@ -215,6 +222,11 @@ def evaluate_authorization(
                 principal_name or "__none__"
             )
             if not linked:
+                # Ignore a policy only when its different role binding is
+                # statically established. A variable or unresolved reference
+                # could still bind to the protected principal, so fail closed.
+                if role_ref not in known_role_bindings and unresolved_role_binding(role_ref):
+                    outside_model.append(f"{addr}: role binding unresolved")
                 continue
             doc = _decode_policy_doc(attrs.get("policy"))
             if doc is None:
