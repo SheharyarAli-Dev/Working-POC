@@ -126,7 +126,7 @@ def render_html(tmp_path, *views) -> list:
     work = tmp_path / "render"
     work.mkdir(exist_ok=True)
     done = subprocess.run(["node", str(RENDERER), str(FRONTEND), str(work)], input=json.dumps({"views": list(views)}),
-                          capture_output=True, text=True, timeout=120)
+                          capture_output=True, text=True, encoding="utf-8", timeout=120)
     assert done.returncode == 0, done.stderr
     rendered = json.loads(done.stdout)["html"]
     assert len(rendered) == len(views)
