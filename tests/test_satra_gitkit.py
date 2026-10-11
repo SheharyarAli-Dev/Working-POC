@@ -57,3 +57,7 @@ def make_settings(workspace, repo, extra_allow=()):
         repair_budget=3,
         push_enabled=False,
     )
+
+
+def pytest_configure(config):
+    config.addinivalue_line("markers", "req(id): Map test to SATRA functional or non-functional requirement ID")
