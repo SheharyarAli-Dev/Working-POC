@@ -15,11 +15,13 @@
     "de9dd60dacf14f99122a5a00ef1568a1ea47698c58a68f56a6b460bbc06d61e7",
     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "f69d7c8c32139ea90ac43ab43bada1ba96db455b1974ac4c6e91a821327acc6f",
-    "fda4a1cc6b10227ae4a99848970eada470b070d8269ca8574e0bfbf2cf51a5dc"
+    "fda4a1cc6b10227ae4a99848970eada470b070d8269ca8574e0bfbf2cf51a5dc",
+    "f6f4037c60b067215f27dac8888f50912a7a85fe8bdd7b7498cc6bfbd3caf6b5"
   ],
   "cavr_sources": [
     "b4e7ebcbe324484da22c64d925a2d03fd8aa06f55da73f62e4104b7163a340bf",
-    "d66853ef67dacada9ea21d6a5311284675b0ee1fdb2e29202ce591ba702e4f07"
+    "d66853ef67dacada9ea21d6a5311284675b0ee1fdb2e29202ce591ba702e4f07",
+    "f6f4037c60b067215f27dac8888f50912a7a85fe8bdd7b7498cc6bfbd3caf6b5"
   ],
   "warning": "Only built-in inert source digests; never regenerate against untrusted candidate code"
 }

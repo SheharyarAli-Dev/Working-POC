@@ -151,6 +151,10 @@ def preflight(source):
             return False, "Unsafe or non-discriminative test construct"
         if isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id in ("eval", "exec", "open", "compile", "getattr", "setattr", "__import__"):
             return False, "Unsafe side effect / dynamic execution"
+        if isinstance(n, ast.Assert):
+            rendered = ast.unparse(n.test)
+            if rendered in ("True", "1", "False", "0"):
+                return False, "Vacuous assertion cannot discriminate secure from insecure behaviour"
     if not any(isinstance(n, ast.Assert) for n in ast.walk(tree)):
         return False, "No assertion"
     return True, "Passed syntax preflight"
@@ -161,7 +165,16 @@ def is_pass(result):
 
 
 def killed(result):
-    return result.get("available") and result.get("exit_code") == 1 and result.get("failed", 0) > 0
+    if not (result.get("available") and result.get("exit_code") == 1 and result.get("failed", 0) > 0):
+        return False
+    # An infrastructure failure (import error, setup crash) is not a genuine mutation kill.
+    tests = result.get("tests", [])
+    if tests and all(
+        any(kw in (t.get("message") or "") for kw in ("ImportError", "ModuleNotFoundError", "RuntimeError: failed import", "Error during collection"))
+        for t in tests if t.get("status") == "FAIL"
+    ):
+        return False
+    return True
 
 
 def judge(baseline, mutant, repeat, feasible):
