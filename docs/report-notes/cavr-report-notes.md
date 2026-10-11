@@ -2594,3 +2594,109 @@ Run on 2026-10-11 after the review fix:
    Yes. It sends the same request as chip 1 and nothing else. It is a hit only because chip 1 stored an analysis under
    the same eight key fields; on an empty cache the same chip is a miss
    (`test_the_again_chip_is_the_same_request_and_hits_the_cache_only_when_an_analysis_is_stored`).
+
+## Integration fix — pypdf call sites reached through a vendored LOCAL artifact (2026-10-11)
+
+Not a plan step. Maryam asked for `tests/test_integration.py::test_cavr_repair_invalidates_satra_then_reverifies` to be
+fixed in CAVR code or in the test, without weakening the test. The test is unchanged.
+
+Why it failed: the scenario `cross_module` turns `app/pdf_adapter.py` into
+`from vendor.invoice_pdf_lab import extract_invoice_text`, so `PdfReader` is called in `vendor/`. The older contract
+`capability_contract.infer` takes its call sites from `ContextService.dependency_context` (orchestrator), which reads
+`app/*.py` only. No pypdf call site -> `confidence: insufficient` -> every node "Capability contract lacks
+task/call-site authority" (UNRESOLVED). The repair candidate (`vendor/invoice_pdf_safe.py`) was therefore UNRESOLVED in
+`Service._repair`, which promotes a repair only on VERIFIED: no `repair.applied`, final decision BLOCK.
+
+### Ch 6 Implementation
+
+| File | Function | What it does |
+|---|---|---|
+| `backend/cavr/capability_contract.py` (247 -> 347 lines) | `use_through_local_artifacts(context)` (new) | Returns one attribution per pypdf call site that the application reaches through a LOCAL lock artifact, with the chain in `through` (`local_package`, `artifact`, `sha256`, `imported_at`, `called_at`). `[]` when a link is missing. |
+| | `_application_call(context, project, module)` (new) | Link 3: the first call in `app/` of a name imported from the artifact's module, in the importing file or one relative re-export away. |
+| | `_relative_target(record)`, `_in_app(record)` (new) | The project file a `from .x import name` reads; whether a record is in `app/`. |
+| | `infer(context, node)` | `is_pdf` now also accepts the records of `use_through_local_artifacts`; the contract has a new key `local_artifact_use` (inside the digest). Nothing else changed. |
+| `tests/test_cavr_vendored_use.py` (new, 15 functions, 31 cases) | | See below. |
+
+Key algorithm (`use_through_local_artifacts`):
+1. Lock must pin pypdf and hold a LOCAL `.py` artifact; `extract_project_context(context.path)` must be `OK`.
+2. Link 1: the artifact file's SHA-256 (from the project context) equals the lock's `sha256`.
+3. Link 2: a file in `app/` imports the artifact's module (`vendor/x.py` -> `vendor.x`).
+4. Link 3: `app/` calls what was imported (a call site with that module's symbol, or a call of the name in an `app/` file that imports it relatively from the importing file).
+5. Link 4: the artifact's own source has pypdf call sites (`usage_of(project, ["pypdf"])`); one record per site.
+
+### Design decisions
+
+| Decision | Alternative | Why |
+|---|---|---|
+| Fix in `backend/cavr/capability_contract.py` | Make `ContextService.dependency_context` read `vendor/` | `backend/orchestrator/` is outside this branch; the plan says to work around it inside `backend/cavr/`. |
+| Keep the test as it is | Accept UNRESOLVED / REVIEW in the test | That would weaken it: the test is the proof that a verified repair is promoted and re-verified. |
+| Require all four links, `[]` otherwise | Count any pypdf call anywhere in the project | "Imported but never used" is no authority in C4 either (`NO_CALL_SITE_AUTHORITY`); a call in `tests/` or in a file the app does not import says nothing about the application. |
+| Check the artifact's SHA-256 against the lock here | Rely on `read_artifact` | For the pypdf node the vendored file has not been hash-checked yet when its contract is inferred. |
+| Reuse `extract_project_context` / `usage_of` | A second AST walker | Same parser, same budgets, same fail-closed results (unparsed file, symlink) as C4. |
+| New contract key `local_artifact_use`, `evidence` untouched | Append to `evidence.dependency_attributions` | `evidence` stays exactly what the orchestrator returned; the extra records are visibly CAVR's. Cost: every contract digest (and so every cache key of `analyze`) changes once. |
+
+### Requirements covered
+
+No `FR-CAVR-NN` identifiers exist in this repository; IDs are from `RequirementsTab.tsx` (Maryam to confirm).
+
+| ID | Title | What this covers | Acceptance check |
+|---|---|---|---|
+| FR-3 | Capability Contract Inference | Call-site authority for a package used through a vendored module | `test_cross_module_scenario_reaches_pypdf_through_the_vendored_lab_file`, `test_reexported_name_called_in_another_app_file` |
+| FR-6 | Fail-Closed Security Policy | A missing link, a changed artifact, an unparsed project file -> no authority | `test_a_missing_link_gives_no_authority` (10), `test_artifact_whose_bytes_are_not_the_locked_ones_gives_no_authority`, `test_project_source_that_cannot_be_parsed_gives_no_authority` |
+| none listed | Repair is promoted only after re-verification, and invalidates SATRA evidence | End to end | `tests/test_integration.py::test_cavr_repair_invalidates_satra_then_reverifies` |
+
+### Ch 7 Test cases
+
+Run on 2026-10-11. `tests/test_cavr_vendored_use.py`: 31 passed.
+
+| Test ID | Purpose | Input | Expected | Result |
+|---|---|---|---|---|
+| `test_cross_module_scenario_reaches_pypdf_through_the_vendored_lab_file` | Real scenario, before repair | `cross_module` candidate | orchestrator finds 0 pypdf attributions; chain `app/pdf_adapter.py:1` -> `app/main.py:87` -> `vendor/invoice_pdf_lab.py:10,11`; both contracts `rule-grounded`, SECRET_ACCESS and NETWORK_CONNECT still denied | pass |
+| `test_repaired_cross_module_scenario_reaches_pypdf_through_the_safe_file` | Real scenario, after `replace_lab` | repaired candidate | chain through `vendor/invoice_pdf_safe.py`; `rule-grounded` | pass |
+| `test_safe_scenario_has_no_local_artifact_and_keeps_its_direct_call_sites` | No change for a project without a LOCAL artifact | `safe` candidate | `[]`, `rule-grounded` from the direct call sites | pass |
+| `test_reexported_name_called_in_another_app_file` | Link 3 through a relative re-export | tmp project | 2 records, `called_at` `app/main.py:5` | pass |
+| `test_name_called_in_the_file_that_imports_it` (4) | Link 3 in one file: `from`, `as`, `import a.b`, `import a.b as c` | tmp project | `called_at` in `app/pdf_adapter.py` | pass |
+| `test_renamed_reexport_is_followed_by_the_name_the_adapter_binds` | `as` on both imports | tmp project | `called_at` `app/main.py:3` | pass |
+| `test_a_missing_link_gives_no_authority` (10) | Edge / failure: imported never called; named never called; same name from another module; another name; local function of the same name; artifact not imported; another vendored file imported; artifact without pypdf; pypdf imported never called; pypdf called by a file that is not the artifact | tmp project | `[]`, contract `insufficient`, `required == []` | pass |
+| `test_a_call_outside_app_is_not_the_applications_call` | Call only in `tests/` | tmp project | `[]` | pass |
+| `test_the_recorded_import_is_the_applications_not_another_directorys` | `admin/tool.py` imports and calls too | tmp project | chain names `app/` files only | pass |
+| `test_artifact_whose_bytes_are_not_the_locked_ones_gives_no_authority` | Failure: file edited after the lock | lock hash of other bytes | `[]`; the matching lock gives records | pass |
+| `test_lock_entries_that_cannot_carry_the_chain` (6) | Failure: no pypdf pin; no LOCAL entry; `.py` entry not LOCAL; artifact missing; `../` path; empty lock | tmp project | `[]` | pass |
+| `test_project_source_that_cannot_be_parsed_gives_no_authority` | Failure: `app/broken.py` | tmp project | `[]` | pass |
+| `test_srs_without_a_pdf_task_is_still_insufficient` | The SRS condition of `infer` still holds | SRS without "pdf" | records found, contract `insufficient` | pass |
+| `test_contract_digest_follows_the_chain` | Digest covers the chain | same project twice; call moved one line | equal; then different | pass |
+| `tests/test_integration.py::test_cavr_repair_invalidates_satra_then_reverifies` | The asked test, unchanged | `cross_module`, `auto_repair=True` | ACCEPT, `repair.applied`, SATRA invalidated and rerun, stale CAVR REJECTED, current CAVR VERIFIED | pass (failed before: `BLOCK`) |
+
+- Before the fix (2026-10-11, same tree): `tests/test_integration.py` + `tests/test_api_replay.py` -> 1 failed, 9 passed. The other 6 of the former 7 baseline failures already passed after the merge of `origin/master`.
+- `.venv/bin/python -m pytest -q` -> 1323 passed, 0 failed, 7 skipped (the 7 skips are `tests/test_cavr_live.py` without `CAVR_LIVE=1`); was 1285 passed, 7 failed.
+- Mutation check (7 mutations of the new code, run by hand, not kept): link 3 skipped -> 13 failed; hash not compared -> 1; relative target not compared -> 1; unparsed project accepted -> 1; `infer` without the new records -> 3; link 4 in any file and link 2 in any directory -> 0 at first, 1 each after two cases were added.
+
+### Defects found and fixed
+
+- The mutation check showed two unchecked conditions (pypdf call in a file that is not the artifact; import outside `app/`). Added the tenth case of `test_a_missing_link_gives_no_authority` and `test_the_recorded_import_is_the_applications_not_another_directorys`.
+- Review: 0 passes of cavr-reviewer (not requested for this fix), no verdict, 0 MINOR recorded.
+
+### Known limitations / deferred
+
+- Syntactic only. Link 4 is per file, not per function: a pypdf call anywhere in the artifact counts, also outside the function the application calls. A re-export is followed one file deep, and only for `from .x import name` (not `from . import x`, not a package `__init__.py`).
+- Only `app/` is the application, and the import name `pypdf` is fixed, as in the orchestrator's alias map. C4 proper (`infer_capability_contract`) reads import names from the wheel; `infer` is replaced by it in plan step 14.
+- A contract is not a verdict: with the contract `rule-grounded`, the lab file is still REJECTED by what the sandbox observes, and `pypdf` in the lab run is now VERIFIED instead of UNRESOLVED.
+- `extract_project_context` now runs once per locked package when the lock has a LOCAL artifact (twice per analysis in the scenario).
+- The run rewrites the tracked file `reports/scenario-validation.json` (fixture teardown in `tests/conftest.py`); it was restored and not committed (outside the scope).
+- From 2026-10-25 the stored PyPI advisory record is older than 30 days (see the Step 14 note); the integration tests that need pypdf VERIFIED will then fail for that separate reason.
+- `docs/cavr-m1-plan.md` still names 7 baseline failures; today's count is 0.
+
+### Tool disclosure (Ch 8.7)
+
+- **Generated by Claude Code:** the diagnosis (a reproduction script that printed the run's events, not kept), the change in `capability_contract.py`, `tests/test_cavr_vendored_use.py`, these notes, the study Q&A entry, the commit.
+- **Reviewed / changed by Maryam:** nothing yet. She set the constraint (CAVR code or the test, test not weakened).
+- **Verified by:** the asked test and the full suite (numbers above), the run without the fix, the mutation check. No cavr-reviewer pass.
+
+### Supervisor Q&A prep
+
+1. **Did you make the test pass by loosening CAVR?**
+   No. The test is untouched, and authority needs four links read from real files: a LOCAL artifact with the locked SHA-256, an import in `app/`, a call of the imported name in `app/`, a pypdf call in the artifact. Ten missing-link cases stay `insufficient`.
+2. **Why was the first analysis REJECTED and the repair still not applied?**
+   REJECTED came from the sandbox (the lab file sent the canary). The repair candidate had nothing to reject, but its contract was `insufficient`, so it was UNRESOLVED, and `Service._repair` promotes only a VERIFIED candidate.
+3. **Why not fix the orchestrator's reader?**
+   It belongs to another member. CAVR adds its own evidence next to the orchestrator's (`local_artifact_use`) and leaves `evidence` as returned.
