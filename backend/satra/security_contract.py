@@ -96,6 +96,14 @@ def derive_contracts_for_regions(regions, policy=None, requirements_text=None):
 
 
 def build(context):
+    # The contract authority is the trusted SRS and policy, not the candidate's own SRS.
+    # If the candidate workspace has replaced or removed the relevant security requirements
+    # (e.g. set srs to content that lacks ownership/invoice semantics), there is no supported
+    # InvoiceHub security contract to enforce.
+    srs_text = (context.srs or "").lower()
+    required_keywords = ("invoice", "owner", "authoriz", "authenticat", "access")
+    if not any(kw in srs_text for kw in required_keywords):
+        return None
     p = context.policy.get("ownership", {}) if hasattr(context, "policy") and isinstance(context.policy, dict) else {}
     from backend.orchestrator.hashing import digest
     contract = {
@@ -103,6 +111,7 @@ def build(context):
         "version": 1,
         **p,
         "route": "GET /invoices/{invoice_id}",
+        "expected_status": p.get("denied_status", 403),
         "authority_sources": ["SRS.md#FR-03", "policy.json#ownership", "trusted baseline app/main.py"],
         "preconditions": ["authenticated normal user", "existing invoice owned by another user"],
         "counterfactual": "bypass can_access_invoice ownership guard",

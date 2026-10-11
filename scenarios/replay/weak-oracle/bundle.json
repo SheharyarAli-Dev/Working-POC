@@ -3,8 +3,8 @@
   "title": "Recorded controlled oracle edit",
   "repository": "baseline",
   "events": "events.jsonl",
-  "initial_snapshot_sha256": "a392e997af7bfb0fbc89244c3aa6f6ecdf6a541f132cfd46e1c3c3da0b4f534e",
-  "trace_sha256": "b06cd34e8322870c7ffa0b4b651faa8bddc91d92d4ca3503abe76e937a9c837b",
+  "initial_snapshot_sha256": "23961b2e26eb824ce03f666e1842f730d9ad8e8d71be941247c113f0554e8d1c",
+  "trace_sha256": "fd22264da9b483fe78c9622aabe936d912860b6c9a90630c88ebd1c23d022117",
   "controlled": true,
   "agent_metadata": {
     "provider": "none",
