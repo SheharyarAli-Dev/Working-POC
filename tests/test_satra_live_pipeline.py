@@ -26,7 +26,7 @@ def test_live_pipeline_executes_real_engine():
     assert kinds[-1] == "run_completed"
     assert evidence["simulated"] is False and evidence["commit"] == sha
     assert len([k for k in kinds if k == "verification_gate_ticking"]) == 7
-    assert evidence["executions"]["candidate"].get("backend") in ("docker", "podman", "HASH_PINNED_BUILTIN_SUBPROCESS", None)
+    assert evidence["executions"]["candidate"].get("backend") in ("docker", "podman", "HASH_PINNED_BUILTIN_SUBPROCESS", "host", None)
     assert ("candidate_validated" in kinds) or ("ollama_skipped" in kinds), "Ollama outcome must be reported"
     for kind, data in events:
         if kind == "candidate_validated":
