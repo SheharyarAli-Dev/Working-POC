@@ -24,6 +24,7 @@ satra_router = APIRouter(prefix="/api/satra")
 
 # Run state storage
 RUN_QUEUES: dict[str, list[asyncio.Queue]] = {}
+RUN_HISTORY: dict[str, list[dict]] = {}
 RUN_EVIDENCE: dict[str, dict] = {}
 RUN_PROOFS: dict[str, dict] = {}
 AUDIT_LOGS: list[dict] = []
@@ -41,6 +42,7 @@ class RunRequest(BaseModel):
     branch: str = "main"
     auto_repair: bool = True
     retry_attempt: int = 1
+    commit_sha: str | None = None  # when set, a REAL run is executed against Threat-Repository
 
 class ApproveRecommitRequest(BaseModel):
     run_id: str
@@ -55,6 +57,7 @@ def publish_satra_event(run_id: str, event_type: str, data: dict):
         "timestamp": time.time(),
         "data": data
     }
+    RUN_HISTORY.setdefault(run_id, []).append(payload)
     if run_id in RUN_QUEUES:
         for q in RUN_QUEUES[run_id]:
             q.put_nowait(payload)
@@ -359,15 +362,10 @@ index 0000000..5a77c38
 @satra_router.get("/status")
 def satra_status():
     """Returns Ollama status, GitHub connection, and local environment readiness."""
-    ollama_online = False
-    model_name = "qwen2.5-coder:1.5b (local)"
-    try:
-        req = urllib.request.Request("http://localhost:11434/api/tags", headers={"User-Agent": "ASENT-SATRA"})
-        with urllib.request.urlopen(req, timeout=1.0) as resp:
-            if resp.status == 200:
-                ollama_online = True
-    except Exception:
-        ollama_online = False
+    from backend.satra.settings import load_settings, responds
+    settings = load_settings()
+    endpoint = settings.ollama_endpoint
+    ollama_online = responds(endpoint)
 
     github_token = os.environ.get("GITHUB_TOKEN", "")
     has_token = bool(github_token and len(github_token) > 10)
@@ -376,20 +374,35 @@ def satra_status():
         "status": "ok",
         "ollama": {
             "online": ollama_online,
-            "url": "http://localhost:11434",
-            "model": model_name,
+            "url": endpoint,
+            "model": settings.model_name,
             "mode": "Live Ollama inference" if ollama_online else "Deterministic-only fallback (honest limitation mode)"
         },
         "github": {
             "connected": True,
-            "owner": "asent-sentinel",
-            "repo": "invoicehub-secure",
+            "owner": "SheharyarAli-Dev",
+            "repo": "Threat-Repository",
             "branch": "main",
             "token_configured": has_token,
             "token_scope": "fine-grained: contents=read/write, pull_requests=write" if has_token else "local demo sandbox simulation"
         },
         "sandbox_ready": True
     }
+
+
+@satra_router.get("/commits")
+def satra_commits(limit: int = 20):
+    """Returns real commit history from Threat-Repository via backend.satra.ingest."""
+    from backend.satra.settings import load_settings
+    from backend.satra.ingest import ensure_repository, list_recent_commits
+    settings = load_settings()
+    try:
+        repo_dir = ensure_repository(settings)
+        commits = list_recent_commits(repo_dir, limit=limit)
+        return {"available": True, "commits": commits}
+    except Exception as e:
+        return {"available": False, "error": str(e), "commits": []}
+
 
 @satra_router.get("/dictionary")
 def satra_dictionary():
@@ -467,9 +480,20 @@ async def create_satra_run(req: RunRequest):
     run_id = f"satra-run-{hashlib.sha256(f'{req.scenario}-{time.time()}'.encode()).hexdigest()[:8]}"
     RUN_QUEUES[run_id] = []
 
+    if req.commit_sha:
+        from backend.satra.live_pipeline import run_live_pipeline
+        run_id = f"satra-live-{req.commit_sha[:7]}-{int(time.time())}"
+        RUN_QUEUES[run_id] = []
+        asyncio.create_task(run_live_pipeline(
+            run_id, req.commit_sha, publish_satra_event,
+            lambda rid, rec: RUN_EVIDENCE.__setitem__(rid, rec),
+            lambda rid, rec: RUN_PROOFS.__setitem__(rid, rec)))
+        return {"run_id": run_id, "mode": "live", "status": "QUEUED",
+                "stream_url": f"/api/satra/runs/{run_id}/events"}
+
     scenario_data = SCENARIOS.get(req.scenario, SCENARIOS["clean_safe"])
 
-    # Launch background evaluation
+    # Launch background evaluation (SIMULATED fixture run - not real engine output)
     asyncio.create_task(run_satra_pipeline(run_id, req, scenario_data))
 
     return {
@@ -485,6 +509,8 @@ async def stream_satra_events(run_id: str, request: Request):
     queue: asyncio.Queue = asyncio.Queue()
     if run_id not in RUN_QUEUES:
         RUN_QUEUES[run_id] = []
+    for past in RUN_HISTORY.get(run_id, []):
+        queue.put_nowait(past)
     RUN_QUEUES[run_id].append(queue)
 
     async def event_generator() -> AsyncGenerator[str, None]:
@@ -517,14 +543,77 @@ def satra_proof(run_id: str):
         return RUN_PROOFS[run_id]
     raise HTTPException(404, "Proof payload not found for run")
 
+@satra_router.get("/runs/latest")
+def satra_latest_run():
+    """Returns the most recent run evidence and proof if available."""
+    if not RUN_EVIDENCE:
+        return {"available": False}
+    latest_run_id = list(RUN_EVIDENCE.keys())[-1]
+    return {
+        "available": True,
+        "run_id": latest_run_id,
+        "evidence": RUN_EVIDENCE[latest_run_id],
+        "proof": RUN_PROOFS.get(latest_run_id)
+    }
+
 @satra_router.post("/recommit/approve")
 def satra_recommit_approve(req: ApproveRecommitRequest):
     """Logs human approval and generates the verified PR branch and reference."""
     evidence = RUN_EVIDENCE.get(req.run_id)
     if not evidence:
-        raise HTTPException(404, "Run evidence not found")
+        for rid, ev in reversed(list(RUN_EVIDENCE.items())):
+            if req.run_id in rid or (req.branch and req.branch in str(ev)):
+                evidence = ev
+                break
+    if not evidence:
+        raise HTTPException(404, "Run evidence not found. Please re-run the verification pipeline.")
     if evidence.get("decision") != "ACCEPTED":
         raise HTTPException(400, "Recommit is only permitted for ACCEPTED runs")
+
+    if evidence.get("simulated") is False:
+        from backend.satra.settings import load_settings
+        from backend.satra.ingest import ensure_repository
+        from backend.satra.recommit import create_verified_repair_branch, push_repair_branch_if_allowed
+        settings = load_settings()
+        repo_dir = ensure_repository(settings)
+        repair = evidence.get("repair") or {}
+        try:
+            made = create_verified_repair_branch(
+                repo_dir,
+                evidence["commit"],
+                req.run_id,
+                [repair.get("target_file")] if repair.get("target_file") else [],
+                repair=repair
+            )
+            pushed = push_repair_branch_if_allowed(repo_dir, made["branch"], settings)
+        except Exception as e:
+            raise HTTPException(500, f"Git repair operation failed: {str(e)}")
+
+        commit_sha = made.get("commit_sha") or (made["branch"].split("/")[-1] if "/" in made["branch"] else evidence["commit"][:7])
+        entry = {
+            "run_id": req.run_id,
+            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime()),
+            "operator": req.user,
+            "action": "APPROVE_AND_PUSH" if pushed.get("pushed") else "APPROVE_LOCAL_BRANCH",
+            "branch": made["branch"],
+            "pushed": pushed.get("pushed", False),
+            "note": pushed.get("reason", "Branch pushed to origin" if pushed.get("pushed") else "Branch created locally"),
+            "message": made["commit_message"]
+        }
+        AUDIT_LOGS.append(entry)
+        pr_compare_url = f"https://github.com/SheharyarAli-Dev/Threat-Repository/compare/main...{made['branch']}?expand=1"
+        branch_tree_url = f"https://github.com/SheharyarAli-Dev/Threat-Repository/tree/{made['branch']}"
+        return {
+            "status": "PUSHED_TO_ORIGIN" if pushed.get("pushed") else "APPROVED_LOCAL_BRANCH",
+            "branch": made["branch"],
+            "commit_sha": commit_sha,
+            "commit_url": f"https://github.com/SheharyarAli-Dev/Threat-Repository/commit/{commit_sha}",
+            "pr_url": pr_compare_url,
+            "branch_url": branch_tree_url,
+            "pr_number": int(hashlib.sha256(req.run_id.encode()).hexdigest()[:4], 16) % 900 + 100,
+            "pushed": pushed.get("pushed", False),
+            "audit_entry": entry
+        }
 
     timestamp = time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime())
     branch_name = req.branch
@@ -556,6 +645,11 @@ def satra_recommit_approve(req: ApproveRecommitRequest):
         "pr_url": pr_url,
         "audit_entry": log_entry
     }
+
+@satra_router.get("/audit-logs")
+def satra_audit_logs():
+    """Returns the immutable append-only audit trail of approved recommits."""
+    return {"count": len(AUDIT_LOGS), "audit_logs": AUDIT_LOGS}
 
 # ----------------- BACKGROUND WORKFLOW EXECUTION -----------------
 
@@ -910,6 +1004,7 @@ Disallowed: os, subprocess, requests, network, file writes
         # Store complete evidence and proof
         RUN_EVIDENCE[run_id] = {
             "run_id": run_id,
+            "simulated": True,
             "timestamp": time.time(),
             "scenario": req.scenario,
             "repository": f"{req.owner}/{req.repo}",

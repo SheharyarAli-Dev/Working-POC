@@ -161,6 +161,27 @@ def test_sable_standalone_evaluator_fails_closed_on_unresolved_role_binding(scen
     assert result.grants, 'the known registered-role policy must remain represented'
     assert any('aws_iam_role_policy.dynamic_extra: role binding unresolved' in item for item in result.outside_model)
 
+def test_sable_standalone_evaluator_fails_closed_on_null_role_binding():
+    model={"resources": {
+        "aws_iam_role.app": {"type": "aws_iam_role", "attributes": {"name": "app-role"}},
+        "aws_s3_bucket.data": {"type": "aws_s3_bucket", "attributes": {"bucket": "customer-data"}},
+        "aws_iam_role_policy.valid": {"type": "aws_iam_role_policy", "module": "", "attributes": {
+            "role": "aws_iam_role.app.id", "policy": {"Statement": [{"Effect": "Allow",
+                "Action": ["s3:GetObject", "s3:PutObject"], "Resource": ["arn:aws:s3:::customer-data/*"]}]}}},
+        "aws_iam_role_policy.dynamic_extra": {"type": "aws_iam_role_policy", "module": "", "attributes": {
+            "role": None, "policy": {"Statement": [{"Effect": "Allow", "Action": ["s3:*"], "Resource": ["*"]}]}}},
+    }}
+    result=evaluate_authorization(
+        model,
+        'aws_iam_role.app',
+        'aws_s3_bucket.data',
+        ['s3:GetObject','s3:PutObject'],
+    )
+    assert not result.known
+    assert not result.holds
+    assert result.grants, 'the valid principal policy should remain represented'
+    assert any('aws_iam_role_policy.dynamic_extra: role binding unresolved' in item for item in result.outside_model)
+
 def test_sable_explicitly_unrelated_role_binding_is_ignored(scenario):
     _,c=scenario('sable_preserved')
     main=c.path/'infra/main.tf'

@@ -1,0 +1,156 @@
+name: SATRA CI
+
+on:
+  push:
+    branches: ["satra-feature"]
+  pull_request:
+    branches: ["master", "satra-feature"]
+  workflow_dispatch:
+
+concurrency:
+  group: satra-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  satra-suite:
+    name: SATRA Test Suite (Required)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements.lock.txt
+      - name: Install dependencies
+        run: pip install -r requirements.lock.txt
+      - name: Configure Git identity for test commits
+        run: |
+          git config --global user.email "ci@example.com"
+          git config --global user.name "ASENT CI"
+      - name: Verify test inventory is up to date
+        run: python scripts/satra_test_inventory.py --check
+      - name: Build sandbox container image
+        run: bash scripts/satra_build_sandbox.sh
+      - name: Run SATRA suite with JUnit report
+        env:
+          SATRA_ALLOW_HOST_EXEC: "1"
+        run: |
+          mkdir -p reports
+          python -m pytest tests/test_satra*.py tests/test_api_replay.py -v --junitxml=reports/satra-junit.xml
+      - name: Generate SATRA Step Summary
+        if: always()
+        run: |
+          python - << 'EOF'
+          import xml.etree.ElementTree as ET
+          import os
+
+          xml_path = "reports/satra-junit.xml"
+          summary_file = os.environ.get("GITHUB_STEP_SUMMARY")
+          if os.path.exists(xml_path) and summary_file:
+              tree = ET.parse(xml_path)
+              root = tree.getroot()
+              suite = root if root.tag == "testsuite" else (root.find("testsuite") or root)
+              tests = int(suite.attrib.get("tests", 0))
+              failures = int(suite.attrib.get("failures", 0))
+              errors = int(suite.attrib.get("errors", 0))
+              skipped = int(suite.attrib.get("skipped", 0))
+              passed = tests - failures - errors - skipped
+
+              lines = [
+                  "# SATRA Test Suite Execution Summary\n\n",
+                  f"| Metric | Count |\n|---|---|\n",
+                  f"| **Total Tests** | {tests} |\n",
+                  f"| **Passed** | {passed} ✅ |\n",
+                  f"| **Failed** | {failures} ❌ |\n",
+                  f"| **Errors** | {errors} ⚠️ |\n",
+                  f"| **Skipped** | {skipped} ⏭️ |\n\n",
+                  "### Test Cases\n\n",
+                  "| Test Case | Status | Duration (s) |\n|---|---|---|\n"
+              ]
+              for tc in root.iter("testcase"):
+                  name = tc.attrib.get("name", "")
+                  classname = tc.attrib.get("classname", "")
+                  duration = tc.attrib.get("time", "0")
+                  if tc.find("failure") is not None:
+                      status = "❌ FAIL"
+                  elif tc.find("error") is not None:
+                      status = "⚠️ ERROR"
+                  elif tc.find("skipped") is not None:
+                      status = "⏭️ SKIP"
+                  else:
+                      status = "✅ PASS"
+                  lines.append(f"| `{classname}::{name}` | {status} | {duration} |\n")
+
+              with open(summary_file, "a", encoding="utf-8") as f:
+                  f.writelines(lines)
+          EOF
+      - name: Upload SATRA JUnit Artifact
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: satra-junit-results
+          path: reports/satra-junit.xml
+
+  full-suite:
+    name: Full Suite Integration (Informational)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements.lock.txt
+      - name: Install dependencies
+        run: pip install -r requirements.lock.txt
+      - name: Configure Git identity
+        run: |
+          git config --global user.email "ci@example.com"
+          git config --global user.name "ASENT CI"
+      - name: Build sandbox container image
+        run: bash scripts/satra_build_sandbox.sh
+      - name: Run full test suite
+        env:
+          SATRA_ALLOW_HOST_EXEC: "1"
+        run: |
+          mkdir -p reports
+          python -m pytest -v --junitxml=reports/full-junit.xml || true
+      - name: Generate Full Suite Step Summary
+        if: always()
+        run: |
+          python - << 'EOF'
+          import xml.etree.ElementTree as ET
+          import os
+
+          xml_path = "reports/full-junit.xml"
+          summary_file = os.environ.get("GITHUB_STEP_SUMMARY")
+          if os.path.exists(xml_path) and summary_file:
+              tree = ET.parse(xml_path)
+              root = tree.getroot()
+              suite = root if root.tag == "testsuite" else (root.find("testsuite") or root)
+              tests = int(suite.attrib.get("tests", 0))
+              failures = int(suite.attrib.get("failures", 0))
+              errors = int(suite.attrib.get("errors", 0))
+              skipped = int(suite.attrib.get("skipped", 0))
+              passed = tests - failures - errors - skipped
+
+              lines = [
+                  "# Full Suite (Cross-Module) Execution Summary\n\n",
+                  f"| Metric | Count |\n|---|---|\n",
+                  f"| **Total Tests** | {tests} |\n",
+                  f"| **Passed** | {passed} ✅ |\n",
+                  f"| **Failed** | {failures} ❌ |\n",
+                  f"| **Errors** | {errors} ⚠️ |\n",
+                  f"| **Skipped** | {skipped} ⏭️ |\n\n"
+              ]
+              with open(summary_file, "a", encoding="utf-8") as f:
+                  f.writelines(lines)
+          EOF
+      - name: Upload Full Suite JUnit Artifact
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: full-suite-junit-results
+          path: reports/full-junit.xml

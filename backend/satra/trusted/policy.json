@@ -1,0 +1,56 @@
+{
+  "version": 1,
+  "application": "invoice-api",
+  "subjects": {
+    "alice": {"id": 1, "role": "user", "token": "tok-alice"},
+    "bob": {"id": 2, "role": "user", "token": "tok-bob"},
+    "admin": {"id": 3, "role": "admin", "token": "tok-admin"}
+  },
+  "seed_invoices": [
+    {"id": 1, "owner": "alice", "marker": "alice consulting retainer"},
+    {"id": 2, "owner": "bob", "marker": "bob hosting renewal"}
+  ],
+  "routes": [
+    {
+      "id": "POL-INV-READ",
+      "method": "GET",
+      "path": "/invoices/{invoice_id}",
+      "family": "AUTHZ.IDOR.001",
+      "rule": "owner_or_admin",
+      "authentication": "required",
+      "roles_allowed_any_object": ["admin"],
+      "denied_status": 403,
+      "unauthenticated_status": 401,
+      "requirement": "SRS-01"
+    },
+    {
+      "id": "POL-INV-SEARCH",
+      "method": "GET",
+      "path": "/invoices",
+      "family": "INJ.SQL.001",
+      "rule": "parameterized_query",
+      "query_parameter": "search",
+      "authentication": "required",
+      "requirement": "SRS-03"
+    },
+    {
+      "id": "POL-FILE-READ",
+      "method": "GET",
+      "path": "/files/{name}",
+      "family": "PATH.TRAV.001",
+      "rule": "contained_in_uploads",
+      "base_directory": "uploads",
+      "requirement": "SRS-04"
+    },
+    {
+      "id": "POL-INV-CREATE",
+      "method": "POST",
+      "path": "/invoices",
+      "family": "AUTH.REQ.001",
+      "rule": "authentication_required",
+      "unauthenticated_status": 401,
+      "state_changing": true,
+      "requirement": "SRS-02"
+    }
+  ]
+}
