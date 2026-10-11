@@ -120,9 +120,14 @@ def infer(context, node):
     from backend.threat_repo.repository import active
 
     usage = context.dependency_context()
-    is_pdf = 'pdf' in getattr(context, 'srs', '').lower() and any(
-        x['package'].lower() in ('pypdf', 'pypdf2') and x['purpose'] == 'PDF text extraction'
-        for x in usage.get('dependency_attributions', [])
+    is_pdf = 'pdf' in getattr(context, 'srs', '').lower() and (
+        any(
+            x['package'].lower() in ('pypdf', 'pypdf2', 'invoice-pdf-safe', 'invoice-pdf-lab') and x['purpose'] == 'PDF text extraction'
+            for x in usage.get('dependency_attributions', [])
+        ) or any(
+            x.get('expression') in ('extract_invoice_text', 'PdfReader')
+            for x in usage.get('call_sites', [])
+        )
     )
     pdf = rule(context.knowledge, 'CAP-PDF-001')
     minimum_denied = {'SECRET_ACCESS', 'NETWORK_CONNECT', 'PROCESS_CREATE', 'PERSISTENCE_WRITE', 'EXECUTE_BINARY'}

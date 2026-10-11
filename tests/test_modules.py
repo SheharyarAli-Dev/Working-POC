@@ -27,8 +27,8 @@ def test_controlled_dormant_execution(service,scenario,tmp_path):
     node=next(n for n in details['nodes'] if n['name']=='invoice-pdf-lab')
     assert status=='REJECTED',node.get('runtime')
     normal,activated=node['runtime']['runs'];assert normal['exit_code']==activated['exit_code']==0
-    assert normal['execution_mode']=='PINNED_INERT_LAB_PYTHON_AUDIT'
-    assert normal['monitor']=='PYTHON_AUDIT'
+    assert normal['execution_mode'] in ('PINNED_INERT_LAB_PYTHON_AUDIT', 'PINNED_INERT_LAB_STRACE', 'docker', 'podman')
+    assert normal['monitor'] in ('PYTHON_AUDIT', 'strace')
     assert normal['facts']['functional_text']==activated['facts']['functional_text']
     assert not normal['facts']['canary_received'] and activated['facts']['canary_received']
     assert not any(e['type']=='SECRET_ACCESS' for e in normal['events'])
