@@ -2,7 +2,7 @@ name: SATRA CI
 
 on:
   push:
-    branches: ["satra-feature"]
+    branches: ["satra-feature", "integration/sable-satra-cavr"]
   pull_request:
     branches: ["master", "satra-feature"]
   workflow_dispatch:
@@ -32,12 +32,34 @@ jobs:
         run: python scripts/satra_test_inventory.py --check
       - name: Build sandbox container image
         run: bash scripts/satra_build_sandbox.sh
+      - name: Require Docker engine and built sandbox image
+        run: |
+          docker info >/dev/null
+          docker image inspect asent-sandbox:local >/dev/null
       - name: Run SATRA suite with JUnit report
         env:
           SATRA_ALLOW_HOST_EXEC: "1"
         run: |
           mkdir -p reports
           python -m pytest tests/test_satra*.py tests/test_api_replay.py -v --junitxml=reports/satra-junit.xml
+      - name: Verify Docker sandbox tests ran without skips
+        run: |
+          python - << 'EOF'
+          import xml.etree.ElementTree as ET
+          root = ET.parse("reports/satra-junit.xml").getroot()
+          cases = {case.attrib.get("name"): case for case in root.iter("testcase")}
+          required = {
+              "test_sandbox_network_isolated",
+              "test_sandbox_readonly_root",
+              "test_sandbox_tmpfs_isolated",
+              "test_sandbox_execution_timeout",
+          }
+          missing = sorted(required - cases.keys())
+          skipped = sorted(name for name in required & cases.keys() if cases[name].find("skipped") is not None)
+          if missing or skipped:
+              raise SystemExit(f"Docker-backed SATRA tests missing={missing}, skipped={skipped}")
+          print(f"Docker-backed SATRA tests ran: {len(required)}; skips: 0")
+          EOF
       - name: Generate SATRA Step Summary
         if: always()
         run: |
@@ -93,9 +115,8 @@ jobs:
           path: reports/satra-junit.xml
 
   full-suite:
-    name: Full Suite Integration (Informational)
+    name: Full Suite Integration (Required)
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -116,7 +137,7 @@ jobs:
           SATRA_ALLOW_HOST_EXEC: "1"
         run: |
           mkdir -p reports
-          python -m pytest -v --junitxml=reports/full-junit.xml || true
+          python -m pytest -v --junitxml=reports/full-junit.xml
       - name: Generate Full Suite Step Summary
         if: always()
         run: |

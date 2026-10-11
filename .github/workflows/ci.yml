@@ -98,7 +98,7 @@ jobs:
           path: reports/pytest.xml
 
   frontend:
-    name: Frontend build
+    name: Frontend build and render tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -107,8 +107,23 @@ jobs:
           node-version: "20"
           cache: npm
           cache-dependency-path: frontend/package-lock.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements.lock.txt
+      - run: pip install -r requirements.lock.txt
       - run: npm ci --prefix frontend
       - run: npm run build --prefix frontend
+      - name: Run server-rendered frontend tests
+        run: |
+          mkdir -p reports
+          python -m pytest -q tests/test_cavr_frontend.py --junitxml=reports/frontend-render.xml
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: junit-frontend-render
+          path: reports/frontend-render.xml
       - uses: actions/upload-artifact@v4
         with:
           name: frontend-dist

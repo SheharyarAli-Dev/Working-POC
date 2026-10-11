@@ -22,6 +22,7 @@ jobs:
           tests/test_modules.py::test_sable_unknown_parse_and_disabled
           tests/test_modules.py::test_sable_unsupported_iam_stays_unknown
           tests/test_modules.py::test_sable_unresolved_role_binding_with_valid_policy_is_unknown
+          tests/test_modules.py::test_sable_standalone_evaluator_fails_closed_on_null_role_binding
           tests/test_modules.py::test_sable_explicitly_unrelated_role_binding_is_ignored
           tests/test_modules.py::test_sable_unsupported_terraform_stays_unknown
           tests/test_modules.py::test_sable_unverified_baseline_and_empty_baseline
