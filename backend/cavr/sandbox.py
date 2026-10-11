@@ -17,7 +17,9 @@ def run_counterfactual(source,pdf,outdir,emit):
     caps=availability();engine=next((e for e in ('docker','podman') if caps[e]['available']),None)
     known_path=ROOT/'scenarios'/'laboratory_hashes.json'
     known=json.loads(known_path.read_text()) if known_path.exists() else {}
-    pinned=digest(source.read_bytes()) in known.get('cavr_sources',[])
+    import hashlib
+    def _lf_digest(b): return hashlib.sha256(b.replace(b'\r\n', b'\n')).hexdigest()
+    pinned=_lf_digest(source.read_bytes()) in known.get('cavr_sources',[])
     if not engine and not pinned:return {'available':False,'reason':'Untrusted package requires Docker/Podman; host fallback only accepts hash-pinned inert sources','runs':[]}
     use_strace=bool(engine or caps['strace']['available'])
     backend=engine or ('PINNED_INERT_LAB_STRACE' if use_strace else 'PINNED_INERT_LAB_PYTHON_AUDIT')
