@@ -1,5 +1,5 @@
 from backend.threat_repo.repository import active
-from backend.satra.dictionary import RULES
+from backend.satra.seed_rules import RULES
 
 def dictionary(knowledge):
     rows={r['id']:r for r in active(knowledge,'satra_rules')}
