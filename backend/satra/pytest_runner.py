@@ -13,6 +13,11 @@ from backend.orchestrator.hashing import copy_tree,digest,files
 from backend.integrations.tooling import availability
 
 
+def _lf_digest(data: bytes) -> str:
+    """Hash with CRLF normalized to LF — matches git text-mode checkout on any OS."""
+    import hashlib
+    return hashlib.sha256(data.replace(b'\r\n', b'\n')).hexdigest()
+
 def permitted_builtin(root):
     index=ROOT/'scenarios/laboratory_hashes.json'
     allowed=json.loads(index.read_text()).get('python_sources',[]) if index.exists() else []
@@ -20,8 +25,9 @@ def permitted_builtin(root):
     if any(f.endswith(('.so','.pyd','.dll','.dylib','.pyw','.pth','.zip','.egg')) for f in names):return False
     for name in ('pytest.ini','fixtures/invoice.pdf'):
         reference=ROOT/'demo_project/InvoiceHub'/name;candidate=Path(root)/name
-        if not candidate.is_file() or digest(candidate.read_bytes())!=digest(reference.read_bytes()):return False
-    return all(digest((Path(root)/f).read_bytes()) in allowed for f in names if f.endswith('.py'))
+        if not candidate.is_file() or _lf_digest(candidate.read_bytes())!=_lf_digest(reference.read_bytes()):return False
+    return all(_lf_digest((Path(root)/f).read_bytes()) in allowed for f in names if f.endswith('.py'))
+
 
 def run_pytest(root,output,selected='all',trusted=False):
     start=time.perf_counter();output=Path(output);output.mkdir(parents=True,exist_ok=True)
