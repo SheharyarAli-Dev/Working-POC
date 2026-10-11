@@ -31,20 +31,24 @@ The pipeline runs nine stages in a fixed order. Each stage adds its result to th
 \setlength{\tabcolsep}{6pt}
 
 The verdict follows four rules, taken from the module's own header:
+\begin{sloppypar}
 \begin{itemize}
     \item \texttt{REJECTED} when the downloaded bytes do not match the registry, a wheel is unsafe, or OSV lists the version of the package or of anything in its tree as affected.
     \item \texttt{UNRESOLVED} when anything is unknown: the request, the policy, the network, a dependency that is not pinned, a project that cannot be read, a package the project never uses, or code the scan cannot read.
     \item A sensitive sink in a wheel is evidence, not a failure, unless the contract does not allow its capability outright and the project's call sites can reach it. Then the verdict is \texttt{UNRESOLVED} and carries the escalation text ``deep analysis required (M2)''.
     \item With several requirements in one request: \texttt{REJECTED} if any is rejected, else \texttt{UNRESOLVED} if any is unresolved, else \texttt{VERIFIED}.
 \end{itemize}
+\end{sloppypar}
 No stage installs, imports or runs package code.
 
 \textbf{Interfaces.} CAVR has three entry points and all three reach the same function.
+\begin{sloppypar}
 \begin{itemize}
     \item \textbf{Python:} \path{verify_request(request,project_dir,policy,store)}. The request is a pip command, a requirements edit or a capture record. The result is a dictionary with \texttt{status}, \texttt{stage}, \texttt{rule}, \texttt{reason}, \texttt{fast\_gate\_ms}, \texttt{cache\_hit}, \texttt{escalated}, \texttt{gate}, \texttt{packages} and \texttt{policy\_version}.
     \item \textbf{Command line:} \texttt{python} \path{-m} \path{backend.cavr.pip_shim} \texttt{install} \path{<name>==<version>}, with the wrapper options \path{--cavr-project}, \path{--cavr-policy}, \path{--cavr-python}, \path{--cavr-json} and \path{--install}. Exit code 0 is \texttt{VERIFIED}, 1 \texttt{REJECTED}, 2 \texttt{UNRESOLVED}, 3 \texttt{BLOCK}, and 4 means an install was asked for after a \texttt{VERIFIED} verdict and pip did not succeed.
     \item \textbf{HTTP:} \texttt{GET} \path{/api/cavr/scenarios} lists the six request chips; \texttt{POST} \path{/api/cavr/run?scenario=<id>} and \texttt{POST} \path{/api/cavr/intercept} start a run; \texttt{GET} \path{/api/cavr/stream/{run_id}} replays the run's events; \texttt{GET} \path{/api/cavr/proof/{run_id}} returns the verdict, the hash comparison and the six-stage summary; \texttt{GET} \path{/api/cavr/metrics} and \texttt{GET} \path{/api/cavr/cache} return the report numbers and the stored cache rows.
 \end{itemize}
+\end{sloppypar}
 
 \begin{sloppypar}
 \textbf{Data.} The policy is one JSON file with \texttt{approved\_requirements}, \texttt{denied\_packages}, \texttt{allowed\_scopes} and \texttt{project\_task\_description}. Its version is the SHA-256 of its canonical JSON. SQLite holds two CAVR tables in \path{backend/cavr/storage.py}: \texttt{verdict\_cache}, one row per cache key with the eight key fields as columns and an integrity digest, and \texttt{verdict\_log}, one row per \path{verify_request} call. Downloaded wheels go to \path{cavr/quarantine} under the data directory named by \texttt{ASENT\_DATA}.
@@ -253,6 +257,7 @@ Docker is needed only by the sandbox runner, which the fast gate does not call. 
 
 \subsection{Reproducible Setup and Run Instructions}
 On Linux, from the repository root:
+\begin{sloppypar}
 \begin{enumerate}
     \item \texttt{bash} \path{scripts/setup.sh} creates \path{.venv}, installs \path{requirements.lock.txt} and builds the dashboard. It needs Python 3.11 or newer, and npm to build the dashboard.
     \item \texttt{npm} \path{--prefix} \texttt{frontend} \texttt{run} \texttt{build} rebuilds the dashboard after any frontend change. The build output \path{frontend/dist} is not in Git.
@@ -260,6 +265,7 @@ On Linux, from the repository root:
     \item \path{.venv/bin/python} \path{-m} \path{uvicorn} \path{backend.main:app} \path{--host} \path{127.0.0.1} \path{--port} \path{8000} starts the app with the same \texttt{ASENT\_DATA}. Open \path{http://127.0.0.1:8000} and go to the CAVR module.
     \item The pip wrapper is run as \path{.venv/bin/python} \path{-m} \path{backend.cavr.pip_shim} \path{--cavr-project} \path{backend/cavr/sample_project} \path{--cavr-policy} \path{backend/cavr/project_policy.json} \texttt{install} \path{pypdf==6.19.0}.
 \end{enumerate}
+\end{sloppypar}
 The fast gate needs internet access to reach PyPI and OSV. Nothing is installed by any of these commands. The full demo script with the recorded output of every command is \path{docs/cavr-demo.md} on the \texttt{cavr} branch.
 
 \subsection{Demonstration Evidence}\label{sec:cavr-demo}

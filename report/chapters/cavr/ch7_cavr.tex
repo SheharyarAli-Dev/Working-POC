@@ -279,6 +279,7 @@ CI, no-container mode & \path{test_controlled_dormant_execution} failed: with Do
 
 \subsection{Deferred Work}
 These items are known, written down, and not done in this iteration.
+\begin{sloppypar}
 \begin{itemize}
     \item \textbf{Docker sandbox in CI.} The sandbox image has not been built and the container command has not been run. The CI job with a real Docker sandbox is deferred, so the tests cover the no-container mode only.
     \item \textbf{Sandbox execution on real packages.} Counterfactual activation, OS-level observation, the causal graph, repair and re-verification are not part of the fast gate. A request that needs them ends \texttt{UNRESOLVED} with the escalation text.
@@ -289,6 +290,7 @@ These items are known, written down, and not done in this iteration.
     \item \textbf{Cache integrity.} The row digest is a plain SHA-256; a keyed digest is deferred.
     \item \textbf{Evaluation.} Measuring detection and false-positive rates on a package corpus, and setting a latency target, belong to the later evaluation work.
 \end{itemize}
+\end{sloppypar}
 \begin{sloppypar}
 One time limit applies to the shared integration tests and not to the fast gate: the stored advisory record that the older analyzer path reads is accepted for 30 days from 2026-09-25, so from 2026-10-25 those tests fail unless the record is refreshed.
 \end{sloppypar}
