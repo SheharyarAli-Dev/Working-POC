@@ -32,20 +32,27 @@ because the verdict also depends on the code around a call site (see
 guard must not share a cached verdict.
 
 `infer(context, node)` at the end of the file is the older orchestrator contract; it is used
-by `analyzer.py` until plan step 14 and is unchanged.
+by `analyzer.py` until plan step 14. Its call-site evidence is the orchestrator's
+`ContextService.dependency_context` plus `use_through_local_artifacts` (below), which follows
+the one hop that the orchestrator's reader does not: application -> vendored LOCAL artifact -> pypdf.
 """
 from __future__ import annotations
+import ast
+import json
 import re
+from pathlib import PurePosixPath
 
 from packaging.utils import canonicalize_name
 
-from backend.cavr.context_extractor import usage_of
+from backend.cavr.context_extractor import extract_project_context, usage_of
 from backend.orchestrator.hashing import digest
 from backend.threat_repo.behavior_rules import normalize_name
 from backend.threat_repo.repository import active
 
 CONTEXT_LISTS = ("files", "imports", "call_sites", "references", "star_imports")
 DEFAULT_DENY = "not granted by the policy (default deny)"
+APPLICATION_DIR = "app/"  # the only directory `ContextService.dependency_context` reads
+PDF_IMPORT_NAME = "pypdf"  # the import name the older contract knows (its alias map says the same)
 
 
 def infer_capability_contract(distribution, context=None, policy=None, knowledge=None) -> dict:
@@ -219,15 +226,107 @@ def _capabilities(policy, knowledge, names: list[str]):
             "capability_rules": [{"id": rule["id"], "version": rule["version"], "task": rule["data"]["task"]} for rule in rules]}, None
 
 
+def use_through_local_artifacts(context) -> list[dict]:
+    """pypdf call sites that the application reaches through a vendored LOCAL artifact of the lock.
+
+    `ContextService.dependency_context` reads `app/*.py` only, and matches a call to an import
+    of the same file. When the adapter is `from vendor.invoice_pdf_safe import extract_invoice_text`,
+    the `PdfReader` call is written in `vendor/invoice_pdf_safe.py`, so it finds no use of pypdf.
+    This follows that one hop in the project's real source. Every link has to be there:
+
+        1. the lock pins pypdf, and a LOCAL `.py` artifact whose file has the locked SHA-256
+        2. a file in app/ imports that artifact's module
+        3. the application calls what it imported: in that file, or in an app/ file that takes
+           the name from that file with a relative import (`from .pdf_adapter import name`)
+        4. the artifact's own source calls into pypdf
+
+    One record per pypdf call site of link 4, in the shape of the orchestrator's attributions plus
+    `through` (the chain). A missing link, or project source that was not fully read and parsed,
+    gives [] and the contract stays `insufficient`. Limits: syntactic like the rest of the file;
+    link 4 is per file, not per function; a re-export is followed one file deep.
+    """
+    packages = json.loads(context.read("dependencies.lock.json") or '{"packages":[]}').get("packages", [])
+    pinned = next((p for p in packages if canonicalize_name(p["name"]) == PDF_IMPORT_NAME), None)
+    local = [p for p in packages if p.get("ecosystem") == "LOCAL" and str(p.get("artifact", "")).endswith(".py")]
+    if not pinned or not local:
+        return []
+    project = extract_project_context(context.path)
+    if project["result"] != "OK":
+        return []
+    hashes = {entry["path"]: entry["sha256"] for entry in project["files"]}
+    found = []
+    for package in local:
+        artifact = package["artifact"]
+        if hashes.get(artifact) != package.get("sha256"):  # link 1: not in the project, or not the locked bytes
+            continue
+        module = artifact[:-len(".py")].replace("/", ".")
+        imported = next((i for i in project["imports"] if _in_app(i) and i["module"] == module), None)  # link 2
+        called = _application_call(context, project, module) if imported else None  # link 3
+        if not called:
+            continue
+        for site in usage_of(project, [PDF_IMPORT_NAME])["call_sites"]:  # link 4
+            if site["file"] != artifact:
+                continue
+            found.append({"package": pinned["name"], "version": pinned.get("version"), "imported_module": PDF_IMPORT_NAME,
+                          "imported_name": site["symbol"].rsplit(".", 1)[-1],
+                          "call_site": {"file": site["file"], "line": site["line"], "expression": site["expression"],
+                                        "imported_module": PDF_IMPORT_NAME},
+                          "purpose": "PDF text extraction",
+                          "through": {"local_package": package["name"], "artifact": artifact, "sha256": package["sha256"],
+                                      "imported_at": {"file": imported["file"], "line": imported["line"]}, "called_at": called},
+                          "method": "AST: app/ import of a hash-checked LOCAL lock artifact, a call of the imported name "
+                                    "in app/, and a call site in the artifact",
+                          "scope": "syntactic attribution through one vendored module; no general dataflow"})
+    return found
+
+
+def _application_call(context, project: dict, module: str):
+    """{file, line} of the first call in app/ of something imported from `module`, or None (link 3)."""
+    direct = next((c for c in project["call_sites"] if _in_app(c) and c["symbol"].startswith(module + ".")), None)
+    if direct:
+        return {"file": direct["file"], "line": direct["line"]}
+    # A re-export: app/pdf_adapter.py binds the name, app/main.py imports it from `.pdf_adapter` and calls it.
+    # `context_extractor` does not follow relative imports (they are the project's own code), so the call is read here.
+    exported = {(i["file"], i["bound_as"]) for i in project["imports"] if _in_app(i) and i["module"] == module and i["name"]}
+    for record in project["imports"]:
+        if not _in_app(record) or (_relative_target(record), record["name"]) not in exported:
+            continue
+        tree = ast.parse((context.path / record["file"]).read_bytes())  # the same bytes the project context parsed
+        line = min((node.lineno for node in ast.walk(tree) if isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Name) and node.func.id == record["bound_as"]), default=None)
+        if line is not None:
+            return {"file": record["file"], "line": line}
+    return None
+
+
+def _in_app(record: dict) -> bool:
+    return record["file"].startswith(APPLICATION_DIR)
+
+
+def _relative_target(record: dict):
+    """The project file a relative `from .x import name` reads, as written; None for an absolute import or `from . import x`."""
+    dots = len(record["module"]) - len(record["module"].lstrip("."))
+    rest = record["module"][dots:]
+    if not dots or not rest:
+        return None
+    base = PurePosixPath(record["file"]).parent
+    for _ in range(dots - 1):
+        base = base.parent
+    return (base / rest.replace(".", "/")).as_posix() + ".py"
+
+
 def infer(context, node):
     from backend.orchestrator.hashing import digest
     from backend.threat_repo.capability_rules import rule
     from backend.threat_repo.repository import active
 
     usage = context.dependency_context()
+    # The orchestrator's reader sees a pypdf call only when it is written in app/. A call the
+    # application reaches through a vendored LOCAL artifact is added here, with its whole chain.
+    through_local = use_through_local_artifacts(context)
     is_pdf = 'pdf' in getattr(context, 'srs', '').lower() and any(
         x['package'].lower() in ('pypdf', 'pypdf2') and x['purpose'] == 'PDF text extraction'
-        for x in usage.get('dependency_attributions', [])
+        for x in usage.get('dependency_attributions', []) + through_local
     )
     pdf = rule(context.knowledge, 'CAP-PDF-001')
     minimum_denied = {'SECRET_ACCESS', 'NETWORK_CONNECT', 'PROCESS_CREATE', 'PERSISTENCE_WRITE', 'EXECUTE_BINARY'}
@@ -238,6 +337,7 @@ def infer(context, node):
         'required': pdf['data'].get('required', []) if supported else [],
         'denied': sorted(minimum_denied | set(pdf['data'].get('denied', []) if pdf else [])),
         'evidence': usage,
+        'local_artifact_use': through_local,
         'knowledge_rule': pdf['id'] if pdf else None,
         'confidence': 'rule-grounded' if supported else 'insufficient',
         'package': node['name'],

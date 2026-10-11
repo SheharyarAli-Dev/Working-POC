@@ -338,3 +338,22 @@ Example (recorded): the genuine wheel has SHA-256 `7e5d6e73…8d14` before and a
 time and inode; the rejected file `a52a19f9…e7b9` is in `quarantine-demo/tampered_wheel/`.
 Test: `test_a_tampered_run_in_the_middle_of_a_real_run_does_not_change_the_real_verdict` (before the fix the real run
 ended UNRESOLVED `ARTIFACT_CHANGED`).
+
+## Batch F — the repair integration test (2026-10-11)
+
+### Q1. Why did `test_cavr_repair_invalidates_satra_then_reverifies` fail with BLOCK instead of ACCEPT?
+
+Because CAVR could not see that the project uses pypdf once the PDF code moved into a vendored file, so the repair was
+never applied. The scenario `cross_module` replaces `app/pdf_adapter.py` with one line,
+`from vendor.invoice_pdf_lab import extract_invoice_text`. The call `PdfReader(...)` is then in `vendor/`, not in `app/`.
+The older contract (`capability_contract.infer`) takes its call sites from the orchestrator's
+`ContextService.dependency_context`, which reads only `app/*.py`. It found no pypdf call, so the contract was
+`insufficient` and every package got "Capability contract lacks task/call-site authority" (UNRESOLVED).
+The first analysis was still REJECTED (the sandbox saw the lab file send the canary). The repair then swapped in
+`vendor/invoice_pdf_safe.py` and re-checked it: CAVR said UNRESOLVED again, for the same reason. The service applies a
+repair only when the re-check is VERIFIED, so the run stayed at BLOCK and no `repair.applied` event was written.
+
+The fix is `capability_contract.use_through_local_artifacts`: it follows the chain in the real files and needs all four
+links: the lock holds pypdf and a LOCAL `.py` file with the locked SHA-256; a file in `app/` imports it; the application
+calls the imported name; that file calls pypdf. Example: `app/pdf_adapter.py:1` imports, `app/main.py:87` calls,
+`vendor/invoice_pdf_safe.py` calls `PdfReader`. One link missing -> `[]` -> still UNRESOLVED.
