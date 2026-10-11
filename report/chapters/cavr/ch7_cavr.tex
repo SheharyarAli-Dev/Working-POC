@@ -102,7 +102,32 @@ Live, 2026-10-11, \texttt{CAVR\_LIVE=1}, real PyPI, OSV and pip & 7 passed (\pat
 The local command is \texttt{.venv/bin/python} \path{-m} \texttt{pytest} \path{-q} from the repository root. The seven local skips are the live tests. CI skips 26: the seven live tests and the 19 page-rendering cases, which need the frontend's Node modules in the test job. The counts agree with the collection: 1254 passed and 26 skipped is 1280 CAVR cases, and both 1338 with 7 and 1319 with 26 are 1345 cases in the full suite. The two failures of run 38135800645 are the CI defects in the table below. When this iteration started, the full suite had 64 passed and 7 failed; the seven failures were one test in \path{tests/test_api_replay.py} and six in \path{tests/test_integration.py}.
 \end{sloppypar}
 
-\subsection{Edge and Failure Cases}
+\begin{sloppypar}
+Figures~\ref{fig:cavr-tests-cavr} to~\ref{fig:cavr-tests-live} are terminal screenshots of three local runs on the development machine. As shown in Figure~\ref{fig:cavr-tests-cavr}, the CAVR test files run on their own give 1273 passed and 7 skipped, which is the 1280 collected cases; the seven skips are the live tests. This CAVR-only run is not a row of the table above, which lists the local CAVR tests only as part of the full suite. Figure~\ref{fig:cavr-tests-full} shows the full suite with 1338 passed and 7 skipped, the same counts as the local rows of the table. Figure~\ref{fig:cavr-tests-live} shows the seven live tests run with \texttt{CAVR\_LIVE=1}, each listed by name as passed.
+\end{sloppypar}
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.9\linewidth]{figures/cavr/cavr-20-tests-cavr.png}
+    \caption[Local pytest run of the CAVR tests]{Local run of the CAVR test files (\texttt{pytest tests/test\_cavr\_*.py -q}): 1273 passed, 7 skipped. The seven skips are the live tests, which need \texttt{CAVR\_LIVE=1}.}
+    \label{fig:cavr-tests-cavr}
+\end{figure}
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.9\linewidth]{figures/cavr/cavr-21-tests-full-suite.png}
+    \caption[Local pytest run of the full suite]{Local run of the full test suite (\texttt{pytest -q}): 1338 passed, 7 skipped, none failed.}
+    \label{fig:cavr-tests-full}
+\end{figure}
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.9\linewidth]{figures/cavr/cavr-22-tests-live.png}
+    \caption[Live tests against PyPI and OSV]{Opt-in live tests against the real PyPI and OSV (\texttt{CAVR\_LIVE=1}, \texttt{tests/test\_cavr\_live.py}, Python 3.14.4): 7 passed.}
+    \label{fig:cavr-tests-live}
+\end{figure}
+
+\subsection{Edge and Failure Cases}\label{sec:cavr-edge}
 Five failure cases matter most for the fast gate, because each one is a way a request could wrongly end as \texttt{VERIFIED}. Each has tests and a recorded real run; the recorded runs are in Section~\ref{sec:cavr-demo}.
 
 \setlength{\tabcolsep}{3pt}
@@ -119,6 +144,93 @@ Unreadable directory & \path{test_directory_that_cannot_be_listed_makes_the_cont
 \bottomrule
 \end{longtable}
 \setlength{\tabcolsep}{6pt}
+
+\begin{sloppypar}
+\textbf{The demo cases on the page.} The demo cases were also clicked on the CAVR page in a browser on 2026-10-11, and the screenshots below are from that session. They are separate runs from the recorded output of Section~\ref{sec:cavr-demo}, so the times differ. Case 1, the \texttt{VERIFIED} request, is shown in Figures~\ref{fig:cavr-timeline-verified} and~\ref{fig:cavr-verdict-verified}. On the timeline a tick marks a stage that ran, not a stage that passed. On the verdict card the header of a \texttt{REJECTED} run reads \texttt{BLOCK}; the policy state below it is the CAVR verdict.
+\end{sloppypar}
+
+\begin{sloppypar}
+\textbf{Case 3, known vulnerability.} As shown in Figure~\ref{fig:cavr-osv-timeline}, \texttt{pypdf==5.1.0} passes the requirement gate and the hash check and still ends \texttt{REJECTED}. Figure~\ref{fig:cavr-osv-verdict} shows the reason: the live OSV answer lists 97 advisories that affect this version, and the rule is \path{KNOWN_VULNERABILITY}.
+\end{sloppypar}
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.9\linewidth]{figures/cavr/cavr-03-rejected-osv-pipeline.png}
+    \caption[Case 3: timeline of the REJECTED pypdf 5.1.0 request]{Case 3, \texttt{pip install pypdf==5.1.0}: the request is permitted by the gate and the hash matches, and the verdict is \texttt{REJECTED} for known vulnerabilities.}
+    \label{fig:cavr-osv-timeline}
+\end{figure}
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.9\linewidth]{figures/cavr/cavr-04-rejected-osv-verdict.png}
+    \caption[Case 3: verdict card with 97 OSV advisories]{Case 3 verdict card: policy state \texttt{REJECTED}, rule \texttt{KNOWN\_VULNERABILITY}, with 97 live OSV advisories that affect \texttt{pypdf} 5.1.0.}
+    \label{fig:cavr-osv-verdict}
+\end{figure}
+
+\begin{sloppypar}
+\textbf{Case 4, not on the allowlist.} As shown in Figure~\ref{fig:cavr-block-timeline}, \texttt{left-pad==1.0} is stopped at the requirement gate and stages 3 to 5 are marked ``did not run''. The verdict card in Figure~\ref{fig:cavr-block-verdict} has a dash for the artifact SHA-256 and for the hash check, because nothing was downloaded.
+\end{sloppypar}
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.9\linewidth]{figures/cavr/cavr-05-block-pipeline.png}
+    \caption[Case 4: timeline of the blocked left-pad request]{Case 4, \texttt{pip install left-pad==1.0}: blocked at the requirement gate (C2) with \texttt{NOT\_ON\_ALLOWLIST}; the artifact, cache and analysis stages did not run.}
+    \label{fig:cavr-block-timeline}
+\end{figure}
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.9\linewidth]{figures/cavr/cavr-06-block-verdict.png}
+    \caption[Case 4: BLOCK verdict card]{Case 4 verdict card: policy state \texttt{BLOCK}, rule \texttt{NOT\_ON\_ALLOWLIST}. Nothing was downloaded, so there is no hash to show.}
+    \label{fig:cavr-block-verdict}
+\end{figure}
+
+\begin{sloppypar}
+\textbf{Case 5, tampered wheel.} As shown in Figure~\ref{fig:cavr-tampered-timeline}, the evidence holds both digests: the downloaded file hashes to \texttt{a52a19f9...} and the registry says \texttt{7e5d6e73...}, so the artifact stage returns \path{HASH_MISMATCH} and the cache and analysis stages do not run. These are the two digests of the recorded run in Section~\ref{sec:cavr-demo}. Figure~\ref{fig:cavr-tampered-verdict} shows the \texttt{REJECTED} card, which names the demo condition that produced the mismatch.
+\end{sloppypar}
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.9\linewidth]{figures/cavr/cavr-07-tampered-pipeline.png}
+    \caption[Case 5: timeline of the tampered-wheel run]{Case 5, tampered wheel: the SHA-256 of the downloaded file differs from the registry digest, and the artifact stage returns \texttt{HASH\_MISMATCH}.}
+    \label{fig:cavr-tampered-timeline}
+\end{figure}
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.9\linewidth]{figures/cavr/cavr-08-tampered-verdict.png}
+    \caption[Case 5: REJECTED verdict card under the demo condition]{Case 5 verdict card: policy state \texttt{REJECTED}, rule \texttt{HASH\_MISMATCH}, under the demo condition \texttt{tampered\_wheel}.}
+    \label{fig:cavr-tampered-verdict}
+\end{figure}
+
+\begin{sloppypar}
+\textbf{Case 6, network unavailable.} As shown in Figure~\ref{fig:cavr-unresolved-timeline}, the run fails closed at the artifact stage with \path{REGISTRY_UNAVAILABLE}. Figure~\ref{fig:cavr-unresolved-verdict} shows the card: header \texttt{NEEDS\_REVIEW}, policy state \texttt{UNRESOLVED}, and the sentence ``Unknown is not treated as a pass.'' The OSV line on this card is a stored answer marked \texttt{DATED CACHE}, not a live one, because this demo condition does not ask OSV live.
+\end{sloppypar}
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.9\linewidth]{figures/cavr/cavr-09-unresolved-pipeline.png}
+    \caption[Case 6: timeline of the network-unavailable run]{Case 6, registry unreachable: the run fails closed with \texttt{UNRESOLVED} and rule \texttt{REGISTRY\_UNAVAILABLE}; the cache and analysis stages did not run.}
+    \label{fig:cavr-unresolved-timeline}
+\end{figure}
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.9\linewidth]{figures/cavr/cavr-10-unresolved-verdict.png}
+    \caption[Case 6: UNRESOLVED verdict card]{Case 6 verdict card: header \texttt{NEEDS\_REVIEW}, policy state \texttt{UNRESOLVED}, under the demo condition \texttt{network\_off}. Unknown is not treated as a pass.}
+    \label{fig:cavr-unresolved-verdict}
+\end{figure}
+
+\begin{sloppypar}
+\textbf{Metrics.} Figure~\ref{fig:cavr-metrics} shows the Metrics tab in that session. It counts ten logged verdicts from repeated runs of the chips: four \texttt{VERIFIED}, three \texttt{REJECTED} and three \texttt{BLOCK}. This is not the recorded pass of Section~\ref{sec:cavr-demo}, after which the log held five. The demo-condition runs of cases 5 and 6 are not logged, so \texttt{UNRESOLVED} has no requests. Two runs early in the session took about 20~s each, which is why the p95 values are high; the screenshots do not show the cause. In this session the cache hits were not faster than the misses (p50 4029.88~ms against 3776.73~ms), so these numbers do not support a claim that a hit saves time. The rows behind them are the verdict log in Figure~\ref{fig:cavr-verdict-log} of Appendix~\ref{app:cavr-requirements}.
+\end{sloppypar}
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.9\linewidth]{figures/cavr/cavr-18-metrics.png}
+    \caption[Metrics tab after repeated demo runs]{Metrics tab after repeated demo runs in one session: ten logged verdicts, a cache hit on 3 of 10 verdicts and on 3 of the 7 that reached the cache lookup, and the p50 and p95 of \texttt{fast\_gate\_ms} by verdict and by cache lookup.}
+    \label{fig:cavr-metrics}
+\end{figure}
 
 The other refusal cases the tests cover, by group:
 \begin{itemize}
@@ -161,7 +273,7 @@ CI, no-container mode & \path{test_controlled_dormant_execution} failed: with Do
     \item \textbf{Verified locally:} 1338 passed, 0 failed, 7 skipped for the full suite at commit \texttt{d63183d}, on Python 3.14.4 and on Python 3.12.15 with strace, both on 2026-10-11.
     \item \textbf{Verified in CI:} run 38137109059 on commit \texttt{d63183d} passed all six jobs on Python 3.12 with Docker and Podman disabled; the CAVR job reported 1254 passed and 26 skipped.
     \item \textbf{Verified against the real services:} the seven live tests, and the six demo cases and four wrapper runs recorded in Section~\ref{sec:cavr-demo}, all gave the expected verdict, stage, rule and exit code.
-    \item \textbf{Not tested:} the real Docker path of the sandbox runner (Docker is not installed on the development machine and is disabled in CI); the Docker and Podman monitor modes; the page in a browser (clicks, the live event stream and the layout).
+    \item \textbf{Not tested:} the real Docker path of the sandbox runner (Docker is not installed on the development machine and is disabled in CI); the Docker and Podman monitor modes; the page in a browser by an automated test (clicks, the live event stream and the layout). The page was opened by hand in one session, for the screenshots in this report.
     \item \textbf{Not established:} detection rates on real malicious packages, false-positive rates on a package corpus, or a latency target. The demo covers two packages, \texttt{pypdf} and \texttt{left-pad}, and one sample project.
 \end{itemize}
 

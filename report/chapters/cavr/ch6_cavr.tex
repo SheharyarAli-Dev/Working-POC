@@ -148,6 +148,24 @@ The demo package shows why the last step is needed. pypdf 6.19.0 calls \texttt{s
 \end{sloppypar}
 
 \begin{sloppypar}
+The CAVR page prints this contract and this judgement for the demo request, as shown in Figure~\ref{fig:cavr-capability-contract}: four call sites, \texttt{FILE\_READ} and \texttt{FILE\_WRITE} required and permitted, the other eight capabilities denied, and the two \texttt{subprocess.run} sinks listed against \texttt{PROCESS\_EXEC} with the result ``No reachable sink''. Figure~\ref{fig:cavr-ast-scan} shows the scan behind that row: 59 Python files read, both sinks judged \texttt{GUARD\_DISABLED} by the accepted proof \texttt{pypdf-jbig2dec-disabled}, and the limit of that proof as the page states it. Both are static findings; no package code was run.
+\end{sloppypar}
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.9\linewidth]{figures/cavr/cavr-11-capability-contract.png}
+    \caption[Capability contract inferred for pypdf 6.19.0]{Capability contract tab for \texttt{pypdf} 6.19.0 in the sample project: two capabilities required and permitted, eight denied, and the two \texttt{subprocess.run} sinks under \texttt{PROCESS\_EXEC} judged \texttt{GUARD\_DISABLED}.}
+    \label{fig:cavr-capability-contract}
+\end{figure}
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.9\linewidth]{figures/cavr/cavr-12-ast-scan-sinks.png}
+    \caption[AST scan and sink judgement for pypdf 6.19.0]{Triggers tab for \texttt{pypdf} 6.19.0: the AST scan of 59 Python files, the two \texttt{subprocess.run} sinks judged \texttt{GUARD\_DISABLED}, and the accepted reachability proof with its stated limit.}
+    \label{fig:cavr-ast-scan}
+\end{figure}
+
+\begin{sloppypar}
 \textbf{Verdict cache.} \path{cache_key} refuses to build a key unless all eight fields are usable, then hashes their canonical JSON. \path{store} accepts only \texttt{VERIFIED} and \texttt{REJECTED} results. \path{lookup} uses a row only if its integrity digest matches and its own eight columns give the key it is filed under. Only the scan and sink analysis is cached. The download, the tree, the contract and the OSV query run on every request, because the first three are fields of the key and advisories change while the file does not.
 \end{sloppypar}
 
@@ -158,6 +176,42 @@ The demo package shows why the last step is needed. pypdf 6.19.0 calls \texttt{s
 \begin{sloppypar}
 \textbf{Dashboard.} \path{run_verification} runs the pipeline in a worker thread and publishes one event per stage that ran, with every value copied from the verdict. \path{stage_summary} builds the six-stage timeline (capture, gate, artifact, cache, analysis, verdict); a stage with no value is marked as not run. Two demo conditions exist and only replace the network transport: \texttt{tampered\_wheel} flips one bit of the downloaded file and \texttt{network\_off} fails every request. A run under a demo condition gets no store, so it is not logged, not cached and not counted in the metrics, and it downloads into its own directory.
 \end{sloppypar}
+
+\begin{sloppypar}
+Figure~\ref{fig:cavr-timeline-verified} shows the page after chip 1: the six stages of \path{stage_summary} with the value each one returned, and the reasoning panel below them. A tick marks a stage that ran, not a stage that passed; the verdict is the status under the last stage. Figure~\ref{fig:cavr-verdict-verified} shows the verdict card for the same chip. The card prints two words: a header, which is \texttt{ALLOW} for \texttt{VERIFIED}, \texttt{BLOCK} for \texttt{REJECTED} and \texttt{BLOCK}, and \texttt{NEEDS\_REVIEW} for \texttt{UNRESOLVED}, and below it the policy state, which is the CAVR verdict. The screenshots in this report were taken in one browser session on 2026-10-11. The server had already verified pypdf 6.19.0 in that session, so this run shows a cache \texttt{HIT}.
+\end{sloppypar}
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.9\linewidth]{figures/cavr/cavr-01-verified-pipeline.png}
+    \caption[Six-stage timeline for a VERIFIED request]{CAVR page after chip 1, \texttt{pip install pypdf==6.19.0}: all six stages of the timeline ran and the verdict is \texttt{VERIFIED}. The cache lookup is a \texttt{HIT} because the server had verified this wheel earlier in the session. Nothing was installed.}
+    \label{fig:cavr-timeline-verified}
+\end{figure}
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.9\linewidth]{figures/cavr/cavr-02-verified-verdict.png}
+    \caption[Verdict card for a VERIFIED request]{Verdict card for \texttt{pypdf} 6.19.0: policy state \texttt{VERIFIED}, the artifact SHA-256 with \texttt{HASH\_MATCH}, the live OSV answer with no advisory for this version, and the two limits the verdict states.}
+    \label{fig:cavr-verdict-verified}
+\end{figure}
+
+\begin{sloppypar}
+Figure~\ref{fig:cavr-certificate-verified} shows the Assurance tab for another \texttt{VERIFIED} run of the same request in that session. The seven records are the \path{EvidenceChain} of the run, each hashed together with the SHA-256 of the record before it. The certificate below them is built by \path{certificate_for_verdict}: it repeats the verdict and lists the artifact, subtree and contract digests and the result of each check, with sandbox execution as \texttt{NOT\_RUN (M2)}. Figure~\ref{fig:cavr-certificate-limits} shows the limits the page prints below a certificate.
+\end{sloppypar}
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.9\linewidth]{figures/cavr/cavr-15-assurance-certificate-verified.png}
+    \caption[Evidence chain and certificate for a VERIFIED run]{Assurance tab for a \texttt{VERIFIED} run of \texttt{pypdf} 6.19.0: the seven-record evidence chain and the bounded trust certificate with the digests and the result of each check. The right end of the registry digest is cut off by the browser window.}
+    \label{fig:cavr-certificate-verified}
+\end{figure}
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.9\linewidth]{figures/cavr/cavr-17-certificate-limits.png}
+    \caption[Stated limits of a certificate]{``What this certificate does not establish'': the limits stated by the run and the method limits of the fast gate, as printed below a certificate.}
+    \label{fig:cavr-certificate-limits}
+\end{figure}
 
 \subsection{Algorithms and Technical Decisions}
 \setlength{\tabcolsep}{3pt}
@@ -475,7 +529,9 @@ The last wrapper run is a real connection failure with no demo switch. For the v
 The 26 skips in CI are the seven live tests, which need \texttt{CAVR\_LIVE=1}, and the 19 page-rendering tests, which need the frontend's Node modules in the test job. The two failures of run 38135800645 are described in the next subsection.
 \end{sloppypar}
 
-\textbf{TODO: add screenshots of the CAVR page for cases 1, 3, 4, 5 and 6 from a browser run. The recorded script was run through the API; the page was not opened in a browser when it was recorded.}
+\begin{sloppypar}
+\textbf{Screenshots.} The recorded output above was produced through the API, without a browser. The page was opened in a browser afterwards, on 2026-10-11, and the six chips were clicked. Case 1 in that session is shown in Figures~\ref{fig:cavr-timeline-verified} and~\ref{fig:cavr-verdict-verified}, and cases 3 to 6 are shown in Section~\ref{sec:cavr-edge}. These are separate runs from the ones recorded above, so the run ids and \texttt{fast\_gate\_ms} differ, and case 1 appears there as a cache \texttt{HIT}.
+\end{sloppypar}
 
 \subsection{Defects Found by CI}\label{sec:cavr-ci-defects}
 \begin{sloppypar}
