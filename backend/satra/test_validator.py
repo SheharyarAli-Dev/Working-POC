@@ -152,6 +152,8 @@ def preflight(source):
         if isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id in ("eval", "exec", "open", "compile", "getattr", "setattr", "__import__"):
             return False, "Unsafe side effect / dynamic execution"
         if isinstance(n, ast.Assert):
+            if isinstance(n.test, ast.Constant) and n.test.value in (True, False, 1, 0, "", None):
+                return False, "Vacuous assertion cannot discriminate secure from insecure behaviour"
             rendered = ast.unparse(n.test)
             if rendered in ("True", "1", "False", "0"):
                 return False, "Vacuous assertion cannot discriminate secure from insecure behaviour"
@@ -165,16 +167,20 @@ def is_pass(result):
 
 
 def killed(result):
-    if not (result.get("available") and result.get("exit_code") == 1 and result.get("failed", 0) > 0):
+    """
+    Classifies mutant kill by pytest JUnit XML element (<failure> vs <error>):
+    - An assertion failure (<failure> / status == 'FAIL') indicates genuine mutant kill.
+    - An infrastructure crash / import failure (<error> / status == 'ERROR') is NOT a genuine kill.
+    - If every mutant is an infrastructure error, the kill check evaluates False.
+    """
+    if not result.get("available"):
         return False
-    # An infrastructure failure (import error, setup crash) is not a genuine mutation kill.
     tests = result.get("tests", [])
-    if tests and all(
-        any(kw in (t.get("message") or "") for kw in ("ImportError", "ModuleNotFoundError", "RuntimeError: failed import", "Error during collection"))
-        for t in tests if t.get("status") == "FAIL"
-    ):
-        return False
-    return True
+    if tests:
+        # At least one test must have status == 'FAIL' (assertion failure / <failure> in JUnit XML)
+        return any(t.get("status") == "FAIL" for t in tests)
+    # When tests array is unavailable, fall back to counts: failed > 0 and errors == 0
+    return result.get("exit_code") == 1 and result.get("failed", 0) > 0 and result.get("errors", 0) == 0
 
 
 def judge(baseline, mutant, repeat, feasible):
