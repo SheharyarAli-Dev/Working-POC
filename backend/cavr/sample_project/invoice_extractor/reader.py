@@ -1,26 +1,30 @@
 """
 Sample Project: Invoice PDF Extractor.
-Extracts invoice totals, line items, and invoice dates from PDF invoices.
+Extracts invoice text and document metadata from PDF invoices.
+
+This is the project the CAVR dashboard verifies requests for. pypdf's optional JBIG2 decoder
+runs an external program, so every reader is created and used inside
+`apply_configuration(jbig2dec_binary=None)`, which turns that decoder off.
 """
-import os
-from pypdf import PdfReader
+from pypdf import PdfReader, apply_configuration
+
 
 class InvoiceReader:
     def __init__(self, filepath: str):
         self.filepath = filepath
 
     def extract_text(self) -> str:
-        # Call site: reader.py:14 (PdfReader)
-        reader = PdfReader(self.filepath)
-        text_parts = []
-        for page_idx, page in enumerate(reader.pages):
-            # Call site: reader.py:18 (page.extract_text)
-            extracted = page.extract_text()
-            if extracted:
-                text_parts.append(extracted)
+        with apply_configuration(jbig2dec_binary=None):
+            reader = PdfReader(self.filepath)
+            text_parts = []
+            for page in reader.pages:
+                extracted = page.extract_text()
+                if extracted:
+                    text_parts.append(extracted)
         return "\n".join(text_parts)
 
     def parse_metadata(self) -> dict:
-        reader = PdfReader(self.filepath)
-        # Call site: reader.py:26 (metadata access)
-        return dict(reader.metadata or {})
+        with apply_configuration(jbig2dec_binary=None):
+            reader = PdfReader(self.filepath)
+            metadata = dict(reader.metadata or {})
+        return metadata
