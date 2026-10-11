@@ -228,3 +228,44 @@ P13 Assurance & Part & Hash chain of run events; a certificate that copies the v
 \setlength{\tabcolsep}{6pt}
 
 The CAVR acceptance results apply to the requests and projects named in the tests and in the recorded demo runs. They do not show detection rates on real malicious packages.
+
+\subsection*{CAVR dashboard screenshots}
+\begin{sloppypar}
+The screenshots below are from the browser session of 2026-10-11 described in Section~\ref{sec:cavr-demo}. As shown in Figures~\ref{fig:cavr-req-trace-1} and~\ref{fig:cavr-req-trace-2}, the Requirements tab of the CAVR page lists the scope and threat model and a traceability matrix; the two figures are the same tab, scrolled, for the network-unavailable run. The tab uses its own list, FR-1 to FR-10 with NFR-1 and NFR-2, and names a design phase (P1 to P13) for most rows. These are not the FR-C and NFR-C identifiers of Chapter 4. The last column holds only what that run returned: the capture, the gate result \texttt{PERMITTED}, the verdict \texttt{UNRESOLVED} and the certificate identifier. Every other row shows a dash, including the deep-analysis rows that the fast gate does not run. A dash is not a pass.
+\end{sloppypar}
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.9\linewidth]{figures/cavr/cavr-13-requirements-traceability-1.png}
+    \caption[Requirements tab: scope, threat model, FR-1 to FR-4]{Requirements tab of the CAVR page: scope, threat model and the page's traceability matrix, rows FR-1 to FR-4. The identifiers are the page's own, not the FR-C identifiers of Chapter 4.}
+    \label{fig:cavr-req-trace-1}
+\end{figure}
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.9\linewidth]{figures/cavr/cavr-14-requirements-traceability-2.png}
+    \caption[Requirements tab: FR-5 to NFR-2]{Requirements tab, rows FR-5 to NFR-2, for the network-unavailable run. Rows the run did not reach, and the deep-analysis rows (M2), show a dash and not a pass.}
+    \label{fig:cavr-req-trace-2}
+\end{figure}
+
+\begin{sloppypar}
+Figure~\ref{fig:cavr-chain-unresolved} shows the Assurance tab for the same run; its certificate identifier is the one in Figure~\ref{fig:cavr-req-trace-2}. The chain has five records, there are no digests, and the checks that were not reached are listed as \path{NOT_REACHED}, not as passed. The chain of a \texttt{VERIFIED} run, with seven records, is in Figure~\ref{fig:cavr-certificate-verified}.
+\end{sloppypar}
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.9\linewidth]{figures/cavr/cavr-16-assurance-chain-unresolved.png}
+    \caption[Evidence chain and certificate for the UNRESOLVED run]{Assurance tab for the \texttt{UNRESOLVED} run (demo condition \texttt{network\_off}): a five-record evidence chain and a certificate with no digests, in which the unreached checks are listed as \texttt{NOT\_REACHED}.}
+    \label{fig:cavr-chain-unresolved}
+\end{figure}
+
+\begin{sloppypar}
+Figure~\ref{fig:cavr-verdict-log} shows the verdict log at the end of the session: ten rows, each with the request, the status, the stage and rule, \texttt{fast\_gate\_ms} and the cache lookup. The first request for \texttt{pypdf==6.19.0}, at 6:34:01~PM, is a \texttt{MISS} and the three later ones are \texttt{HIT}. The demo-condition runs (tampered wheel and network unavailable) are absent, as FR-C12 requires. The Metrics tab in Figure~\ref{fig:cavr-metrics} is computed from these rows.
+\end{sloppypar}
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.9\linewidth]{figures/cavr/cavr-19-verdict-log.png}
+    \caption[Verdict log after repeated demo runs]{Verdict log after repeated demo runs in one session: ten requests with status, stage and rule, \texttt{fast\_gate\_ms} and cache lookup. Demo-condition runs are not logged.}
+    \label{fig:cavr-verdict-log}
+\end{figure}
