@@ -27,6 +27,11 @@ Results:
 Not read as project code: directories whose name starts with a dot, `__pycache__`,
 `node_modules`, and virtual environments (a directory holding `pyvenv.cfg`).
 
+A directory or file that cannot be examined (no permission, an I/O error) is never skipped
+silently and never raises: it is listed in `not_read` and the result is SOURCE_NOT_READ. The
+checks use `os.stat` / `os.lstat` and catch `OSError` themselves, because `pathlib`'s `is_file()`
+and `is_symlink()` raise `PermissionError` on Python 3.12 and return False on Python 3.14.
+
 Limits: this is syntactic. Names are resolved per file, not per scope; a call on an object
 (`reader.pages`) or through `getattr` is not a call site; a local name that hides an import is
 still counted as that import.
@@ -35,6 +40,7 @@ from __future__ import annotations
 import ast
 import hashlib
 import os
+import stat
 from pathlib import Path
 
 from backend.orchestrator.hashing import digest
@@ -54,7 +60,15 @@ def extract_project_context(project_dir=None) -> dict:
     """
     root = Path(project_dir) if project_dir is not None else SAMPLE_PROJECT_DIR
     fields = {"project_dir": str(root)}
-    if not root.is_dir():
+    try:
+        is_directory = stat.S_ISDIR(os.stat(root).st_mode)
+    except (FileNotFoundError, NotADirectoryError):
+        is_directory = False
+    except OSError as exc:  # it may exist, but this process may not look: not the same as "missing"
+        reason = exc.strerror or str(exc)
+        return _result("UNRESOLVED", "SOURCE_NOT_READ", f"project directory cannot be examined: {root} ({reason})",
+                       not_read=[{"file": ".", "reason": reason}], **fields)
+    if not is_directory:
         return _result("UNRESOLVED", "PROJECT_MISSING", f"project directory does not exist: {root}", **fields)
 
     paths, skipped, not_read = _python_files(root)
@@ -142,21 +156,42 @@ def _python_files(root: Path):
         kept = []
         for name in sorted(directories):
             path = Path(base) / name
-            if path.is_symlink():
-                not_read.append({"file": relative(name), "reason": "symbolic link"})
-            elif name.startswith(".") or name in SKIPPED_DIRECTORY_NAMES or (path / "pyvenv.cfg").is_file():
-                skipped.append(relative(name))
-            else:
-                kept.append(name)
+            try:
+                if _is_symlink(path):
+                    not_read.append({"file": relative(name), "reason": "symbolic link"})
+                elif name.startswith(".") or name in SKIPPED_DIRECTORY_NAMES or _is_virtualenv(path):
+                    skipped.append(relative(name))
+                else:
+                    kept.append(name)
+            except OSError as exc:  # not kept: `os.walk` does not enter it, so it is reported once
+                not_read.append({"file": relative(name), "reason": exc.strerror or str(exc)})
         directories[:] = kept
         for name in sorted(names):
             if not name.endswith(".py"):
                 continue
-            if (Path(base) / name).is_symlink():
+            try:
+                link = _is_symlink(Path(base) / name)
+            except OSError as exc:
+                not_read.append({"file": relative(name), "reason": exc.strerror or str(exc)})
+                continue
+            if link:
                 not_read.append({"file": relative(name), "reason": "symbolic link"})
             else:
                 paths.append(relative(name))
     return sorted(paths), sorted(skipped), sorted(not_read, key=lambda item: item["file"])
+
+
+def _is_symlink(path) -> bool:
+    """Whether `path` is a symbolic link. Raises OSError when that cannot be found out."""
+    return stat.S_ISLNK(os.lstat(path).st_mode)
+
+
+def _is_virtualenv(directory) -> bool:
+    """Whether `directory` holds a `pyvenv.cfg` file. Raises OSError when that cannot be found out (e.g. no permission)."""
+    try:
+        return stat.S_ISREG(os.stat(Path(directory) / "pyvenv.cfg").st_mode)
+    except (FileNotFoundError, NotADirectoryError):
+        return False
 
 
 def _dotted(node):

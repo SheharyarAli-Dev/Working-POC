@@ -36,7 +36,10 @@ def test_controlled_dormant_execution(service,scenario,tmp_path):
     assert normal['facts']['functional_text']==activated['facts']['functional_text']
     assert not normal['facts']['canary_received'] and activated['facts']['canary_received']
     assert not any(e['type']=='SECRET_ACCESS' for e in normal['events'])
-    assert any(x['causal_confirmed'] for x in node['threat_correlations'])
+    # The connection is observed in every monitor mode (under strace it is a non-blocking connect, -1 EINPROGRESS).
+    assert any(e['type']=='NETWORK_CONNECT' for e in activated['events']),(activated['execution_mode'],sorted({e['type'] for e in activated['events']}))
+    assert not any(e['type']=='NETWORK_CONNECT' for e in normal['events'])
+    assert any(x['causal_confirmed'] for x in node['threat_correlations']),(activated['execution_mode'],node['threat_correlations'])
     assert all('kind' in x for x in node['causal_graph']['nodes'])
     assert all(Path(x['trace_path']).is_file() for x in node['runtime']['runs'])
 
