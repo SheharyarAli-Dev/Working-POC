@@ -1,5 +1,6 @@
 import React from 'react';
-import { CavrRunState } from './types';
+import { CavrRunState, NOT_COMPUTED, shown } from './types';
+import { AdvisoryList } from './AdvisoryList';
 import { ShieldCheck, AlertOctagon, HelpCircle, CheckCircle, FileText, Clock, Cpu, Lock, AlertTriangle } from 'lucide-react';
 
 interface OverviewTabProps {
@@ -7,30 +8,32 @@ interface OverviewTabProps {
 }
 
 export const OverviewTab: React.FC<OverviewTabProps> = ({ state }) => {
-  const { package: pkg, version: ver, verdict, policyState, honestyWording } = state;
-  const hash = state.resolution?.sha256 || 'Pending resolution';
-  const totalRuns = state.counterfactualResults?.total_runs || (verdict ? 1 : 0);
-  const totalTime = state.counterfactualResults?.budget_used_seconds || 1.8;
-  const residuals = state.counterfactualResults?.residual_uncertainty || [];
+  const { verdict, policyState, honestyWording } = state;
+  // The proof's package and version when there is a proof; before it arrives, those of the chip that was clicked.
+  const pkg = state.proofData?.package || state.package;
+  const ver = state.proofData?.version || state.version;
+  // Everything below is copied from the pipeline's verdict; nothing is filled in when it is missing.
+  const v = state.proofData?.cavr_verdict;
+  const resolution = state.resolution;
+  const hash: string | null = resolution?.sha256 || null;
+  const condition = state.proofData?.demo_condition;
+  const limits: any[] = state.certificate?.residual_uncertainty || [];
 
-  // Top 3 findings
   const findings: string[] = [];
-  if (state.gateResult?.result === "BLOCK") {
-    findings.push(`Requirement Gate: Matched explicit denylist rule '${state.gateResult.matched_rule}'.`);
+  if (state.gateResult && state.gateResult.result !== "PERMITTED") {
+    findings.push(`Requirement gate: ${state.gateResult.result} (${state.gateResult.matched_rule}). ${state.gateResult.reason}`);
   }
-  if (state.resolution?.known_risk_signals?.length) {
-    findings.push(`OSV Snapshot: Matched ${state.resolution.known_risk_signals[0].cve} (${state.resolution.known_risk_signals[0].severity}).`);
+  if (resolution?.hash_rule && resolution.hash_rule !== "HASH_MATCH") {
+    findings.push(`Artifact: ${resolution.hash_rule}. ${resolution.hash_reason || ''}`);
   }
-  if (state.counterfactualResults?.comparison?.new_behaviors_revealed_by_counterfactual > 0) {
-    findings.push(`Counterfactual: Exposed hidden exfiltration socket under synthesized AWS credentials.`);
+  if (resolution?.known_risk_signals?.length) {
+    findings.push(`OSV: ${shown(resolution.advisory_summary)}.`);
   }
-  if (state.causalGraph?.violating_paths?.length) {
-    findings.push(`Causal Graph: Prohibited source-to-sink path (canary -> network endpoint).`);
+  if (v?.escalation) {
+    findings.push(`Escalation: ${v.escalation}.`);
   }
-  if (findings.length === 0 && verdict === 'ALLOW') {
-    findings.push("Clean AST: Zero malicious syntax patterns or dangerous system sinks.");
-    findings.push("Clean Sandbox: 0 unauthorized socket connections across explored conditions.");
-    findings.push("OSV Database: 0 known vulnerabilities found in bundled snapshot.");
+  if (v) {
+    findings.push(`${v.stage} / ${v.rule}: ${v.reason}`);
   }
 
   return (
@@ -41,18 +44,20 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({ state }) => {
             {verdict === 'ALLOW' && <CheckCircle size={18} />}
             {verdict === 'BLOCK' && <AlertOctagon size={18} />}
             {verdict === 'NEEDS_REVIEW' && <AlertTriangle size={18} />}
-            <span>VERDICT: {verdict || 'ANALYZING'}</span>
+            <span>VERDICT: {shown(verdict)}</span>
           </div>
 
           <div className="policy-state-badge">
-            POLICY STATE: <strong>{policyState || 'EVALUATING'}</strong>
+            POLICY STATE: <strong>{shown(policyState)}</strong>
           </div>
         </div>
 
         <div className="overview-honesty-banner">
           <span className="honesty-tag">HONESTY WORDING</span>
-          <p className="honesty-claim">"{honestyWording}"</p>
-          <span className="honesty-sub">ASENT never uses the words "safe" or "proven safe". Bounded strictly to evaluated test conditions.</span>
+          <p className="honesty-claim">{shown(honestyWording)}</p>
+          <span className="honesty-sub">
+            {v ? `${v.status}: ${v.stage} / ${v.rule}` : 'The verdict is bounded by the checks that ran; it never says "safe".'}
+          </span>
         </div>
       </div>
 
@@ -60,38 +65,48 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({ state }) => {
       <div className="overview-stats-grid">
         <div className="overview-stat-box">
           <span className="stat-label"><FileText size={13} /> Package &amp; Version</span>
-          <strong className="stat-value">{pkg} <code>v{ver}</code></strong>
-          <span className="stat-meta">Scenario: {state.scenarioKey}</span>
+          <strong className="stat-value">{shown(pkg)} <code>{shown(ver)}</code></strong>
+          <span className="stat-meta">Scenario: {shown(state.scenarioKey)}</span>
         </div>
 
         <div className="overview-stat-box">
           <span className="stat-label"><Lock size={13} /> Artifact SHA-256</span>
-          <strong className="stat-value mono">{hash.substring(0, 16)}...</strong>
-          <span className="stat-meta">Cryptographically pinned</span>
+          <strong className="stat-value mono">{hash ? `${hash.substring(0, 16)}...` : NOT_COMPUTED}</strong>
+          <span className="stat-meta">
+            Hash check: {shown(resolution?.hash_rule)}
+          </span>
         </div>
 
         <div className="overview-stat-box">
-          <span className="stat-label"><Cpu size={13} /> Counterfactual Runs</span>
-          <strong className="stat-value">{totalRuns} container run(s)</strong>
-          <span className="stat-meta">Hardened disposable runner</span>
+          <span className="stat-label"><Clock size={13} /> Fast gate</span>
+          <strong className="stat-value">{v?.fast_gate_ms != null ? `${v.fast_gate_ms} ms` : NOT_COMPUTED}</strong>
+          <span className="stat-meta">Cache hit: {v ? (v.cache_hit ? 'yes' : 'no') : NOT_COMPUTED}</span>
         </div>
 
         <div className="overview-stat-box">
-          <span className="stat-label"><Clock size={13} /> Analysis Time</span>
-          <strong className="stat-value">{totalTime}s</strong>
-          <span className="stat-meta">Budget: 25.0s maximum</span>
+          <span className="stat-label"><Cpu size={13} /> Escalated</span>
+          <strong className="stat-value">{v ? (v.escalated ? 'yes' : 'no') : NOT_COMPUTED}</strong>
+          <span className="stat-meta">Escalation: {shown(v?.escalation)}</span>
         </div>
       </div>
+
+      {condition && (
+        <div className="overview-honesty-banner">
+          <span className="honesty-tag">DEMO CONDITION: {condition.id}</span>
+          <p className="honesty-claim">{condition.description}</p>
+          <span className="honesty-sub">The pipeline ran unchanged under this condition. A condition can only make a verdict worse.</span>
+        </div>
+      )}
 
       {/* Top Findings & Residuals Row */}
       <div className="overview-two-col">
         <div className="overview-card">
           <div className="card-header-row">
-            <h5>Top Security Findings</h5>
+            <h5>Findings of this run</h5>
             <span className="card-badge">{findings.length} recorded</span>
           </div>
           <ul className="findings-list">
-            {findings.slice(0, 3).map((f, i) => (
+            {findings.map((f, i) => (
               <li key={i} className="finding-item">
                 <span className="finding-num">{i + 1}</span>
                 <span>{f}</span>
@@ -102,18 +117,17 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({ state }) => {
 
         <div className="overview-card">
           <div className="card-header-row">
-            <h5>Residual Uncertainty Declaration</h5>
-            <span className="card-badge warn">{residuals.length} unreached</span>
+            <h5>What this verdict does not establish</h5>
+            <span className="card-badge warn">{limits.length} stated</span>
           </div>
-          {residuals.length === 0 ? (
-            <p className="clean-residual-note">All syntactic triggers explored within budget quota.</p>
+          {limits.length === 0 ? (
+            <p className="clean-residual-note">{verdict ? 'No limits were reported for this run.' : 'Available when the run has finished.'}</p>
           ) : (
             <div className="residual-list">
-              <p className="residual-intro">The following high-risk predicates remain unreached and are honestly declared:</p>
               <ul>
-                {residuals.map((r: any, idx: number) => (
+                {limits.map((r: any, idx: number) => (
                   <li key={idx}>
-                    <code>{r.predicate}</code> ({r.file_line}): Priority {r.priority}
+                    <code>{r.predicate}</code> ({r.file_line}): {r.reason}
                   </li>
                 ))}
               </ul>
@@ -121,6 +135,9 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({ state }) => {
           )}
         </div>
       </div>
+
+      {/* OSV: the count and the first three ids, with the whole list in a closed section */}
+      <AdvisoryList resolution={resolution} runId={state.runId} />
     </div>
   );
 };
