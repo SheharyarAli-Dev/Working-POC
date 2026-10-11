@@ -12,3 +12,7 @@ video-renderer/*.tmp.mp4
 frontend/dist/
 ASENT_CODEX_MASTER_HANDOFF.md
 ASENT_ANTIGRAVITY_LIVE_HANDOFF_ADDENDUM.md
+
+.satra_workspace/
+artifacts/satra/
+.venv-satra/

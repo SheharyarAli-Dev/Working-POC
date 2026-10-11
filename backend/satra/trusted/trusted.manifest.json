@@ -1,0 +1,13 @@
+{
+  "algorithm": "sha256-lf-normalized",
+  "files": {
+    "SRS.md": "62172f4da9fe0f156b63256a4fbdfff1a8ab86ae53363f0ab5f99f336c04223b",
+    "policy.json": "a69252bd1579072d1be78ee169a3470ab93f650c069e74df242d2c842df69c3c",
+    "trusted_pytest.ini": "b24f5458af2415dee762f72b90114a0fbaa4ce6162f3f547ce4647e6e51aaf5e",
+    "trusted_tests/conftest.py": "c3f1c519715b2fca5ab95765b6bcc69aa18622c62f5a46b351468fd815123983",
+    "trusted_tests/test_auth_required.py": "78a433b599c3fffade8730b4b1b5f0882a9e2f5535c96e750f2934acffaee252",
+    "trusted_tests/test_authz_idor.py": "d90ff7fc0bf522d38ca93f80105eb8dc12acef408a2574855ef2310306648a5e",
+    "trusted_tests/test_path_traversal.py": "277440facd44c052e8c6f31e8341b63193743960417de19fa8db50044ba85191",
+    "trusted_tests/test_sqli.py": "e26d320f9fcb8bbe9c04cf4a730e26e130a5cc92ce6b6354ede208fd6db91573"
+  }
+}

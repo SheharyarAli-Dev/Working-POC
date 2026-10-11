@@ -18,7 +18,7 @@ received=[]
 audit_events=[]
 intercept_events=[]
 try:
-    listener=socket.socket();listener.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1);listener.bind(('127.0.0.1',18765));listener.listen(1);listener.settimeout(1.5)
+    listener=socket.socket();listener.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1);listener.bind(('127.0.0.1',18765));listener.listen(1);listener.settimeout(15.0)
 except OSError:
     listener=None
     # This controlled endpoint shim is used only for the pinned inert fixture

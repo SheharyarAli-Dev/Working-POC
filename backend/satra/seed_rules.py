@@ -1,4 +1,4 @@
-from pathlib import Path
+﻿from pathlib import Path
 RULES=[
  {'id':'AUTHZ.IDOR.001','cwe':'CWE-639','family':'authorization / object ownership','applicability':['FastAPI','InvoiceHub'],'preconditions':['object ID from request','authenticated user','invoice ownership'],'expected_secure_behavior':'HTTP 403 and no state change','pytest_template':'trusted_security.py::test_nonowner_denied','input_classes':['owner','nonowner','unauthenticated','administrator'],'counterfactual_template':'bypass can_access_invoice','validation_rules':['parses','secure baseline passes','valid mutant killed by assertion','repeatable','local','bounded runtime'],'version':1},
  {'id':'AUTHN.001','cwe':'CWE-306','family':'authentication','applicability':['FastAPI','InvoiceHub'],'preconditions':['private invoice route'],'expected_secure_behavior':'HTTP 401 without token','pytest_template':'trusted_security.py::test_unauthenticated_denied','input_classes':['missing bearer token'],'counterfactual_template':None,'validation_rules':['parses','baseline passes','local'],'version':1},
