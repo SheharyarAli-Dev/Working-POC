@@ -274,6 +274,8 @@ Found in commit 0b (2026-10-10, `521c414`) and deliberately not fixed there:
   assertions. Because every failed syscall is skipped, a blocked connect or a failed open of a secret
   file in a `--network none` container would also leave no event (read from the code, not run; docker
   and podman modes were not executed). No code change now. -> M2 sandbox.
+  **Fixed for `connect(...) = -1 EINPROGRESS` on 2026-10-11** (the test failed in CI at exactly this assertion;
+  `docs/report-notes/cavr-report-notes.md`, "Defects found by CI"). Every other failed syscall is still skipped. -> M2 sandbox.
 
 Found in the batch 1-3 review (2026-10-10, MINOR items) and deliberately not fixed there:
 

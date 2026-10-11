@@ -2700,3 +2700,106 @@ Run on 2026-10-11. `tests/test_cavr_vendored_use.py`: 31 passed.
    REJECTED came from the sandbox (the lab file sent the canary). The repair candidate had nothing to reject, but its contract was `insufficient`, so it was UNRESOLVED, and `Service._repair` promotes only a VERIFIED candidate.
 3. **Why not fix the orchestrator's reader?**
    It belongs to another member. CAVR adds its own evidence next to the orchestrator's (`local_artifact_use`) and leaves `evidence` as returned.
+
+## Defects found by CI (2026-10-11)
+
+GitHub Actions run 38135800645 on `fd276d7` (Python 3.12, Docker and Podman disabled by the workflow): 2 failed, 1302 passed, 26 skipped.
+Both tests pass on the development machine (Python 3.14.4, no strace, no Docker). Both were reproduced locally with Python 3.12.15
+(`/usr/bin/python3.12`, a venv from `requirements.lock.txt`) and a strace 6.19 binary put on PATH, then fixed.
+
+| # | Test | Cause | Reproduced with |
+|---|---|---|---|
+| 1 | `tests/test_cavr_contract.py::test_directory_that_cannot_be_listed_makes_the_context_unresolved` | `context_extractor._python_files` called `(path / "pyvenv.cfg").is_file()` on a directory of mode 0. `Path.is_file()` raises `PermissionError` on Python 3.12 and returns False on 3.14. | Python 3.12, with or without strace |
+| 2 | `tests/test_modules.py::test_controlled_dormant_execution` | Not the Python-audit mode. With strace available the sandbox runs in `PINNED_INERT_LAB_STRACE`; `runtime_monitor.normalize` dropped every line with ` = -1 `, and the lab file's `socket.create_connection(..., timeout=1)` is a non-blocking connect that strace prints as `connect(...) = -1 EINPROGRESS`. No `NETWORK_CONNECT` event, so no SECRET_READ -> NETWORK_CONNECT pair and no `causal_confirmed`. | Python 3.12 and 3.14 with strace on PATH; passes on both without strace |
+
+The CI log does not print the execution mode, so "the runner has strace" is concluded from the reproduction, not read from the log.
+The test now prints the mode in its assertion message. Defect 2 was already written down as deferred in `docs/cavr-m1-plan.md`
+("Found in commit 0b"); the EINPROGRESS part is now fixed.
+
+### Ch 6 Implementation
+
+| File | Function | Change |
+|---|---|---|
+| `backend/cavr/context_extractor.py` (238 -> 273 lines) | `_is_symlink(path)`, `_is_virtualenv(directory)` (new) | `os.lstat` / `os.stat` with `stat.S_ISLNK` / `S_ISREG`. "Not found" is False; any other `OSError` is raised to the caller. |
+| | `_python_files` | The checks of a directory are inside `try / except OSError`: the directory is added to `not_read` and is not entered. The symlink check of a `.py` file is caught the same way. |
+| | `extract_project_context` | The check of the project directory itself uses `os.stat`: missing -> `PROJECT_MISSING` as before; exists but may not be examined -> `SOURCE_NOT_READ` with `not_read == [{"file": "."}]` (on 3.12 this raised, on 3.14 it said "does not exist"). |
+| `backend/cavr/runtime_monitor.py` (18 -> 20 lines) | `normalize` | A line with ` = -1 ` is still skipped, except `connect(` with ` = -1 EINPROGRESS`. Whether it becomes an event is decided by the unchanged rule below it (`AF_INET` only). |
+| `tests/test_cavr_runtime_monitor.py` (new, 5 functions, 9 cases) | | See below. |
+| `tests/test_cavr_contract.py` (+4 functions, 6 cases, and the helper `refuse`) | | See below. |
+| `tests/test_modules.py` | `test_controlled_dormant_execution` | Two assertions added (a `NETWORK_CONNECT` event in the activated run, none in the normal run) and the mode in two assertion messages. Nothing removed. |
+
+Key algorithm (walk): for each directory `os.walk` offers: symlink -> `not_read`; hidden / cache / virtualenv -> `skipped`;
+a check that raises `OSError` -> `not_read`, not entered; otherwise entered. Any `not_read` entry makes the result UNRESOLVED `SOURCE_NOT_READ`.
+
+### Design decisions
+
+| Decision | Alternative | Why |
+|---|---|---|
+| `os.stat` / `os.lstat` with our own `except` | Keep `pathlib` and wrap it in `try` | `pathlib` hides the error on 3.14, so the unreadable directory was treated as "no virtualenv" there. With `os.stat` both versions do the same and the tests can show it. |
+| A directory whose check fails is `not_read` and not entered | Enter it and let `os.walk` report it | One entry per directory on every version (entering reports it a second time, or lists files that cannot be read). |
+| Fix `normalize` so the correlation is produced | Change the test to expect no confirmation under strace | The confirmation is valid in strace mode: the trace has the read of `canary.txt`, then the connect to `127.0.0.1:18765`, and the harness received the exact marker. Only the parser lost the connect. It also lost the `NETWORK_CONNECT` violation. |
+| Keep only EINPROGRESS for `connect` | Keep every failed `connect`, or check `getsockopt(SO_ERROR)` afterwards | EINPROGRESS means "started", not "failed". A refused connect made no connection, and counting attempts is the M2 sandbox decision already in the plan. Following `getsockopt` needs per-descriptor state across `<unfinished ...>` lines. |
+| Change in `runtime_monitor.py`, not in `threat_repo/source_sink_rules.py` | Make `correlate` accept a received marker without a connect event | `correlate` is right to require the ordered events; it is also outside this branch. |
+
+### Requirements covered
+
+No `FR-CAVR-NN` identifiers exist in this repository; IDs are from `RequirementsTab.tsx` (Maryam to confirm).
+
+| ID | Title | What this covers | Acceptance check |
+|---|---|---|---|
+| FR-6 | Fail-Closed Security Policy | Project source that cannot be examined is UNRESOLVED on every Python version, never a crash and never "no virtualenv" | `test_directory_that_cannot_be_searched_is_reported_once_whatever_its_mode` (3), `test_virtualenv_check_that_fails_makes_the_directory_not_read_on_every_python` |
+| none listed | Runtime observation: a network connection is observed in every monitor mode | strace: non-blocking connect | `test_recorded_lab_trace_has_the_secret_read_and_then_the_connection`, `tests/test_modules.py::test_controlled_dormant_execution` |
+
+### Ch 7 Test cases
+
+Run on 2026-10-11.
+
+| Test ID | Purpose | Input | Expected | Result |
+|---|---|---|---|---|
+| `test_directory_that_cannot_be_listed_makes_the_context_unresolved` (existing) | CI defect 1 | directory of mode 0 | UNRESOLVED `SOURCE_NOT_READ`, `not_read == ["locked"]` | pass on 3.12 and 3.14 (3.12 before: `PermissionError`) |
+| `test_directory_that_cannot_be_searched_is_reported_once_whatever_its_mode` (3) | Edge: modes 000, 444, 200, with a nested directory | real `chmod` | one `not_read` entry "locked", only `a.py` read | pass |
+| `test_virtualenv_check_that_fails_makes_the_directory_not_read_on_every_python` | The 3.12 behaviour on any Python | `os.stat` refuses `pyvenv.cfg` | `not_read == ["pkg"]`, nothing skipped | pass |
+| `test_symlink_check_that_fails_is_not_read` | Failure of `lstat` on a file, and on a directory with an I/O error | `os.lstat` refuses `b.py`, then `pkg` | that name in `not_read` with the error text | pass |
+| `test_project_directory_that_may_not_be_examined_is_not_called_missing` | The project directory under a closed parent; a file and a path under a file as "project" | real `chmod` | `SOURCE_NOT_READ` with `"."`; then OK; `PROJECT_MISSING` for the two non-directories | pass |
+| `test_recorded_lab_trace_has_the_secret_read_and_then_the_connection` | CI defect 2 on recorded strace lines | 8 lines of the real trace | FILE_WRITE, SECRET_ACCESS, NETWORK_CONNECT `127.0.0.1:18765` | pass |
+| `test_recorded_lab_trace_gives_the_confirmed_correlation_and_the_network_violation` | Correlation and violations from those events | events + received marker | one confirmed SECRET_ACCESS -> NETWORK_CONNECT hit; violations SECRET_ACCESS, NETWORK_CONNECT, CANARY_FLOW | pass |
+| `test_the_connection_alone_is_not_a_confirmed_flow` | Failure cases of the confirmation | nothing received; another payload; no read; connect before read | not confirmed / no hit | pass |
+| `test_connect_results` (5) | Which connect results are events | `= 0`, EINPROGRESS, ECONNREFUSED, ENETUNREACH, EACCES | event for the first two only | pass |
+| `test_einprogress_is_an_exception_for_connect_only` | Edge: EINPROGRESS on `openat`; failed `openat` / `execve`; `AF_UNIX` connect; non-loopback address | single lines | no event, except the `AF_INET` connect ("unresolved socket") | pass |
+| `tests/test_modules.py::test_controlled_dormant_execution` | The CI test, with two more assertions | `cavr_canary` scenario | REJECTED, canary received only when activated, NETWORK_CONNECT only when activated, `causal_confirmed` | pass in `PINNED_INERT_LAB_PYTHON_AUDIT` and `PINNED_INERT_LAB_STRACE`, on 3.12 and 3.14 |
+
+- Old code against the new tests: Python 3.14 without strace -> 9 failed; Python 3.12 with strace -> 13 failed, among them the two CI failures.
+- `.venv/bin/python -m pytest -q` (Python 3.14.4, no strace) -> 1338 passed, 0 failed, 7 skipped (was 1323 passed).
+- Python 3.12.15 with strace on PATH, no Docker / Podman -> 1338 passed, 0 failed, 7 skipped. CI has 26 skips because the frontend render tests need Node modules there.
+- Not run: the docker and podman modes (not installed here, disabled in CI).
+
+### Defects found and fixed
+
+- Defect 1 and defect 2 above.
+- Found while fixing 1: on Python 3.14 the old code did not report a directory of mode 444 as one unreadable directory (case `[292]` failed on the old code), and called a project directory under a closed parent "does not exist". Both fixed by the same change.
+- Found while fixing 2: under strace the lab run also had no `NETWORK_CONNECT` violation (only SECRET_ACCESS and CANARY_FLOW). It has one now.
+- Review: 0 passes of cavr-reviewer (not requested), no verdict, 0 MINOR recorded.
+
+### Known limitations / deferred
+
+- Every other failed syscall is still skipped by `normalize`: a refused or blocked connect and a failed open of a secret file leave no event (plan, "Found in commit 0b"). -> M2 sandbox.
+- An EINPROGRESS connect is recorded without checking that it completed.
+- The file-level `lstat` failure can only happen when permissions change during the walk; it is tested by replacing `os.lstat`, not with a real file system.
+- `os.walk` decides "directory or file" itself; on a file system without entry types, a subdirectory of a directory that may be listed but not searched could be taken for a file. Its parent is already `not_read` in that case (the `pyvenv.cfg` check fails first).
+- The fix is confirmed on GitHub only when the next CI run is green; here it is confirmed with Python 3.12 and a local strace.
+- `reports/scenario-validation.json` was rewritten by the runs, restored, not committed.
+
+### Tool disclosure (Ch 8.7)
+
+- **Generated by Claude Code:** the reproduction (Python 3.12 venv and a strace binary in a scratch directory, not kept), both fixes, the tests, the plan line, these notes, the study Q&A entry, the commit.
+- **Reviewed / changed by Maryam:** she reported the two CI failures and set the rule for defect 2 (produce the confirmation if it is valid, do not weaken REJECTED and the canary assertions). Nothing reviewed yet.
+- **Verified by:** the CI log of run 38135800645 (read with `gh`), old code against new tests, the two full-suite runs above. No cavr-reviewer pass.
+
+### Supervisor Q&A prep
+
+1. **Why did the tests pass on your machine and fail in CI?**
+   Two differences: Python 3.12 against 3.14 (`Path.is_file()` raises on a permission error only in 3.12), and strace present against absent (a different monitor, with a parser that lost one line).
+2. **Is the confirmed flow under strace real, or did you make the test pass?**
+   Real: the trace holds the read of `canary.txt`, then the connect to the harness port, and the harness received the exact marker. Without a received marker, with another payload, without the read, or in the wrong order, there is no confirmation (`test_the_connection_alone_is_not_a_confirmed_flow`).
+3. **Was a wrong verdict ever given?**
+   No. The lab file was REJECTED in both modes. What was missing under strace was one event, its violation and the causal confirmation; what was wrong on 3.12 was a crash instead of UNRESOLVED.

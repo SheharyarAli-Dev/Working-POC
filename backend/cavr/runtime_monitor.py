@@ -3,7 +3,9 @@ import re
 def normalize(trace):
     events=[]
     for line in trace.splitlines():
-        if ' = -1 ' in line:continue
+        # A failed syscall did nothing, except connect() on a socket with a timeout: that socket is
+        # non-blocking, so the call returns -1 EINPROGRESS and the connection is made afterwards.
+        if ' = -1 ' in line and not ('connect(' in line and ' = -1 EINPROGRESS' in line):continue
         kind=None;resource=None
         if 'connect(' in line and 'AF_INET' in line:
             kind='NETWORK_CONNECT';resource='127.0.0.1:18765' if '18765' in line else 'unresolved socket'

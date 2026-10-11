@@ -357,3 +357,20 @@ The fix is `capability_contract.use_through_local_artifacts`: it follows the cha
 links: the lock holds pypdf and a LOCAL `.py` file with the locked SHA-256; a file in `app/` imports it; the application
 calls the imported name; that file calls pypdf. Example: `app/pdf_adapter.py:1` imports, `app/main.py:87` calls,
 `vendor/invoice_pdf_safe.py` calls `PdfReader`. One link missing -> `[]` -> still UNRESOLVED.
+
+### Q2. Why did CI fail two tests that pass on my machine?
+
+Two different reasons, one per test. Neither was a wrong verdict; both were places where CAVR did not report something.
+
+1. `test_directory_that_cannot_be_listed_makes_the_context_unresolved`: CI runs Python 3.12, I run 3.14.
+   `context_extractor._python_files` asked `(directory / "pyvenv.cfg").is_file()` to skip virtual environments. For a
+   directory without permission, Python 3.12 raises `PermissionError`; Python 3.14 answers False. So on 3.12 the
+   walk crashed. Now `_is_virtualenv` and `_is_symlink` use `os.stat` / `os.lstat`, the walk catches `OSError`, and
+   the directory goes to `not_read` -> UNRESOLVED `SOURCE_NOT_READ` on both versions.
+2. `test_controlled_dormant_execution`: the CI machine has strace, mine does not, so CI ran the lab file in the mode
+   `PINNED_INERT_LAB_STRACE` (reproduced here with strace on PATH; without strace the test passes on 3.12 too).
+   `runtime_monitor.normalize` skipped every strace line with ` = -1 `. The lab file connects with a timeout, which
+   makes the socket non-blocking, and strace prints that as `connect(...) = -1 EINPROGRESS`. No `NETWORK_CONNECT`
+   event -> no "secret read, then network" pair -> no `causal_confirmed`. Now that one line is kept.
+   Example: the trace has `openat("canary.txt", O_RDONLY) = 4`, then the connect to `127.0.0.1:18765`, and the
+   harness receives the marker: that is the confirmed flow. The verdict was REJECTED before and after.

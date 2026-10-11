@@ -203,6 +203,73 @@ def test_directory_that_cannot_be_listed_makes_the_context_unresolved(tmp_path):
     assert outcome(extract_project_context(root)) == ("OK", "PROJECT_READ")
 
 
+@pytest.mark.parametrize("mode", [0o000, 0o444, 0o200])
+def test_directory_that_cannot_be_searched_is_reported_once_whatever_its_mode(tmp_path, mode):
+    """CI defect (Python 3.12): the `pyvenv.cfg` check raised PermissionError out of the walk."""
+    root = project(tmp_path, {"a.py": "import pypdf\n", "locked/b.py": "import pypdf\n", "locked/deep/c.py": "import pypdf\n"})
+    if os.geteuid() == 0:
+        pytest.skip("root can read every directory")
+    os.chmod(root / "locked", mode)
+    try:
+        context = extract_project_context(root)
+    finally:
+        os.chmod(root / "locked", 0o755)
+    assert outcome(context) == ("UNRESOLVED", "SOURCE_NOT_READ")
+    assert context["not_read"] == [{"file": "locked", "reason": "Permission denied"}]
+    assert [entry["path"] for entry in context["files"]] == ["a.py"]
+
+
+def refuse(monkeypatch, function_name, refused_name, error=PermissionError(13, "Permission denied")):
+    """Make `os.stat` / `os.lstat` fail for one file name, on every Python version."""
+    real = getattr(os, function_name)
+
+    def probe(path, *args, **kwargs):
+        if os.path.basename(os.fspath(path)) == refused_name:
+            raise error
+        return real(path, *args, **kwargs)
+
+    monkeypatch.setattr(context_extractor.os, function_name, probe)
+
+
+def test_virtualenv_check_that_fails_makes_the_directory_not_read_on_every_python(tmp_path, monkeypatch):
+    """The same defect without a chmod: Python 3.14's `is_file()` hid this error and the directory was read as project code."""
+    root = project(tmp_path, {"a.py": "import pypdf\n", "pkg/b.py": "import pypdf\n", "pkg/deep/c.py": "import pypdf\n"})
+    refuse(monkeypatch, "stat", "pyvenv.cfg")
+    context = extract_project_context(root)
+    assert outcome(context) == ("UNRESOLVED", "SOURCE_NOT_READ")
+    assert context["not_read"] == [{"file": "pkg", "reason": "Permission denied"}]
+    assert context["skipped_directories"] == [] and [entry["path"] for entry in context["files"]] == ["a.py"]
+
+
+def test_symlink_check_that_fails_is_not_read(tmp_path, monkeypatch):
+    root = project(tmp_path, {"a.py": "import pypdf\n", "b.py": "import pypdf\n", "pkg/c.py": "import pypdf\n"})
+    refuse(monkeypatch, "lstat", "b.py")
+    context = extract_project_context(root)
+    assert outcome(context) == ("UNRESOLVED", "SOURCE_NOT_READ")
+    assert context["not_read"] == [{"file": "b.py", "reason": "Permission denied"}]
+    monkeypatch.undo()
+    refuse(monkeypatch, "lstat", "pkg", OSError(5, "Input/output error"))
+    context = extract_project_context(root)
+    assert outcome(context) == ("UNRESOLVED", "SOURCE_NOT_READ")
+    assert context["not_read"] == [{"file": "pkg", "reason": "Input/output error"}]
+
+
+def test_project_directory_that_may_not_be_examined_is_not_called_missing(tmp_path):
+    root = project(tmp_path / "closed", {"a.py": "import pypdf\n"})
+    if os.geteuid() == 0:
+        pytest.skip("root can read every directory")
+    os.chmod(tmp_path / "closed", 0)
+    try:
+        context = extract_project_context(root)
+    finally:
+        os.chmod(tmp_path / "closed", 0o755)
+    assert outcome(context) == ("UNRESOLVED", "SOURCE_NOT_READ")
+    assert context["not_read"] == [{"file": ".", "reason": "Permission denied"}] and "cannot be examined" in context["reason"]
+    assert outcome(extract_project_context(root)) == ("OK", "PROJECT_READ")
+    assert outcome(extract_project_context(root / "a.py")) == ("UNRESOLVED", "PROJECT_MISSING")
+    assert outcome(extract_project_context(root / "a.py" / "under_a_file")) == ("UNRESOLVED", "PROJECT_MISSING")
+
+
 def test_budgets(tmp_path, monkeypatch):
     root = project(tmp_path, {"a.py": "x = 1\n", "b.py": "y = 2\n" * 10})
     monkeypatch.setattr(context_extractor, "MAX_FILE_BYTES", 20)
