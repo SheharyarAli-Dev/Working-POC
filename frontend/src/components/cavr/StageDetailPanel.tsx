@@ -1,5 +1,5 @@
 import React from 'react';
-import { CavrRunState } from './types';
+import { CavrRunState, NOT_COMPUTED, shown } from './types';
 import { Shield, Info, ArrowRight, CheckCircle2, AlertTriangle, XCircle, Search } from 'lucide-react';
 
 interface StageDetailPanelProps {
@@ -7,94 +7,77 @@ interface StageDetailPanelProps {
 }
 
 export const StageDetailPanel: React.FC<StageDetailPanelProps> = ({ state }) => {
-  const { stepIndex, explainSimply, package: pkgName, version: pkgVer, verdict, policyState } = state;
+  const { stepIndex, explainSimply, verdict, policyState } = state;
+
+  // The pipeline's verdict (from /api/cavr/proof) and the payloads of the stages that ran.
+  // The step index of a run is the last stage that ran: 0 request, 1 gate, 2 artifact / tree / OSV,
+  // 3 cache lookup, 4 contract / scan / sinks. Later timeline steps do not exist on the fast gate.
+  const v = state.proofData?.cavr_verdict;
+  const resolution = state.resolution;
+  const contract = state.actionData?.capability_contract;
+  const sinks: any[] = state.actionData?.reachability?.sinks || [];
+  const verdictLine = v ? `Verdict: ${v.status} (${v.stage} / ${v.rule}). ${v.reason}` : null;
+  const afterThis = (next: string) => (verdict ? "The run has finished; nothing was installed." : next);
 
   const stageDescriptions = [
     {
-      title: "Step 1: Capture (P1 Intercept)",
-      what: `AI coding agent attempted 'pip install ${pkgName}==${pkgVer}'. ASENT local proxy intercepted request before execution.`,
-      why: "Preventing untrusted packages from running setup.py hooks or modifying the host operating system.",
-      evidence: state.gateResult ? `Intercepted command targeting local PEP 503 proxy at port 8000.` : "Awaiting agent command interception.",
-      next: "Evaluate against project requirement policy (P2 Requirement Gate)."
+      title: "Step 1: Capture (C1)",
+      what: state.request
+        ? `Request received: '${state.request}'. It is verified before anything is installed.`
+        : "No request yet. Choose one of the requests above.",
+      why: "A request is only as trustworthy as what is actually downloaded for it, so it is checked first.",
+      evidence: state.runId ? `Run ${state.runId}.` : NOT_COMPUTED,
+      next: afterThis("Requirement gate (C2).")
     },
     {
-      title: "Step 2: Requirement Gate (P2 Gate)",
-      what: state.gateResult 
-        ? `Evaluated project_policy.json rule: ${state.gateResult.rule_checked} -> ${state.gateResult.result}.` 
-        : "Checking project allowlist and denylist constraints.",
-      why: "Ensuring all dependencies strictly match authorized requirements before dispatching to sandbox.",
-      evidence: state.gateResult?.reason || "Pending policy evaluation.",
-      next: state.gateResult?.result === "BLOCK" 
-        ? "Package flagged on explicit denylist. Proceeding with forensic inspection and alternative repair."
-        : "Quarantine artifact in read-only sandbox directory (P5 Resolution)."
+      title: "Step 2: Requirement Gate (C2)",
+      what: state.gateResult
+        ? `${state.gateResult.rule_checked}: ${state.gateResult.result} (${state.gateResult.matched_rule}).`
+        : "Checking the request against the project policy.",
+      why: "A request the policy does not permit is stopped before anything is downloaded.",
+      evidence: shown(state.gateResult?.reason),
+      next: afterThis("Download the wheel and compare its SHA-256 with the registry (C3).")
     },
     {
-      title: "Step 3: Quarantine & Transitive Resolution (P5)",
-      what: state.resolution 
-        ? `Quarantined artifact sha256:${state.resolution.sha256?.substring(0, 16)}... Built transitive tree (${state.resolution.tree?.nodes?.length || 1} packages).`
-        : "Locked package into read-only isolation.",
-      why: "Preventing filesystem alterations while analyzing the entire dependency DAG against the offline OSV database.",
-      evidence: state.resolution?.known_risk_signals?.length 
-        ? `Found ${state.resolution.known_risk_signals.length} vulnerability advisory in offline OSV snapshot (${state.resolution.known_risk_signals[0].cve}).`
-        : "No known CVE matches in offline OSV snapshot.",
-      next: "Check package against SQLite trusted cache store."
+      title: "Step 3: Artifact, dependency tree and advisories (C3)",
+      what: resolution
+        ? `Artifact ${shown(resolution.filename)}: ${shown(resolution.hash_rule)}. Tree: ${shown(resolution.tree?.rule)} (${shown(resolution.tree?.nodes?.length)} files).`
+        : "Downloading the wheel and reading its dependencies.",
+      why: "The SHA-256 is computed from the downloaded bytes and compared with the registry digest; every dependency is checked the same way.",
+      evidence: resolution
+        ? (resolution.known_risk_signals?.length
+          ? `OSV: ${shown(resolution.advisory_summary)}. The whole list is in the Overview tab and in the proof.`
+          : `sha256 ${shown(resolution.sha256)}; registry ${shown(resolution.registry_sha256)}. OSV: ${shown((resolution.advisories || []).map((a: any) => a.rule).join(', '))}.`)
+        : NOT_COMPUTED,
+      next: afterThis("Look up the verdict cache on the 8-field key.")
     },
     {
-      title: "Step 4: Cache Verification (Cache Check)",
-      what: state.cacheResult?.result === "HIT"
-        ? "Pre-verified cache HIT! Cryptographic hash matches trusted database."
-        : (state.cacheResult?.result === "HASH_MISMATCH" ? "HASH MISMATCH! Artifact bytes altered." : "Cache MISS: Package not previously verified."),
-      why: "Fast-tracking known safe packages to save analysis budget while quarantining modified binaries.",
-      evidence: state.cacheResult?.result === "HIT" 
-        ? "Exact match in trusted_packages SQLite table." 
-        : (state.cacheResult?.reason || "Proceeding to deep analysis."),
-      next: state.cacheResult?.result === "HIT" ? "Release directly to agent environment." : "Dispatch to Static AST Action (P3, P4, P6)."
+      title: "Step 4: Verdict cache lookup",
+      what: state.cacheResult ? `Cache: ${state.cacheResult.result}.` : "Looking for a stored analysis of exactly these inputs.",
+      why: "A stored analysis is reused only when the file, the tree, the contract, the policy and the analyzer are all the same. OSV is asked again either way.",
+      evidence: state.cacheResult?.reason || (state.cacheResult?.key ? `key ${state.cacheResult.key}` : NOT_COMPUTED),
+      next: afterThis("Contract from the project's call sites, then the AST scan.")
     },
     {
-      title: "Step 5: Static Action Inspection (P3, P4, P6)",
-      what: state.actionData
-        ? `Inferred capability contract (${state.actionData.capability_contract?.summary?.required_count} required, ${state.actionData.capability_contract?.summary?.denied_count} denied). Discovered ${state.actionData.triggers_info?.total_triggers} environment predicates.`
-        : "Analyzing Python AST syntax tree, sinks, and capability contracts.",
-      why: "Deriving deterministic capabilities from real project call sites before running dynamic tests.",
-      evidence: state.actionData?.triggers_info?.ranked_triggers?.length
-        ? `Top trigger: ${state.actionData.triggers_info.ranked_triggers[0].predicate} (Priority Score: ${state.actionData.triggers_info.ranked_triggers[0].priority})`
-        : "Zero dangerous AST sinks detected.",
-      next: "Execute multi-run adaptive counterfactual exploration in hardened sandbox (P7, P8)."
-    },
-    {
-      title: "Step 6: Hostile Environment Testing (P7, P8)",
-      what: state.counterfactualResults
-        ? `Completed ${state.counterfactualResults.total_runs} container runs. Stop reason: ${state.counterfactualResults.stop_reason}`
-        : "Running adaptive counterfactual frontier loop in isolated container.",
-      why: "Dormant malware evades single-run sandboxes by waiting for specific credentials or environment variables.",
-      evidence: state.counterfactualResults?.comparison?.new_behaviors_revealed_by_counterfactual > 0
-        ? `Counterfactual activation exposed ${state.counterfactualResults.comparison.new_behaviors_revealed_by_counterfactual} hidden behavior(s) invisible to baseline run!`
-        : "Behavior remained stable and clean across synthesized conditions.",
-      next: "Construct NetworkX causal capability graph and evaluate deterministic policy (P9)."
-    },
-    {
-      title: "Step 7: Deterministic Verdict & Repair (P9, P10, P11)",
-      what: verdict 
-        ? `Assurance Gate Verdict: ${verdict} (Policy: ${policyState || 'EVALUATED'}).`
-        : "Evaluating causal graph source-to-sink paths against capability contract.",
-      why: "Applying fail-closed security rules: unauthorized network connects or credential accesses result in REJECTED.",
-      evidence: state.repair?.chosen_candidate 
-        ? `Minimal repair identified: ${state.repair.chosen_candidate.name}==${state.repair.chosen_candidate.version} (${state.repair.chosen_candidate.level_name}).`
-        : (state.honestyWording || "Evaluation complete."),
-      next: verdict === "ALLOW" ? "Clean reconstruction and release (P12, P13)." : "Awaiting human operator approval for repair substitute."
-    },
-    {
-      title: "Step 8: Clean Reconstruction & Assurance (P12, P13)",
-      what: state.reconstruction
-        ? `Production environment reconstructed from clean baseline (${state.reconstruction.baseline_digest?.substring(0, 20)}...). Sandbox discarded.`
-        : "Generating tamper-evident cryptographic hash chain and assurance certificate.",
-      why: "Ensuring analysis sandboxes are never reused, and all evidence is cryptographically provable.",
-      evidence: state.certificate 
-        ? `Certificate ${state.certificate.certificate_id} issued. Root digest: ${state.certificate.evidence_chain_root?.substring(0, 16)}...`
-        : "Ledger hash chain complete.",
-      next: "Workflow finalized. Production environment secured."
+      title: "Step 5: Capability contract, AST scan and sinks (C4)",
+      what: contract
+        ? `${contract.rule}: ${shown(contract.summary?.required_count)} required, ${shown(contract.summary?.denied_count)} denied capabilities; ${(contract.call_sites || []).length} call sites.`
+        : "Reading the project's imports and call sites.",
+      why: "A sensitive call inside a wheel only matters when the contract does not allow it and the project's call sites can reach it.",
+      // "Nothing found" is a result of the scan. Without a sink judgement (the pipeline stopped before
+      // the scan, as for a version OSV rejects) there is no such result, only a dash.
+      evidence: state.actionData?.reachability
+        ? (sinks.length
+          ? sinks.map((sink: any) => `${sink.file}:${sink.line} ${sink.sink} ${sink.verdict}`).join('; ')
+          : "No sensitive sink call found in the scanned wheels.")
+        : NOT_COMPUTED,
+      next: afterThis("Verdict.")
     }
   ];
+  if (verdictLine) {
+    // Once the verdict is known every stage shows it, so the panel never ends on an intermediate message.
+    stageDescriptions.forEach(stage => { stage.what = `${stage.what} ${verdictLine}`; });
+  }
 
   const current = stageDescriptions[Math.min(stepIndex, stageDescriptions.length - 1)];
 
@@ -106,10 +89,10 @@ export const StageDetailPanel: React.FC<StageDetailPanelProps> = ({ state }) => 
           <h4>{current.title}</h4>
         </div>
         <div className="stage-status-indicator">
-          {verdict === 'ALLOW' && <span className="status-chip good"><CheckCircle2 size={13} /> {state.honestyWording}</span>}
-          {verdict === 'BLOCK' && <span className="status-chip bad"><XCircle size={13} /> Policy Violation Detected</span>}
-          {verdict === 'NEEDS_REVIEW' && <span className="status-chip warn"><AlertTriangle size={13} /> Review Required (Fail Closed)</span>}
-          {!verdict && <span className="status-chip neutral"><Search size={13} /> Stage in progress</span>}
+          {verdict === 'ALLOW' && <span className="status-chip good"><CheckCircle2 size={13} /> Verified by the fast gate</span>}
+          {verdict === 'BLOCK' && <span className="status-chip bad"><XCircle size={13} /> {policyState === 'BLOCK' ? 'Blocked by the project policy' : 'Rejected: a check failed'}</span>}
+          {verdict === 'NEEDS_REVIEW' && <span className="status-chip warn"><AlertTriangle size={13} /> Unresolved (fail closed){v?.escalation ? `: ${v.escalation}` : ''}</span>}
+          {!verdict && <span className="status-chip neutral"><Search size={13} /> {state.runId ? 'Run in progress' : 'No run yet'}</span>}
         </div>
       </div>
 
@@ -120,7 +103,7 @@ export const StageDetailPanel: React.FC<StageDetailPanelProps> = ({ state }) => 
         </div>
         <div className="stage-col">
           <span className="col-label">WHY THIS MATTERS</span>
-          <p>{explainSimply ? "We verify the code so no backdoors or data thieves get into your app." : current.why}</p>
+          <p>{current.why}</p>
         </div>
         <div className="stage-col">
           <span className="col-label">EVIDENCE FOUND</span>

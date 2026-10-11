@@ -4,11 +4,15 @@ Hash-chains every evidence transition event into an immutable ledger:
 Record = {seq, ts, phase, type, data, prev_hash, sha256}
 Provides verification function re-walking the chain.
 Generates Certificate JSON and printable HTML report with bounded trust claim.
+
+Since plan step 13 the certificate is built by `certificate_for_verdict` from a pipeline
+verdict; it copies values and never fills in a result for a check that did not run.
 """
 from __future__ import annotations
 import hashlib
 import json
 import time
+from html import escape
 
 GENESIS_HASH = "0000000000000000000000000000000000000000000000000000000000000000"
 
@@ -86,42 +90,73 @@ def verify_chain(records: list[dict]) -> dict:
         "message": f"Cryptographic evidence chain verified intact ({len(records)}/{len(records)} blocks verified)."
     }
 
-def generate_certificate(run_data: dict) -> dict:
-    pkg = run_data.get("package", "unknown")
-    ver = run_data.get("version", "1.0.0")
-    run_id = run_data.get("run_id", "cavr-run")
-    verdict = run_data.get("verdict", "ALLOW")
-    terminal_hash = run_data.get("terminal_hash", "0" * 64)
+CLAIMS = {
+    "VERIFIED": "Every fast-gate check passed for this file and this project: registry SHA-256, dependency tree, OSV "
+                "advisories, capability contract, AST scan and sink reachability. No package code was run. This is not a "
+                "claim that the package is safe; it is bounded by the checks listed here.",
+    "REJECTED": "A check failed. The request must not be installed.",
+    "BLOCK": "The project policy does not permit this request. Nothing was downloaded.",
+    "UNRESOLVED": "Something could not be established. Unknown is not treated as a pass.",
+}
+ALIASES = {"VERIFIED": "ALLOW", "REJECTED": "BLOCK", "BLOCK": "BLOCK", "UNRESOLVED": "NEEDS_REVIEW"}
+NOT_REACHED = "NOT_REACHED"
 
+
+def certificate_for_verdict(run_id: str, verdict: dict, terminal_hash: str, demo_condition=None) -> dict:
+    """The certificate of one pipeline verdict. Every value is copied from the verdict.
+
+    A check the pipeline did not reach is written as NOT_REACHED, never as passed. Each
+    capability row is the contract's own decision (REQUIRED / OPTIONAL / DENIED) for the
+    project, not an observation of the package.
+    """
+    status = verdict.get("status")
+    packages = verdict.get("packages") or []
+    package = packages[0] if packages else {}
+    evidence = package.get("evidence") or {}
+    artifact, tree, contract = (evidence.get(key) or {} for key in ("artifact", "tree", "contract"))
+    reachability = evidence.get("reachability") or {}
+    requested = ((verdict.get("request") or {}).get("requirements") or [{}])[0]
+    requested = requested if isinstance(requested, dict) else {}
+    advisories = evidence.get("advisories") or []
+    scans = evidence.get("scan") or []
     return {
         "certificate_id": f"CERT-ASENT-{run_id}",
-        "schema": "https://asent.dev/schema/assurance-certificate/v1.json",
+        "schema": "https://asent.dev/schema/assurance-certificate/v2.json",
         "timestamp": time.time(),
         "subject": {
-            "package": pkg,
-            "version": ver,
-            "artifact_sha256": run_data.get("sha256", ""),
-            "baseline_digest": run_data.get("baseline_digest", f"sha256:{hashlib.sha256(b'base').hexdigest()}")
+            "package": package.get("package") or requested.get("canonical_name"),
+            "version": package.get("version") or requested.get("version"),
+            "artifact_sha256": artifact.get("sha256"),
+            "registry_sha256": artifact.get("registry_sha256"),
+            "subtree_digest": tree.get("subtree_digest"),
+            "contract_digest": contract.get("digest"),
+            "other_packages_in_request": [f"{other.get('package')}=={other.get('version')}" for other in packages[1:]],
         },
-        "verdict": verdict,
-        "bounded_trust_claim": "No malicious behavior observed under our tests. Does NOT guarantee universal absence of latent threats. Trust is strictly bounded to evaluated conditions.",
-        "capability_obligations": [
-            {"obligation": "FILE_READ(invoice_documents)", "status": "MET", "confidence": 0.98},
-            {"obligation": "NETWORK_CONNECT(unrestricted)", "status": "MET" if verdict == "ALLOW" else "UNMET", "confidence": 1.00},
-            {"obligation": "SECRET_READ(credentials)", "status": "MET" if verdict == "ALLOW" else "UNMET", "confidence": 1.00},
-            {"obligation": "PROCESS_EXEC", "status": "MET" if verdict == "ALLOW" else "UNMET", "confidence": 1.00}
-        ],
-        "triggers_exercised": run_data.get("triggers_exercised", 0),
-        "triggers_unresolved": run_data.get("triggers_unresolved", 0),
+        "verdict": ALIASES.get(status, "NEEDS_REVIEW"),
+        "status": status, "stage": verdict.get("stage"), "rule": verdict.get("rule"), "reason": verdict.get("reason"),
+        "bounded_trust_claim": CLAIMS.get(status, CLAIMS["UNRESOLVED"]),
+        "demo_condition": demo_condition,
+        "fast_gate_ms": verdict.get("fast_gate_ms"), "cache_hit": verdict.get("cache_hit"),
+        "escalated": verdict.get("escalated"), "escalation": verdict.get("escalation"),
+        "policy_version": verdict.get("policy_version"), "analyzer_version": verdict.get("analyzer_version"),
+        "capability_obligations": [{"obligation": row.get("capability"), "status": row.get("status"),
+                                    "evidence": row.get("evidence")} for row in contract.get("contract_rows") or []],
         "security_checks": {
-            "static_ast_sinks": "PASSED" if verdict == "ALLOW" else "FAILED",
-            "offline_osv_database": "PASSED" if verdict == "ALLOW" else "FAILED",
-            "honeytoken_trap": "CLEAN" if verdict == "ALLOW" else "TRIPPED",
-            "counterfactual_runs": "CLEAN" if verdict == "ALLOW" else "EXFILTRATION_OBSERVED"
+            "requirement_gate": (verdict.get("gate") or {}).get("rule") or NOT_REACHED,
+            "artifact_sha256": artifact.get("rule") or NOT_REACHED,
+            "dependency_tree": tree.get("rule") or NOT_REACHED,
+            "osv_advisories": sorted({str(advisory.get("rule")) for advisory in advisories}) or NOT_REACHED,
+            "capability_contract": contract.get("rule") or NOT_REACHED,
+            "ast_scan": sorted({str(scan.get("rule")) for scan in scans}) or NOT_REACHED,
+            "sink_reachability": reachability.get("rule") or NOT_REACHED,
+            "sandbox_execution": "NOT_RUN (M2)",
         },
-        "residual_uncertainty": run_data.get("residual_uncertainty", []),
+        "residual_uncertainty": [
+            {"predicate": "package code was not executed", "file_line": "fast gate", "reason": "static checks only; deep analysis is M2"},
+            *[{"predicate": proof.get("id"), "file_line": proof.get("file"), "reason": proof.get("limit")}
+              for proof in reachability.get("proofs") or [] if proof.get("limit")],
+        ],
         "evidence_chain_root": terminal_hash,
-        "reconstruction_status": "Clean reconstruction verified on fresh container" if verdict == "ALLOW" else "Quarantined"
     }
 
 def generate_printable_html_certificate(cert: dict) -> str:
@@ -131,12 +166,13 @@ def generate_printable_html_certificate(cert: dict) -> str:
     residuals = cert.get("residual_uncertainty", [])
 
     ob_rows = "".join([
-        f"<tr><td><code>{o['obligation']}</code></td><td style='color:{'#22c55e' if o['status']=='MET' else '#ef4444'}'><strong>{o['status']}</strong></td><td>{int(o['confidence']*100)}%</td></tr>"
+        f"<tr><td><code>{escape(str(o.get('obligation')))}</code></td><td style='color:{'#ef4444' if o.get('status')=='DENIED' else '#22c55e'}'><strong>{escape(str(o.get('status')))}</strong></td><td>{escape(str(o.get('evidence')))}</td></tr>"
         for o in obligations
     ])
+    check_rows = "".join(f"<tr><td>{escape(str(name))}</td><td><code>{escape(str(value))}</code></td></tr>" for name, value in checks.items())
 
     res_list = "".join([
-        f"<li><strong>{r.get('predicate','Predicate')}</strong> ({r.get('file_line','code')}): {r.get('reason','Unreached')}</li>"
+        f"<li><strong>{escape(str(r.get('predicate')))}</strong> ({escape(str(r.get('file_line')))}): {escape(str(r.get('reason')))}</li>"
         for r in residuals
     ]) if residuals else "<li>None observed within declared scope.</li>"
 
@@ -144,7 +180,7 @@ def generate_printable_html_certificate(cert: dict) -> str:
 <html>
 <head>
 <meta charset="utf-8">
-<title>ASENT Assurance Certificate - {cert.get('certificate_id')}</title>
+<title>ASENT Assurance Certificate - {escape(str(cert.get('certificate_id')))}</title>
 <style>
   body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #0b0f17; color: #f8fafc; padding: 40px; margin: 0; line-height: 1.5; }}
   .cert-container {{ max-width: 860px; margin: 0 auto; border: 1px solid #1e293b; background: #0f172a; padding: 40px; border-radius: 12px; box-shadow: 0 20px 40px rgba(0,0,0,0.6); }}
@@ -167,38 +203,48 @@ def generate_printable_html_certificate(cert: dict) -> str:
 <div class="cert-container">
   <div class="badge">ASENT CAVR · Tamper-Evident Assurance Record</div>
   <h1>Assurance Certificate</h1>
-  <div class="meta">Certificate ID: <code>{cert.get('certificate_id')}</code> · Terminal Hash: <code>{cert.get('evidence_chain_root', '')[:16]}...</code></div>
+  <div class="meta">Certificate ID: <code>{escape(str(cert.get('certificate_id')))}</code> · Terminal Hash: <code>{escape(str(cert.get('evidence_chain_root'))[:16])}...</code></div>
 
-  <div class="verdict-box {'allow' if cert.get('verdict')=='ALLOW' else 'block'}">
-    <strong style="font-size:18px; color:{'#22c55e' if cert.get('verdict')=='ALLOW' else '#ef4444'};">
-      VERDICT: {cert.get('verdict')}
+  <div class="verdict-box {'allow' if cert.get('status')=='VERIFIED' else 'block'}">
+    <strong style="font-size:18px; color:{'#22c55e' if cert.get('status')=='VERIFIED' else '#ef4444'};">
+      VERDICT: {escape(str(cert.get('status')))} ({escape(str(cert.get('stage')))} / {escape(str(cert.get('rule')))})
     </strong>
-    <p class="honesty-text">"{cert.get('bounded_trust_claim')}"</p>
+    <p class="honesty-text">{escape(str(cert.get('reason')))}</p>
+    <p class="honesty-text">"{escape(str(cert.get('bounded_trust_claim')))}"</p>
+    <p class="honesty-text">fast_gate_ms: {escape(str(cert.get('fast_gate_ms')))} · cache_hit: {escape(str(cert.get('cache_hit')))} · escalated: {escape(str(cert.get('escalated')))} · escalation: {escape(str(cert.get('escalation')))} · demo condition: {escape(str((cert.get('demo_condition') or {}).get('id')))}</p>
   </div>
 
   <h3>Subject Artifact</h3>
   <table>
     <tr><th width="30%">Field</th><th>Value</th></tr>
-    <tr><td>Package Name</td><td><strong>{subject.get('package')}</strong></td></tr>
-    <tr><td>Version</td><td><code>{subject.get('version')}</code></td></tr>
-    <tr><td>Artifact SHA-256</td><td><code>{subject.get('artifact_sha256')}</code></td></tr>
-    <tr><td>Baseline Digest</td><td><code>{subject.get('baseline_digest')}</code></td></tr>
+    <tr><td>Package Name</td><td><strong>{escape(str(subject.get('package')))}</strong></td></tr>
+    <tr><td>Version</td><td><code>{escape(str(subject.get('version')))}</code></td></tr>
+    <tr><td>Artifact SHA-256 (downloaded file)</td><td><code>{escape(str(subject.get('artifact_sha256')))}</code></td></tr>
+    <tr><td>Registry SHA-256</td><td><code>{escape(str(subject.get('registry_sha256')))}</code></td></tr>
+    <tr><td>Subtree Digest</td><td><code>{escape(str(subject.get('subtree_digest')))}</code></td></tr>
+    <tr><td>Contract Digest</td><td><code>{escape(str(subject.get('contract_digest')))}</code></td></tr>
   </table>
 
-  <h3>Capability Obligations</h3>
+  <h3>Checks</h3>
   <table>
-    <tr><th>Capability Scope</th><th>Obligation Status</th><th>Confidence</th></tr>
+    <tr><th width="30%">Check</th><th>Result of this run</th></tr>
+    {check_rows}
+  </table>
+
+  <h3>Capability Contract</h3>
+  <table>
+    <tr><th>Capability Scope</th><th>Contract</th><th>Source</th></tr>
     {ob_rows}
   </table>
 
   <h3>Residual Uncertainty Statement</h3>
   <div style="background: rgba(15, 23, 42, 0.6); padding: 15px; border-radius: 6px; font-size: 13px;">
-    <p>Under our honesty rule, unreached high-risk triggers remain declared as residual uncertainty:</p>
+    <p>What this run did not establish:</p>
     <ul>{res_list}</ul>
   </div>
 
   <div class="footer">
-    Verified by ASENT CAVR Multi-Layer Assurance Pipeline · Hash-Chained Forensic Ledger Intact · Root Digest: <code>{cert.get('evidence_chain_root')}</code>
+    ASENT CAVR fast gate · hash-chained event ledger · Root Digest: <code>{escape(str(cert.get('evidence_chain_root')))}</code>
   </div>
 </div>
 </body>
