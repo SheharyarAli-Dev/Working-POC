@@ -169,18 +169,21 @@ def is_pass(result):
 def killed(result):
     """
     Classifies mutant kill by pytest JUnit XML element (<failure> vs <error>):
-    - An assertion failure (<failure> / status == 'FAIL') indicates genuine mutant kill.
-    - An infrastructure crash / import failure (<error> / status == 'ERROR') is NOT a genuine kill.
-    - If every mutant is an infrastructure error, the kill check evaluates False.
+    - An assertion failure (<failure> / AssertionError in message) indicates genuine mutant kill.
+    - An infrastructure crash / import failure (<error> / status == 'ERROR' / RuntimeError) is NOT a genuine kill.
+    - If every mutant is an infrastructure error or non-assertion exception, the kill check evaluates False.
     """
-    if not result.get("available"):
+    if not result.get("available") or result.get("exit_code") != 1 or result.get("errors", 0) > 0:
         return False
     tests = result.get("tests", [])
     if tests:
-        # At least one test must have status == 'FAIL' (assertion failure / <failure> in JUnit XML)
-        return any(t.get("status") == "FAIL" for t in tests)
-    # When tests array is unavailable, fall back to counts: failed > 0 and errors == 0
-    return result.get("exit_code") == 1 and result.get("failed", 0) > 0 and result.get("errors", 0) == 0
+        return any(
+            t.get("status") == "FAIL" and (
+                "AssertionError" in t.get("message", "") or "assert" in t.get("message", "")
+            )
+            for t in tests
+        )
+    return result.get("failed", 0) > 0 and result.get("errors", 0) == 0
 
 
 def judge(baseline, mutant, repeat, feasible):

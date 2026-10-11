@@ -14,7 +14,8 @@ def test_dictionary_rules_table():
     assert all(r["status"] == "FULL" and r["test_file"] is not None for r in tier1)
 
 
-def test_contract_runner_sanity_failure_gives_inconclusive(tmp_path):
+def test_contract_runner_sanity_failure_gives_inconclusive(tmp_path, monkeypatch):
+    monkeypatch.setenv("SATRA_ALLOW_HOST_EXEC", "1")
     broken_app_dir = tmp_path / "broken"
     broken_app_dir.mkdir()
     (broken_app_dir / "app").mkdir()
@@ -30,7 +31,8 @@ import sys
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="Requires bash and POSIX execution for satra_seed_threat_repo.sh")
-def test_tier1_rules_against_seed_repos(tmp_path):
+def test_tier1_rules_against_seed_repos(tmp_path, monkeypatch):
+    monkeypatch.setenv("SATRA_ALLOW_HOST_EXEC", "1")
     import os, subprocess
     from test_satra_gitkit import IDENTITY, start_repo, record
 
@@ -40,6 +42,7 @@ def test_tier1_rules_against_seed_repos(tmp_path):
 
     env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
     env.update(IDENTITY)
+    env["SATRA_ALLOW_HOST_EXEC"] = "1"
     subprocess.run(["bash", str(seed_script), str(repo)], capture_output=True, text=True, env=env, check=True)
 
     git_do(repo, "checkout", "-q", "main")
