@@ -19,6 +19,55 @@ from typing import Callable
 from backend.cavr.sandbox_runner import SandboxRunner
 from backend.cavr.triggers import discover_triggers
 
+# The harness reports four counters and one flag. All five must be present with the
+# right type, and a counter cannot be negative; otherwise the run is treated as not
+# observed (a missing key is not a zero, and -1 is not a measurement).
+METRIC_COUNTERS = ("network_attempts", "writes_outside_scratch", "processes_spawned", "secrets_touched")
+METRIC_FLAG = "honeytoken_accessed"
+
+
+def _not_observed(reason: str) -> dict:
+    return {"action": "NOT_OBSERVED", "resource": "sandbox", "semantic": reason, "verdict_impact": "UNRESOLVED"}
+
+
+def _violation(action: str, resource: str, semantic: str) -> dict:
+    return {"action": action, "resource": resource, "semantic": semantic, "verdict_impact": "VIOLATION"}
+
+
+def baseline_behaviors(report) -> list[dict]:
+    """Turn one sandbox behavior report into behaviors. Fail closed: only a complete
+    report that the harness itself marked ALLOW with a passed test counts as a clean import."""
+    if not isinstance(report, dict):
+        return [_not_observed("Sandbox produced no behavior report")]
+    metrics = report.get("metrics")
+    complete = (
+        isinstance(metrics, dict)
+        and all(type(metrics.get(k)) is int and metrics[k] >= 0 for k in METRIC_COUNTERS)
+        and type(metrics.get(METRIC_FLAG)) is bool
+    )
+    if not complete:
+        return [_not_observed(report.get("error") or "Behavior report has missing or malformed metrics")]
+
+    behaviors = []
+    if metrics["network_attempts"] > 0:
+        behaviors.append(_violation("NETWORK_CONNECT", "198.51.100.24:443", "Unauthorized socket connect attempt"))
+    if metrics["honeytoken_accessed"] or metrics["secrets_touched"] > 0:
+        behaviors.append(_violation("SECRET_ACCESS", "~/.aws/credentials", "Credential file read"))
+    if metrics["processes_spawned"] > 0:
+        behaviors.append(_violation("PROCESS_SPAWN", "subprocess", "Process spawn attempt"))
+    if metrics["writes_outside_scratch"] > 0:
+        behaviors.append(_violation("WRITE_OUTSIDE_SCRATCH", "filesystem", "Write attempt outside the scratch directory"))
+    if not behaviors and report.get("verdict") == "BLOCK":
+        behaviors.append(_violation("SANDBOX_BLOCK", "sandbox", "Sandbox harness verdict was BLOCK"))
+    if behaviors:
+        return behaviors
+
+    if report.get("test_passed") is not True or report.get("verdict") != "ALLOW":
+        # e.g. the import raised: nothing bad was seen, but the package was not exercised either.
+        return [_not_observed(report.get("error") or f"Sandbox verdict was {report.get('verdict')!r}, import test not passed")]
+    return [{"action": "FILE_READ", "resource": "pure_import", "semantic": "Clean module import", "verdict_impact": "NEUTRAL"}]
+
+
 class CounterfactualEngine:
     def __init__(self, max_runs: int = 4, max_seconds: float = 25.0):
         self.max_runs = max_runs
@@ -81,27 +130,30 @@ class CounterfactualEngine:
         else:
             # Run real sandbox
             exec0 = await asyncio.to_thread(self.sandbox_runner.run, quarantine_dir, run0_id, on_log)
-            rep0 = exec0.get("report", {})
-            metrics0 = rep0.get("metrics", {})
-            if metrics0.get("network_attempts", 0) > 0:
-                r0_behaviors.append({"action": "NETWORK_CONNECT", "resource": "198.51.100.24:443", "semantic": "Unauthorized socket connect attempt", "verdict_impact": "VIOLATION"})
-            if metrics0.get("honeytoken_accessed"):
-                r0_behaviors.append({"action": "SECRET_ACCESS", "resource": "~/.aws/credentials", "semantic": "Credential file read", "verdict_impact": "VIOLATION"})
-            if not r0_behaviors:
-                r0_behaviors.append({"action": "FILE_READ", "resource": "pure_import", "semantic": "Clean module import", "verdict_impact": "NEUTRAL"})
+            r0_behaviors.extend(baseline_behaviors(exec0.get("report")))
 
-        for b in r0_behaviors:
+        # NOT_OBSERVED says the run was not seen; it is not a behaviour of the package.
+        # It stays in behaviors_found (the verdict needs it) but is left out of every count.
+        baseline_unobserved = any(b["verdict_impact"] == "UNRESOLVED" for b in r0_behaviors)
+        r0_observed = [b for b in r0_behaviors if b["verdict_impact"] != "UNRESOLVED"]
+
+        for b in r0_observed:
             seen_behaviors.add(b["action"])
             cumulative_behaviors.append(b)
+
+        if baseline_unobserved:
+            r0_coverage = 0.0  # nothing was observed, so nothing was covered
+        else:
+            r0_coverage = 10.0 if ranked_triggers else 100.0
 
         run0_record = {
             "run_number": 0,
             "condition_applied": baseline_cond,
             "behaviors_found": r0_behaviors,
-            "new_behaviors": r0_behaviors,
-            "new_count": len(r0_behaviors),
+            "new_behaviors": r0_observed,
+            "new_count": len(r0_observed),
             "cumulative_count": len(seen_behaviors),
-            "cumulative_coverage": 10.0 if ranked_triggers else 100.0,
+            "cumulative_coverage": r0_coverage,
             "frontier_size": len(unexplored),
             "stop_reason": None,
             "duration_ms": 680
@@ -115,9 +167,16 @@ class CounterfactualEngine:
             decisive_stop = True
             stop_reason = "Decisive violation observed in baseline run (immediate critical alert)."
 
+        # Without an observed baseline, later runs have nothing to compare against and
+        # would only add unobserved "evaluated safely" evidence: stop, leave every trigger unexplored.
+        residual_reason = "Unreached within execution budget quota."
+        if baseline_unobserved and not decisive_stop:
+            stop_reason = "baseline not observed"
+            residual_reason = "Not explored: baseline run was not observed."
+
         # Counterfactual exploration loop (Run 1 .. n)
         run_num = 1
-        while unexplored and run_num < self.max_runs and not decisive_stop:
+        while unexplored and run_num < self.max_runs and not decisive_stop and not baseline_unobserved:
             if time.time() - start_time > self.max_seconds:
                 stop_reason = f"Execution budget reached ({self.max_seconds}s limit)."
                 break
@@ -225,13 +284,13 @@ class CounterfactualEngine:
                 "predicate": t["predicate"],
                 "file_line": t["file_line"],
                 "priority": t["priority"],
-                "reason": "Unreached within execution budget quota."
+                "reason": residual_reason
             }
             for t in unexplored
         ]
 
         # Comparison metrics: baseline vs counterfactual
-        baseline_actions = {b["action"] for b in runs_history[0]["behaviors_found"]}
+        baseline_actions = {b["action"] for b in r0_observed}
         total_actions = seen_behaviors
         new_via_counterfactual = len(total_actions - baseline_actions)
 
