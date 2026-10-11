@@ -1,15 +1,13 @@
 from __future__ import annotations
 import hashlib
 import json
-import os
-import shutil
 import subprocess
-import sys
-import tempfile
 import time
 from pathlib import Path
 from typing import Callable
-from backend.config import ROOT
+
+# Absolute, so `docker run` finds the profile whatever the current directory is.
+SECCOMP_PROFILE = Path(__file__).resolve().parents[2] / "docker" / "asent-seccomp.json"
 
 class SandboxRunner:
     def __init__(self, use_gvisor: bool = False):
@@ -27,7 +25,7 @@ class SandboxRunner:
             "--user", "10001:10001",
             "--cap-drop", "ALL",
             "--security-opt", "no-new-privileges",
-            "--security-opt", "seccomp=asent-seccomp.json",
+            "--security-opt", f"seccomp={SECCOMP_PROFILE}",
             "--pids-limit", "64",
             "--memory", "256m",
             "--cpus", "0.5",
@@ -36,8 +34,10 @@ class SandboxRunner:
             cmd.extend(["--runtime", "runsc"])
         cmd.extend([
             "-v", f"{Path(quarantine_dir).resolve()}:/pkg:ro",
+            # The image ENTRYPOINT is already `python /opt/asent/harness.py`;
+            # only its argument, the package path, is passed here.
             self.image_name,
-            "python", "/opt/asent/harness.py", "/pkg"
+            "/pkg"
         ])
         return cmd
 
@@ -57,15 +57,10 @@ class SandboxRunner:
         log(f"[INFO] Initializing sandbox isolation for run {run_id}...")
         log(f"[DOCKER_CMD] {docker_cmd_str}")
 
-        # Check if docker is available
-        has_docker = False
-        try:
-            res = subprocess.run(["docker", "--version"], capture_output=True, timeout=2)
-            has_docker = res.returncode == 0
-        except Exception:
-            has_docker = False
+        has_docker = self._docker_available()
 
         report: dict | None = None
+        timed_out = False
         start_time = time.time()
 
         if has_docker:
@@ -89,61 +84,44 @@ class SandboxRunner:
                         log(stripped)
                     if time.time() - start_time > self.timeout_seconds:
                         proc.kill()
-                        log("[SECURITY_ALERT] Hard timeout of 30 seconds exceeded! Container force-killed.")
+                        timed_out = True
+                        log(f"[SECURITY_ALERT] Hard timeout of {self.timeout_seconds} seconds exceeded! Container force-killed.")
                         break
                 proc.wait()
-                # Parse behavior report from output
-                report = self._extract_report("\n".join(raw_output))
+                if timed_out:
+                    # A run that had to be killed did not finish. Whatever it printed before
+                    # the kill, including a complete-looking report, is not read (fail closed).
+                    log("[RUNNER] Run timed out; any report printed before the kill is not trusted.")
+                else:
+                    # Parse behavior report from output
+                    full_text = "\n".join(raw_output)
+                    if self._has_duplicate_markers(full_text):
+                        log("[SECURITY_ALERT] More than one behavior report in container output; report not trusted.")
+                    report = self._extract_report(full_text)
             except Exception as e:
                 log(f"[ERROR] Docker container execution failed: {e}")
 
-        if not report:
-            log("[RUNNER] Running real host-isolated Python audit harness with honeytokens...")
-            harness_py = ROOT / "backend" / "cavr" / "harness.py"
-            cmd = [sys.executable, str(harness_py), str(pkg_dir)]
-            
-            try:
-                proc = subprocess.Popen(
-                    cmd,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.STDOUT,
-                    text=True,
-                    bufsize=1
-                )
-                raw_output = []
-                while True:
-                    line = proc.stdout.readline() if proc.stdout else ""
-                    if not line and proc.poll() is not None:
-                        break
-                    if line:
-                        stripped = line.strip()
-                        raw_output.append(stripped)
-                        log(stripped)
-                    if time.time() - start_time > self.timeout_seconds:
-                        proc.kill()
-                        log("[SECURITY_ALERT] Hard timeout of 30 seconds exceeded! Process force-killed.")
-                        break
-                proc.wait()
-                report = self._extract_report("\n".join(raw_output))
-            except Exception as e:
-                log(f"[ERROR] Harness execution failed: {e}")
+        # Fail closed: package code never runs on the host. Without a container, or
+        # without a behavior report from it, nothing was observed -> UNRESOLVED.
+        # observed uses the same test as the replacement below, so the two cannot disagree.
+        observed = bool(report)
+        if not has_docker:
+            reason = "No container isolation available (docker not found); package was not executed"
+            log(f"[RUNNER] {reason}. Result: UNRESOLVED.")
+            report = self._unresolved_report(reason)
+        elif not observed:
+            reason = "Container run produced no usable behavior report (failed, killed, timed out, or malformed)"
+            log(f"[RUNNER] {reason}. No host fallback. Result: UNRESOLVED.")
+            report = self._unresolved_report(reason)
 
-        if not report:
-            # Fallback safe empty report if process was killed
-            report = {
-                "verdict": "BLOCK",
-                "hash": "error",
-                "test_passed": False,
-                "error": "Execution interrupted or timed out",
-                "metrics": {
-                    "network_attempts": 1,
-                    "writes_outside_scratch": 0,
-                    "processes_spawned": 0,
-                    "secrets_touched": 0,
-                    "honeytoken_accessed": False
-                },
-                "events": [{"type": "TIMEOUT_OR_TERMINATION", "reason": "Harness timeout"}]
-            }
+        # "container" only when a report really came back from one. Docker present but
+        # nothing usable (launch failed, image missing, killed) is "container_failed".
+        if not has_docker:
+            isolation = "none"
+        elif observed:
+            isolation = "container"
+        else:
+            isolation = "container_failed"
 
         return {
             "run_id": run_id,
@@ -151,13 +129,15 @@ class SandboxRunner:
             "container_id": f"asent-{container_id}",
             "image_digest": self.image_digest,
             "use_gvisor": self.use_gvisor,
+            "observed": observed,
+            "isolation": isolation,
             "timeout_seconds": self.timeout_seconds,
             "lockdown_flags": {
                 "network": "none",
                 "filesystem": "read-only",
                 "user": "10001:10001 (non-root)",
                 "capabilities": "cap-drop ALL",
-                "security_opt": ["no-new-privileges", "seccomp=asent-seccomp.json"],
+                "security_opt": ["no-new-privileges", f"seccomp={SECCOMP_PROFILE}"],
                 "memory": "256m",
                 "cpus": "0.5",
                 "tmpfs": "/scratch:rw,noexec,nosuid,size=64m"
@@ -166,13 +146,43 @@ class SandboxRunner:
             "logs": logs
         }
 
-    def _extract_report(self, full_text: str) -> dict | None:
+    def _docker_available(self) -> bool:
         try:
-            start_marker = "--- ASENT_BEHAVIOR_REPORT_START ---"
-            end_marker = "--- ASENT_BEHAVIOR_REPORT_END ---"
-            if start_marker in full_text and end_marker in full_text:
-                json_part = full_text.split(start_marker)[1].split(end_marker)[0].strip()
-                return json.loads(json_part)
+            res = subprocess.run(["docker", "--version"], capture_output=True, timeout=2)
+            return res.returncode == 0
         except Exception:
-            pass
-        return None
+            return False
+
+    @staticmethod
+    def _unresolved_report(reason: str) -> dict:
+        # metrics is None, not zeros: zero would claim "observed, and nothing happened".
+        return {
+            "verdict": "UNRESOLVED",
+            "hash": None,
+            "test_passed": False,
+            "error": reason,
+            "metrics": None,
+            "events": [{"type": "NOT_OBSERVED", "reason": reason}]
+        }
+
+    START_MARKER = "--- ASENT_BEHAVIOR_REPORT_START ---"
+    END_MARKER = "--- ASENT_BEHAVIOR_REPORT_END ---"
+
+    def _has_duplicate_markers(self, full_text: str) -> bool:
+        return full_text.count(self.START_MARKER) > 1 or full_text.count(self.END_MARKER) > 1
+
+    def _extract_report(self, full_text: str) -> dict | None:
+        # The package shares stdout with the harness, so it can print a report of its own.
+        # The harness prints exactly one; any other count means we cannot tell which is real.
+        if full_text.count(self.START_MARKER) != 1 or full_text.count(self.END_MARKER) != 1:
+            return None
+        # END printed before START is not a report frame.
+        if full_text.index(self.START_MARKER) > full_text.index(self.END_MARKER):
+            return None
+        try:
+            json_part = full_text.split(self.START_MARKER)[1].split(self.END_MARKER)[0].strip()
+            parsed = json.loads(json_part)
+        except Exception:
+            return None
+        # Valid JSON that is not an object (a list, a string) is not a report.
+        return parsed if isinstance(parsed, dict) else None

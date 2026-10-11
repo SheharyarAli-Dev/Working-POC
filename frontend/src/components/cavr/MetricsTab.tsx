@@ -1,158 +1,205 @@
 import React, { useState, useEffect } from 'react';
-import { CavrRunState } from './types';
-import { BarChart3, PieChart, Clock, TrendingUp, History, RotateCcw } from 'lucide-react';
+import { CavrRunState, NOT_COMPUTED, shown } from './types';
+import { BarChart3, PieChart, Clock, History } from 'lucide-react';
 
 interface MetricsTabProps {
   state: CavrRunState;
-  onSelectPastRun?: (run: any) => void;
 }
 
-export const MetricsTab: React.FC<MetricsTabProps> = ({ state, onSelectPastRun }) => {
-  const [metrics, setMetrics] = useState<any>({
-    total_runs: 5,
-    verdict_distribution: { ALLOW: 1, BLOCK: 4, NEEDS_REVIEW: 0 },
-    cache_hit_rate: 20.0,
-    median_analysis_time_ms: 1250,
-    p95_analysis_time_ms: 2400,
-    avg_counterfactual_runs: 3.2,
-    triggers_activated: 8,
-    new_behaviors_counterfactual_vs_baseline: 6,
-    repair_success_rate: 94.0,
-    recent_runs: []
-  });
+// One group of fast_gate_ms values in the answer of /api/cavr/metrics.
+interface TimeSummary {
+  count: number;
+  p50: number | null;
+  p95: number | null;
+}
 
-  const fetchMetrics = async () => {
-    try {
-      const res = await fetch('/api/cavr/metrics');
-      if (res.ok) {
-        const data = await res.json();
-        setMetrics(data);
-      }
-    } catch (e) {
-      console.error(e);
-    }
-  };
+// Loads /api/cavr/metrics (the verdict log: one row per request) again after each run.
+// Nothing is shown until the backend has answered.
+export const MetricsTab: React.FC<MetricsTabProps> = ({ state }) => {
+  const [metrics, setMetrics] = useState<any | null>(null);
+  const [failed, setFailed] = useState(false);
 
   useEffect(() => {
-    fetchMetrics();
-  }, [state.stepIndex]);
+    fetch('/api/cavr/metrics')
+      .then(res => { if (!res.ok) throw new Error(String(res.status)); return res.json(); })
+      .then(data => { setMetrics(data); setFailed(false); })
+      .catch(() => setFailed(true));
+  }, [state.stepIndex, state.verdict]);
 
-  const verdicts = metrics.verdict_distribution || { ALLOW: 1, BLOCK: 4, NEEDS_REVIEW: 0 };
-  const total = Math.max(metrics.total_runs || 1, 1);
-  const allowPct = Math.round(((verdicts.ALLOW || 0) / total) * 100);
-  const blockPct = Math.round(((verdicts.BLOCK || 0) / total) * 100);
-  const reviewPct = Math.round(((verdicts.NEEDS_REVIEW || 0) / total) * 100);
+  if (!metrics) {
+    return (
+      <div className="evidence-tab-pane metrics-pane">
+        <div className="history-table-card">
+          <p>{failed ? 'The metrics could not be loaded.' : 'Loading metrics...'}</p>
+        </div>
+      </div>
+    );
+  }
+  return <MetricsReport metrics={metrics} />;
+};
+
+// The numbers of one answer of /api/cavr/metrics. fast_gate_ms is given per verdict and per cache
+// lookup, never as one percentile over all verdicts: a BLOCK takes a few milliseconds and downloads
+// nothing, so it would hide how long verifying a package takes.
+export const MetricsReport: React.FC<{ metrics: any }> = ({ metrics }) => {
+  const total: number = metrics.verdicts || 0;
+  const byStatus: Record<string, number> = metrics.by_status || {};
+  const times = metrics.fast_gate_ms || {};
+  const pairs: any[] = times.by_status_and_cache_lookup || [];
+  const percent = (rate: any) => (rate == null ? NOT_COMPUTED : `${(rate * 100).toFixed(1)}%`);
+  const segment: Record<string, string> = { VERIFIED: 'allow', REJECTED: 'block', BLOCK: 'block', UNRESOLVED: 'review' };
+
+  // One table of groups: a name, how many requests, and their nearest-rank p50 and p95.
+  const timeTable = (title: string, firstColumn: string, groups: Record<string, TimeSummary>) => (
+    <div className="history-table-card">
+      <div className="history-header">
+        <Clock size={16} />
+        <h6>{title}</h6>
+      </div>
+      <div className="history-table-wrap">
+        <table className="history-table">
+          <thead>
+            <tr>
+              <th>{firstColumn}</th>
+              <th>Requests</th>
+              <th>p50 (ms)</th>
+              <th>p95 (ms)</th>
+            </tr>
+          </thead>
+          <tbody>
+            {Object.entries(groups).map(([name, group]) => (
+              <tr key={name} className="history-row">
+                <td><code>{name}</code></td>
+                <td>{shown(group.count)}</td>
+                <td>{shown(group.p50)}</td>
+                <td>{shown(group.p95)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
 
   return (
     <div className="evidence-tab-pane metrics-pane">
-      {/* Top 4 KPI Cards */}
       <div className="metrics-kpi-grid">
         <div className="kpi-card">
-          <span className="kpi-title"><PieChart size={13} /> Cache Hit Rate</span>
-          <strong className="kpi-val">{metrics.cache_hit_rate}%</strong>
-          <span className="kpi-sub">Bypasses hostile sandbox</span>
+          <span className="kpi-title"><BarChart3 size={13} /> Verdicts logged</span>
+          <strong className="kpi-val">{total}</strong>
+          <span className="kpi-sub">One row per request. Runs under a demo condition are not logged.</span>
         </div>
 
         <div className="kpi-card">
-          <span className="kpi-title"><Clock size={13} /> Median / P95 Latency</span>
-          <strong className="kpi-val">{metrics.median_analysis_time_ms}ms / {metrics.p95_analysis_time_ms}ms</strong>
-          <span className="kpi-sub">Full 13-phase evaluation</span>
+          <span className="kpi-title"><PieChart size={13} /> Cache hit rate, all verdicts</span>
+          <strong className="kpi-val">{percent(metrics.cache_hit_rate)}</strong>
+          <span className="kpi-sub">{shown(metrics.cache_hits)} of {total} verdicts</span>
         </div>
 
         <div className="kpi-card">
-          <span className="kpi-title"><TrendingUp size={13} /> Counterfactual Revelations</span>
-          <strong className="kpi-val highlight">+{metrics.new_behaviors_counterfactual_vs_baseline}</strong>
-          <span className="kpi-sub">Hidden threats found vs baseline</span>
-        </div>
-
-        <div className="kpi-card">
-          <span className="kpi-title"><BarChart3 size={13} /> Repair Success Rate</span>
-          <strong className="kpi-val">{metrics.repair_success_rate}%</strong>
-          <span className="kpi-sub">Valid substitute identified</span>
+          <span className="kpi-title"><PieChart size={13} /> Cache hit rate, lookups only</span>
+          <strong className="kpi-val">{percent(metrics.cache_hit_rate_of_lookups)}</strong>
+          <span className="kpi-sub">{shown(metrics.cache_lookup_hits)} of {shown(metrics.cache_lookups)} verdicts that reached the cache lookup</span>
         </div>
       </div>
 
-      {/* Charts Row */}
+      {timeTable('fast_gate_ms by verdict', 'Verdict', times.by_status || {})}
+      {timeTable('fast_gate_ms by cache lookup', 'Cache lookup', times.by_cache_lookup || {})}
+
+      <div className="history-table-card">
+        <div className="history-header">
+          <Clock size={16} />
+          <h6>fast_gate_ms by verdict and cache lookup</h6>
+        </div>
+        <div className="history-table-wrap">
+          <table className="history-table">
+            <thead>
+              <tr>
+                <th>Verdict</th>
+                <th>Cache lookup</th>
+                <th>Requests</th>
+                <th>p50 (ms)</th>
+                <th>p95 (ms)</th>
+              </tr>
+            </thead>
+            <tbody>
+              {pairs.length > 0 ? (
+                pairs.map((row: any) => (
+                  <tr key={`${row.status}-${row.cache_lookup}`} className="history-row">
+                    <td><code>{row.status}</code></td>
+                    <td><code>{row.cache_lookup}</code></td>
+                    <td>{shown(row.count)}</td>
+                    <td>{shown(row.p50)}</td>
+                    <td>{shown(row.p95)}</td>
+                  </tr>
+                ))
+              ) : (
+                <tr>
+                  <td colSpan={5} className="text-center py-4 text-gray-500">No verdict has been logged yet.</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
       <div className="metrics-charts-row">
-        {/* Verdict Distribution Bar */}
         <div className="chart-card">
-          <h6>Verdict Distribution Across Pipeline Runs</h6>
+          <h6>Verdicts by status</h6>
           <div className="verdict-dist-bar">
-            {allowPct > 0 && <div className="dist-seg allow" style={{ width: `${allowPct}%` }} title={`ALLOW: ${allowPct}%`} />}
-            {blockPct > 0 && <div className="dist-seg block" style={{ width: `${blockPct}%` }} title={`BLOCK: ${blockPct}%`} />}
-            {reviewPct > 0 && <div className="dist-seg review" style={{ width: `${reviewPct}%` }} title={`REVIEW: ${reviewPct}%`} />}
+            {Object.entries(byStatus).map(([status, count]) => (
+              <div
+                key={status}
+                className={`dist-seg ${segment[status] || 'review'}`}
+                style={{ width: `${total ? (count / total) * 100 : 0}%` }}
+                title={`${status}: ${count}`}
+              />
+            ))}
           </div>
           <div className="dist-legend">
-            <span><span className="dot allow" /> ALLOW: {verdicts.ALLOW || 0} ({allowPct}%)</span>
-            <span><span className="dot block" /> BLOCK: {verdicts.BLOCK || 0} ({blockPct}%)</span>
-            <span><span className="dot review" /> REVIEW: {verdicts.NEEDS_REVIEW || 0} ({reviewPct}%)</span>
-          </div>
-        </div>
-
-        {/* Counterfactual vs Baseline Discovery */}
-        <div className="chart-card">
-          <h6>Threat Discovery Method Comparison</h6>
-          <div className="discovery-comparison-bars">
-            <div className="disc-row">
-              <span className="disc-label">Single Baseline Run:</span>
-              <div className="disc-bar-track">
-                <div className="disc-bar-fill baseline" style={{ width: '25%' }}>1 Baseline</div>
-              </div>
-            </div>
-            <div className="disc-row">
-              <span className="disc-label">Counterfactual Runs:</span>
-              <div className="disc-bar-track">
-                <div className="disc-bar-fill counterfactual" style={{ width: '90%' }}>
-                  +{metrics.new_behaviors_counterfactual_vs_baseline} Hidden Threats Exposed
-                </div>
-              </div>
-            </div>
+            {Object.entries(byStatus).map(([status, count]) => (
+              <span key={status}><span className={`dot ${segment[status] || 'review'}`} /> {status}: {count}</span>
+            ))}
+            {total === 0 && <span>No verdict has been logged yet.</span>}
           </div>
         </div>
       </div>
 
-      {/* Run History Table */}
       <div className="history-table-card">
         <div className="history-header">
           <History size={16} />
-          <h6>Recent Verification Run History (Audit Trace)</h6>
+          <h6>Last verdicts (verdict log)</h6>
         </div>
 
         <div className="history-table-wrap">
           <table className="history-table">
             <thead>
               <tr>
-                <th>Run ID</th>
-                <th>Package</th>
-                <th>Verdict</th>
-                <th>Policy State</th>
-                <th>CF Runs</th>
-                <th>Analysis Time</th>
-                <th>Timestamp</th>
+                <th>Recorded</th>
+                <th>Request</th>
+                <th>Status</th>
+                <th>Stage / rule</th>
+                <th>fast_gate_ms</th>
+                <th>Cache lookup</th>
+                <th>Escalated</th>
               </tr>
             </thead>
             <tbody>
-              {metrics.recent_runs && metrics.recent_runs.length > 0 ? (
-                metrics.recent_runs.map((r: any) => (
-                  <tr key={r.run_id} className="history-row" onClick={() => onSelectPastRun && onSelectPastRun(r)}>
-                    <td><code>{r.run_id}</code></td>
-                    <td><strong>{r.package}</strong> <code>v{r.version || '1.0.0'}</code></td>
-                    <td>
-                      <span className={`verdict-tag-sm ${r.verdict?.toLowerCase()}`}>
-                        {r.verdict}
-                      </span>
-                    </td>
-                    <td><code>{r.policy_state || 'EVALUATED'}</code></td>
-                    <td>{r.counterfactual_runs}</td>
-                    <td>{r.duration_ms}ms</td>
-                    <td>{new Date((r.timestamp || Date.now() / 1000) * 1000).toLocaleTimeString()}</td>
+              {(metrics.recent || []).length > 0 ? (
+                metrics.recent.map((row: any) => (
+                  <tr key={row.id} className="history-row">
+                    <td>{new Date(row.recorded_at).toLocaleTimeString()}</td>
+                    <td><code>{row.requested}</code></td>
+                    <td><span className={`verdict-tag-sm ${segment[row.status] || 'review'}`}>{row.status}</span></td>
+                    <td><code>{row.stage} / {row.rule}</code></td>
+                    <td>{shown(row.fast_gate_ms)}</td>
+                    <td>{shown(row.cache_lookup)}</td>
+                    <td>{row.escalated ? 'yes' : 'no'}</td>
                   </tr>
                 ))
               ) : (
                 <tr>
-                  <td colSpan={7} className="text-center py-4 text-gray-500">
-                    Running scenarios will populate historical telemetry here.
-                  </td>
+                  <td colSpan={7} className="text-center py-4 text-gray-500">No verdict has been logged yet.</td>
                 </tr>
               )}
             </tbody>

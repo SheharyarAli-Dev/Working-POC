@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { CavrRunState } from './types';
+import { CavrRunState, NOT_RUN_ON_FAST_GATE } from './types';
 import { GitBranch, Shield, Filter, Info, AlertTriangle, CheckCircle } from 'lucide-react';
 
 interface CausalGraphTabProps {
@@ -12,15 +12,20 @@ export const CausalGraphTab: React.FC<CausalGraphTabProps> = ({ state }) => {
   const [showDependencies, setShowDependencies] = useState(true);
   const [selectedElement, setSelectedElement] = useState<any | null>(null);
 
-  const causal = state.causalGraph || {
-    nodes: [
-      { id: "pkg:" + state.package, label: state.package, kind: "package", is_violating: false },
-      { id: "fn:" + state.package + ".extract_invoice_text", label: "extract_invoice_text()", kind: "module/function", is_violating: false }
-    ],
-    edges: [
-      { source: "pkg:" + state.package, target: "fn:" + state.package + ".extract_invoice_text", relation: "calls", is_violating: false }
-    ]
-  };
+  if (!state.causalGraph) {
+    // No invented graph: the causal graph is built from observed runs, and none happen on the fast gate.
+    return (
+      <div className="evidence-tab-pane causal-pane">
+        <div className="tab-intro-card">
+          <div>
+            <h5>Causal Capability Graph</h5>
+            <p>{NOT_RUN_ON_FAST_GATE}</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+  const causal = state.causalGraph;
 
   const violatingPaths = state.violatingPaths || [];
   const hasViolations = violatingPaths.length > 0;
@@ -38,7 +43,8 @@ export const CausalGraphTab: React.FC<CausalGraphTabProps> = ({ state }) => {
       nodes = nodes.filter((n: any) => n.kind !== 'environment predicate');
     }
     if (!showDependencies) {
-      nodes = nodes.filter((n: any) => !n.id.includes('sub-telemetry-hook'));
+      // A dependency is a package node other than the package that was asked for.
+      nodes = nodes.filter((n: any) => n.kind !== 'package' || String(n.id).includes(state.package));
     }
     const validIds = new Set(nodes.map((n: any) => n.id));
     edges = edges.filter((e: any) => validIds.has(e.source) && validIds.has(e.target));

@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { CavrRunState } from './types';
+import React, { useEffect, useState } from 'react';
+import { CavrRunState, shown } from './types';
 import { ShieldCheck, Download, CheckCircle2, XCircle, Link2, AlertTriangle, RefreshCw, FileCode, Printer } from 'lucide-react';
 
 interface AssuranceTabProps {
@@ -7,41 +7,25 @@ interface AssuranceTabProps {
 }
 
 export const AssuranceTab: React.FC<AssuranceTabProps> = ({ state }) => {
-  const [chainVerifyStatus, setChainVerifyStatus] = useState<{ intact: boolean; message: string; broken_seq?: number } | null>(null);
+  const [chainVerifyStatus, setChainVerifyStatus] = useState<{ intact: boolean; message: string } | null>(null);
   const [isVerifying, setIsVerifying] = useState(false);
-  const [isTampered, setIsTampered] = useState(false);
+  const [blocks, setBlocks] = useState<any[]>([]);
 
-  const cert = state.certificate || {
-    certificate_id: `CERT-ASENT-${state.runId || 'sample'}`,
-    schema: "https://asent.dev/schema/assurance-certificate/v1.json",
-    subject: {
-      package: state.package,
-      version: state.version,
-      artifact_sha256: state.resolution?.sha256 || "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      baseline_digest: "sha256:7f9a2e8c1b50493817f5492d001e3b6289410ac0219582d92138a0f918e932b1"
-    },
-    verdict: state.verdict || "ALLOW",
-    bounded_trust_claim: "No malicious behavior observed under our tests. Trust is strictly bounded to evaluated conditions.",
-    capability_obligations: [
-      { obligation: "FILE_READ(invoice_documents)", status: "MET", confidence: 0.98 },
-      { obligation: "NETWORK_CONNECT(unrestricted)", status: state.verdict === 'ALLOW' ? 'MET' : 'UNMET', confidence: 1.0 },
-      { obligation: "SECRET_READ(credentials)", status: state.verdict === 'ALLOW' ? 'MET' : 'UNMET', confidence: 1.0 }
-    ],
-    evidence_chain_root: "942c5a758f98d790eaed1a29cb6eefc7ffb0d1cf7af05c3d2791656dbd6ad1e1"
-  };
+  // The certificate of this run, built by the backend from the pipeline's verdict. No sample certificate.
+  const cert = state.certificate;
+  const residuals: any[] = cert?.residual_uncertainty || [];
+  const checks: [string, any][] = Object.entries(cert?.security_checks || {});
 
-  const residuals = state.counterfactualResults?.residual_uncertainty || [];
-
-  // Mock blocks for linked chain display
-  const blocks = [
-    { seq: 1, phase: "P1", name: "Capture & Hook", hash: "942c5a...1e1" },
-    { seq: 2, phase: "P2", name: "Requirement Gate", hash: "450b20...8a" },
-    { seq: 3, phase: "P5", name: "Resolution & OSV", hash: "71f46d...cb" },
-    { seq: 4, phase: "P4", name: "Capability Contract", hash: "34b7f8...df" },
-    { seq: 5, phase: "P7", name: "Counterfactual Test", hash: "d8291a...41" },
-    { seq: 6, phase: "P9", name: "Causal Graph & Policy", hash: "8e036d...2d" },
-    { seq: 7, phase: "P13", name: "Assurance Certificate", hash: "2f0a1c...48" }
-  ];
+  // The real records of this run's hash chain.
+  useEffect(() => {
+    setBlocks([]);
+    setChainVerifyStatus(null);
+    if (!state.runId || !cert) return;
+    fetch(`/api/cavr/evidence/${state.runId}/records`)
+      .then(res => (res.ok ? res.json() : []))
+      .then(setBlocks)
+      .catch(() => setBlocks([]));
+  }, [state.runId, cert]);
 
   const verifyChainCall = async () => {
     if (!state.runId) return;
@@ -50,29 +34,35 @@ export const AssuranceTab: React.FC<AssuranceTabProps> = ({ state }) => {
       const res = await fetch(`/api/cavr/evidence/${state.runId}/verify`);
       if (res.ok) {
         const data = await res.json();
-        setChainVerifyStatus({
-          intact: data.intact,
-          message: data.message || "Cryptographic evidence chain verified intact."
-        });
+        setChainVerifyStatus({ intact: data.intact === true, message: data.message || data.error || "No message from the ledger." });
       } else {
-        setChainVerifyStatus({ intact: false, message: "Verification failed on remote ledger." });
+        setChainVerifyStatus({ intact: false, message: `The ledger could not be verified (HTTP ${res.status}).` });
       }
     } catch {
-      setChainVerifyStatus({ intact: true, message: "Evidence hash chain verified intact (local cache)." });
+      // An unreachable ledger is not an intact ledger.
+      setChainVerifyStatus({ intact: false, message: "The ledger could not be reached, so the chain was not verified." });
     } finally {
       setIsVerifying(false);
-      setIsTampered(false);
     }
   };
 
-  const triggerTamperDemo = () => {
-    setIsTampered(true);
-    setChainVerifyStatus({
-      intact: false,
-      broken_seq: 4,
-      message: "Tampering Detected! Block #4 byte flipped: computed hash does not match next block prev_hash pointer."
-    });
-  };
+  if (!cert) {
+    return (
+      <div className="evidence-tab-pane assurance-pane">
+        <div className="cert-document-card">
+          <div className="cert-doc-header">
+            <div>
+              <span className="cert-badge">BOUNDED TRUST CERTIFICATE</span>
+              <h5>No certificate yet</h5>
+            </div>
+          </div>
+          <div className="cert-body-preview">
+            <p>The certificate and the evidence chain of a run appear here when the run has finished.</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   const downloadJson = () => {
     const blob = new Blob([JSON.stringify(cert, null, 2)], { type: "application/json" });
@@ -95,8 +85,8 @@ export const AssuranceTab: React.FC<AssuranceTabProps> = ({ state }) => {
       <div className="hash-chain-card">
         <div className="chain-topbar">
           <div>
-            <h6>Tamper-Evident Forensic Evidence Chain (Merkle Hash-Chained Ledger)</h6>
-            <span className="chain-sub">Every phase transition event cryptographically incorporates the preceding block's SHA-256 digest.</span>
+            <h6>Evidence chain of this run ({blocks.length} records)</h6>
+            <span className="chain-sub">Each event of the run is hashed together with the SHA-256 of the record before it.</span>
           </div>
 
           <div className="chain-actions">
@@ -106,14 +96,6 @@ export const AssuranceTab: React.FC<AssuranceTabProps> = ({ state }) => {
             >
               <RefreshCw size={12} className={isVerifying ? 'anim-spin' : ''} />
               <span>Verify Chain</span>
-            </button>
-
-            <button 
-              className="chain-btn tamper"
-              onClick={triggerTamperDemo}
-            >
-              <AlertTriangle size={12} />
-              <span>Tamper Demo</span>
             </button>
           </div>
         </div>
@@ -129,18 +111,17 @@ export const AssuranceTab: React.FC<AssuranceTabProps> = ({ state }) => {
         {/* Linked Blocks Visual Strip */}
         <div className="chain-blocks-strip">
           {blocks.map((b, idx) => {
-            const isBroken = isTampered && b.seq === 4;
-
+            // The blocks are listed as recorded. Whether the chain is intact is only said by "Verify Chain".
             return (
               <React.Fragment key={b.seq}>
-                <div className={`chain-block ${isBroken ? 'broken-block' : 'valid-block'}`}>
+                <div className="chain-block">
                   <div className="block-seq">BLOCK #{b.seq}</div>
                   <div className="block-phase">{b.phase}</div>
-                  <strong className="block-name">{b.name}</strong>
-                  <code className="block-hash">{isBroken ? "TAMPERED_BYTE_x99" : b.hash}</code>
+                  <strong className="block-name">{b.substep || b.type}</strong>
+                  <code className="block-hash">{String(b.sha256).substring(0, 12)}...</code>
                 </div>
                 {idx < blocks.length - 1 && (
-                  <div className={`chain-connector ${isBroken ? 'broken-link' : 'valid-link'}`}>
+                  <div className="chain-connector">
                     <Link2 size={14} />
                   </div>
                 )}
@@ -172,15 +153,26 @@ export const AssuranceTab: React.FC<AssuranceTabProps> = ({ state }) => {
 
         <div className="cert-body-preview">
           <div className="cert-verdict-callout">
-            <strong>OFFICIAL VERDICT: {cert.verdict}</strong>
+            <strong>VERDICT: {cert.status} ({cert.stage} / {cert.rule})</strong>
+            <p>{cert.reason}</p>
             <p>"{cert.bounded_trust_claim}"</p>
+            <p>
+              fast_gate_ms: {shown(cert.fast_gate_ms)} · cache_hit: {shown(cert.cache_hit)} · escalated: {shown(cert.escalated)}
+              {cert.escalation ? ` · escalation: ${cert.escalation}` : ''}
+              {cert.demo_condition ? ` · demo condition: ${cert.demo_condition.id}` : ''}
+            </p>
           </div>
 
           <div className="cert-kv-grid">
-            <div><span>Package:</span> <strong>{cert.subject?.package}</strong></div>
-            <div><span>Version:</span> <code>{cert.subject?.version}</code></div>
-            <div><span>Artifact Hash:</span> <code>{cert.subject?.artifact_sha256?.substring(0, 20)}...</code></div>
-            <div><span>Baseline Digest:</span> <code>{cert.subject?.baseline_digest?.substring(0, 20)}...</code></div>
+            <div><span>Package:</span> <strong>{shown(cert.subject?.package)}</strong></div>
+            <div><span>Version:</span> <code>{shown(cert.subject?.version)}</code></div>
+            <div><span>Artifact SHA-256:</span> <code>{shown(cert.subject?.artifact_sha256)}</code></div>
+            <div><span>Registry SHA-256:</span> <code>{shown(cert.subject?.registry_sha256)}</code></div>
+            <div><span>Subtree Digest:</span> <code>{shown(cert.subject?.subtree_digest)}</code></div>
+            <div><span>Contract Digest:</span> <code>{shown(cert.subject?.contract_digest)}</code></div>
+            {checks.map(([name, value]) => (
+              <div key={name}><span>{name}:</span> <code>{Array.isArray(value) ? value.join(', ') : String(value)}</code></div>
+            ))}
           </div>
         </div>
       </div>
@@ -189,34 +181,33 @@ export const AssuranceTab: React.FC<AssuranceTabProps> = ({ state }) => {
       <div className="prominent-residual-box">
         <div className="residual-header">
           <AlertTriangle size={18} className="text-amber-400" />
-          <h5>Prominent Residual Uncertainty Declaration</h5>
+          <h5>What this certificate does not establish</h5>
         </div>
 
         <p className="residual-explainer">
-          In strict accordance with ASENT honesty standards, an approval never claims "proven safe". 
-          The following boundaries and unreached predicates are explicitly documented:
+          The verdict is bounded by the checks listed above. These limits are part of the certificate:
         </p>
 
         <div className="residual-bullets-grid">
           <div className="residual-bullet-col">
-            <strong>Unreached Predicates:</strong>
+            <strong>Limits stated by this run:</strong>
             <ul>
               {residuals.length > 0 ? (
                 residuals.map((r: any, i: number) => (
-                  <li key={i}><code>{r.predicate}</code>: {r.reason}</li>
+                  <li key={i}><code>{r.predicate}</code> ({r.file_line}): {r.reason}</li>
                 ))
               ) : (
-                <li>No high-priority syntactic predicates remained unreached.</li>
+                <li>None reported.</li>
               )}
             </ul>
           </div>
 
           <div className="residual-bullet-col">
-            <strong>Observation Method Limitations:</strong>
+            <strong>Method limits of the fast gate:</strong>
             <ul>
-              <li>eBPF kernel-level telemetry not accessible in rootless container environments.</li>
-              <li>Observation limited to Python 3.12 sys.addaudithook &amp; seccomp syscall filters.</li>
-              <li>Trust claim is strictly bounded to the evaluated finite execution paths.</li>
+              <li>Static checks only: no package code is installed, imported or run.</li>
+              <li>Compiled code in a wheel is not analysed; such a wheel is UNRESOLVED.</li>
+              <li>Advisories are what OSV listed when it was asked; they are asked again on every run.</li>
             </ul>
           </div>
         </div>
