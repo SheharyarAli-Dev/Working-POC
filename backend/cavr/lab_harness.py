@@ -2,6 +2,7 @@
 import importlib.util
 import json
 import os
+import resource
 import socket
 import sys
 import threading
@@ -9,14 +10,10 @@ from pathlib import Path
 
 FAKE='CAVR_FAKE_SECRET_NOT_A_CREDENTIAL'
 work=Path.cwd();mode=sys.argv[1];source=Path(sys.argv[2]).resolve();pdf=Path(sys.argv[3]).read_bytes()
-try:
-    import resource
-    resource.setrlimit(resource.RLIMIT_AS,(256*1024*1024,256*1024*1024))
-    resource.setrlimit(resource.RLIMIT_CPU,(8,8))
-    resource.setrlimit(resource.RLIMIT_FSIZE,(8*1024*1024,8*1024*1024))
-    resource.setrlimit(resource.RLIMIT_NOFILE,(128,128))
-except (ImportError,ValueError):
-    pass  # resource limits unavailable on Windows; audit hook enforces subprocess/network restrictions
+resource.setrlimit(resource.RLIMIT_AS,(256*1024*1024,256*1024*1024))
+resource.setrlimit(resource.RLIMIT_CPU,(8,8))
+resource.setrlimit(resource.RLIMIT_FSIZE,(8*1024*1024,8*1024*1024))
+resource.setrlimit(resource.RLIMIT_NOFILE,(128,128))
 received=[]
 audit_events=[]
 intercept_events=[]
