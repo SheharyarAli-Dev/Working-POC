@@ -1,0 +1,1225 @@
+                                                 ASENT — MODULE 3
+
+                                                SATRA-RV
+                      Security Assertion, Testing, Repair & Verification
+Revised module design merging the original SATRA research boundary with the new dictionary + Ollama
+                                           + sandbox plan
+
+
+
+ STATUS: GREEN TO IMPLEMENT; YELLOW ON NOVELTY​
+ The design is technically feasible and research-worthy enough to proceed, but its novelty is a hypothesis that must be
+ validated against strong baselines. The module must not claim “first” or “fully secure” before empirical kill tests demonstrate
+ added value.
+
+
+
+ Constraint / requirement                                           Design decision
+                                                                    Core decision engine is deterministic and local. Ollama is
+ No paid APIs / cloud services                                      local-only and used conditionally; there is no hosted LLM
+                                                                    dependency.
+                                                                    One local model is used only for bounded dynamic-test
+ No “agent uses agent” architecture                                 generation and repair proposals; all acceptance decisions remain
+                                                                    deterministic/evidence-based.
+                                                                    Students implement the security-change model, dictionary, test
+ Student contribution must be substantial                           validator, localization logic, patch-verification logic, sandbox
+                                                                    orchestration, evidence model, benchmark and evaluation.
+                                                                    Conflicting requirements, deep program/security reasoning,
+ Clear CCP                                                          interdependent stages, significant consequences, uncertain root
+                                                                    causes, and multiple stakeholders are central to the problem.
+                                                                    SATRA-RV owns application-code security verification and repair
+ Different from CAVR / SABLE                                        acceptance. CAVR owns dependency/package behavior; SABLE
+                                                                    owns IaC/resource lineage.
+                                                                    Core prototype is planned for 8 months; research evaluation,
+ 1–1.5 year legitimate scope                                        hardening, benchmark, integration and extensions take the
+                                                                    module to 12–16 months.
+
+
+Source basis: the uploaded “ASENT | SATRA” 24 September 2026 design, the rejection feedback supplied in the
+companion text file, and current 2026 literature and open-source tooling verified during this review.
+
+
+
+1. Executive Summary
+The revised module should not be presented as “an AI vulnerability scanner that generates tests and fixes code.” That
+formulation is too close to already-published 2026 detection-and-remediation pipelines. Instead, SATRA-RV retains the
+strongest part of the original SATRA document — independent, change-targeted security assurance — and makes the
+new components subordinate to a measurable acceptance problem: can an AI-generated application-code patch be
+accepted only after deterministic security obligations, trusted security tests, validated dynamic tests, and isolated
+before/after verification provide sufficient evidence that the targeted defect was removed without introducing a new
+security regression?
+The new core is therefore a five-part chain: (1) snapshot the trusted baseline and AI candidate, (2) build a Security
+Change Contract from the diff and security semantics, (3) execute deterministic dictionary tests plus validated
+Ollama-generated tests, (4) repair only from an evidence bundle and verify the candidate in a disposable sandbox, and
+(5) accept/reject the patch with an auditable evidence record. The central research claim is deliberately bounded and
+
+
+                                 ASENT | SATRA-RV | Revised Module Design | 25 September 2026 | Page 1
+conditional: SATRA-RV is valuable only if this change-targeted, evidence-grounded gate detects security failures or
+unsafe repairs that simpler baselines miss without creating unacceptable false blocks or local execution overhead.
+
+ Core research question​
+ Can a local, change-targeted security assurance gate improve the safety of AI-generated application-code changes by
+ combining trusted security tests with validated adaptive tests and differential repair verification, while remaining independent
+ of external APIs and avoiding circular trust in the same AI system that generated the patch?
+
+
+
+
+2. Direct Response to the Rejection Feedback
+ Committee criticism                                                         Concrete response in SATRA-RV
+                                                                             The problem is reframed around a genuine assurance conflict:
+                                                                             increase automated repair speed while preventing both false
+                                                                             acceptance of vulnerable patches and false rejection of legitimate
+ CCP was not justified.
+                                                                             changes. This requires program analysis, security semantics, testing
+                                                                             theory, mutation/counterfactual reasoning, repair, isolation and
+                                                                             evidence aggregation.
+                                                                             The architecture removes agent chaining. Static analysis first
+                                                                             localizes the changed security region. Only then is one local Ollama
+ Too many agents / token inflation.
+                                                                             model conditionally invoked with minimized, change-local context.
+                                                                             The core gate works without Ollama.
+                                                                             The new problem statement explicitly matches the workflow:
+                                                                             AI-generated application changes may contain or preserve security
+ Problem statement conflicted with architecture.                             defects; the system must generate/verify security evidence before
+                                                                             accepting a repair. Every component exists to solve that exact
+                                                                             problem.
+                                                                             A 12-month implementation/evaluation roadmap is defined with
+ Iterations were vague.                                                      entrance criteria, deliverables, KPIs, kill tests and exit conditions for
+                                                                             every phase.
+                                                                             Developer/AI coding user, security reviewer, CI/release engineer,
+ Stakeholders were absent.                                                   maintainer and downstream user are explicitly tied to decisions and
+                                                                             evidence.
+                                                                             The revised design compares traditional SAST, dynamic testing,
+                                                                             mutation testing, LLM security-test generation, LLM repair,
+ Existing comparison relied on checkpoints.
+                                                                             coding-agent test-integrity tools and 2026 integrated pipelines using
+                                                                             cited research and practical open-source baselines.
+                                                                             The students do not merely wire tools together. They implement the
+                                                                             security-change contract, bounded security dictionary, dynamic-test
+ Student contribution was unclear.                                           acceptance protocol, patch safety decision policy, differential verifier,
+                                                                             evidence schema, benchmark cases, baseline/ablation experiments
+                                                                             and local evaluation harness.
+                                                                             The core domain is Python web application security. The module
+ Scope needs redefinition.                                                   does not claim universal language/security coverage and does not
+                                                                             duplicate dependency or IaC analysis.
+                                                                             Ollama is a replaceable local component. The research artifact is the
+ Simply integrating existing agents is not enough.                           deterministic assurance protocol around it. Replacing Ollama with
+                                                                             another local model must not change the decision semantics.
+
+
+
+
+3. What Is Kept, What Is Changed, and Why
+ Original SATRA strength                           New SATRA-RV treatment                             Reason
+                                                                                                      Defines exactly what changed and prevents
+ Trusted baseline/candidate diff                   Kept as mandatory immutable input
+                                                                                                      whole-repository blind analysis.
+                                                   Kept and renamed Security Change Contract          Prevents circular “test name says it is security”
+ Security-obligation mapping
+                                                   (SCC)                                              reasoning.
+                                                   Kept, but used mainly to validate security tests   Makes test quality measurable rather than
+ Targeted security mutants / counterfactuals
+                                                   and challenge patches                              trusting LLM-generated tests.
+                                                                                                      Catches deletion, skips, assertion weakening
+ Direct test-integrity checks                      Kept
+                                                                                                      and permissive mocks.
+                                                                                                      Maintains an independent authority outside the
+ Deterministic decision engine                     Kept and expanded
+                                                                                                      LLM.
+
+
+
+                                   ASENT | SATRA-RV | Revised Module Design | 25 September 2026 | Page 2
+ Original SATRA strength                            New SATRA-RV treatment                                Reason
+                                                                                                          Provides trusted deterministic coverage across
+ Security dictionary                                New and central
+                                                                                                          bounded vulnerability families.
+                                                                                                          Adds repository-specific test ideas without
+ Ollama dynamic test generation                     New; untrusted candidate generator
+                                                                                                          making the LLM the final oracle.
+                                                                                                          Automates remediation but never directly
+ Ollama repair                                      New; candidate patch generator
+                                                                                                          commits or decides safety.
+                                                                                                          Checks functional/security regressions after
+ Sandbox verification                               New and mandatory for repairs
+                                                                                                          patching.
+                                                                                                          Only an accepted evidence bundle may create
+ Final recommit                                     New, gate-controlled
+                                                                                                          the final commit/handoff.
+
+
+The design therefore does not abandon SATRA. It extends its strongest research idea — independent security assurance
+after AI-generated change — into a complete detection-to-repair-to-verification loop. The repair loop is a downstream
+consumer of the assurance model, not the source of the research novelty.
+
+
+
+4. Exact Pain Point and Real Use Case
+The direct pain point is not “AI writes insecure code” in isolation. Static vulnerability scanners already identify many
+known patterns, and LLMs can already propose fixes. The more difficult engineering problem is deciding whether an
+AI-generated change is safe to accept when the same change can alter code, tests, assumptions and behavior at once.
+Representative safe use case: a coding agent modifies a Flask endpoint that previously required authentication and
+ownership checks. The patch makes the normal functional test pass, but the changed code path now permits an
+unauthorized access path. A static scanner may miss a semantic authorization regression; the old suite may also pass.
+SATRA-RV uses the diff to localize the security-sensitive region, runs deterministic authorization tests, asks Ollama for
+additional repository-specific tests, validates useful dynamic tests against bounded counterfactuals, and only accepts a
+repair after isolated before/after security and functional checks succeed.
+
+ One-line problem statement​
+ AI-generated application changes can introduce or preserve security defects, and a green ordinary test suite is insufficient
+ evidence of safe repair. SATRA-RV provides a local, change-targeted security evidence gate that tests, repairs, re-tests,
+ isolates and differentially verifies the candidate before acceptance.
+
+
+
+
+5. State of the Art and Existing Solutions
+The following comparison is intentionally broader than a few “checkpoints.” It includes mature conventional analysis,
+recent mutation/test-generation research, LLM-based repair, coding-agent test-integrity work, and 2026 end-to-end
+security repair pipelines. The proposal treats these as baselines rather than competitors to be ignored.
+ Existing solution / line of work                   What it contributes                                   Important limitation/gap relative to SATRA-RV
+                                                                                                          Excellent static detection, but a scanner is not by
+                                                    Semantic code-as-data analysis and security           itself a patch-acceptance protocol and does not
+ SAST: CodeQL                                       queries; supports Python and multiple other           establish whether a generated dynamic test is
+                                                    languages.                                            discriminative or whether an LLM repair changed
+                                                                                                          security behavior elsewhere.
+                                                                                                          Pattern/SAST coverage is bounded by rules and
+                                                    Fast local pattern/data-flow style scanning with      analysis; does not inherently provide adaptive
+ SAST: Semgrep CE
+                                                    customizable rules; open-source/local use.            repository-conditioned tests or independent repair
+                                                                                                          acceptance.
+                                                    AST-based detection of common Python security         Useful deterministic baseline, but shallow relative
+ Python security linting: Bandit
+                                                    issues.                                               to full behavioral verification.
+                                                                                                          Requires a running target and test strategy; broad
+                                                    Exercises running web applications and can
+ DAST: OWASP ZAP-style runtime testing                                                                    dynamic scanning does not automatically connect
+                                                    expose runtime weaknesses missed statically.
+                                                                                                          findings to the exact AI diff or patch safety.
+                                                    Measures whether tests detect behaviorally altered    Generic mutation alone can be expensive,
+ Classical mutation testing
+                                                    programs.                                             equivalent/unrelated, and non-security-specific.
+                                                                                                          Shows security mutation itself is not novel;
+                                                    Introduces security-specific mutation operators for
+                                                                                                          SATRA-RV must therefore contribute through
+ 2026 security mutation for broken access control   pathname limitation and CSRF and evaluates test
+                                                                                                          change-local contract + test acceptance + repair
+                                                    quality.
+                                                                                                          verification, not mutation alone.
+
+
+
+
+                                     ASENT | SATRA-RV | Revised Module Design | 25 September 2026 | Page 3
+Existing solution / line of work                    What it contributes                                 Important limitation/gap relative to SATRA-RV
+                                                                                                        Demonstrates value of adaptive tests, but also
+                                                    2026 work uses constraint-based mutation and
+                                                                                                        reinforces that test generation is itself a research
+LLM security-test generation                        vulnerability oracles to generate tests for
+                                                                                                        problem; SATRA-RV must validate generated tests
+                                                    LLM-produced code.
+                                                                                                        rather than trust them.
+                                                    Measures whether LLM-generated security tests       A benchmark/evaluation framework is not a
+SecMutBench / similar security-test benchmarks
+                                                    actually kill security mutants.                     repository commit gate or repair verifier.
+                                                    Uses semantically altered variants to expose weak   Generic test-suite strengthening is already
+STING                                               regression suites and guide focused test            occupied; SATRA-RV must remain security/change
+                                                    augmentation.                                       targeted.
+                                                    Shows current LLM-generated suites can have         Supports SATRA-RV’s need for an independent
+SWE-Mutation                                        weak discriminative power against realistic         test-acceptance stage rather than trusting
+                                                    mutations.                                          generated tests.
+                                                    Measures coding-agent shortcut/test exploitation,   Measures/benchmarks agent behavior; it is not a
+ImpossibleBench
+                                                    including harmful test manipulation.                complete application security patch verifier.
+                                                                                                        Strong practical baselines for test integrity, but not
+                                                    Local, deterministic evidence checks around agent
+Backcheck / mumei                                                                                       a full security vulnerability
+                                                    claims, test weakening and clean re-execution.
+                                                                                                        detection/repair/differential verifier.
+                                                                                                        Repair generation is already mature enough that
+                                                    Large body of work on generating patches from
+LLM vulnerability repair / APR literature                                                               “use an LLM to fix it” cannot be the research
+                                                    bug/vulnerability findings.
+                                                                                                        contribution.
+                                                                                                        Very close to the naïve new plan; explicitly
+2026 just-in-time security detection/remediation    Combines CodeQL/Bandit, LLM validation,             motivates adding a stronger differential acceptance
+pipeline                                            enrichment, LLM repair and re-scan.                 layer rather than claiming simple scan→fix→rescan
+                                                                                                        is novel.
+                                                    Shows targeted-fix success and regression safety    Supports making post-repair regression verification
+2026 vulnerability-regression research
+                                                    are distinct properties of LLM patches.             a first-class research object.
+
+
+
+Research-gap hypothesis (not a proven novelty claim)​
+The candidate gap is a change-targeted, local assurance protocol that links the exact AI-touched security region to trusted
+security obligations, deterministic test templates, validated adaptive tests, repair candidates and an independent before/after
+sandbox verdict. The contribution survives only if this chain measurably improves silent-security-failure detection or patch
+safety over strong simpler baselines.
+
+
+
+
+6. Final SATRA-RV Architecture
+
+
+
+
+  Figure 1. High-level SATRA-RV architecture. Ollama is an untrusted candidate generator/repairer; the deterministic evidence gate remains
+                                                               authoritative.
+
+
+6.1 Boundary of the Module
+Area                                                SATRA-RV owns                                       Explicitly outside core scope
+                                                    Security analysis, tests, patch verification
+                                                                                                        Dependency package trust analysis and
+Application code                                    and repair acceptance for Python web
+                                                                                                        IaC/resource lineage.
+                                                    applications.
+                                                                                                        Cryptographic proofs, memory corruption
+                                                    Bounded web-application security
+Security model                                                                                          across C/C++, cloud account security, full
+                                                    obligations and vulnerability families.
+                                                                                                        browser security.
+                                                    Local Ollama as optional/replaceable                Hosted LLM APIs, model training, model
+AI
+                                                    candidate generator and repairer.                   fine-tuning.
+                                                    Local disposable sandbox with reproducible          Production execution and live exploitation
+Execution
+                                                    test runs.                                          against third-party systems.
+                                                    Evidence bundle + accept/reject/retry
+Output                                                                                                  Absolute proof that an application is secure.
+                                                    decision + safe recommit/handoff.
+
+
+
+
+                                      ASENT | SATRA-RV | Revised Module Design | 25 September 2026 | Page 4
+7. Every Sub-Module You Will Build
+Sub-module                                                          Concrete responsibility and student contribution
+                                                                    Purpose: establish immutable baseline/candidate states. Inputs: Git
+                                                                    repository, initial commit or AI-generated commit. Outputs: commit
+M1. Repository & Commit Capture                                     hashes, file lists, unified diff, changed-line map. Student work: safe
+                                                                    checkout logic, repository normalization, clean-worktree checks,
+                                                                    change metadata and evidence IDs.
+                                                                    Purpose: determine which changed regions can affect security.
+                                                                    Techniques: Python AST/Tree-sitter, import/call relations,
+                                                                    route/decorator detection, known sinks/sources, security API
+M2. Security-Sensitive Change Localizer
+                                                                    patterns, changed-test detection. Output: security regions with
+                                                                    confidence and reasons. Student work: rule set, region schema,
+                                                                    locality heuristics, false-positive controls.
+                                                                    Purpose: convert a changed security region into an independently
+                                                                    grounded security expectation. Fields: subject/trust level,
+M3. Security Change Contract (SCC) Builder                          action/resource, expected secure outcome, code region, applicable
+                                                                    vulnerability families, candidate tests, counterfactuals and invariants.
+                                                                    Student work: contract schema and mapping logic.
+                                                                    Purpose: provide deterministic, trusted coverage. Each entry
+                                                                    contains CWE family, preconditions, safe behavior, pytest template,
+M4. Security Dictionary Engine                                      attack/input classes, expected output/state effect, applicable
+                                                                    framework and validation metadata. Student work: initial bounded
+                                                                    library, pytest harness, tagging, versioning, coverage matrix.
+                                                                    Purpose: run local deterministic tools such as Bandit/Semgrep CE
+                                                                    and optionally local CodeQL as baselines/auxiliary signals. Student
+M5. Static Security Analysis Adapter
+                                                                    work: normalized finding schema, deduplication, changed-region
+                                                                    filtering, severity mapping and tool disagreement handling.
+                                                                    Purpose: discover repository-specific security scenarios that are not
+                                                                    directly covered by the dictionary. Context is strictly change-local.
+M6. Dynamic Test Candidate Generator (Ollama)
+                                                                    Student work: context selector, prompt/structured-output protocol,
+                                                                    model configuration, token/cost logging and candidate ranking.
+                                                                    Purpose: prevent weak LLM tests from becoming trusted. Checks
+                                                                    syntax/imports, secure-baseline behavior, vulnerable-counterfactual
+M7. Dynamic Test Validator                                          discrimination, locality, repeatability, runtime budget, side effects and
+                                                                    test independence. Student work: acceptance algorithm and
+                                                                    evidence rules.
+                                                                    Purpose: combine static findings, dictionary failures, accepted
+                                                                    dynamic-test failures, diff signals and SCC obligations. Output: one
+M8. Findings Correlator                                             normalized finding per security issue with traceability. Student work:
+                                                                    correlation rules, confidence aggregation, duplicate suppression and
+                                                                    severity/confidence explanation.
+                                                                    Purpose: propose a minimal code patch for a correlated finding. It
+                                                                    receives the evidence bundle, not the whole repository by default.
+M9. Repair Proposal Engine (Ollama)                                 Candidate patches are always untrusted and are applied in an
+                                                                    isolated branch. Student work: repair context selection, patch
+                                                                    constraints, iteration policy, failure feedback formatting.
+                                                                    Purpose: independently execute candidate patches. The sandbox
+                                                                    compares baseline vs candidate on security obligations, deterministic
+                                                                    tests, accepted dynamic tests and functional regression. Student
+M10. Differential Sandbox Verifier
+                                                                    work: container orchestration, clean environment generation,
+                                                                    resource/time limits, network controls, before/after normalization and
+                                                                    verdict extraction.
+                                                                    Purpose: produce ACCEPT / REJECT / RETRY / INCONCLUSIVE
+                                                                    using explicit evidence, not LLM judgment. Student work: decision
+M11. Repair/Acceptance Decision Engine
+                                                                    matrix, thresholds, bounded retries, false-block policy and reviewer
+                                                                    escalation.
+                                                                    Purpose: make every decision auditable and reproducible. Outputs
+                                                                    JSON/SARIF/report with commit IDs, security regions, tests, findings,
+M12. Evidence & Recommit Layer                                      patches, sandbox logs and verdict. Only accepted patches are
+                                                                    eligible for recommit/handoff. Student work: schema, report
+                                                                    generator, reproducibility metadata, CI exit codes.
+                                                                    Purpose: demonstrate that the system adds measurable value. Build
+                                                                    secure/vulnerable paired cases, legitimate refactors, security
+M13. Benchmark & Evaluation Harness                                 regressions, test weakening cases and repair-induced regressions.
+                                                                    Student work: ground truth, metrics, baselines, ablations, statistical
+                                                                    analysis and reproducibility package.
+
+
+
+
+                                 ASENT | SATRA-RV | Revised Module Design | 25 September 2026 | Page 5
+8. Detailed End-to-End Flow
+
+
+                         Figure 2. End-to-end execution flow, including test generation, repair and bounded retry.
+
+
+8.1 Phase-by-Phase Behavior
+ Phase                                                                    What SATRA-RV actually does
+                                                                          Checkout baseline; verify clean state; capture candidate diff; assign
+ P1 Capture
+                                                                          run ID.
+                                                                          Map changed lines to functions/routes/security operations; identify
+ P2 Localize
+                                                                          associated tests and security semantics.
+                                                                          Construct security obligations/invariants from
+ P3 Contract                                                              route/middleware/ownership/sink semantics and explicit benchmark
+                                                                          policy where available.
+                                                                          Run relevant deterministic dictionary tests and record
+ P4 Trusted tests
+                                                                          baseline/candidate outcomes.
+                                                                          Generate Ollama candidates only for changed security regions;
+ P5 Adaptive tests
+                                                                          never expose unnecessary repository contents.
+                                                                          Reject generated tests that do not compile, fail baseline
+ P6 Test validation                                                       expectations, lack counterfactual discrimination, are unstable, or are
+                                                                          too broad.
+                                                                          Normalize findings and determine whether there is a security defect,
+ P7 Correlation
+                                                                          a pre-existing gap, a test weakness or insufficient evidence.
+                                                                          Provide only relevant evidence to Ollama; apply candidate patch in a
+ P8 Repair
+                                                                          branch; never commit automatically at this stage.
+                                                                          Run security + functional + build/runtime checks in a disposable
+ P9 Sandbox
+                                                                          environment; compare baseline and candidate behavior.
+                                                                          ACCEPT only when all mandatory evidence gates pass; otherwise
+ P10 Decision
+                                                                          RETRY within a bounded budget or REJECT/INCONCLUSIVE.
+                                                                          Store the evidence bundle and produce commit/handoff only for
+ P11 Evidence/recommit
+                                                                          accepted patches.
+
+
+
+
+9. Security Dictionary Design
+The dictionary is not a static list of payloads. It is a versioned security knowledge/test specification that connects a
+vulnerability family to preconditions, code patterns, expected safe behavior and executable pytest logic. It becomes the
+trusted deterministic layer against which Ollama-generated tests are judged.
+SecurityRule {
+  id: AUTHZ.IDOR.001
+  cwe: CWE-639
+  family: "authorization / object ownership"
+  applicability: [Flask, pytest]
+  preconditions: [object_id_from_request, user_context, ownership_check]
+  security_obligation: "non-owner must be denied"
+  safe_outcome: [HTTP_403, no_state_change]
+  test_template: pytest_function
+  input_classes: [owner, non_owner, unauthenticated]
+  counterfactual_template: "remove_or_bypass_owner_check"
+  validation_rules: [runs, discriminates, stable, local]
+  version: 1
+}
+
+
+
+9.1 Initial vulnerability coverage
+ Priority                         Security family                         Initial deterministic treatment     Why included
+                                                                          Route/guard semantics + pytest      Direct continuation of original SATRA
+ Core                             Authentication / authorization / IDOR
+                                                                          negative tests + counterfactuals    strength and high-value web security.
+
+
+
+                              ASENT | SATRA-RV | Revised Module Design | 25 September 2026 | Page 6
+ Priority                            Security family                        Initial deterministic treatment          Why included
+                                                                            Source/sink patterns +
+                                                                                                                     Obvious application-security pain
+ Core                                SQL injection                          parameterization checks + behavior
+                                                                                                                     point.
+                                                                            tests where safe
+                                                                            Subprocess/shell usage + controlled      High consequence and
+ Core                                Command injection
+                                                                            input tests                              repository-sensitive.
+                                                                            Path normalization + containment +       Behavioral security issue; strong
+ Core                                Path traversal / unsafe file access
+                                                                            file behavior checks                     counterfactual space.
+                                                                            Template/sink analysis +
+ Core                                XSS                                                                             Demonstrates input/output security.
+                                                                            encoded/untrusted-output cases
+                                                                            User-controlled URL/sink checks +
+ Core                                SSRF                                                                            Shows runtime/data-flow reasoning.
+                                                                            safe local target harness
+                                                                            Token/route semantics +
+ Core                                CSRF                                                                            Strong security-test oracle problem.
+                                                                            request-state tests
+                                                                            Known API patterns + controlled          Representative high-risk Python
+ Core                                Insecure deserialization
+                                                                            fixture tests                            issue.
+                                                                            Static detection + repository history    Useful deterministic addition, lower
+ Extension                           Secrets / credentials
+                                                                            checks                                   need for dynamic tests.
+                                                                            Target construction + approved host
+ Extension                           Open redirect / unsafe redirect                                                 Small but clear semantic rule.
+                                                                            invariant
+                                     Unsafe temporary file / race-prone
+ Extension                                                                  Pattern + behavior checks                Adds deeper runtime semantics.
+                                     file handling
+                                                                            Added only when a
+ Extension                           Other CWE families                     benchmark/evidence need justifies        Prevents scope explosion.
+                                                                            them
+
+
+
+
+10. Ollama Dynamic Test Generation and Validation
+
+
+
+                   Figure 3. Ollama-generated tests are hypotheses; only validated candidates enter the trusted execution set.
+
+
+10.1 Why dynamic tests are included
+A deterministic dictionary cannot anticipate every repository-specific security invariant. Different applications encode
+authorization, object ownership, URL constraints and validation logic differently. A local model can use the exact changed
+code context to propose additional cases. Current 2026 evidence supports this direction but also shows that
+LLM-generated tests can be weak or brittle, so the generator must remain subordinate to an independent validator.
+SWE-Mutation found substantial weaknesses in the discriminative power of current LLM-generated suites, while a 2026
+security-test-generation study demonstrated that adversarial test synthesis can improve fault discovery when paired with
+mutation/oracles.
+
+10.2 Dynamic-test context policy
+●​   Only changed security slices are sent to the model by default. The context builder can include the changed function,
+     relevant call/data flow, applicable dictionary entries, route/schema signatures and small neighboring utilities.
+●​   No production secrets or user data are allowed. Redaction and repository policy checks happen before the model
+     call.
+●​   No model call occurs when deterministic tests and security analysis already provide sufficient evidence. This makes
+     Ollama conditional rather than mandatory.
+●​   The model returns structured test candidates. The system rejects prose-only outputs and refuses unsafe side effects.
+●​   The model is never the final judge. Acceptance is determined by deterministic execution and counterfactual evidence.
+10.3 Dynamic test acceptance criteria
+ Check                                               Required condition                                  Failure meaning
+                                                     Test parses and imports in target
+ Syntax/import                                                                                           Reject candidate.
+                                                     environment.
+                                                     Test behaves correctly on the trusted secure
+ Secure baseline                                                                                         Likely wrong or overfitted test.
+                                                     baseline.
+                                                     Test detects at least one valid security
+ Counterfactual discrimination                                                                           Not discriminative enough.
+                                                     counterfactual.
+
+                                  ASENT | SATRA-RV | Revised Module Design | 25 September 2026 | Page 7
+ Check                                              Required condition                              Failure meaning
+                                                    Test exercises the changed or explicitly
+ Locality                                                                                           Too broad / unrelated.
+                                                    related security behavior.
+                                                    Repeated executions are stable within the
+ Repeatability                                                                                      Flaky candidate.
+                                                    configured budget.
+                                                    No uncontrolled network access, credential
+ Side-effect safety                                                                                 Unsafe test.
+                                                    use or destructive action.
+                                                    Test maps to SCC obligation / vulnerability
+ Traceability                                                                                       Cannot be independently interpreted.
+                                                    family.
+
+
+
+
+11. Automated Repair and Sandboxed Verification
+
+
+
+
+                      Figure 4. Repair loop: candidate patch → isolated execution → differential evidence → accept/retry/reject.
+
+
+11.1 Repair contract
+Ollama receives a structured evidence bundle rather than a generic “fix security” prompt. The bundle identifies the
+affected region, finding family, expected secure behavior, failing tests, accepted dynamic tests, relevant static signals and
+                              ASENT | SATRA-RV | Revised Module Design | 25 September 2026 | Page 8
+constraints on the patch. The repairer proposes a patch; it cannot mark the patch safe and it cannot directly write the final
+commit.
+
+11.2 Sandbox controls
+●​   Disposable execution. Every candidate patch runs in a fresh container or isolated workspace and is destroyed after
+     evaluation.
+●​   No production credentials. Benchmark and local evaluation use synthetic data; secrets are excluded from the
+     container.
+●​   Restricted network. Default repair verification runs without outbound network access unless a benchmark explicitly
+     needs a controlled local service.
+●​   Bounded resources. CPU, memory, filesystem and wall-clock limits stop pathological patches/tests.
+●​   Clean dependency state. Dependencies are prepared from a controlled local build environment; the sandbox does
+     not rely on mutable developer state.
+●​   Before/after differential. The same security obligations and functional invariants are executed against baseline and
+     candidate where possible.
+
+11.3 Mandatory post-repair gates
+ Gate                                                              Question answered
+                                                                   Does the candidate no longer violate the declared security
+ Target defect removed?
+                                                                   obligation?
+ Trusted tests pass?                                               Do deterministic dictionary tests still behave as expected?
+                                                                   Does the candidate satisfy repository-specific scenarios that survived
+ Accepted dynamic tests pass?
+                                                                   validation?
+                                                                   Do new static/dynamic security findings appear or does a previously
+ New security regression?
+                                                                   satisfied obligation break?
+ Functional regression?                                            Does the patch break intended application behavior?
+                                                                   Does the application still build/start/execute correctly in the isolated
+ Build/runtime regression?
+                                                                   environment?
+                                                                   Did the patch modify only the intended security-relevant scope or
+ Patch scope acceptable?
+                                                                   introduce unrelated changes?
+
+
+
+
+12. Decision Engine and Evidence Model
+The system should expose four final states: ACCEPTED, REJECTED, RETRY_AVAILABLE and INCONCLUSIVE. The
+original SATRA labels PRESERVED_WITHIN_MODEL, ORACLE_WEAKENED, APPLICATION_REGRESSION,
+PRE_EXISTING_TEST_GAP and INCONCLUSIVE remain useful internally for diagnosis; the external gate can
+summarize them into a merge decision.
+if insufficient_evidence:
+    decision = INCONCLUSIVE
+elif patch_violates_security_contract:
+    decision = REJECTED
+elif trusted_tests_fail or accepted_dynamic_tests_fail:
+    decision = REJECTED
+elif new_security_regression:
+    decision = REJECTED
+elif functional_regression or build_failure:
+    decision = REJECTED
+elif repair_attempts_remaining and failing_evidence_is_actionable:
+    decision = RETRY_AVAILABLE
+else:
+    decision = ACCEPTED
+
+
+
+12.1 Evidence bundle
+ Record                                                            Minimum fields
+ Run                                                               run_id, timestamp, tool/model versions, platform
+ Repository state                                                  baseline_commit, candidate_commit, working-tree hash
+
+                                ASENT | SATRA-RV | Revised Module Design | 25 September 2026 | Page 9
+Record                                                                   Minimum fields
+Security region                                                          file, line range, function/route, mapping reason, confidence
+Security contract                                                        obligation, subject, action/resource, expected outcome, invariant
+Dictionary tests                                                         test IDs, versions, outcomes, runtime
+                                                                         candidate ID, prompt/context fingerprint, validation outcome,
+Dynamic tests
+                                                                         accepted/rejected reason
+Findings                                                                 CWE/family, severity, source, evidence links, status
+Repair                                                                   attempt ID, changed files, patch summary, model metadata
+Sandbox                                                                  image/environment ID, tests, runtime, logs, differential results
+                                                                         ACCEPT/REJECT/RETRY/INCONCLUSIVE + explanation +
+Decision
+                                                                         evidence references
+
+
+
+
+13. Relationship to CAVR and SABLE
+
+
+
+
+                    Figure 5. Module boundary: SATRA-RV owns application-code security verification and repair acceptance.
+
+Module                                           Owns                                             SATRA-RV interaction
+                                                                                                  If a CAVR repair changes application
+                                                                                                  security behavior or its tests, SATRA-RV can
+                                                 Dependency/package behavior, hidden
+CAVR                                                                                              independently verify the application security
+                                                 activation, repair and re-verification.
+                                                                                                  contract. SATRA-RV does not repeat
+                                                                                                  dependency analysis.
+                                                                                                  If an application+IaC change is part of an
+                                                 IaC security preservation, resource              ASENT run, SATRA-RV and SABLE emit
+SABLE
+                                                 restructuring and lineage.                       separate evidence. SATRA-RV does not
+                                                                                                  analyze Terraform/resource lineage.
+                                                 Application code security tests, adaptive test
+                                                                                                  Final ASENT layer combines evidence; no
+                                                 generation, repair verification, sandbox
+SATRA-RV                                                                                          module is expected to “own” the entire
+                                                 differential checks and evidence-based
+                                                                                                  security problem.
+                                                 acceptance.
+
+
+No duplication by design​
+The separation is based on the object being verified: package/dependency behavior (CAVR), infrastructure state and lineage
+(SABLE), or application security behavior and its validation (SATRA-RV).
+
+
+
+
+                                 ASENT | SATRA-RV | Revised Module Design | 25 September 2026 | Page 10
+14. CCP Mapping — Direct, Defensible, and Central
+ Seoul Accord characteristic                          SATRA-RV application                                  Concrete artifact
+                                                      Repair quickly vs avoid unsafe repairs;
+                                                      maximize detection vs avoid false blocks; use
+ 1. Conflicting requirements                                                                                Core gate and retry/accept policy.
+                                                      adaptive AI vs keep the decision independent;
+                                                      broad security coverage vs local compute limits.
+                                                      No single scanner, test suite or LLM is
+                                                      sufficient; students must design a bounded
+ 2. No obvious solution / depth                                                                             Research comparisons, ablations and kill tests.
+                                                      assurance protocol and prove value against
+                                                      baselines.
+                                                      Program analysis, web security semantics,
+                                                      testing theory, mutation/counterfactual
+ 3. Depth of knowledge                                                                                      SCC, dictionary, validator, differential sandbox.
+                                                      reasoning, LLM test generation, automated
+                                                      repair, isolation and evidence engineering.
+                                                      AI-generated patches can alter code and tests
+                                                      simultaneously; dynamic test quality can              Adaptive test validation + repair regression
+ 4. Unfamiliar issues
+                                                      degrade under code evolution; repair can              evaluation.
+                                                      introduce new vulnerabilities.
+                                                      The project does more than running a scanner:
+                                                      it creates a security contract from the change        Research mechanism, not tool integration
+ 5. Beyond standard practice
+                                                      and uses independent before/after evidence for        alone.
+                                                      patch acceptance.
+                                                      Developer, security reviewer, CI/release
+ 6. Diverse stakeholders                              engineer, maintainer and downstream user              Different report outputs and gate semantics.
+                                                      have different acceptance needs.
+                                                      False acceptance may merge vulnerable
+                                                                                                            High-assurance decision policy and
+ 7. Significant consequences                          software; false rejection wastes engineering
+                                                                                                            sandboxing.
+                                                      time and blocks legitimate fixes.
+                                                      Change localization affects context, context
+                                                      affects tests, tests affect repair evidence, repair
+ 8. Interdependence                                                                                         Full pipeline and failure-state model.
+                                                      affects sandbox behavior, and final decisions
+                                                      depend on all of these.
+                                                      A failure may be a code regression, weak test,
+                                                                                                            Classification and evidence collection reduce
+ 9. Ill-defined requirements/cause                    pre-existing test gap, generated-test weakness,
+                                                                                                            uncertainty experimentally.
+                                                      or repair-induced regression.
+
+
+
+
+15. Stakeholders and Decisions
+ Stakeholder                                          Decision / need                                       SATRA-RV evidence
+                                                                                                            Security finding, patch evidence,
+ Developer using AI                                   Can I safely accept the agent patch?
+                                                                                                            test/sandbox result.
+                                                      Does the change satisfy the bounded                   Security obligations, deterministic and
+ Application security engineer
+                                                      security contract?                                    dynamic test evidence.
+ CI/release engineer                                  Should the change merge automatically?                Machine-readable gate status and exit code.
+                                                      What exactly changed and what was                     Diff → security region → test → patch →
+ Maintainer/code reviewer
+                                                      verified?                                             sandbox trace.
+                                                      Did intended security behavior remain                 Before/after security invariants and final
+ Downstream user
+                                                      intact?                                               decision.
+
+
+
+
+16. 12-Month Implementation and Research Plan
+The module is designed to justify approximately one academic year without inventing superficial features. Months 1–8
+build the core mechanism. Months 9–12 are required research evaluation, hardening, integration and reproducibility work.
+Months 13–16 are an optional extension window if the core evaluation reveals a justified need for broader vulnerability
+families or another Python web framework.
+ Month                                   Focus                                   Primary student work                    Exit artifact
+                                                                                 Problem definition, initial 8 core
+                                         Scope freeze + benchmark
+ 1                                                                               security families, evidence             Frozen scope; benchmark design
+                                         specification
+                                                                                 schema, ground-truth protocol
+                                                                                 Git capture, AST/Tree-sitter
+ 2                                       Repository/diff + security localizer    mapping, security-sensitive region      M1/M2 working prototype
+                                                                                 detector
+                                                                                 Obligation schema, policy sources,
+ 3                                       Security Change Contract                                                        M3 prototype
+                                                                                 invariants, locality model
+
+                                     ASENT | SATRA-RV | Revised Module Design | 25 September 2026 | Page 11
+ Month                                Focus                                 Primary student work                   Exit artifact
+                                                                            pytest harness, first deterministic
+ 4                                    Security dictionary v1                                                       M4 + coverage matrix
+                                                                            rules, baseline execution
+                                                                            Bandit/Semgrep CE integration,
+                                      Static adapters + finding
+ 5                                                                          finding normalization, direct diff     M5/M8
+                                      correlation
+                                                                            signals
+                                                                            Context minimization, structured
+ 6                                    Ollama dynamic test generator         outputs, candidate ranking, token      M6
+                                                                            logging
+                                                                            Counterfactual tests, stability,
+ 7                                    Dynamic test validator                                                       M7; first measurable research KPI
+                                                                            locality and acceptance rules
+                                                                            Evidence-driven prompts, isolated
+ 8                                    Repair engine + bounded loop                                                 M9
+                                                                            branch application, retry limits
+                                                                            Disposable containers,
+ 9                                    Sandbox + differential verifier       security/functional regression,        M10
+                                                                            before/after comparison
+                                                                            Acceptance states, JSON/SARIF,
+ 10                                   Decision/evidence + commit gate                                              M11/M12
+                                                                            audit trail, safe recommit
+                                                                            Dictionary-only, scanner-only,
+ 11                                   Baseline/ablation experiments         scanner+rescan, no-diff context,       Comparative results
+                                                                            no-sandbox, etc.
+                                                                            Stress cases, failure analysis,
+                                      Hardening + final evaluation +
+ 12                                                                         runtime/token optimization,            Final prototype + thesis evidence
+                                      ASENT interface
+                                                                            reproducibility
+
+
+
+
+16.1 Optional months 13–16
+●​     Security-family expansion only if justified by benchmark gaps. Add further CWE families, not arbitrary “feature creep.”
+●​     Second Python web framework only if transfer evaluation is scientifically useful. Flask remains the core scope;
+       Django/FastAPI are optional extensions.
+●​     Performance/scale study. Optimize context size, parallel test execution, mutation reuse and sandbox startup.
+●​     Cross-module ASENT experiments. Evaluate CAVR→SATRA-RV and SABLE→SATRA-RV handoffs without
+       duplicating their analyses.
+
+
+
+17. KPIs and Research Metrics
+ KPI                                               Definition                                         Why it matters
+                                                   True security regressions caught / total           Shows whether the module catches the actual
+ Security detection recall
+                                                   ground-truth regressions.                          problem.
+                                                   Legitimate secure changes incorrectly rejected /
+ False-block rate                                                                                     Prevents “block everything” behavior.
+                                                   legitimate changes.
+                                                   Validated dynamic tests / generated candidate      Measures whether Ollama outputs are usable
+ Dynamic-test acceptance rate
+                                                   tests.                                             rather than blindly trusted.
+                                                   Accepted tests that kill valid counterfactuals /
+ Dynamic-test discrimination                                                                          Direct measure of security-test quality.
+                                                   accepted tests.
+                                                   Repairs that remove the target defect and pass
+ Repair success rate                                                                                  Measures practical repair value.
+                                                   all gates / repair attempts.
+                                                   Accepted-looking patches that introduce new
+ Repair-induced regression rate                                                                       Directly tests why the sandbox exists.
+                                                   security/functional faults before verification.
+                                                   Regressions missed by baseline tests but
+ Silent-regression catch rate                                                                         Core research value.
+                                                   caught by SATRA-RV.
+ Mean repair iterations                            Average repair attempts before accept/reject.      Shows loop efficiency.
+                                                   Additional runtime over simple scanner/replay
+ Local compute overhead                                                                               Student-level feasibility.
+                                                   baselines.
+                                                   Ollama calls and tokens per candidate patch,
+ LLM/token budget per change                                                                          Directly addresses prior committee concern.
+                                                   ideally on only changed context.
+                                                   Decisions with complete
+ Evidence completeness                                                                                Supports reproducibility and auditability.
+                                                   diff/contract/test/patch/sandbox trace.
+
+
+
+
+18. Experimental Baselines and Kill Tests
+A strong FYP should be willing to discover that part of the proposed mechanism is unnecessary. The following
+experiments are therefore mandatory research gates rather than optional demonstrations.
+
+
+                                  ASENT | SATRA-RV | Revised Module Design | 25 September 2026 | Page 12
+Baseline / kill test                                Question                                            If SATRA-RV does not beat it
+                                                    Do Bandit/Semgrep/CodeQL catch the same             The dynamic/behavioral layer may be
+B1: static scanner only
+                                                    security regressions?                               unnecessary for that class.
+                                                    Does simply re-running scanners provide the         The repair-verification contribution must be
+B2: scanner + re-scan after repair
+                                                    same patch safety?                                  narrowed.
+                                                    Does the trusted deterministic dictionary catch
+B3: dictionary-only                                                                                     Ollama dynamic testing may not be justified.
+                                                    everything the dynamic layer catches?
+                                                    Does validation materially reduce weak/flaky
+B4: Ollama tests without validator                                                                      The validator is not justified or needs redesign.
+                                                    tests or false assurance?
+                                                    Does change-targeted security context actually
+B5: dynamic tests without security contract                                                             Change-local modeling needs redesign.
+                                                    help versus generic repository prompting?
+                                                                                                        If nearly none, quantify why; otherwise sandbox
+B6: repair without sandbox                          How many new regressions are missed?
+                                                                                                        is justified.
+B7: generic mutation vs                             Does targeting the changed security behavior
+                                                                                                        Security-contract contribution may be weak.
+security/change-targeted counterfactuals            improve signal/overhead?
+                                                    Can obligations/test validation be derived          Redesign the oracle source; no circular
+K8: circularity
+                                                    independently of the tests generated by the AI?     acceptance.
+                                                    Can the complete loop run locally within a          Narrow scope rather than adding paid
+K9: feasibility
+                                                    bounded time/resource budget?                       infrastructure.
+
+
+
+
+19. Mandatory Stress Cases
+ID                                    Case                                   Setup                                    Expected SATRA-RV behavior
+                                                                                                                      Accept if security contract
+                                                                             Code changes; tests legitimately
+S1                                    Legitimate secure refactor                                                      preserved and tests remain
+                                                                             refactored
+                                                                                                                      discriminative.
+                                                                                                                      Detect via
+S2                                    Authorization bypass                   Guard removed or weakened                dictionary/counterfactual; repair;
+                                                                                                                      sandbox reject until fixed.
+                                                                             Assertion weakened, negative
+                                                                                                                      Flag as test-integrity weakness; do
+S3                                    Test weakening                         case removed, auth mocked to
+                                                                                                                      not treat green CI as sufficient.
+                                                                             success
+                                                                                                                      Ollama proposes candidate; only
+S4                                    Repository-specific hidden case        Static dictionary finds no direct rule
+                                                                                                                      validated test enters suite.
+                                                                             Original issue fixed but another         Sandbox differential verification
+S5                                    Repair-induced new vulnerability
+                                                                             security property breaks                 rejects patch.
+                                                                                                                      Classify as pre-existing
+                                                                             Baseline already violates the same
+S6                                    Pre-existing vulnerability                                                      test/security gap, not caused by
+                                                                             security obligation
+                                                                                                                      the candidate.
+                                                                             Ollama test sometimes fails on           Reject dynamic test; keep
+S7                                    Flaky generated test
+                                                                             secure baseline                          deterministic evidence.
+                                                                                                                      Localizer limits security analysis to
+S8                                    Large irrelevant diff                  AI changes many non-security files       affected regions; do not flood
+                                                                                                                      Ollama context.
+
+
+
+
+20. Zero-Cost / Local-Only Feasibility
+Component                                           Role                                                Cost/deployment position
+Python                                              Orchestrator and analysis engine                    Free/local
+Git                                                 Baseline/candidate snapshots and diff               Free/local
+pytest / unittest                                   Deterministic and dynamic test execution            Free/local
+Python AST / Tree-sitter                            Structural mapping                                  Free/open-source
+Bandit                                              Python SAST baseline                                Free/open-source
+Semgrep CE                                          Local pattern/SAST baseline                         Free/open-source local option
+Ollama                                              Local LLM generation/repair                         Local; no hosted API dependency
+Docker                                              Disposable sandbox                                  Free local runtime
+SQLite/JSON/SARIF                                   Evidence storage/output                             Free/local
+                                                                                                        Use only if local installation and license
+Optional CodeQL CLI                                 Evaluation baseline / deeper local analysis         conditions are acceptable for the student
+                                                                                                        environment
+
+
+Important constraint statement​
+The module must remain functionally usable when Ollama is unavailable. Static analysis, deterministic dictionary tests,
+
+
+                                 ASENT | SATRA-RV | Revised Module Design | 25 September 2026 | Page 13
+ repository diff analysis, sandbox execution and the acceptance engine are not allowed to depend on a paid or hosted AI
+ service.
+
+
+
+
+21. Critical Risks, Weaknesses, and Defenses
+ Risk                                          Severity                                   Defense
+                                                                                          Never trust without validator; require
+ LLM-generated test is wrong                   High                                       secure-baseline + counterfactual discrimination
+                                                                                          + stability.
+                                                                                          Trusted dictionary + static analysis +
+ Ollama misses a vulnerability                 High
+                                                                                          benchmarked dynamic layer; bounded claims.
+                                                                                          Before/after contract and regression suite;
+ Patch fixes one route but breaks another      High
+                                                                                          sandbox differential checks.
+                                                                                          Do not auto-repair solely from a scanner
+ Static tool false positives                   Medium                                     finding; require behavior evidence or clear
+                                                                                          confidence policy.
+                                                                                          Feasibility checks and independent validation;
+ Mutation equivalent/unusable                  High
+                                                                                          exclude invalid mutants from scoring.
+                                                                                          Python web applications remain core; extra
+ Scope explosion                               High                                       CWE/frameworks only via measured evaluation
+                                                                                          need.
+                                                                                          Change-local context, conditional calls,
+ Ollama too slow on student hardware           Medium                                     bounded model size, deterministic-first pipeline,
+                                                                                          caching and token/runtime metrics.
+                                                                                          Security contract derives from code
+ Circularity                                   High                                       semantics/policy, not solely from the test being
+                                                                                          evaluated.
+                                                                                          INCONCLUSIVE is preferable to an unjustified
+ False assurance                               Critical                                   ACCEPT. Acceptance requires converging
+                                                                                          evidence from independent layers.
+                                                                                          Maintain explicit object boundary and
+ Overlap with CAVR/SABLE                       High
+                                                                                          cross-module handoff contract.
+
+
+
+
+22. Panel-Critic Questions and Direct Answers
+“Isn’t this just Semgrep/Bandit + Ollama?”
+Not in the proposed research definition. Those tools are explicit baselines. SATRA-RV adds a change-targeted security
+contract, trusted security-test dictionary, validation of LLM-generated tests, controlled repair, and differential before/after
+patch acceptance. Whether that added chain is actually useful must be demonstrated experimentally.
+
+“Isn’t Ollama just an existing technology?”
+Yes. Ollama is infrastructure, not the contribution. The student contribution is the protocol that controls when Ollama is
+called, what context it sees, how its tests are validated, how patches are constrained, and how the final verdict is
+generated independently.
+
+“Why not just run all tests?”
+Because passing tests does not prove that the tests remain discriminative and does not guarantee that a repair
+introduced a new security failure. Current 2026 research documents both test-suite weaknesses and repair-induced
+security regressions.
+
+“Why do you need the dictionary if Ollama can generate tests?”
+The dictionary is the trusted deterministic floor. It prevents the research from depending entirely on model behavior and
+provides reproducible ground truth for benchmarking the dynamic layer.
+
+
+
+
+                                 ASENT | SATRA-RV | Revised Module Design | 25 September 2026 | Page 14
+“Why do you need dynamic tests?”
+Repository-specific security semantics may not be captured by fixed rules. The dynamic layer explores local behavior, but
+only accepted candidates are promoted to the execution set.
+
+“Why do you need sandboxing?”
+A patch can remove the target finding while changing functionality or introducing a second vulnerability. A disposable
+environment allows differential verification without touching production or the developer’s main workspace.
+
+“How do you know your dynamic test is good?”
+It must run on the secure baseline, detect a valid security counterfactual, remain stable, stay local to the target behavior
+and produce reproducible evidence.
+
+“Can you guarantee the application is secure?”
+No. The module makes a bounded claim about the supported Python/web security model and tested obligations.
+Universal security is explicitly out of scope.
+
+“Where is the students’ work?”
+In the security-change localizer, contract model, dictionary design, pytest harness, test validator, evidence correlator,
+differential sandbox verifier, decision engine, benchmark, baselines, ablations and empirical evaluation. Existing tools are
+components under test, not the project itself.
+
+
+
+23. Final Research Claim and Green-Light Criteria
+Recommended claim language: “SATRA-RV investigates whether a local, change-targeted security assurance gate that
+combines trusted security obligations, deterministic security tests, validated adaptive tests and differential post-repair
+verification can reduce silent security regressions in AI-generated Python web-application changes compared with
+simpler scanning, test-replay and repair pipelines.”
+Do not claim “first,” “state of the art,” “fully secure,” or “solves AI security” until the empirical results support those
+statements. The original SATRA document correctly treated novelty as conditional; the revised design should preserve
+that discipline.
+
+23.1 Required final gates
+ Gate                                      Evidence                                  Pass condition
+                                                                                     Most benchmark obligations can be derived
+ G1                                        Independent security obligations          from code/policy semantics without using the
+                                                                                     target test assertion as the only source of truth.
+                                                                                     A strong proportion of accepted dynamic tests
+ G2                                        Dynamic-test validity                     are independently shown to discriminate valid
+                                                                                     counterfactual security faults.
+                                                                                     The sandbox catches a measurable fraction of
+ G3                                        Repair safety                             regressions or unsafe repairs that
+                                                                                     scanner/replay baselines miss.
+                                                                                     The full chain shows measurable improvement
+                                                                                     in detection or patch acceptance quality over
+ G4                                        Baseline advantage
+                                                                                     simpler baselines at an acceptable false-block
+                                                                                     rate.
+                                                                                     The decision remains independent of the
+ G5                                        No circularity
+                                                                                     AI-generated tests/patches being evaluated.
+                                                                                     The core loop operates without paid/hosted
+ G6                                        Local feasibility                         APIs within the team’s declared
+                                                                                     hardware/runtime budget.
+                                                                                     Every decision is reconstructable from commit
+ G7                                        Reproducibility                           IDs, contract ID, test IDs, patch attempt and
+                                                                                     sandbox evidence.
+                                                                                     No duplicated ownership with CAVR
+ G8                                        Clear module boundary
+                                                                                     dependency analysis or SABLE IaC analysis.
+
+
+
+
+                            ASENT | SATRA-RV | Revised Module Design | 25 September 2026 | Page 15
+24. Verified Research and Tool References
+ ID                               Source                                     Link                                         Use in proposal
+                                                                                                                          AI coding agents can delete tests,
+                                                                             https://cheatsheetseries.owasp.org/chea
+                                  OWASP Secure Coding with AI Cheat                                                       weaken assertions, over-mock and
+ R1                                                                          tsheets/Secure_Coding_with_AI_Cheat_
+                                  Sheet                                                                                   assert buggy behavior; recommends
+                                                                             Sheet.html
+                                                                                                                          independent/adversarial testing.
+                                                                             https://proceedings.iclr.cc/paper_files/pa
+                                                                             per/2026/hash/ca688eb14e29701a11bd           Measures LLM agents exploiting tests
+ R2                               ImpossibleBench (ICLR 2026)
+                                                                             ba6633186328-Abstract-Conference.ht          and shortcuts.
+                                                                             ml
+                                                                                                                          Benchmark of LLM-generated test
+                                                                             https://aclanthology.org/2026.findings-ac
+ R3                               SWE-Mutation (Findings ACL 2026)                                                        reliability using mutation; highlights
+                                                                             l.1976/
+                                                                                                                          weak discriminative power.
+                                                                             https://www.alphaxiv.org/abs/2604.0151       Mutation-guided diagnosis and
+ R4                               STING (2026)
+                                                                             8v1                                          augmentation of regression suites.
+                                                                                                                          Security-specific mutation operators;
+                                  Mutation-based security test quality for   https://doi.org/10.1186/s13635-026-0022
+ R5                                                                                                                       demonstrates mutation itself is not
+                                  broken access control (2026)               6-w
+                                                                                                                          sufficient novelty.
+                                                                                                                          Constraint-based mutation and
+                                  Security Unit Test Generation for          https://papers.ssrn.com/sol3/papers.cfm
+ R6                                                                                                                       vulnerability oracles for security test
+                                  LLM-Produced Code (2026)                   ?abstract_id=6143746
+                                                                                                                          generation.
+                                                                                                                          Shows structured security-test feedback
+                                  Security Tests as Executable
+ R7                                                                          https://arxiv.org/abs/2608.09740             can help repair but visible tests can still
+                                  Specifications (2026)
+                                                                                                                          miss hidden security/behavioral failures.
+                                                                                                                          End-to-end scan/validate/repair/rescan
+                                  Securing AI-Generated Code:
+                                                                                                                          pipeline; reports remediation-induced
+ R8                               Just-in-Time Detection and Remediation     https://arxiv.org/abs/2608.16187
+                                                                                                                          new vulnerabilities and is a direct
+                                  (2026)
+                                                                                                                          baseline for this proposal.
+                                  Beyond Bypass: Vulnerability                                                            Distinguishes removal of the target
+                                                                             https://ieeexplore.ieee.org/abstract/docu
+ R9                               Regression in LLM-Generated Security                                                    vulnerability from regressions introduced
+                                                                             ment/11662505/
+                                  Patches (AITest 2026)                                                                   by the patch itself.
+                                  LLM-based Vulnerability Detection and
+                                                                                                                          Broad survey of LLM approaches for
+ R10                              Repair: Literature Review (ACM             https://doi.org/10.1145/3708522
+                                                                                                                          vulnerability detection and repair.
+                                  TOSEM, 2025)
+                                                                                                                          Survey of template, ML and
+                                  Advancements in Automated Program          https://link.springer.com/article/10.1007/
+ R11                                                                                                                      deep-learning APR tools and the
+                                  Repair: Comprehensive Review (2025)        s10115-025-02383-9
+                                                                                                                          broader repair landscape.
+                                  How Safe Are AI-Generated Patches?                                                      Large-scale study of security risks in
+ R12                                                                         https://arxiv.org/abs/2507.02976
+                                  (2025)                                                                                  LLM/agentic automated program repair.
+                                                                                                                          Empirical evidence that AI-generated
+                                  Security Weaknesses of                     https://doi.org/10.48550/arXiv.2310.0205
+ R13                                                                                                                      code can contain many CWE categories
+                                  Copilot-Generated Code (2023)              9
+                                                                                                                          and that guided fixing is incomplete.
+                                                                             https://docs.github.com/en/code-security
+                                                                                                                          Semantic security analysis engine and
+ R14                              CodeQL documentation                       /concepts/code-scanning/codeql/codeql-
+                                                                                                                          supported languages.
+                                                                             code-scanning
+                                                                             https://semgrep.dev/products/community
+ R15                              Semgrep Community Edition                                                               Local open-source SAST option.
+                                                                             -edition
+ R16                              Bandit                                     https://github.com/PyCQA/bandit              AST-based Python security linter.
+                                                                             https://github.com/VectorInstitute/backch    Local evidence checker for coding-agent
+ R17                              Backcheck
+                                                                             eck                                          claims and test weakening.
+                                                                                                                          Test-integrity enforcement and
+ R18                              mumei                                      https://github.com/iroha924/mumei            clean-HEAD re-execution for
+                                                                                                                          coding-agent workflows.
+                                                                                                                          Publicly described student/FYP project:
+                                                                             https://www.linkedin.com/posts/maheen-
+                                  ASHEN — Automated Security & Host                                                       AI-assisted security assessment, exploit
+                                                                             naeem-6a463b323_finalyearproject-cyb
+ R19                              Exploitation Navigator (FAST-NUCES                                                      validation, remediation guidance and
+                                                                             ersecurity-penetrationtesting-activity-748
+                                  FYP)                                                                                    reporting. Project-level comparator; not
+                                                                             2710591179030530-Bi3q
+                                                                                                                          peer-reviewed evidence.
+                                                                                                                          Public graduation project combining
+                                                                                                                          vulnerability classification, rule
+                                                                                                                          confirmation, region-based repair and
+                                  VulnSneak — AI-Powered Vulnerability
+                                                                             https://github.com/MO-Khalid-1/vulnsne       LLM repair. Close student-level
+ R20                              Detection & Automated Repair
+                                                                             ak                                           baseline; SATRA-RV differentiates
+                                  (graduation project)
+                                                                                                                          through change-local assurance,
+                                                                                                                          dynamic-test validation and differential
+                                                                                                                          sandbox acceptance.
+
+
+
+
+25. Absolute Limitations / What This Document Does NOT Claim
+●​     No universal vulnerability coverage. The security dictionary and contract model are bounded.
+●​     No guarantee of zero false negatives. The system can miss issues outside its rule/model space.
+●​     No guarantee that Ollama is always correct. The architecture explicitly assumes the opposite and validates model
+       output.
+●​     No guarantee that every repair can be automated. INCONCLUSIVE/REJECTED/human-review outcomes are
+       legitimate outputs.
+
+
+                              ASENT | SATRA-RV | Revised Module Design | 25 September 2026 | Page 16
+●​   No proof that the research is novel before experiments. The current 2026 literature makes overlap substantial; the
+     claimed contribution must survive baselines and kill tests.
+●​   No paid API requirement. Optional external tooling may be useful for comparison only and is not part of the required
+     core.
+●​   No claim that sandboxing itself is novel. It is a required safety mechanism in this architecture, not the research
+     contribution by itself.
+
+
+
+26. Final Verdict
+ GREEN LIGHT TO PROCEED TO IMPLEMENTATION — WITH A CONDITIONAL NOVELTY GATE​
+ The merged design is strong enough to build and defend as a serious FYP module. The correct research posture is not “we
+ invented automated security fixing”; that area is already crowded. The defensible contribution is the independent, local,
+ change-targeted assurance protocol that makes deterministic tests, adaptive tests, repair proposals and sandbox results
+ converge into a commit decision, with explicit measurements against strong simpler baselines.
+
+
+
+For the committee, the simplest direct explanation is: “Our module does not trust the AI patch, does not trust AI-generated
+tests, and does not trust a green ordinary test suite. We build a security contract from what changed, run trusted security
+tests, use a local model only to discover additional tests or propose a repair, validate those tests independently, run the
+repair in a disposable environment, compare security and functional behavior before and after, and commit only when the
+evidence gate passes.”
+That formulation keeps the original SATRA research backbone, makes your new dictionary/Ollama/sandbox choices
+first-class implementation components, directly answers the previous committee criticisms, and gives the module enough
+genuine technical and experimental work for a 12-month contribution. The final green light on novelty depends on the
+empirical results defined above.
+Document date: 25 September 2026. Research status should be re-checked before final defense because active 2026
+work is moving quickly.
+
+
+
+
+                            ASENT | SATRA-RV | Revised Module Design | 25 September 2026 | Page 17
+

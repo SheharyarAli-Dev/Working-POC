@@ -1,0 +1,106 @@
+\chapter{Iteration 1: Design and Implementation}
+
+This chapter records the implementation that can be tied to the current repository evidence, with emphasis on SABLE and its connection to the shared ASENT assurance workflow. It separates working mechanisms from planned work and does not treat a static analysis result as proof that infrastructure was deployed or tested against a live cloud account.
+
+\section{Iteration Objectives}
+
+The iteration objective was to implement a reproducible infrastructure-security check for Terraform changes and connect its result to ASENT's shared evidence and decision path. SABLE addresses a specific continuity problem: after an infrastructure refactor, the resource that now represents a protected logical asset may not be the resource that looks most similar by name. A policy can still be syntactically valid while granting access to the wrong bucket or granting broader access than the registered obligation permits.
+
+The implementation therefore aims to:
+\begin{itemize}
+    \item parse a trusted Terraform baseline and a candidate version into comparable resource models;
+    \item check a registered principal, protected asset, and required action set against the baseline before making a continuity claim;
+    \item identify a candidate successor using explicit move information and structural evidence, and abstain when evidence is ambiguous;
+    \item evaluate the supported IAM/S3 policy subset on the selected successor; and
+    \item emit a traceable result that the shared ASENT gate can accept, block, or send for review.
+\end{itemize}
+
+\section{Selected Use Cases / Features}
+
+The implementation focuses on the following use cases.
+
+\begin{enumerate}
+    \item \textbf{Check a refactor that preserves an obligation.} The resource address may change, but the successor still satisfies the registered access requirement.
+    \item \textbf{Detect a wrong-target or weakened policy.} A policy may continue to allow the required actions but point to a different bucket, or it may grant extra permissions. The target-to-obligation relationship must be checked as well as the policy syntax.
+    \item \textbf{Handle ambiguous or unsupported changes conservatively.} Ambiguous moves, unsupported constructs, and incomplete evidence lead to \texttt{UNKNOWN}.
+    \item \textbf{Carry module evidence into the shared gate.} Evidence is associated with the exact candidate snapshot and module input hash; stale or invalid evidence cannot silently authorize a new candidate.
+\end{enumerate}
+
+\section{Design}
+
+SABLE uses a bounded, local analysis pipeline. The baseline is an authority supplied by prior approval; SABLE does not decide that an arbitrary baseline is trustworthy. For the current S3 obligation, the registered principal is the application IAM role, the protected asset is the customer-data bucket, and the required actions are \texttt{s3:GetObject} and \texttt{s3:PutObject} on the bucket's object scope.
+
+The pipeline follows these steps:
+\begin{enumerate}
+    \item \textbf{Load evidence and parse both snapshots.} Terraform files are normalized into resource records, references, module outputs, move records, and a resource-reference graph.
+    \item \textbf{Validate the baseline.} The required authorization predicate must be known and hold on the trusted baseline before continuity is assessed.
+    \item \textbf{Find a candidate successor.} SABLE scores resource-type and structural signals, including unchanged address, explicit \texttt{moved} blocks, physical bucket identity, stable asset/lifecycle tags, and preserved references. A unique candidate must meet the configured confidence threshold and margin; conflicts or close scores result in abstention.
+    \item \textbf{Project the obligation.} The required principal and actions are evaluated against the selected successor. The existence of some policy grant is not enough if it is attached to the wrong logical asset.
+    \item \textbf{Emit the verdict and evidence.} The analysis returns \texttt{PRESERVED}, \texttt{REGRESSED}, or \texttt{UNKNOWN} for the supported continuity cases, along with reasons and evidence details. The shared gate checks the current snapshot, input hash, and evidence integrity before making a workflow-level decision.
+\end{enumerate}
+
+\section{Implementation}
+
+The SABLE implementation is in the \texttt{backend/sable/} package. Its HCL parser reads local Terraform files and builds a resource graph. The authorization evaluator interprets a bounded IAM/S3 subset. The correspondence logic proposes successors from structural and reference signals rather than resource-name similarity alone. The API exposes scenario runs, progress events, run results, proof/evidence inspection, audit actions, and a benchmark endpoint.
+
+The shared workflow is implemented through the orchestrator and its front-end Run Workflow view. The final gate evaluates module statuses against the same candidate snapshot and expected module input hashes. Current, integrity-valid \texttt{PRESERVED} or module-level \texttt{NOT\_APPLICABLE} evidence is acceptable. \texttt{REGRESSED} blocks. \texttt{UNKNOWN}, missing evidence, stale evidence, or failed integrity requires review unless another result already blocks.
+
+\section{Completed Features / Module}
+
+The SABLE branch currently contains the following implemented features:
+\begin{itemize}
+    \item parsing and normalization of supported Terraform resources, local modules, resource references, outputs, and \texttt{moved} blocks;
+    \item a bounded authorization check for relevant IAM role policies and bucket policies, including required actions and resource scope;
+    \item resource-successor ranking and ambiguity handling;
+    \item explicit handling for invalid baselines, parse errors, unresolved bindings, and unsupported constructs;
+    \item baseline variants B0--B4 for comparing candidate-only policy checks, before/after checks, move evidence, structural correspondence, and the combined obligation-projection approach;
+    \item scenario fixtures for preserved changes, regressions, and uncertain outcomes; and
+    \item shared evidence integration with snapshot/input-hash checks and a final decision of \texttt{ACCEPT}, \texttt{REVIEW}, or \texttt{BLOCK}.
+\end{itemize}
+
+These are implementation and test-fixture capabilities. They do not mean that SABLE supports all of Terraform or the full AWS IAM policy language, nor that the candidate configuration has been applied to AWS.
+
+\section{Technical Implementation Details}
+
+\textbf{HCL normalization.} \path{backend/sable/hcl_parser.py} uses \path{python-hcl2} to parse local \texttt{.tf} files. It represents resources by Terraform address, collects references into a directed graph, records \texttt{moved} blocks, and resolves supported local-module outputs. The current parser bounds module depth and rejects unsupported cases such as module instances requiring \texttt{count} or \texttt{for\_each} expansion. Parsing and resolution errors remain visible in the result.
+
+\textbf{Authorization.} \path{backend/sable/authorization.py} evaluates the documented subset of IAM/S3 authorization used by the obligation. It considers supported Allow/Deny statements, action wildcards, ARN/resource matching, principal attachment, and bucket-policy evidence. Unsupported policy semantics are not guessed. In particular, unresolved expressions and unsupported statement forms are surfaced as outside-model evidence and can force an unknown result.
+
+\textbf{Correspondence.} \path{backend/sable/correspondence.py} ranks candidate resources using explicit evidence such as a move record, physical bucket identity, stable asset tags, lifecycle tags, and reference preservation. The choice is rejected if a conflict exists, the best candidate fails the minimum score, or the best and second-best candidates are too close. This avoids using a similar resource name as sufficient proof of logical identity.
+
+\textbf{Benchmark and baselines.} \path{backend/sable/baselines.py} defines B0--B4, allowing the combined approach to be compared with weaker checks that omit one or more forms of evidence. \path{backend/sable/benchmark.py} runs the authored scenarios and computes measures such as false-safe results, regression recall, correspondence accuracy, unknown precision, and evidence completeness. The scenario and ground-truth files are synthetic and authored in-house, so results from them are an early controlled validation set rather than an independent field evaluation.
+
+\textbf{Shared evidence.} The common orchestrator hashes candidate file snapshots and module inputs, stores module evidence, and checks the evidence chain. Evidence that does not match the candidate snapshot or expected module input hash is not accepted as current proof. A change to one part of the candidate can therefore invalidate evidence for affected modules before the final gate accepts a workflow result.
+
+\section{Algorithms and Technical Decisions}
+
+The main decision is to separate \emph{authorization validity} from \emph{logical asset correspondence}. A policy can satisfy an action check against one resource while the intended protected asset has moved or been replaced; checking only the policy would miss the wrong-target case. SABLE therefore verifies the baseline predicate, chooses a supported successor, and then evaluates the required authorization on that successor.
+
+A second decision is to make uncertainty explicit. If the baseline itself is not verified, the parser cannot normalize a required construct, or the successor candidates conflict, SABLE does not convert missing evidence into a safe verdict. It returns \texttt{UNKNOWN}. This is intentionally distinct from \texttt{REGRESSED}: the former means there is insufficient supported evidence to establish the result, while the latter means a known obligation does not hold in the assessed candidate.
+
+The current model is deliberately bounded. It does not attempt general semantic equivalence for arbitrary Terraform programs or full AWS runtime authorization. These limits keep the decision path deterministic and make the unsupported boundary inspectable.
+
+\section{Tools, Frameworks and Technologies}
+
+The implementation uses Python 3.12, FastAPI and Pydantic for the API, \path{python-hcl2} for HCL parsing, NetworkX for the resource-reference graph, and pytest for automated tests. GitHub Actions runs the focused SABLE and shared-gate test selection. The Run Workflow view uses React and TypeScript.
+
+Terraform CLI, Checkov, Trivy, and Docker/Podman are optional environment tools. Their absence is reported and can reduce scanner strength or isolation; the report does not imply that an unavailable external scan passed.
+
+\section{Reproducible Setup and Run Instructions}
+From the repository root in Windows PowerShell, run \texttt{powershell -ExecutionPolicy Bypass -File .\textbackslash{}scripts\textbackslash{}setup.ps1} once to create the Python environment, install dependencies, and build the frontend. Start the local app with \texttt{powershell -ExecutionPolicy Bypass -File .\textbackslash{}scripts\textbackslash{}start.ps1}, then open \texttt{http://127.0.0.1:8000} and select \textit{RUN WORKFLOW} for the shared path. Stop the server with \texttt{STOP\_ASENT.ps1}. Chapter 8 records the exact focused test command and result. On a Windows host where pytest's default temporary directory is inaccessible, pass a fresh writable \texttt{--basetemp} under the project. The demonstration requires no Terraform apply, AWS credentials, or cloud API access.
+
+\section{Demonstration Evidence}
+
+The implementation and automated evidence can be checked directly: the \href{https://github.com/SheharyarAli-Dev/Working-POC/tree/sable}{SABLE branch}, its \href{https://github.com/SheharyarAli-Dev/Working-POC/commit/9a4dc3d94626ec1f14683b7420f4640d97de20c7}{published commit}, and the \href{https://github.com/SheharyarAli-Dev/Working-POC/actions/runs/38058431317}{focused GitHub Actions run}.
+
+The run executed on the listed SABLE commit and completed successfully with 44 focused SABLE/shared-gate tests passing. This CI result is reproducible repository evidence; it is not evidence of a live AWS deployment.
+
+The current local worktree selection is reported with its exact command and result in Chapter 8: 27 passed, 10 deselected, including the four parameterized shared-gate cases. This selection includes the local evaluator correction described in Chapter 5 and is not the published commit's CI result. The retained integrated Run Workflow execution \texttt{104074afe883} displays SABLE \texttt{REGRESSED} and an overall ASENT decision of \texttt{BLOCK}; in this scenario SATRA is also \texttt{INCONCLUSIVE}, so the overall result must not be attributed to SABLE alone. Figure~\ref{fig:asent-shared-sable-regressed} in the development-evidence chapter records the shared workflow. The dedicated SABLE-page capture documents a separate customer-data wrong-target case and is identified separately.
+
+% Module sections (each owned by its member, see OWNERS.md)
+\input{chapters/cavr/ch6_cavr}
+\input{chapters/satra/ch6_satra}
+
+\section{Iteration Outcome}
+
+The mid-stage SABLE milestones I1--I4 are implemented in the published branch and are linked to acceptance tests in Chapter 4 and Appendix A. A later local correctness audit updated unresolved standalone role-binding behavior and added regression coverage; it passed in the current worktree but remains uncommitted and is not part of commit \texttt{9a4dc3d9}. The earlier 44-test CI result applies to that published commit; the current local 27-test selected result is separate. Future comparative research, broader independent validation, live infrastructure assessment, and expansion beyond the supported Terraform/IAM subset are not completed milestones.

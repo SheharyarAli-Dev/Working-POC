@@ -1,0 +1,44 @@
+\chapter{Introduction and Project Vision}
+\section{Project Overview}
+ASENT (Agent Sentinel) is a local assurance workflow for reviewing security evidence associated with proposed software changes. The repository contains three module paths: CAVR for dependency analysis, SATRA-RV for application-code analysis, and SABLE for infrastructure-as-code analysis. This report section documents the verified SABLE contribution and does not infer authorship or readiness for the other modules from their presence in the repository.
+
+\section{Problem Statement}
+The SABLE problem is refactoring-induced security-boundary misbinding. A Terraform refactor can rename a resource, move it into a module, replace it, or introduce a competing resource. An IAM policy may remain syntactically valid and may grant the required actions, yet point to a different S3 bucket. A candidate-only policy check does not establish that the previously verified application-role obligation still protects the same logical data asset.
+
+\section{Problem Context and Motivation}
+The bounded case is the relationship between an application IAM role, a protected S3 customer-data bucket, and the required object actions. The authorization obligation is relational: principal, actions, and resource scope must all agree. Resource names and Terraform addresses can change during refactoring, so correspondence requires evidence beyond name similarity. This is a pre-deployment local analysis problem; the current prototype does not apply Terraform or query live AWS state.
+
+\section{Project Vision}
+ASENT's project vision is to combine attributable security evidence for proposed changes into a reviewable workflow decision. For SABLE, the mid-stage objective is narrower: check whether a registered S3/IAM obligation is preserved across supported Terraform changes, detect a known regression, and return uncertainty when available evidence cannot justify either conclusion.
+
+\section{Project Objectives}
+\begin{enumerate}
+    \item Normalize the supported Terraform/HCL subset into resources, references, local-module outputs, and move records.
+    \item Verify the registered obligation on the trusted baseline before making a continuity claim.
+    \item Identify a supported successor using structural evidence and project the obligation onto it.
+    \item Publish candidate-bound evidence for the shared gate and verify preserved, regressed, and uncertain outcomes with named tests.
+\end{enumerate}
+
+\section{Project Scope}
+\begin{longtable}{p{0.22\textwidth}p{0.70\textwidth}}
+\toprule
+\textbf{In the current SABLE prototype} & \textbf{Explicit boundary}\\
+\midrule
+Local Terraform/HCL parsing for the supported resource subset, local modules and references; S3 buckets; selected inline IAM role-policy forms; baseline obligation checks; successor ranking; shared evidence freshness and final-gate integration. & No general Terraform interpreter, full AWS IAM evaluator, live AWS inspection, Terraform apply, arbitrary module expansion, production-scale performance claim, or independent real-world effectiveness result. Unsupported or unresolved semantics remain unknown.\\
+\bottomrule
+\end{longtable}
+
+\section{Project Modules}
+ASENT's repository organizes dependency, application-code, and Terraform/infrastructure analysis under CAVR, SATRA-RV, and SABLE respectively. The shared orchestrator routes relevant changes, stores module evidence, and evaluates a final decision. Detailed behavior and ownership claims in this report are limited to SABLE and the shared gate behavior demonstrated by its tests.
+
+\section{Stakeholders and User Classes}
+The intended users are project developers and reviewers who need an inspectable decision before trusting a proposed change. The supervisor and evaluation panel assess the prototype and its evidence. The team must confirm the contribution and administrative records required for the complete report.
+
+\section{Success Criteria}
+For this mid-stage SABLE scope, success is observable when: (i) a supported refactor preserving the registered obligation returns \texttt{PRESERVED}; (ii) a known wrong target or missing required action returns \texttt{REGRESSED}; (iii) an ambiguous successor, unresolved role binding, invalid baseline, or unsupported policy semantics does not return a safe verdict and instead returns \texttt{UNKNOWN}; and (iv) current SABLE evidence reaches the shared final gate with its candidate snapshot, input hash, and integrity checks intact. The requirement table and tests in Chapters 4 and 8 make these checks reproducible.
+
+\section{Constraints and Assumptions}
+The baseline and registered obligation are treated as trusted inputs supplied by the project configuration. SABLE's conclusions are limited to parsed evidence and its documented model. Synthetic fixtures support controlled regression tests but do not establish behavior on deployed AWS resources or independent production repositories. The analysis is local and requires no cloud credentials.
+
+\section{Ethical, Legal and DEI Considerations}
+The demonstrated analysis uses local fixture data and does not require personal data or cloud credentials. Reports must distinguish synthetic fixtures and static analysis from live infrastructure evidence. Tool-assisted development and team-wide disclosures require confirmation from the individuals concerned; this report records only the SABLE-related tool use verified for this report update.

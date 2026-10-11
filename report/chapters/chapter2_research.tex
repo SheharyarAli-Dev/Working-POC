@@ -1,0 +1,24 @@
+\chapter{Research and Existing Solutions}
+\section{Research Method / Approach}
+The SABLE research design frames one bounded problem: whether a previously verified least-privilege S3 authorization boundary can be attributed to the correct logical asset after structural Terraform refactoring. The current mid-stage work operationalizes that problem as a deterministic prototype and controlled scenario tests. The full comparative evaluation proposed in the research design has not been completed, so this chapter reports the hypothesis and implementation evidence without claiming measured research superiority. The project research source is cited as an internal design record in the bibliography.
+
+\section{Existing Solutions / Products}
+The design record identifies several relevant approach classes: Terraform address and move tracking, infrastructure policy scanners, graph-aware configuration checks, repair-verification systems, and cloud-state monitoring. Each addresses useful parts of infrastructure assurance. SABLE's bounded question is whether a baseline obligation can be associated with the intended candidate successor and then re-evaluated there. This distinction is a research question, not an assertion that existing tools fail or that the SABLE method is novel.
+
+\section{Comparison of Existing Solutions}
+The implemented B0--B4 configurations in \path{backend/sable/baselines.py} encode progressively stronger and weaker SABLE checks, including candidate-only checks, baseline checks, explicit move evidence, structural correspondence, and obligation projection. The scenario suite provides controlled inputs for those designs. The present evidence records implementation and correctness checks; it does not report a completed comparative benchmark result or a measured advantage over an external scanner. The strongest baseline and comparison protocol must be confirmed against the approved research plan before an evaluation claim is made.
+
+\section{Limitations and Gaps}
+The residual question is attribution under structural change: local policy validity alone does not establish that authorization still governs the intended protected asset. The prototype addresses a limited S3/IAM case using explicit baseline verification, successor evidence, and authorization projection. Whether this chain improves decision quality over strong existing evidence is unverified pending the planned comparative evaluation. Broader academic literature synthesis and source verification remain report work; no unsupported novelty claim is made here.
+
+\section{Proposed Solution}
+SABLE parses baseline and candidate snapshots, verifies the registered obligation on the baseline, ranks candidate successors using structural signals, evaluates the same obligation on a unique supported successor, and returns \texttt{PRESERVED}, \texttt{REGRESSED}, or \texttt{UNKNOWN}. The shared workflow binds emitted evidence to the candidate snapshot and module input hash before the final gate uses it. Chapter 5 shows the implemented components; Chapter 8 lists the acceptance tests.
+
+\section{Complex Computing Problem}
+The computing problem combines syntactic normalization of a declarative language, bounded resolution of references across local modules, selection among candidate successor resources, and evaluation of relational authorization semantics. Ambiguous or unresolved inputs must be represented explicitly because selecting an incorrect resource can convert a valid policy on an unrelated bucket into a false-safe continuity result. The current implementation resolves only its documented subset.
+
+\section{Technical Challenges}
+The mid-stage implementation addresses: (i) normalizing supported HCL and local-module references; (ii) separating physical/logical successor evidence from resource-name similarity; (iii) evaluating action, principal binding, and S3 resource scope together; (iv) treating unsupported policy semantics and unresolved role bindings as uncertainty; and (v) preserving evidence freshness and integrity through the shared gate. General Terraform evaluation, complete AWS policy semantics, and live state remain outside the implemented boundary.
+
+\section{Research Findings and Design Decisions}
+The project design record makes the intended claim conditional: the proposed chain must be compared with strong simpler baselines, and the contribution must be narrowed if it does not add useful evidence. The implementation decision to verify the baseline first and project the obligation onto a selected successor follows from the exact wrong-target failure mode. The local tests establish that selected fixtures produce the expected statuses; they do not establish novelty, general effectiveness, or an independent error rate. See \cite{asentSableResearchDesign} for the project-specific research design; the team must reconcile its cited external literature against the final reference list before submission.

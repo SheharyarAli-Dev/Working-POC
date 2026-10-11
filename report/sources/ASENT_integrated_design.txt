@@ -1,0 +1,917 @@
+ASENT
+
+Integrated Security Assurance for AI-Assisted Software Development
+
+CAVR + SATRA-RV + SABLE
+
+Combined Project Scope, Research Design, Architecture, Supervisor-Feedback Resolution and End-to-End Integration
+
+  --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+  Project position: ASENT is a local, evidence-driven security assurance gate between AI-assisted development and the point at which generated or modified software is trusted, merged, or handed off. It does not rely on one AI system to judge another AI system; final decisions are based on deterministic evidence from specialized modules.
+  --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+  --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+  -----------------------------------------------------------------------------------------------------------------------------------------------------
+  Item                                Combined decision
+  ----------------------------------- -----------------------------------------------------------------------------------------------------------------
+  Overall input                       Developer SRS / requirements / approved plan + repository state + project policies
+
+  Overall output                      ACCEPT / BLOCK / REVIEW + combined evidence bundle and clean trusted next state
+
+  Module 1 - CAVR                     Dependency/package trust, hidden behavior activation, repair and re-verification
+
+  Module 2 - SATRA-RV                 Application-code security verification, adaptive tests, repair acceptance and differential sandbox verification
+
+  Module 3 - SABLE                    Terraform/IaC least-privilege security-boundary continuity and successor attribution
+
+  Cost boundary                       No mandatory paid API, paid cloud, commercial sandbox or subscription scanner
+
+  Primary platform                    Local Linux-based research prototype; Python backend; containers; open-source tooling
+
+  Project duration                    12-month integrated plan; modules progress in parallel; SABLE core is ~5 months within the shared year
+  -----------------------------------------------------------------------------------------------------------------------------------------------------
+
+Version: Integrated Design v1.0 | 26 September 2026
+
+Document Map
+
+  ------------------------------------------------------------------------------------------------------------------------------------
+  Section                                       What it answers
+  --------------------------------------------- --------------------------------------------------------------------------------------
+  1. Executive Summary                          What is ASENT as one complete system?
+
+  2. Supervisor Meeting Requirements            What did the supervisor challenge, and how is each point resolved?
+
+  3. Final Problem and Scope                    What exact three security problems are being solved?
+
+  4. Integrated End-to-End Architecture         How do the three modules work together rather than as separate projects?
+
+  5. Shared Context, Interception and Routing   How does ASENT actually receive commands and obtain context?
+
+  6. CAVR                                       How are dependencies verified, activated, repaired and re-verified?
+
+  7. SATRA-RV                                   How is generated application code tested, repaired and safely accepted?
+
+  8. SABLE                                      How is a Terraform least-privilege boundary preserved across structural refactoring?
+
+  9. Cross-Module Interaction                   How do repairs invalidate/re-trigger other modules?
+
+  10. Integrated POC Use Case                   How can one realistic feature demonstrate all three modules?
+
+  11. State of the Art and Differentiation      What already exists and what residual gaps remain?
+
+  12. Prototype and Implementation              What exactly will be built and with which tools?
+
+  13. Evaluation and Kill Tests                 How do we prove or kill each research claim?
+
+  14. CCP / Seoul Accord                        Why is this a complex computing problem?
+
+  15. Stakeholders and Team Division            Who uses it and how is essential work divided?
+
+  16. Twelve-Month Plan                         Why a year and what happens in each phase?
+
+  17. Risks, Ethics and Limitations             What ASENT does not claim and how research is kept safe?
+
+  18. End Product and Defense Positioning       What will the final deliverable be and how should it be explained?
+
+  Appendices                                    Decision matrix, data structures, supervisor question sheet and reference pack
+  ------------------------------------------------------------------------------------------------------------------------------------
+
+  ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+  Source basis: the latest CAVR revised design, SATRA-RV module design, SABLE final research design, the two latest module workflow diagrams, and the supervisor meeting transcript. Integration choices that do not already exist verbatim in a module document are explicitly framed here as the recommended ASENT-wide design rather than as proven research novelty.
+  ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+  ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+1. Executive Summary
+
+ASENT addresses one practical trust problem in AI-assisted software development: a coding agent can produce a candidate software state that appears functional while risk is introduced at different layers. A dependency can be malicious or compromised, application code can contain or preserve a security defect, and infrastructure-as-code can preserve syntactic validity while the intended least-privilege boundary moves to the wrong logical resource. These are different security objects and require different analysis methods.
+
+The combined project therefore uses three specialized assurance modules under one local ASENT gate. CAVR owns dependency/package behavior before a dependency is allowed to affect the trusted project. SATRA-RV owns application-code security evidence and safe repair acceptance. SABLE owns Terraform/IaC security-boundary continuity. The modules may run in parallel when a feature touches multiple surfaces, but they share a run context, evidence store, candidate workspace and final trust decision.
+
+  ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+  Whole-project one-liner: The developer gives the SRS/approved plan to the coding agent; the agent works inside an untrusted candidate workspace; ASENT automatically routes dependency actions to CAVR, application security changes to SATRA-RV and Terraform changes to SABLE; only a candidate for which every applicable module passes is committed as the trusted next state.
+  ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+  ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+  --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+  Module            Exact problem                                                                                                                         Core decision                                   What it does not duplicate
+  ----------------- ------------------------------------------------------------------------------------------------------------------------------------- ----------------------------------------------- ------------------------------------------------------------------------------------------------------------
+  CAVR              Can the dependency that is about to execute be trusted for this project task?                                                         VERIFIED / RESTRICTED / REJECTED / UNRESOLVED   Does not replace requirements gathering, package registries, antivirus or SATRA application-code analysis.
+
+  SATRA-RV          Can the AI-generated/modified application-code candidate or repair be accepted without silent security regression?                    ACCEPT / REJECT / RETRY / INCONCLUSIVE          Does not analyze package supply-chain behavior or Terraform lineage.
+
+  SABLE             Did a previously verified least-privilege S3/IAM boundary remain bound to the intended logical asset after Terraform restructuring?   PRESERVED / REGRESSED / UNKNOWN                 Does not perform generic IaC scanning or automatic repair as its research contribution.
+  --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+2. Supervisor Meeting Requirements and Design Responses
+
+The meeting materially changed the combined design. The supervisor repeatedly asked for the complete application flow rather than three isolated module diagrams, asked where the system receives its information, challenged the feasibility of sandboxing many packages, and requested a demonstrable POC. The following table turns those questions into explicit architecture requirements.
+
+  ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+  Supervisor concern / question                                                        Combined ASENT response
+  ------------------------------------------------------------------------------------ -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+  Start from the real developer input, not from a package                              ASENT now starts when the developer registers the SRS/requirements/approved plan and repository. A package action is only one event later in the development process.
+
+  Do not make the whole project depend on the word “change”                            At project level ASENT supports initial generation and later modification. CAVR works in both. SATRA can evaluate generated application code and later repair candidates; its formal differential benchmark still uses baseline/candidate states. SABLE activates only when a baseline Terraform security boundary exists and is structurally refactored.
+
+  Explain how context is obtained; hooks are not “magic”                               The hook/adapter captures a tool event (command, cwd, tool type). A separate context service reads the SRS/plan, repository files, Git state, manifests, lockfiles, imports, call sites, tests and Terraform. Security meaning is derived from explicit project artifacts rather than hidden agent reasoning.
+
+  Show a real malicious-package scenario in the POC                                    The POC uses a controlled research/inert malicious sample or known research artifact inside isolation. CAVR demonstrates that ordinary execution is quiet, a synthetic trigger activates prohibited behavior, the package is blocked, and a safe alternative/version is re-verified.
+
+  Do not sandbox thousands of packages on every run                                    Every resolved package receives a fast gate, but expensive counterfactual execution is only for cache misses, changed artifacts, expanded capability requests or high-risk nodes. Verified evidence is cached by artifact and context digests.
+
+  If a package was checked once, do not repeat the same expensive work unnecessarily   CAVR reuses a verdict only when the exact artifact hash, relevant dependency subtree, capability-contract class, policy version and analyzer version remain compatible. Any changed input invalidates the cache.
+
+  Define what “suspicious behavior” means and relate it to state of the art            CAVR uses a security behavior vocabulary (secret/sensitive-file access, process execution, persistence, external network, native execution, anti-analysis/environment triggers) plus known-vulnerability/malware evidence. The list is a triage/evidence layer; the research contribution is not a signature list.
+
+  Generated application code should also be assessed for vulnerabilities               That responsibility belongs to SATRA-RV: it localizes security-sensitive application code, runs deterministic security checks/tests, validates adaptive tests, repairs candidate defects and accepts a patch only after sandboxed differential verification.
+
+  Explain and demonstrate SABLE technically                                            The POC shows trusted baseline Terraform, a structurally refactored candidate, HCL normalization, successor mapping, IAM/S3 obligation projection and a PRESERVED/REGRESSED/UNKNOWN evidence result.
+
+  Show one overall project rather than three independent projects                      ASENT has one candidate workspace, one context service, one event router, one evidence bus and one final trust gate. Module-specific evidence is independent but combined before commit.
+
+  Development-time overhead must be credible                                           CAVR uses progressive escalation and caching; SATRA performs change-local analysis and calls Ollama conditionally; SABLE runs only if Terraform/IaC is applicable. SATRA and SABLE can run in parallel while CAVR remains synchronous only for dependency actions.
+
+  State of the art must be clear                                                       Each module is benchmarked against strong current baselines; novelty is conditional and kill tests are explicit. Existing tools are treated as baselines/evidence sources, not dismissed as weak.
+  ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+  ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+  Important presentation correction: do not introduce ASENT by saying “first the AI changes code.” Say: “The developer gives the SRS/approved plan and the AI-assisted development session begins. ASENT observes the candidate workspace throughout development. Some features create dependencies, some create application-security-relevant code, and some create or refactor Terraform. The applicable assurance modules are triggered automatically.”
+  ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+  ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+3. Final Problem, Scope and Security Boundaries
+
+3.1 Combined Problem Statement
+
+AI-assisted development increases the amount of code, dependency resolution and infrastructure configuration that can be produced or modified automatically. The security risk is not limited to hallucinated packages or one class of coding mistakes. A candidate may be unsafe because third-party dependency behavior is malicious, application security logic or tests are weak, or a Terraform refactor silently rebinds a least-privilege authorization boundary. ASENT provides an independent local assurance layer before the candidate is trusted.
+
+3.2 Scope Lock
+
+  --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+  Dimension               In scope                                                                                                                                  Not claimed
+  ----------------------- ----------------------------------------------------------------------------------------------------------------------------------------- --------------------------------------------------------------------------
+  Development mode        Initial AI-assisted generation and subsequent modifications inside a candidate workspace                                                  Universal supervision of every AI tool or every programming language
+
+  Dependency security     Python/PyPI and JavaScript/npm on Linux; direct and transitive dependencies                                                               Firmware/kernel-rootkit/hardware compromise; perfect malware proof
+
+  Application security    Python web applications; bounded families such as auth/authz/IDOR, injection, path traversal, XSS, SSRF, CSRF, insecure deserialization   Universal application-security verification for every framework/language
+
+  IaC security            Terraform/HCL + AWS S3/IAM least-privilege role-to-asset binding during structural refactoring                                            All AWS services, all clouds, or arbitrary Terraform equivalence
+
+  Automation              Automated normal path with bounded retry; uncertain states escalate                                                                       Pretending uncertainty is safe
+
+  Cost                    Local/open-source core, public data, optional local Ollama                                                                                Mandatory paid API/cloud/commercial security service
+  --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+3.3 Why Requirements / Plan Mode Do Not Remove ASENT
+
+The combined design assumes good requirements gathering. The developer can use Plan Mode, skills, allowlists and lockfiles. Those artifacts become inputs to ASENT. They reduce ambiguity, but they do not establish that a permitted package artifact is benign, that generated application code satisfies the intended security semantics, or that a Terraform refactor kept the original authorization boundary on the correct logical asset. Requirements answer what is intended; ASENT verifies what is actually about to be trusted.
+
+4. Integrated End-to-End Architecture
+
+The integration below is the recommended ASENT-wide architecture derived from the three module contracts and the supervisor feedback. It is not presented as a separate novelty claim. Its purpose is to ensure the three research modules operate on one candidate state and cannot produce contradictory “green” outputs that are merged independently.
+
+[]
+
+Figure 1. Whole-project integrated runtime flow: one candidate workspace, event-driven parallel module execution, evidence invalidation, and one final ASENT trust gate.
+
+4.1 Runtime Stages
+
+1.  Project registration: the developer supplies the SRS/approved plan, repository and explicit project/security policies. ASENT creates a run ID and immutable references to the starting repository state.
+
+2.  Candidate workspace: the coding agent works in a Git branch/worktree or isolated candidate workspace. The candidate is not automatically trusted or merged.
+
+3.  Context/event capture: an agent hook/tool adapter and shell gateway observe tool calls, while a Git/file observer records generated/modified artifacts. The context service reads project artifacts directly.
+
+4.  Surface routing: dependency actions trigger CAVR; application code/tests trigger SATRA-RV; Terraform/HCL changes trigger SABLE when its baseline precondition exists. More than one module may run for one feature.
+
+5.  Module execution: CAVR may block synchronously before a dependency executes. SATRA-RV and SABLE may analyze candidate snapshots in parallel. Their outputs are independent evidence envelopes.
+
+6.  Cross-module invalidation: if a repair changes inputs owned by another module, only the affected evidence is invalidated and that module re-runs on the new candidate snapshot.
+
+7.  Final trust gate: ASENT freezes the candidate, checks all applicable module states and either accepts/recommits, blocks/iterates, or holds for human review when evidence is unresolved.
+
+4.2 Applicability and Blocking Semantics
+
+  ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+  Event / surface                                                               Module            Execution timing                                                                       Blocking result
+  ----------------------------------------------------------------------------- ----------------- -------------------------------------------------------------------------------------- -------------------------------------------------------------------------------
+  pip/npm install, manifest/lockfile edit, transitive dependency resolution     CAVR              Synchronous before real dependency execution; cached fast path allowed                 REJECTED blocks; UNRESOLVED holds; VERIFIED/RESTRICTED continues under policy
+
+  Application source/test generation or modification                            SATRA-RV          Incremental/background during development; mandatory freeze-time check before commit   REJECT blocks; RETRY loops; INCONCLUSIVE holds; ACCEPT passes
+
+  Terraform/HCL generation or refactoring with an existing protected baseline   SABLE             Parallel static analysis on candidate snapshot                                         REGRESSED blocks; UNKNOWN holds; PRESERVED passes
+
+  No applicable artifact for a module                                           N/A               Skipped                                                                                Does not block
+  ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+5. Shared Context, Interception and Routing - How the System Actually Gets Information
+
+5.1 The Hook Is an Execution Sensor, Not the Source of Security Meaning
+
+This directly answers the supervisor’s “how will it get the information?” question. A pre-tool hook or adapter can tell ASENT that the agent is about to execute a command such as `pip install X`, and can provide the command, tool name, current working directory and session/run identifiers. It cannot magically know why X is needed. The context service obtains that meaning from explicit project artifacts.
+
+  --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+  Information needed               How ASENT gets it                                                                              Example
+  -------------------------------- ---------------------------------------------------------------------------------------------- ------------------------------------------------------------------
+  Task / feature intent            SRS/approved plan registered at run start; issue/task file; agent plan artifact if available   “Extract text from invoice PDFs and store them in protected S3.”
+
+  Repository state                 Git baseline commit + candidate worktree + file hashes                                         baseline commit A, candidate snapshot B
+
+  Dependency intent                Imports/requires, call sites, manifest diff, package command, data-flow neighborhood           `from pypdf import PdfReader`; `PdfReader(path)`
+
+  Application security semantics   Routes, decorators/middleware, role/ownership predicates, security dictionary/policy           non-owner must receive 403
+
+  Terraform security semantics     HCL resource graph, module paths, IAM policy documents, references and moved information       role app -> GetObject on customer-data/*
+
+  Known risk evidence              OSV/public advisory data, registry metadata, artifact hashes, optional provenance evidence     known CVE, package hash, transitive tree
+
+  Runtime behavior                 Sandbox trace from eBPF/bpftrace/strace, process/network/filesystem events                     read ~/.ssh key canary then connect externally
+  --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+5.2 Proposed Shared RunContext
+
+  ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+  RunContext { run_id, srs_or_task, approved_plan_digest, baseline_commit, candidate_workspace, project_policy_digest, package_actions[], changed_app_files[], changed_test_files[], changed_terraform_files[], module_evidence[], final_decision }
+  ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+  ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+5.3 Context Integrity Rules
+
+-   ASENT should never depend on an LLM summary as the only source of context; the repository and approved artifacts are the authoritative evidence.
+
+-   Every module decision is tied to input hashes so stale evidence cannot survive after the candidate changes.
+
+-   Project policy changes invalidate contracts derived from the old policy even if source files did not change.
+
+-   Only the minimum change-local context is passed to the SATRA local model; SABLE does not require an LLM in its decision path; CAVR core decisions remain deterministic/program-analysis based.
+
+6. Module 1 - CAVR: Dependency / Package Trust
+
+6.1 Exact Problem
+
+CAVR starts when a dependency action is about to occur. The package may be explicitly required by the approved plan, selected by the coding agent, already present in a manifest, or pulled transitively. The question is not “did the agent hallucinate it?” The question is whether the exact version, artifact, transitive path and observed behavior are justified for the current project before they affect the trusted environment.
+
+6.2 Supervisor-Aligned CAVR Flow
+
+  ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+  Phase                                  What happens                                                                                                            Tools / evidence                                                          Why it exists
+  -------------------------------------- ----------------------------------------------------------------------------------------------------------------------- ------------------------------------------------------------------------- -------------------------------------------------------------------------------------
+  C1 Capture                             Intercept pip/npm, manifest, lockfile or resolver action before real execution.                                         Agent hook/adapter, shell gateway, PATH wrappers, local Unix socket/API   Makes CAVR unavoidable in the configured execution path.
+
+  C2 Requirement gate                    Check whether the requested dependency/action is permitted by plan/skills/allowlist/lockfile.                           SRS/plan, repo policy, manifest/lockfile                                  Stops clear instruction violations cheaply.
+
+  C3 Fast package gate                   Resolve exact artifact + transitive graph; query cache; check OSV/metadata; light static behavior risk.                 PyPI/npm metadata, SHA-256, OSV, AST/Tree-sitter/Semgrep-style rules      Answers the supervisor performance concern: not every package gets deep sandboxing.
+
+  C4 Capability contract                 Infer minimum justified sensitive capabilities from task and actual API usage.                                          Call sites, imports, files/data used, deterministic capability rules      Distinguishes legitimate sensitive behavior from unjustified behavior.
+
+  C5 Escalation                          Deep analysis only if new/changed/high-risk/cache-invalidated or the capability request is broader.                     Risk score + cache policy + unresolved triggers                           Controls latency.
+
+  C6 Trigger discovery                   Find env/file/host/time/anti-sandbox conditions that can reach sensitive sinks.                                         Python AST, Tree-sitter, reachability rules                               Targets dormant behavior rather than waiting passively.
+
+  C7 Counterfactual sandbox              Create fake secrets/files/env/time and execute safely in a disposable environment.                                      Docker/Podman, namespaces, OverlayFS, synthetic canaries                  Attempts to deliberately activate hidden malicious paths.
+
+  C8 OS-level observation                Normalize system-visible behavior such as FILE_READ, SECRET_ACCESS, PROCESS_EXEC and NETWORK_CONNECT.                   eBPF/bpftrace; strace fallback                                            Catches behavior even when source is obfuscated/native.
+
+  C9 Causal capability graph             Link task intent, packages, processes, files/secrets and endpoints across direct/transitive dependencies.               NetworkX/graph store + canary flow evidence                               Detects distributed/transitive source-to-sink behavior.
+
+  C10 Decision                           Compare observed causal behavior with capability contract.                                                              Deterministic policy engine                                               VERIFIED / RESTRICTED / REJECTED / UNRESOLVED.
+
+  C11 Repair                             Search the least-disruptive safe version/path or supported substitute.                                                  Z3 + dependency resolver + public metadata                                Continues beyond detection.
+
+  C12 Re-verify + clean reconstruction   Fresh environment, project tests/build, capability recalculation, security re-check; reconstruct from clean baseline.   Containers, tests, OSV, hashes                                            A successful resolver result is not enough; repaired state must pass again.
+  ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+6.3 Performance / Cache Design Required by Supervisor Feedback
+
+  -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+  Fast checks are applied to every resolved package node; expensive dynamic counterfactual analysis is selective. A cache hit is valid only when: package ecosystem + name + version + artifact SHA-256 + relevant transitive-subtree digest + capability-contract digest + project policy version + CAVR analyzer version are compatible. If any of these change, the verdict is not blindly reused.
+  -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+  -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+-   Previously VERIFIED artifact, identical dependency subtree and same-or-narrower capability contract: reuse evidence after a lightweight consistency check.
+
+-   New artifact hash, newly widened capability, changed transitive dependency, new install script/native binary, known vulnerability, suspicious trigger pattern or old analyzer version: escalate.
+
+-   High-risk transitive nodes can be sandboxed individually or in bounded dependency groups; CAVR does not need to execute thousands of low-risk unchanged packages deeply on every development run.
+
+-   Cache hit rate, percentage of nodes escalated, p50/p95 latency and counterfactual runs per dependency action are mandatory evaluation metrics.
+
+6.4 CAVR Research Contribution Hypotheses
+
+-   Context-derived minimum capability contracts for dependency actions.
+
+-   Security-targeted counterfactual activation under a bounded exploration budget.
+
+-   Cross-package causal capability reasoning using OS-visible events and canary flows.
+
+-   Constraint-based minimal safe dependency repair followed by functional + security re-verification.
+
+-   Bounded assurance by transactional isolation and clean reconstruction rather than claiming absolute malware absence.
+
+[]
+
+Figure 2. Current detailed CAVR flow. The combined project adds a fast risk/cache stage before expensive sandbox escalation in order to answer the supervisor’s runtime concern.
+
+7. Module 2 - SATRA-RV: Application-Code Security Verification and Repair Acceptance
+
+7.1 Exact Problem
+
+SATRA-RV addresses security risk in application code produced or modified during AI-assisted development. A green ordinary test suite is not enough: a patch can preserve or introduce an authorization/injection flaw, a repair can create a new regression, and generated or edited tests may be weak, over-mocked or non-discriminative. SATRA-RV therefore treats the patch, tests and repair proposal as untrusted until independent evidence converges.
+
+7.2 SATRA-RV Flow
+
+  -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+  Phase                         Mechanism                                                                                                                                Output
+  ----------------------------- ---------------------------------------------------------------------------------------------------------------------------------------- ------------------------------------
+  S1 Capture                    Snapshot trusted baseline and candidate, record commit hashes/diff/run ID.                                                               Immutable candidate evidence
+
+  S2 Localize                   Map changed lines to routes/functions/security operations and changed tests using AST/Tree-sitter.                                       Security-sensitive regions
+
+  S3 Security Change Contract   Derive subject, action/resource, expected secure outcome and invariants from app semantics/policy rather than the test name alone.       Independent security obligation
+
+  S4 Deterministic tests        Execute bounded security dictionary tests plus local static evidence (Bandit/Semgrep; CodeQL optional baseline).                         Trusted reproducible floor
+
+  S5 Adaptive tests             Conditionally ask local Ollama for repository-specific tests using minimized change-local context.                                       Untrusted test candidates
+
+  S6 Validate generated tests   Require syntax/import success, secure-baseline behavior, counterfactual discrimination, locality, repeatability and safe side effects.   Accepted dynamic tests only
+
+  S7 Correlate findings         Combine contract, dictionary failures, accepted dynamic tests, static findings and diff signals.                                         Normalized finding/evidence bundle
+
+  S8 Repair proposal            Local Ollama may propose a minimal patch from the evidence bundle; patch applied only in isolated branch.                                Untrusted repair candidate
+
+  S9 Differential sandbox       Run security, functional and runtime/build checks; compare before/after behavior.                                                        Repair-verification evidence
+
+  S10 Decision                  Deterministic evidence gate produces ACCEPT / REJECT / RETRY / INCONCLUSIVE.                                                             Commit eligibility
+  -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+7.3 Initial Security Families
+
+The latest SATRA-RV design keeps Python web applications as the core scope and proposes deterministic treatment for authentication/authorization/IDOR, SQL injection, command injection, path traversal/unsafe file access, XSS, SSRF, CSRF and insecure deserialization. Secrets/credentials, redirects and additional families are extensions only when benchmark evidence justifies them.
+
+7.4 Why SATRA-RV Is Not “Semgrep + Ollama”
+
+-   Ollama is optional infrastructure, not the final authority. The gate remains functional without it.
+
+-   Generated tests must prove discrimination against a valid security counterfactual before they become trusted evidence.
+
+-   Repair is accepted only after a disposable differential sandbox verifies both the target security contract and functional regression behavior.
+
+-   The novelty hypothesis is the change-targeted evidence protocol, not the existence of mutation testing, test generation, vulnerability scanning or LLM repair individually.
+
+[]
+
+8. Module 3 - SABLE: Terraform Security-Boundary Continuity
+
+8.1 Exact Problem
+
+SABLE is intentionally narrower than generic IaC scanning. It studies one relational security obligation: a designated application IAM role must retain only the intended access to a designated protected S3 data asset when Terraform is structurally refactored. The candidate may be valid and may contain security-looking policies, yet the boundary can be widened, rebound or attached to the wrong successor resource.
+
+8.2 SABLE Flow
+
+  ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+  Phase                           What SABLE computes                                                                                                                                   Primary evidence
+  ------------------------------- ----------------------------------------------------------------------------------------------------------------------------------------------------- -------------------------------------------------------------------
+  I1 Capture                      Load trusted baseline and candidate Terraform; record structural diff.                                                                                Git/Terraform files
+
+  I2 Normalize                    Parse HCL; normalize resources, modules, addresses, policy documents and references.                                                                  python-hcl2 / HCL parser + Terraform CLI
+
+  I3 Model obligation             Represent principal, actions, protected S3 asset, resource scope and authority source.                                                                Trusted baseline policy + explicit benchmark/security requirement
+
+  I4 Successor hypotheses         Generate candidate successor(s) using type, attributes, references, module position, dependency context, policy-target relation and moved evidence.   Structural + semantic evidence
+
+  I5 Obligation projection        Project baseline role/action/resource boundary onto each plausible successor.                                                                         Correspondence model
+
+  I6 Authorization verification   Evaluate IAM/S3 relation locally; use Terraform plan/Checkov/Trivy evidence where useful.                                                             Local deterministic policy evidence
+
+  I7 Attribution                  Separate true misbinding/regression from legitimate re-expression or ambiguity.                                                                       PRESERVED / REGRESSED / UNKNOWN + trace
+  ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+8.3 SABLE Activation in the Integrated Project
+
+The supervisor correctly challenged the idea of tying the entire project to “change.” ASENT itself is not change-only. SABLE, however, has an explicit research precondition: there must be a previously verified Terraform security boundary whose continuity can be evaluated. During first-time Terraform generation, ordinary policy scanning may still run, but the SABLE research contribution is N/A until a baseline protected asset/boundary exists and a later structural refactor creates an attribution problem.
+
+[]
+
+9. Cross-Module Interaction, Parallelism and Evidence Invalidation
+
+9.1 Modules Are Specialized, Not Isolated
+
+The modules do not call each other to repeat analysis. They share the candidate run and exchange only bounded evidence and invalidation events through ASENT. This preserves separation of concerns while ensuring that a repair in one domain cannot leave stale evidence in another domain.
+
+  ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+  Triggering event                                        Immediate module                                          Possible cross-module consequence
+  ------------------------------------------------------- --------------------------------------------------------- ------------------------------------------------------------------------------------------------------------------------------
+  CAVR changes package version/path only                  CAVR re-verifies dependency                               SATRA can reuse evidence if application source/tests/import behavior are unchanged; otherwise re-run affected SATRA regions.
+
+  CAVR replaces package and updates imports/API adapter   CAVR then SATRA                                           SATRA must re-check changed application call sites/security behavior and tests.
+
+  SATRA repair adds or changes dependency                 SATRA proposes patch; router emits new dependency event   CAVR must verify the newly introduced/changed dependency before SATRA repair can be finally accepted.
+
+  SATRA repair changes only application logic/tests       SATRA                                                     SABLE remains valid unless Terraform or IaC inputs changed.
+
+  SABLE reports REGRESSED                                 SABLE                                                     ASENT blocks candidate and gives evidence to agent/developer; corrected Terraform becomes a new SABLE candidate.
+
+  SABLE fix touches application config or dependencies    Router determines affected surfaces                       Re-run only the affected CAVR/SATRA evidence.
+
+  SRS/security policy changes                             Context service                                           Invalidate every contract/obligation whose authority source changed.
+  ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+9.2 Final Decision Matrix
+
+  -------------------------------------------------------------------------------------------------------------------------
+  CAVR                                     SATRA-RV          SABLE             ASENT action
+  ---------------------------------------- ----------------- ----------------- --------------------------------------------
+  VERIFIED or policy-enforced RESTRICTED   ACCEPT            PRESERVED         ACCEPT / clean recommit
+
+  N/A                                      ACCEPT            PRESERVED         ACCEPT
+
+  VERIFIED                                 N/A               PRESERVED         ACCEPT
+
+  REJECTED                                 any               any               BLOCK / CAVR repair or developer revision
+
+  any                                      REJECT            any               BLOCK / SATRA repair or developer revision
+
+  any                                      any               REGRESSED         BLOCK / Terraform revision
+
+  UNRESOLVED                               any               any               HOLD / human review
+
+  any                                      INCONCLUSIVE      any               HOLD / human review
+
+  any                                      any               UNKNOWN           HOLD / human review
+  -------------------------------------------------------------------------------------------------------------------------
+
+9.3 Why Parallel Execution Is Safe
+
+-   All module outputs are tied to the same frozen candidate snapshot or to explicitly versioned intermediate snapshots.
+
+-   Parallelism does not mean independent commits; no module can promote the candidate alone.
+
+-   A candidate repair produces a new snapshot ID and invalidates affected evidence. This prevents a “green” result from an earlier version from surviving silently.
+
+-   CAVR is synchronous only where dependency execution would otherwise cross into the environment; SATRA and SABLE can exploit parallel/background execution to reduce developer wait time.
+
+10. Integrated POC Use Case - One Feature Demonstrating All Three Modules
+
+10.1 SRS
+
+  --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+  Build a Flask invoice-processing service. Users can upload PDF invoices, extract text locally, and store/retrieve invoice files from an AWS S3 bucket. A user may access only invoices they own. The application role must have only GetObject/PutObject access to the customer-data bucket. Infrastructure is defined in Terraform.
+  --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+  --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+10.2 End-to-End Demonstration
+
+Development starts: The SRS and repo are registered with ASENT. The coding agent begins in the candidate workspace; nothing is trusted yet.
+
+Dependency action: The agent requests a PDF library. CAVR captures `pip install package-X` before it reaches the real environment.
+
+Fast package gate: CAVR resolves the exact artifact/transitive graph. If no valid cache entry exists and risk signals justify escalation, the package enters deep analysis.
+
+Hidden behavior activation: Normal sandbox execution appears benign. Static trigger discovery finds a branch controlled by an AWS credential/file condition. CAVR injects a fake canary and re-runs; OS tracing shows the canary read and an external connection. The behavior violates the PDF-only capability contract.
+
+Dependency repair: CAVR rejects X, finds a safe compatible version or approved replacement Y, runs project tests and repeats security analysis in a fresh environment. The repaired dependency state becomes VERIFIED.
+
+Application security: The agent creates `GET /invoices/<id>`. SATRA localizes the route and derives the obligation “non-owner must be denied.” The deterministic test dictionary or a validated adaptive test discovers that another user can access the invoice.
+
+Application repair: SATRA correlates the finding, proposes/accepts a bounded repair candidate, and runs before/after security + functional checks in the sandbox. Only an ACCEPT result is emitted.
+
+Terraform refactor: The agent moves S3 resources into a module and rewrites the IAM policy. SABLE maps the original customer-data asset to candidate successors. A policy that appears locally valid is found attached to the wrong successor or widened to an unrelated bucket.
+
+Infrastructure correction: ASENT blocks the candidate; the agent/developer corrects the Terraform. SABLE re-runs and emits PRESERVED when the original least-privilege obligation is correctly projected onto the intended successor.
+
+Final commit: The evidence bus holds CAVR VERIFIED, SATRA ACCEPT and SABLE PRESERVED for the same final snapshot. ASENT creates the clean recommit/handoff and a combined assurance report.
+
+10.3 What the POC Must Visibly Show
+
+-   Live candidate workspace and registered SRS/plan.
+
+-   Tool interception event before package installation.
+
+-   CAVR cache/risk gate showing why a package was or was not deeply sandboxed.
+
+-   At least one controlled dormant trigger that is inactive in the first run and activated by a synthetic condition in the second run.
+
+-   OS-level evidence (file/secret/process/network events) and a capability-policy mismatch.
+
+-   SATRA security contract, deterministic/validated test evidence, repair and sandbox differential result.
+
+-   SABLE baseline asset, successor candidates, authorization relationship and preserved/regressed/unknown evidence path.
+
+-   Combined final gate showing that one blocking module prevents the whole candidate from being committed.
+
+-   After correction, a single final snapshot with all applicable modules passing and a combined report.
+
+11. State of the Art and Residual Differentiation
+
+11.1 CAVR
+
+  -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+  Existing work                                                      Already solves                                                        Residual CAVR question
+  ------------------------------------------------------------------ --------------------------------------------------------------------- ------------------------------------------------------------------------------------------------------------------------------------------------------------
+  Spracklen et al. / inference-time package-hallucination defenses   Measure/reduce package hallucination and slopsquatting risk.          How do we verify an already-existing or compromised dependency’s actual task-relevant behavior?
+
+  NymGuard                                                           Detects hallucinated names and protects risky unclaimed namespaces.   What if the name is already owned or a legitimate package is compromised?
+
+  DONAPI / ProfMal / MalGuard / HERCULE / DySec                      Strong static/dynamic/graph/ML malicious-package detection.           Can targeted counterfactual activation + project capability reasoning reveal dormant or contextually unjustified behavior under project-scale constraints?
+
+  OSV guided remediation                                             Minimal dependency graph fixes for known vulnerabilities.             Can we repair rejected malicious/behavioral dependency paths and re-verify them when there is no matching CVE?
+  -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+11.2 SATRA-RV
+
+  -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+  Existing work                                      Already solves                                                                   Residual SATRA-RV question
+  -------------------------------------------------- -------------------------------------------------------------------------------- -------------------------------------------------------------------------------------------------------------------
+  CodeQL / Semgrep / Bandit                          Static/pattern/data-flow vulnerability evidence.                                 How should a generated patch be accepted only after independent security obligations and behavior tests converge?
+
+  Classical/security mutation, SWE-Mutation, STING   Measures or strengthens test discrimination; security mutation already exists.   Can a change-targeted contract select and validate security evidence with lower noise and better patch safety?
+
+  LLM security-test generation / APR                 Generates tests or repairs.                                                      How do we validate generated tests and keep the model from becoming the final security oracle?
+
+  2026 scan-validate-repair-rescan pipelines         Integrated vulnerability detection and repair.                                   Does differential sandbox acceptance detect silent or repair-induced regressions that scan->fix->rescan misses?
+  -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+11.3 SABLE
+
+  ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+  Existing work                                    Already solves                                                                      Residual SABLE question
+  ------------------------------------------------ ----------------------------------------------------------------------------------- ---------------------------------------------------------------------------------------------------------------------------------------
+  Terraform moved/refactoring support              Tracks declared address/module moves and some split patterns.                       Does the security obligation remain bound to the intended logical successor when structure exceeds address history?
+
+  Checkov / Trivy / policy-as-code                 Candidate-centric IaC security/misconfiguration checks; some graph relationships.   Can a candidate be locally compliant while the historical least-privilege boundary is attached to the wrong logical asset?
+
+  TerraProbe / TerraRepair                         Layered repair validation and tool-grounded Terraform repair.                       Can deterministic baseline-obligation attribution add measurable information beyond the strongest repair oracle/evidence combination?
+
+  SCAFFOLD-CEGIS / generic security preservation   Shows security constraints can be preserved through iterative refinement.           Can Terraform-specific topology/correspondence resolve bounded S3/IAM misbinding cases?
+  ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+  -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+  Project-level novelty rule: ASENT does not claim that “combining three modules” is novel. Each module must survive its own strong baseline and kill tests. The integrated layer is an engineering assurance mechanism that ensures one final candidate cannot be trusted while any applicable security boundary is failing or unresolved.
+  -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+  -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+12. Prototype and Implementation Structure
+
+12.1 Recommended Local Architecture
+
+  -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+  Component                     Role                                                                              Free/open implementation
+  ----------------------------- --------------------------------------------------------------------------------- ---------------------------------------------------------------------------------------------
+  ASENT Orchestrator            Run lifecycle, context registration, routing, evidence invalidation, final gate   Python + FastAPI or local Python service
+
+  Agent/CLI Adapter             Pre-tool interception and working-context metadata                                Agent hook where available + shell gateway + PATH wrappers
+
+  Candidate Workspace Manager   Trusted baseline + untrusted branch/worktree + snapshot hashes                    Git worktree/branch; optional containerized workspace
+
+  Evidence Store                RunContext, module evidence, hashes, decisions                                    SQLite + JSON/SARIF
+
+  CAVR Engine                   Dependency fast gate, deep counterfactual analysis, repair                        PyPI/npm metadata, OSV, AST/Tree-sitter, Docker/Podman, eBPF/strace, NetworkX, Z3
+
+  SATRA-RV Engine               Security contract, tests, adaptive test validator, repair acceptance              pytest/unittest, AST/Tree-sitter, Bandit, Semgrep CE, optional local CodeQL, Ollama, Docker
+
+  SABLE Engine                  Terraform normalization, correspondence, obligation projection                    python-hcl2, Terraform CLI, Checkov, Trivy, Python graph/matching logic
+
+  Dashboard                     Show real execution state, evidence and decisions                                 React/Vite or equivalent
+
+  Integrity Layer               Evidence digests and reproducible accepted-state record                           SHA-256/hash chaining; optional Sigstore evidence
+  -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+12.2 Dashboard / Demonstrator Layout
+
+-   Left: SRS/approved plan, trusted baseline and candidate workspace timeline.
+
+-   Center: three live module lanes. CAVR shows package graph/cache/trigger/sandbox evidence; SATRA shows security contract/tests/repair; SABLE shows baseline asset/successor/authorization projection.
+
+-   Bottom shared strip: evidence bus, input hashes, invalidation events and analysis timers.
+
+-   Right: final ASENT gate with module states, reason for block/review/accept and clean recommit button/state.
+
+-   The UI is a visualization of real backend state; it is not the research contribution by itself.
+
+12.3 Training / Dataset Position
+
+No mandatory model training or fine-tuning is required. CAVR and SABLE core decisions are deterministic/program-analysis based. SATRA-RV can use a pre-trained local Ollama model conditionally for candidate tests and repair proposals, but generated outputs are independently validated. Public research corpora, controlled inert malicious samples, real/synthetic application security cases and controlled Terraform transformations are used for evaluation rather than for training a single security classifier.
+
+13. Evaluation Plan and Decisive Kill Tests
+
+13.1 Module Metrics
+
+  ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+  Module                              Primary metrics
+  ----------------------------------- ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+  CAVR                                Precision/recall/F1; dormant-trigger activation rate; new sensitive paths per counterfactual run; false positives; p50/p95 analysis time; deep-escalation rate; cache hit rate; cross-package attribution; repair success/minimality; functional preservation; assurance completeness.
+
+  SATRA-RV                            Security detection recall; false-block rate; dynamic-test acceptance/discrimination; repair success; repair-induced regression rate; silent-regression catch rate; repair iterations; local overhead; Ollama calls/tokens; evidence completeness.
+
+  SABLE                               False-safe rate; regression recall; false-regression rate; successor correspondence accuracy; UNKNOWN precision; evidence completeness; analysis overhead.
+  ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+13.2 ASENT-Level Metrics
+
+-   End-to-end false-safe acceptance rate: candidate states containing any ground-truth module failure that ASENT incorrectly accepts.
+
+-   Unnecessary block/review rate on legitimate candidate states.
+
+-   Mean/p95 developer wait time from commit request to final gate result.
+
+-   Percentage of package nodes handled by cache/fast gate versus deep sandbox.
+
+-   Cross-module invalidation rate and re-run cost after automated repairs.
+
+-   Combined evidence completeness: every accepted state must have run ID, candidate hash, module statuses and traceable evidence references.
+
+-   Integrated POC success: one candidate touching dependencies, application code and Terraform must be blocked at each injected fault and accepted only after all three are corrected.
+
+13.3 Kill Tests
+
+  -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+  Area                        Failure condition                                                                                      Research response
+  --------------------------- ------------------------------------------------------------------------------------------------------ ------------------------------------------------------------------------------------
+  CAVR counterfactual layer   One normal sandbox/static baseline detects the same hidden cases with comparable overhead.             Narrow or remove the counterfactual claim.
+
+  CAVR capability model       Task capability contract does not improve false-positive/unknown-behavior decisions.                   Redesign capability inference or treat it as supporting evidence only.
+
+  CAVR repair                 Naive version upgrade/OSV remediation matches optimized repair on supported cases.                     Narrow repair contribution.
+
+  SATRA dynamic layer         Dictionary/static scanner or scanner+rescan matches the full gate.                                     Remove unnecessary dynamic/Ollama layer.
+
+  SATRA validator             Unvalidated Ollama tests perform equivalently without increasing false assurance.                      Validator claim is not justified.
+
+  SABLE                       Strong B4 baseline (scanner + plan + move/reference evidence) matches SABLE.                           Withdraw/narrow SABLE novelty claim.
+
+  SABLE hard cases            No meaningful split/merge/wrong-binding ambiguity exists in benchmark.                                 Kill the problem as too weak.
+
+  Integrated layer            Evidence fusion does not prevent any additional unsafe merge relative to correct independent gating.   Do not claim integration novelty; retain it only as implementation architecture.
+
+  Feasibility                 Local runtime is unacceptably high under declared budgets.                                             Narrow scope/trigger budgets; do not solve by requiring paid cloud infrastructure.
+  -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+14. Complex Computing Problem and Seoul Accord Alignment
+
+The combined project meets the complex-computing requirement through its research objects and algorithms, not because three tools are integrated. The hardest work is deciding what behavior is justified, what security obligation should remain true, what resource is the logical successor, which counterfactuals are meaningful, how a repair can be minimal and safe, and when evidence is insufficient to accept a candidate.
+
+  ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+  Seoul Accord characteristic                  ASENT-wide evidence
+  -------------------------------------------- -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+  1. Conflicting requirements                  Security coverage vs development latency; autonomy vs independent verification; detection sensitivity vs false blocks; minimal repair vs compatibility; automation vs fail-safe uncertainty.
+
+  2. Depth of analysis / no obvious solution   No single scanner or test answers whether a package’s hidden behavior is justified, a generated repair is safe, or an IaC boundary stayed on the correct logical asset.
+
+  3. Depth of knowledge                        Program analysis, software supply-chain security, Linux isolation/eBPF, graph algorithms, web security, testing/mutation, automated repair, Terraform/HCL, IAM/S3 semantics and constraint solving.
+
+  4. Unfamiliar issues                         Agentic dependency actions, dormant supply-chain behavior, generated-test weakness, repair-induced regressions and structural IaC security misbinding are current research problems.
+
+  5. Beyond standard practice                  Standards/tools solve pieces, but the module research questions remain empirical and must be compared with strong baselines.
+
+  6. Stakeholder conflicts                     Developers want speed; security reviewers want evidence; CI wants deterministic exit states; maintainers need low false accusation; platform teams need legitimate refactoring.
+
+  7. Significant consequences                  Credential theft, compromised builds, unauthorized data access, merged vulnerable code and unnecessary blocking of legitimate development.
+
+  8. Interdependence                           A CAVR repair can change SATRA inputs; a SATRA repair can introduce a dependency; a Terraform correction changes SABLE evidence. One stale decision can invalidate the final trust claim.
+
+  9. Requirement/cause identification          Legitimate package capabilities, application security obligations and logical Terraform successors are not always explicitly declared and must be modeled from evidence while preserving uncertainty.
+  ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+15. Stakeholders and Three-Member Work Division
+
+15.1 Stakeholders
+
+  ---------------------------------------------------------------------------------------------------------------------------------------------------------------
+  Stakeholder                              Need from ASENT
+  ---------------------------------------- ----------------------------------------------------------------------------------------------------------------------
+  Developer using coding agent             Fast automated assurance, clear block reason and practical repair path.
+
+  Security reviewer / AppSec / DevSecOps   Evidence-backed module decisions, low false negatives and explicit uncertainty.
+
+  CI / release engineer                    Machine-readable final gate with deterministic commit eligibility.
+
+  Infrastructure / platform maintainer     Legitimate Terraform refactoring without silent least-privilege drift or unnecessary false alarms.
+
+  Open-source/package maintainer           Explainable evidence and responsible handling of suspected malicious behavior; avoid unsupported public accusations.
+
+  Project owner / organization             Reduced supply-chain/application/IaC risk without mandatory paid infrastructure.
+
+  Downstream users                         Software that has passed bounded pre-trust evidence gates.
+  ---------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+15.2 Recommended Equal Core Ownership
+
+  -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+  Member                Primary research ownership                                                                                                                      ASENT-wide ownership                                                                                                   Primary evaluation
+  --------------------- ----------------------------------------------------------------------------------------------------------------------------------------------- ---------------------------------------------------------------------------------------------------------------------- --------------------------------------------------------------------
+  Member 1 - CAVR       Capability contract, fast risk/cache policy, trigger discovery, counterfactual activation, causal dependency behavior, dependency repair.       Tool gateway / dependency-event adapter and package evidence schema.                                                   Detection/activation/latency/cache/repair metrics.
+
+  Member 2 - SATRA-RV   Security Change Contract, deterministic dictionary, adaptive-test validator, finding correlation, repair acceptance and differential sandbox.   Final decision semantics and machine-readable application-security evidence.                                           Detection/false-block/test-quality/repair-regression metrics.
+
+  Member 3 - SABLE      HCL normalization, baseline obligation, successor correspondence, obligation projection, IAM/S3 verification and uncertainty handling.          ASENT RunContext/evidence bus, module-input hashing and cross-module invalidation logic.                               Correspondence/false-safe/false-regression/UNKNOWN metrics.
+
+  Shared by all         Threat model, integrated POC, benchmark design, architecture review, end-to-end evaluation, report/paper, defense.                              No member is assigned only UI/documentation/testing; shared integration is supporting work, not the claimed novelty.   Integrated false-safe, overhead and evidence-completeness metrics.
+  -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+16. Twelve-Month Integrated Research Plan
+
+A shallow dashboard plus scanner wrapper could be built much earlier. The year is justified by the algorithmic work inside CAVR and SATRA-RV, the bounded SABLE research problem, and the need to produce falsifiable empirical evidence. The modules are developed in parallel; the schedule is not “finish one module and then start another.”
+
+  -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+  Months         CAVR lane                                                                            SATRA-RV lane                                                           SABLE lane                                                                                      Shared ASENT milestone
+  -------------- ------------------------------------------------------------------------------------ ----------------------------------------------------------------------- ----------------------------------------------------------------------------------------------- -------------------------------------------------------------------------------------------
+  1-2            Interception, context model, artifact resolution, fast risk/cache design.            Repository capture, security localizer, Security Change Contract.       Scope freeze, HCL normalization, obligation schema, benchmark seed.                             Common RunContext, candidate workspace, router, evidence schema, POC SRS frozen.
+
+  3-4            Capability vocabulary/inference; trigger extractor; first sandbox harness.           Security dictionary v1; deterministic harness; static adapters.         Resource graph, successor correspondence, policy semantic model; first end-to-end hard cases.   First three-lane prototype; shared hashes and module status API.
+
+  5-6            Adaptive counterfactual scheduler; OS-level event normalization; canary flow.        Ollama dynamic test generator + validator; finding correlation.         Obligation projection, attribution, UNKNOWN; strongest B4 baseline and ablations.               Parallel execution and evidence bus; first integrated POC run.
+
+  7-8            Causal capability graph; policy decision; deep-analysis budget tuning.               Repair engine + bounded loop; differential sandbox.                     Final SABLE evaluation/failure analysis and stable module handoff.                              Cross-module invalidation rules; combined gate v1.
+
+  9-10           Constraint repair, transitive path repair, supported replacement, re-verification.   Decision/evidence/recommit layer; stress cases; baseline comparisons.   Support integrated hard cases only; no scope expansion without evidence.                        Performance work: CAVR cache, SATRA change-local parallelism, module re-run minimization.
+
+  11-12          Clean reconstruction, assurance certificate, full ablations.                         Final baseline/kill-test evaluation and hardening.                      Reproducibility support and integrated scenario validation.                                     Integrated benchmark, combined POC, final evidence report, thesis/defense package.
+  -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+  ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+  Why not stop early? An early prototype can intercept commands, run scanners and show three status cards. That would be an implementation demo, not the proposed research. The year is used to answer whether counterfactual activation adds detection value, whether validated adaptive tests improve patch acceptance, whether SABLE beats the strongest Terraform evidence baseline, and whether repair/evidence remain correct under cross-module changes.
+  ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+  ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+17. Risks, Ethics, Safety and Controlled Limitations
+
+  --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+  Risk / limitation                             Handling
+  --------------------------------------------- ----------------------------------------------------------------------------------------------------------------------------------------------------------
+  CAVR path explosion / latency                 Security-relevant trigger frontier, strict budgets, cache/hash reuse, bounded parallelism, residual uncertainty.
+
+  Legitimate package needs sensitive behavior   Project capability contract + scoped permissions + RESTRICTED state; do not classify every network/file action as malware.
+
+  Native/packed package code                    OS-level telemetry can observe effects but is not full binary semantic proof; Linux scope is explicit.
+
+  SATRA generated test is wrong/flaky           Never trusted without secure-baseline + counterfactual discrimination + stability/locality checks.
+
+  SATRA circular security oracle                Contract derives from independent application semantics/policy, not solely from the generated test.
+
+  SABLE ambiguous successor                     UNKNOWN rather than forced PRESERVED; benchmark measures UNKNOWN precision to prevent escape-hatch behavior.
+
+  Malware research safety                       Use inert canaries and controlled research artifacts only inside isolated environments; no live slopsquatting or uncontrolled public malware deployment.
+
+  Privacy / source leakage                      Local-first analysis; no production secrets; public lookups send package identifiers/versions only where possible.
+
+  False accusation of open-source package       Experimental verdicts require manual validation/responsible disclosure before public claims.
+
+  Absolute trust                                No module claims universal safety. Evidence is bounded to the declared monitoring, contract and benchmark assumptions.
+  --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+18. Expected End Product and Defense Positioning
+
+18.1 Final Deliverables
+
+-   Local ASENT orchestrator with run registration, candidate workspace, event routing, evidence bus, invalidation and final commit gate.
+
+-   Functional CAVR engine with fast package gate, cache, capability contract, counterfactual sandbox, OS-level observation, causal graph, repair and assurance output.
+
+-   Functional SATRA-RV engine with security contracts, deterministic security dictionary, adaptive-test validation, repair acceptance and differential sandbox verification.
+
+-   Functional SABLE engine with Terraform normalization, successor correspondence, least-privilege obligation projection and PRESERVED/REGRESSED/UNKNOWN evidence.
+
+-   One integrated research dashboard that visualizes real backend state rather than an animation-only prototype.
+
+-   Controlled benchmark corpus and module-specific baselines/ablations/kill-test results.
+
+-   Combined assurance report for the accepted project snapshot with module decisions, hashes, evidence references and residual uncertainty.
+
+-   Integrated POC scenario demonstrating blocking, repair/revision and final clean acceptance across all applicable modules.
+
+18.2 Final Panel Explanation
+
+  ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+  “ASENT starts from the developer’s SRS and an AI-assisted development workspace. It does not assume the agent will always choose the wrong package or that every change is unsafe. It protects three separate trust boundaries: CAVR verifies third-party dependencies before execution, SATRA-RV verifies generated application security and repairs before acceptance, and SABLE verifies that Terraform least-privilege protection remains attached to the intended resource after structural refactoring. These analyses share one candidate snapshot and one evidence gate. A blocking or unresolved result in any applicable module prevents the candidate from becoming the trusted project state.”
+  ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+  ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+Appendix A - Core Data Structures
+
+  ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+  Structure                           Minimum fields
+  ----------------------------------- ------------------------------------------------------------------------------------------------------------------------------------------
+  RunContext                          run_id, SRS/task digest, approved-plan digest, baseline commit, candidate snapshot, policy digest, changed surfaces, module evidence IDs
+
+  DependencyAction                    command/tool, cwd, ecosystem, package/version request, source manifest/lockfile, resolver path, artifact hash
+
+  CapabilityContract                  required/optional/denied capabilities, scope, evidence source, confidence, contract digest
+
+  SecurityChangeContract              subject/trust level, protected action/resource, expected secure outcome, code region, security family, test/counterfactual candidates
+
+  SABLE Obligation                    principal, actions, protected S3 asset, resource scope, authority source, baseline evidence
+
+  ModuleEvidence                      module, input snapshot hash, status, blocking flag, evidence refs, repaired artifact refs, residual uncertainty, analyzer version
+
+  FinalDecision                       ACCEPT/BLOCK/REVIEW, applicable modules, statuses, invalidation history, clean commit hash, assurance report ID
+  ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+Appendix B - Supervisor Question Sheet
+
+  ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+  Question                                                       Answer
+  -------------------------------------------------------------- -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+  What is the input?                                             SRS/requirements/approved plan + repository/policies. The project does not start from a package.
+
+  Where does ASENT sit?                                          Between the untrusted AI-assisted candidate workspace and the point of trust/merge; CAVR also sits synchronously before dependency execution.
+
+  How does it obtain context?                                    Hooks give the event; ASENT reads explicit SRS/plan, Git, manifests, imports/call sites, tests and Terraform directly.
+
+  Are we scanning/sandboxing thousands of packages every time?   No. Fast evidence is checked broadly; deep counterfactual sandboxing is selective and cached by artifact/context digests.
+
+  How do you know suspicious behavior?                           Known risk data is one signal; CAVR also has a sensitive behavior/trigger vocabulary and compares observed behavior to project-specific capability justification.
+
+  Can a known popular package still be malicious?                Yes; package trust is based on the exact artifact/version/path and behavior, not reputation alone.
+
+  What about the generated application code itself?              SATRA-RV owns that security boundary and validates repairs independently.
+
+  Why SABLE if Checkov exists?                                   Checkov checks candidate facts; SABLE tests whether the historical least-privilege obligation stayed on the correct logical successor after structural refactoring.
+
+  Why not one module?                                            The objects and evidence are different: third-party dependency behavior, application security/repair, and IaC security-boundary attribution. One generic classifier would weaken each research question.
+
+  What happens if one module is uncertain?                       The candidate is held for review; uncertainty is never silently converted to “safe.”
+
+  What is automated?                                             Normal routing, analysis, CAVR/SATRA repair loops, re-verification, evidence generation and final gating. Humans are required only for declared unresolved/inconclusive/unknown states.
+
+  Why one year?                                                  The hard work is the research algorithms and empirical kill tests, not UI or integration. Modules progress in parallel and the integrated gate is only accepted after their individual claims survive evaluation.
+  ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+Appendix C - Reference and Research Source Pack
+
+The following list consolidates the key literature/tool sources already studied in the three module documents. The final thesis should preserve each module’s evidence-status notes and re-check fast-moving 2026 sources before defense.
+
+  --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+  Area                                Reference / source
+  ----------------------------------- --------------------------------------------------------------------------------------------------------------------------------------------------------------
+  CAVR                                Spracklen et al., “We Have a Package for You! A Comprehensive Analysis of Package Hallucinations by Code Generating LLMs,” USENIX Security 2025.
+
+  CAVR                                Djire et al., “Evaluating Inference-Time Defenses Against Package Hallucination in LLM-Generated Code,” ASE 2026.
+
+  CAVR                                Huang et al., “Package Hallucinations as Phantoms in Open-source Software Supply Chains,” ACM TOSEM 2026.
+
+  CAVR                                Duan et al., “Towards Measuring Supply Chain Attacks on Package Managers for Interpreted Languages,” NDSS 2021 (MalOSS).
+
+  CAVR                                Sejfia & Schaefer, “Practical Automated Detection of Malicious npm Packages,” ICSE 2022 (Amalfi).
+
+  CAVR                                Vu et al., “Bad Snakes: Understanding and Improving Python Package Index Malware Scanning,” ICSE 2023.
+
+  CAVR                                Huang et al., “DONAPI: Malicious NPM Packages Detector using Behavior Sequence Knowledge Mapping,” USENIX Security 2024.
+
+  CAVR                                Shariffdeen et al., HERCULE, ICSE-SEIP 2025.
+
+  CAVR                                ProfMal, “Detecting Malicious NPM Packages by the Synergy between Static and Dynamic Analysis,” ASE 2025.
+
+  CAVR                                Gao et al., “MalGuard: Towards Real-Time, Accurate, and Actionable Detection of Malicious Packages in PyPI Ecosystem,” USENIX Security 2025.
+
+  CAVR                                DySec, dynamic/eBPF malicious PyPI package detection, IEEE 2026.
+
+  CAVR                                Google OSV-Scanner Guided Remediation documentation.
+
+  CAVR                                Official incident sources: PyTorch torchtriton (2022), npm event-stream (2018), CISA ua-parser-js (2021), PyPI Ultralytics attack analysis (2024).
+
+  SATRA-RV                            OWASP Secure Coding with AI Cheat Sheet.
+
+  SATRA-RV                            ImpossibleBench, ICLR 2026.
+
+  SATRA-RV                            SWE-Mutation, Findings of ACL 2026.
+
+  SATRA-RV                            STING (2026), mutation-guided diagnosis/augmentation of regression suites.
+
+  SATRA-RV                            Mutation-based security test quality for broken access control, Journal on Information Security 2026.
+
+  SATRA-RV                            Security Unit Test Generation for LLM-Produced Code using constraint-based mutation, 2026.
+
+  SATRA-RV                            “Securing AI-Generated Code: Just-in-Time Detection and Remediation,” 2026.
+
+  SATRA-RV                            “Beyond Bypass: Vulnerability Regression in LLM-Generated Security Patches,” AITest 2026.
+
+  SATRA-RV                            CodeQL, Semgrep Community Edition, Bandit, Backcheck and mumei as practical baselines/tools.
+
+  SABLE                               AWS, “Security best practices for Amazon S3.”
+
+  SABLE                               Agyekum & Santos, “Does Fixing Break Security? An Empirical Study of Security Degradation in Iterative LLM-Driven Infrastructure-as-Code Repair,” 2026.
+
+  SABLE                               HashiCorp Terraform refactoring/moved-block documentation.
+
+  SABLE                               Checkov Terraform graph-check implementation; Trivy Terraform coverage/limitations.
+
+  SABLE                               Alsaid, Nebolisa & Abbas, “TerraProbe: A Layered-Oracle Framework for Detecting Deceptive Fixes in LLM-Assisted Terraform,” 2026.
+
+  SABLE                               Mengistu et al., “TerraRepair: A Tool-Grounded LLM Agent for Infrastructure-as-Code Repair,” 2026.
+
+  SABLE                               Chen et al., “SCAFFOLD-CEGIS: Preventing Latent Security Degradation in LLM-Driven Iterative Code Refinement,” 2026.
+
+  Project                             Supervisor meeting transcript, September 2026 - input/SRS, context-acquisition, POC, performance/caching, state-of-the-art and integrated-flow requirements.
+  --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------

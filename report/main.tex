@@ -1,0 +1,101 @@
+\documentclass{fast-nuces-bs}
+% The class loads natbib with "numbers, authoryear"; force numeric style for IEEEtran (replaces the Tectonic-only wrapper)
+\setcitestyle{numbers,square}
+%\documentclass{article}
+
+\usepackage{blindtext}
+\usepackage{mathptmx}% Times Roman font
+\usepackage[T1]{fontenc}
+\usepackage{lipsum} 
+\usepackage{sectsty}
+\usepackage{tikz-uml}
+\usetikzlibrary{positioning,arrows.meta}
+\usepackage{titlesec}
+\usepackage{longtable}
+\usepackage{booktabs}
+
+% Information about the Thesis 
+% -----------------------------------------------------------------------------
+% (All are compulsory, do not delete any line other than author Information)
+% For e.g., usually there are 3 students in a group, so leave authorone, 
+% authortwo, and authorthree, and delete authorfour.
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\department{FAST School of Computing}
+\faculty{Computer Science}
+\degreeyear{2026}
+\degreemonth{October}
+\degreename{Computer Science}
+\campuscity{Islamabad}
+\authorone{Syed Sheharyar Ali}{23I-0097}
+\authortwo{Maryam Fatima}{23I-3007}
+\authorthree{Muhammad Ali Sajjad}{23I-0110}
+\supervisor{Dr. Atif Aftab Ahmed Jilani}
+\sessionduration{2023-2027}
+\deanname{Dr. Jawwad Ahmed Shamsi}
+\directorname{Dr. Waseem Shahzad}
+\hodname{Dr. Muhammad Arshad Islam}
+\fypcoordinatorname{CS FYP Coordinator (confirm current name before submission)}
+% Administrative role names checked against official FAST-NUCES Islamabad pages on 10 October 2026.
+% Dean: https://www.nu.edu.pk/University/Officers
+% Director and HoD Computer Science: https://isb.nu.edu.pk/NEW/aboutCampus.php
+\title{ASENT: Integrated Security Assurance for AI-Assisted Software Development}
+
+% Connect the chapter fields to the FAST class metadata.
+\makeatletter
+\newcommand{\projecttitle}{\@title}
+\newcommand{\studentone}{\@authoronename}
+\newcommand{\studenttwo}{\@authortwoname}
+\newcommand{\studentthree}{\@authorthreename}
+\makeatother
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% Former document starts below this
+\begin{document}
+
+%\begin{acknowledgements}
+%	Your acknowledgments here
+%\end{acknowledgements}
+
+%\begin{abstract}
+%Briefly state the (1) research problem, (2) methodology, (3) key results, and (4) conclusion. Generally, abstracts are between 150 and 200 words–roughly 10-15 sentences.
+%\end{abstract}
+
+\cleardoublepage
+\pagenumbering{roman}
+\input{chapters/01_students_submission}
+\input{chapters/02_anti_plagiarism}
+\input{chapters/03_authors_declaration}
+\input{chapters/04_abstract}
+\input{chapters/05_acknowledgments}
+\input{chapters/06_executive_summary}
+\tableofcontents
+\listoffigures
+\listoftables
+\input{chapters/07_abbreviations}
+
+\cleardoublepage
+\pagenumbering{arabic}
+\input{chapters/chapter1_introduction}
+\input{chapters/chapter2_research}
+\input{chapters/chapter3_iteration_plan}
+\input{chapters/chapter4_requirements}
+\input{chapters/chapter5_design}
+\input{chapters/chapter6_iteration1}
+\input{chapters/chapter8_testing}
+\input{chapters/chapter9_development_evidence}
+\input{chapters/chapter10_fyp2_plan}
+\input{chapters/conclusion}
+
+\appendix
+\input{chapters/appendix_action_register}
+\input{chapters/appendix_requirements}
+\input{chapters/appendix_test_cases}
+\input{chapters/appendix_repository}
+\input{chapters/appendix_diagrams}
+\input{chapters/appendix_meetings}
+
+\bibliographystyle{IEEEtran}
+\bibliography{references/references}
+\end{document}
+
