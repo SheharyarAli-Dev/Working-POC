@@ -102,3 +102,20 @@ def test_shared_sable_evidence_drives_final_gate(tmp_path,scenario,status,decisi
         assert 'SABLE: UNKNOWN' in run.reasons
         assert any('aws_iam_role_policy.dynamic_extra: role binding unresolved' in item for item in evidence['details']['projected_authorization']['unknown'])
         assert evidence['details']['projected_authorization']['grants']
+
+def test_shared_gate_reviews_missing_sable_baseline(tmp_path):
+    svc=Service(tmp_path/'runtime')
+    run=svc.create('sable_preserved')
+    for file in Path(run.baseline_workspace).rglob('*.tf'):
+        file.unlink()
+    candidate=Path(run.candidate_workspace)
+    for relative in files(candidate):
+        if relative!='policy.json' and not relative.startswith('infra/'):
+            (candidate/relative).unlink()
+    svc.analyze(run.run_id)
+    run=svc.store.run(run.run_id)
+    evidence=[e for e in svc.store.evidence(run.run_id) if e['analyzer']=='SABLE' and not e['stale']][-1]
+    assert evidence['status']=='UNKNOWN'
+    assert evidence['details']['reason'].startswith('No trusted baseline boundary')
+    assert evidence['integrity_valid']
+    assert run.final_decision=='REVIEW',run.reasons
