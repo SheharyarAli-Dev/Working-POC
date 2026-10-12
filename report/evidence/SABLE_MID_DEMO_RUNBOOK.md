@@ -4,23 +4,15 @@ This runbook describes the shared ASENT Run Workflow demonstration on the Window
 
 ## Start ASENT on Windows
 
-Open PowerShell in the repository root.
-
-For a fresh checkout, run setup once. The repository's `scripts/setup.ps1` creates `.venv` with Python 3.12, installs `requirements.lock.txt`, installs frontend dependencies with `npm ci`, and builds the dashboard. It requires the Python 3.12 launcher (`py -3.12`) and Node/npm.
+The verified post-merge demo used `.worktrees/integration-test` at PR #5 head `554b6d51acca29f99c396c3040362015ee460262`, with the root Python 3.12 environment and an isolated data directory. From PowerShell in the repository root, start that same checkout and data set on port 4173:
 
 ```powershell
-.\scripts\setup.ps1
+Set-Location .worktrees\integration-test
+$env:ASENT_DATA = Join-Path $env:TEMP 'asent-codex-sable-c317a49dfbfb4fe3943587f157facbb8'
+..\..\.venv\Scripts\python.exe -m uvicorn backend.main:app --host 127.0.0.1 --port 4173
 ```
 
-Start the application in that PowerShell window:
-
-```powershell
-.\scripts\start.ps1
-```
-
-That script starts `backend.main:app` with Uvicorn bound to `127.0.0.1:8000`. Leave the terminal open while presenting. The root-level `START_ASENT.ps1` is an alternative self-provisioning launcher: it creates the virtual environment and installs Python requirements if needed, builds the frontend if `frontend/dist/index.html` is missing, then starts the same backend. The setup-plus-start pair is the clearer repeatable path because setup also installs frontend dependencies.
-
-When finished, `STOP_ASENT.ps1` stops the process listening on port 8000.
+Leave that terminal open while presenting and open `http://127.0.0.1:4173`. This isolated data directory preserves the two verified run records; it is temporary and may be cleared by Windows cleanup. For a fresh checkout without the prepared root environment, run `scripts/setup.ps1` from the project root, then use the integration worktree's launcher after confirming its dependencies and dashboard build are present. The standard root launcher binds port 8000 and runs the root checkout, so it is not the post-merge demo command documented here.
 
 ## Open and run the integrated workflow
 
@@ -82,11 +74,28 @@ The **SHARED SABLE EXECUTION TRACE** uses the selected run's persisted shared-or
 
 The shared Service determines applicable modules from candidate inputs and routes changed files to module input surfaces. CAVR analyzes dependency/security inputs, SATRA analyzes application/test-integrity inputs, and SABLE analyzes Terraform inputs. The Service runs applicable analyzers concurrently and publishes their evidence through the shared evidence store and event stream. The final gate consumes those module results; there is no direct sequential CAVR-to-SATRA-to-SABLE chain.
 
-The final gate checks current evidence integrity and its candidate-snapshot and module-input-hash bindings. SABLE `PRESERVED` and `NOT_APPLICABLE` are acceptable outcomes, `REGRESSED` blocks, and `UNKNOWN` requires review. Other applicable module results also affect the aggregate decision.
+The final gate checks that each applicable module has current evidence with `integrity_valid` exactly `true` and matching candidate-snapshot and module-input-hash bindings. For SABLE, only `PRESERVED` is acceptable; `REGRESSED` blocks, while `UNKNOWN`, `NOT_APPLICABLE`, missing evidence, or failed bindings require review. A missing or empty baseline is reported as SABLE `UNKNOWN`, so it cannot authorize `ACCEPT`. Other applicable module results also affect the aggregate decision, and no applicable security surface yields `REVIEW`.
 
 ## Screenshots and verified checks
 
-These are captures of the actual rendered integrated Run Workflow page:
+### Fresh post-merge browser demonstration — 2026-10-12
+
+The React Run Workflow page was opened in Edge against the clean integration worktree at PR #5 head `554b6d51acca29f99c396c3040362015ee460262`, subsequently merged as `ffe8aa91ca89702e5db65b8f7ff129aa72f761cc`. Each scenario was selected and started with the dashboard controls. The completed runs and persisted evidence were then checked through the same local application.
+
+| Scenario | Run ID | SABLE result | Overall ASENT gate | Persisted evidence check |
+|---|---|---|---|---|
+| `sable_preserved` | `21adc601d6b7` | `PRESERVED` — the baseline obligation holds, the unique successor is `module.storage.aws_s3_bucket.active_invoices`, and the modeled least-privilege grant holds. | `REVIEW` — SATRA was `INCONCLUSIVE`; this is not an overall `ACCEPT`. | Integrity valid; candidate snapshot matches; SABLE input hash matches the `module.started` event. |
+| `sable_regressed` | `0849603bfc16` | `REGRESSED` — the candidate grant targets `module.storage.aws_s3_bucket.archive_invoices`, so the registered active-asset obligation does not hold. | `BLOCK` — SABLE `REGRESSED`; SATRA was also `INCONCLUSIVE`. | Integrity valid; candidate snapshot matches; SABLE input hash matches the `module.started` event. |
+
+The preserved run's candidate snapshot is `061e827a28e19f5ff48fccb1743c0f317eb6c95438b34cab5981585d1f77b1a6`; its SABLE input hash is `96eba5d3cda77cb146829ed830019289665227d911d5a704bdb81b97d496a0a8`. The regressed run's candidate snapshot is `0221f7c23d207069ad1d52836b7e23f6a379c2a03fb399e973fbc423ff5d41c8`; its SABLE input hash is `ca4a063e06ecde6cd5b58c84d08019fc81188e06d08413d9da88bfcd1fbddf5b`. Both rendered traces showed baseline verification, parsed graphs, selected successor, obligation projection, authorization record, evidence integrity, snapshot/input-hash binding, module outcomes, and the separate final-gate reason.
+
+The fresh rendered captures were saved outside the report evidence directory: `%TEMP%\asent-sable-preserved-live.png`, `%TEMP%\asent-sable-preserved-live-input.png`, and `%TEMP%\asent-sable-regressed-live.png`. They support the recorded live interactions; screenshots alone are not a substitute for the live demonstration.
+
+SATRA was inconclusive on this Windows host. Its persisted evidence records `OSError: [WinError 10106] The requested service provider could not be loaded or initialized` while importing `asyncio.windows_events` / `_overlapped`. This explains the aggregate `REVIEW` and additional `BLOCK` reason; it does not change the SABLE verdicts. No AWS credentials, AWS API calls, or Terraform apply were used.
+
+### Earlier rendered screenshots and checks
+
+These are earlier captures of the actual rendered integrated Run Workflow page:
 
 - `reports/sable-trace-sable_preserved.png`
 - `reports/sable-trace-sable_regressed.png`
@@ -109,37 +118,37 @@ Checks actually verified for this vertical slice:
 
 The unresolved case contains a valid inline policy for the registered role that satisfies the modeled obligation. It also contains a second broad inline policy whose role binding is the expression `var.additional_role`. The analyzer cannot establish whether that policy is unrelated to the registered principal, so it cannot safely ignore the policy or treat its permissions as absent. Persisted evidence records `aws_iam_role_policy.dynamic_extra: role binding unresolved`; SABLE therefore fails closed with `UNKNOWN`, and the shared final gate returns `REVIEW`.
 
-## FYP-1 Mid rubric readiness audit — 2026-10-11
+## FYP-1 Mid rubric readiness audit — 2026-10-12
 
-The criterion names and marks below come from `C:\Users\hp\Downloads\FYP-1-Mid-Assessment-Guidelines-and-Rubrics.pdf` (Form 2, pp. 1–2; Form 3, pp. 2–3). This is a SABLE contribution evidence audit, not a score or a claim that the team report is complete. “Satisfied” means the repository evidence covers that criterion for this bounded SABLE contribution; meeting-room performance and supervisor decisions remain for the supervisor to assess.
+The criterion names and marks below were checked against the official PDF `C:\Users\hp\Downloads\FYP-1-Mid-Assessment-Guidelines-and-Rubrics.pdf` (Form 2, pp. 1–2; Form 3, pp. 2–3); `report/sources/mid_guidelines_rubrics.txt` is only an extraction. This is a SABLE contribution evidence audit, not a score or a claim that the team report is complete. Statuses are `MET`, `PARTIAL`, `UNMET`, or `NOT VERIFIABLE` for the stated SABLE scope; supervisor scoring, team performance, and missing authentic records remain outside this evidence map.
 
 ### Form 2 - Presentation and Demo
 
 | Criterion | Status | Existing evidence | Smallest next action |
 |---|---|---|---|
-| 1. Previous proposal actions addressed (CLO6, 10) | **Unverified** | No completed Panel Action Register/Form 10 or authoritative panel action record was found in the repository, report source, or locally checked project documents. Appendix A remains explicitly pending. | Obtain the actual panel action list and record each action, owner, status, response, and evidence link. |
-| 2. Iteration plan and work breakdown progress (CLO2, 10) | **Partially evidenced** | `reports/fyp1_mid_report/chapters/chapter3_iteration_plan.tex` identifies SABLE I1-I4 and completed prototype work; the runbook and report record the current rehearsal. No authoritative owner/date schedule or recovery log was found. | Confirm planned/completed dates, owners, and any recovery dates against the team's approved schedule. |
-| 3. Live prototype with core module demo (CLO4, 25) | **Partially evidenced** | Three completed shared workflow runs are recorded above: `b107fd8f0f2f` PRESERVED/REVIEW, `5c6fe1aa3a96` REGRESSED/BLOCK, and `b6d3588ec006` UNKNOWN/REVIEW. Evidence integrity, candidate snapshot, and input hash are valid for all three. The retained UNKNOWN screenshot is an intermediate state, and an in-person live demonstration remains to be performed. | In the evaluation, rerun or open the persisted cases live and explain the SABLE result separately from the final gate. |
-| 4. Requirements and acceptance criteria quality (CLO2, 10) | **Satisfied for the SABLE scope** | `chapter4_requirements.tex` defines numbered FR-S1-FR-S8 and acceptance checks. `test_sable_real_hcl`, `test_sable_refactor_and_correspondence_cases`, `test_sable_unsupported_iam_stays_unknown`, and `test_shared_sable_evidence_drives_final_gate` assert the required outcomes. | Be ready to explain one passing, one regression, and one uncertainty assertion. |
-| 5. Design artefacts and design evolution (CLO3, 15) | **Partially evidenced** | `chapter5_design.tex` contains the SABLE architecture/process model and explains baseline verification, correspondence, authorization projection, evidence binding, and the final gate. The latest PDF pages could not be visually rendered in this audit because the available renderer files are inaccessible. | Visually verify the architecture and process pages with an accessible PDF renderer before relying on their layout in the presentation. |
-| 6. Repository, milestone, and member evidence (CLO6, 10) | **Partially evidenced** | Chapter 9 and Appendix D connect SABLE changes to commits and the current `753a55b` head; the report attributes the SABLE contribution to its author. No team-wide task-owner log or confirmed contribution record for other modules was found. | Confirm task ownership and dates against authoritative team task/review records. |
-| 7. Testing and early validation (CLO4, 10) | **Satisfied for the selected SABLE validation** | The correction-containing local selection reports 27 passed, 10 deselected; the earlier dedicated SABLE CI job reports 44 passed on `9a4dc3d`. The broader full-CI run had eight failures; its run link and per-failure details were not present in local records checked here. | Disclose that the broader CI was not green and avoid claiming a full-suite pass; verify the run and triage its failures before making broader readiness claims. |
-| 8. Presentation, Q&A, team, and tool ownership (CLO5, 10) | **Unverified for team defense** | The report records Codex assistance for the SABLE work and report update. Repository records cannot establish live Q&A, balanced participation, or other members' tool use and independent understanding. | Each member should confirm their own tools and prepare to defend their own work; do not infer others' disclosures. |
+| 1. Previous proposal actions addressed (CLO6, 10) | **NOT VERIFIABLE** | No completed Panel Action Register/Form 10 or authoritative panel action record was found in the repository, report source, or locally checked project documents. Appendix A remains explicitly pending. | Obtain the actual panel action list and record each action, owner, status, response, and evidence link. |
+| 2. Iteration plan and work breakdown progress (CLO2, 10) | **MET for SABLE I1-I4 progress** | `chapter3_iteration_plan.tex` defines SABLE I1-I4 and records their implementation, focused test evidence, merged CI provenance, and live dashboard verification. This is the SABLE module contribution; it does not assert a team-wide dated schedule. | Present the four SABLE milestones and point to their implementation and acceptance evidence. |
+| 3. Live prototype with core module demo (CLO4, 25) | **MET for the bounded SABLE demo** | The fresh browser runs above demonstrate preserved and wrong-target cases through the shared dashboard, including the trace and persisted evidence. The preserved case is SABLE `PRESERVED` / overall `REVIEW`; the wrong-target case is SABLE `REGRESSED` / overall `BLOCK`. | During evaluation, repeat the interaction and explain why SATRA also affects the aggregate gate. |
+| 4. Requirements and acceptance criteria quality (CLO2, 10) | **MET for the bounded SABLE requirements** | `chapter4_requirements.tex` defines FR-S1–FR-S8 and traces them to named acceptance tests; the I1–I4 map below records observable outcomes. | Keep the requirement/test links current as scope changes. |
+| 5. Design artefacts and design evolution (CLO3, 15) | **PARTIAL** | `chapter5_design.tex` contains the SABLE architecture/process model and explains baseline verification, correspondence, authorization projection, evidence binding, and the final gate. The latest PDF pages have not been visually inspected. | Rebuild and visually inspect the architecture and process pages before relying on their layout in the presentation. |
+| 6. Repository, milestone, and member evidence (CLO6, 10) | **MET for SABLE contribution evidence** | Chapter 9 and Appendix D identify the SABLE milestones, author attribution, exact merged PR head, and passing checks. This status covers SABLE's contribution only and makes no claim about other members' records. | Show the SABLE commit history and merged PR provenance. |
+| 7. Testing and early validation (CLO4, 10) | **MET for bounded SABLE validation** | The historical focused selection reports 27 passed, 10 deselected; all 18 checks passed on exact merged PR head `554b6d5`. The native-Windows full suite remains 1,400 passed, 36 failed, 10 skipped, and 12 setup errors; failures/errors are not passes. | Explain known limits and scope broader readiness claims to successful CI evidence. |
+| 8. Presentation, Q&A, team, and tool ownership (CLO5, 10) | **NOT VERIFIABLE** | The report records Codex assistance for the SABLE work and report update. Repository records cannot establish live Q&A, balanced participation, or other members' tool use and independent understanding. | Each member should confirm their own tools and prepare to defend their own work; do not infer others' disclosures. |
 
 ### Form 3 - Report Evaluation
 
-The current 84-page report PDF and editable source are in `reports/fyp1_mid_report/`; the compiled PDF and SABLE-specific runbook/evidence are also in `reports/ASENT_FYP1_Mid_Report_Team_Review.zip`. Report status below is limited to SABLE contribution evidence. Administrative completeness and team-wide claims remain pending where the checklist identifies them.
+The report branch `report` contains the editable draft and eight uncommitted chapter/runbook edits for Maryam to review. A prior 162-page PDF build succeeded, but the latest edits have not been rebuilt or visually inspected; signatures, declarations, and team-wide administrative evidence remain pending. The statuses below concern only SABLE contribution evidence, not completion of the team report.
 
 | Criterion | Status | Existing evidence | Smallest next action |
 |---|---|---|---|
-| 1. Report format and artefacts present (CLO2, 5) | **Partially evidenced** | `main.tex` builds an 82-page report and the package contains the editable sources, figures, PDF, runbook, and selected evidence. Signatures, declarations, coordinator/supervisor records, and other administrative fields still require confirmation. | Complete required institutional fields and confirm the prescribed submission artefacts. |
-| 2. Problem formulation, R&D, and gap analysis (CLO1, 15) | **Partially evidenced** | `chapter1_introduction.tex` and `chapter2_research.tex` explain the refactoring-induced S3/IAM boundary problem and bounded research gap with cited related work. Independent verification of the sources and completeness of the team literature review remain open. | Verify bibliographic details and strengthen the comparative synthesis using authoritative sources. |
-| 3. Project vision, scope, and success criteria (CLO2, 10) | **Partially evidenced** | Chapters 3-4 define SABLE I1-I4, the supported S3/IAM scope, explicit out-of-scope limits, and observable outcome criteria. Approved proposal actions and team-wide feasibility/schedule records were not located. | Confirm alignment against the approved proposal and actual panel decisions. |
-| 4. Requirements and acceptance criteria (CLO2, 15) | **Satisfied for SABLE requirements** | Chapter 4 provides FR-S1-FR-S8 and acceptance checks traced to test names and expected PRESERVED, REGRESSED, UNKNOWN, and gate outcomes. | Keep the mapping synchronized if the supported scope changes. |
-| 5. Architecture and component/interface design (CLO3, 15) | **Partially evidenced** | `chapter5_design.tex` includes a project-specific editable architecture diagram and component responsibility rationale tied to current implementation. Latest-page visual inspection is blocked because the available PDF renderer's package directories deny access. | Render and visually inspect the architecture page with an accessible renderer. |
-| 6. Data/process/behavior design (CLO3, 10) | **Partially evidenced** | The design chapter documents the baseline-to-candidate flow, successor selection, authorization projection, evidence binding, and final-gate process. Visual rendering of the latest diagram page could not be completed in this environment. | Visually inspect the process/data model and confirm its page layout before submission. |
-| 7. Implementation documentation (CLO4, 15) | **Satisfied for SABLE content** | Chapter 6 documents reproducible Windows setup/run commands, implementation files, algorithms, the chosen fail-closed decision, and supported-scope limits; Chapters 8-9 report actual validation. | Rehearse the documented setup on the presentation machine. |
-| 8. Testing plan and tool/risk disclosure (CLO5, 15) | **Partially evidenced** | Chapter 8 records the exact 27-pass/10-deselected command, earlier 44-test SABLE CI, known limitations, and the broader run's eight failures. Chapter 9 discloses Codex use for this SABLE contribution and optional dependencies/risks. A local full-CI run link/details and other members' tool disclosures are unavailable. | Verify and record the broader CI failure details and collect each member's own tool/privacy disclosure. |
+| 1. Report format and artefacts present (CLO2, 5) | **PARTIAL** | The editable draft and a prior 162-page PDF build are available; the latest eight local edits have not been rebuilt or visually inspected. Signatures, declarations, coordinator/supervisor records, and other administrative fields still require confirmation. | Rebuild and inspect the report, complete required institutional fields, and confirm prescribed artefacts. |
+| 2. Problem formulation, R&D, and gap analysis (CLO1, 15) | **PARTIAL for SABLE** | The current report identifies SABLE's problem and intended research direction, but its research synthesis and source verification are not complete in the report. Earlier pre-redéfense design documents are unconfirmed background, not evidence of an approved or complete literature review. | Have the report owner complete and verify the SABLE-relevant research synthesis in the report; keep B0-B4 evaluation described as future work until performed. |
+| 3. Project vision, scope, and success criteria (CLO2, 10) | **MET for SABLE scope and success criteria** | Chapters 1, 3, and 4 state the S3/IAM obligation, supported Terraform subset, out-of-scope boundaries, I1-I4, and testable PRESERVED/REGRESSED/UNKNOWN outcomes. | Explain the bounded scope and its relationship to the approved proposal. |
+| 4. Requirements and acceptance criteria (CLO2, 15) | **MET for SABLE requirements** | Chapter 4 provides FR-S1–FR-S8 and acceptance checks traced to test names and expected PRESERVED, REGRESSED, UNKNOWN, and gate outcomes. | Keep the mapping synchronized if the supported scope changes. |
+| 5. Architecture and component/interface design (CLO3, 15) | **PARTIAL** | `chapter5_design.tex` includes an editable architecture diagram and component rationale tied to implementation. The latest report pages and diagram have not been visually inspected. | Rebuild and visually inspect the architecture page before submission. |
+| 6. Data/process/behavior design (CLO3, 10) | **PARTIAL** | The design chapter documents baseline verification, successor selection, authorization projection, evidence binding, and final-gate behavior. The latest diagram page has not been visually inspected. | Rebuild and visually inspect the process/data model and page layout. |
+| 7. Implementation documentation (CLO4, 15) | **MET for SABLE content** | Chapter 6 documents Windows setup/run commands, implementation files, algorithms, the fail-closed decision, and supported-scope limits; Chapters 8-9 report validation. | Rehearse the documented setup on the presentation machine. |
+| 8. Testing plan and tool/risk disclosure (CLO5, 15) | **PARTIAL for SABLE pending author disclosure confirmation** | Chapter 8 records focused validation, merged exact-head CI, native-Windows results, and SABLE's model limits. Chapter 9 and this runbook record Codex, Edge, and GitHub Actions use for the SABLE contribution; the SABLE author must confirm completeness of earlier tool and data-handling disclosures. | Confirm the SABLE author's full tool-use and data-handling statement before submission. |
 
 ### SABLE mid milestones and acceptance trace
 
@@ -169,7 +178,7 @@ The fresh `--basetemp` is only needed on hosts where pytest's default temporary 
 
 **Executed 2026-10-11:** `.venv\Scripts\python.exe -m pytest tests/test_modules.py tests/test_sable_isolation.py tests/test_integration.py::test_shared_sable_evidence_drives_final_gate -k sable --basetemp .venv\.pytest_sable_mid_audit_20261011_c -q` — **27 passed, 10 deselected in 47.26s; exit code 0**. The passing selection includes the four shared final-gate parameter cases. The default pytest temp root on this host was inaccessible, so this run used a fresh writable pytest temp directory. `git diff --check` was also run after the code edits.
 
-**Tool disclosure for this audit/update only:** OpenAI Codex assisted with repository/rubric inspection, the narrowly scoped unresolved-role-binding correction and regression test, and this runbook update. The implementation decision and test outcomes were checked against the repository and executed tests. No generated screenshots, cloud credentials, AWS API calls, or Terraform apply were used for this update. This is not a complete disclosure of earlier work by every team member; the report's tool-use statement must be confirmed by the team.
+**Tool disclosure for this continuation:** OpenAI Codex assisted with repository/rubric inspection, the live dashboard demonstration, and this evidence update. Edge rendered the dashboard and completed the two recorded workflows; screenshots were saved under `%TEMP%` as listed above. No AWS credentials, AWS API calls, or Terraform apply were used. This does not disclose earlier work by every team member; the report's tool-use and privacy statements still require team confirmation.
 
 ### Proposal-action register and report blocker
 
