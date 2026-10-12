@@ -109,7 +109,7 @@ export const RunWorkflowModule: React.FC = () => {
   const sableSnapshotIntegrityValid = Boolean(sableEvidence && sableEvidence.integrity_valid &&
     sableEvidence.candidate_snapshot === currentRun?.candidate_snapshot && sableInputHashMatches !== false);
   const sableBadge = !sableEvidence ? 'PENDING' : !sableSnapshotIntegrityValid ? 'STALE / INVALID' :
-    sableStatus === 'PRESERVED' || sableStatus === 'NOT_APPLICABLE' ? `${sableStatus} -> ACCEPTABLE` :
+    sableStatus === 'PRESERVED' ? 'PRESERVED -> ACCEPTABLE' :
       sableStatus === 'REGRESSED' ? 'REGRESSED -> BLOCKING' : `${sableStatus} -> REVIEW`;
   const decision = currentRun?.final_decision || 'REVIEW';
   const isAccept = decision === 'ACCEPT';
@@ -207,7 +207,7 @@ export const RunWorkflowModule: React.FC = () => {
         <div className="boundary-card">
           <div className="b-header">
             <span className="b-icon green"><Network size={16} /></span><strong>SABLE GATE</strong>
-            <span className={`badge ${!sableEvidence || !sableSnapshotIntegrityValid ? 'warn' : sableStatus === 'REGRESSED' ? 'bad' : sableStatus === 'PRESERVED' || sableStatus === 'NOT_APPLICABLE' ? 'good' : 'warn'}`}>{sableBadge}</span>
+            <span className={`badge ${!sableEvidence || !sableSnapshotIntegrityValid ? 'warn' : sableStatus === 'REGRESSED' ? 'bad' : sableStatus === 'PRESERVED' ? 'good' : 'warn'}`}>{sableBadge}</span>
           </div>
           <p>Shared evidence for local Terraform modules, S3 buckets, and inline IAM role policies.</p>
           <div className="b-meta">Status: {sableStatus} · {sableSnapshotIntegrityValid ? 'persisted evidence present; snapshot and integrity checks pass' : sableEvidence ? 'snapshot or integrity check failed' : 'awaiting shared evidence'}</div>
