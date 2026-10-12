@@ -7,6 +7,7 @@ from backend.cavr.runtime_monitor import normalize
 from backend.cavr.repair import rank_repairs
 from backend.sable.analyzer import analyze as sable
 from backend.sable.authorization import evaluate_authorization
+from backend.sable.policy_semantics import evaluate as evaluate_policy_semantics
 from backend.sable.hcl_parser import parse as parse_hcl
 from backend.satra.analyzer import analyze as satra
 from backend.satra.security_contract import build
@@ -182,6 +183,25 @@ def test_sable_standalone_evaluator_fails_closed_on_null_role_binding():
     assert result.grants, 'the valid principal policy should remain represented'
     assert any('aws_iam_role_policy.dynamic_extra: role binding unresolved' in item for item in result.outside_model)
 
+@pytest.mark.parametrize('role_binding',['','   '])
+def test_empty_role_binding_is_unknown_in_both_evaluators(role_binding):
+    model={"resources": {
+        "aws_iam_role.app": {"type": "aws_iam_role", "attributes": {"name": "app-role"}},
+        "aws_s3_bucket.data": {"type": "aws_s3_bucket", "attributes": {"bucket": "customer-data"}},
+        "aws_iam_role_policy.valid": {"type": "aws_iam_role_policy", "module": "", "attributes": {
+            "role": "aws_iam_role.app.id", "policy": {"Statement": [{"Effect": "Allow",
+                "Action": ["s3:GetObject", "s3:PutObject"], "Resource": ["arn:aws:s3:::customer-data/*"]}]}}},
+        "aws_iam_role_policy.blank": {"type": "aws_iam_role_policy", "module": "", "attributes": {
+            "role": role_binding, "policy": {"Statement": [{"Effect": "Allow",
+                "Action": ["s3:*"], "Resource": ["*"]}]}}},
+    }}
+    shared=evaluate_policy_semantics(model,'aws_iam_role.app','aws_s3_bucket.data',['s3:GetObject','s3:PutObject'])
+    standalone=evaluate_authorization(model,'aws_iam_role.app','aws_s3_bucket.data',['s3:GetObject','s3:PutObject'])
+    assert not shared['known'] and not shared['holds']
+    assert not standalone.known and not standalone.holds
+    assert any('role binding unresolved' in message for message in shared['unknown'])
+    assert any('role binding unresolved' in message for message in standalone.outside_model)
+
 def test_sable_explicitly_unrelated_role_binding_is_ignored(scenario):
     _,c=scenario('sable_preserved')
     main=c.path/'infra/main.tf'
@@ -226,7 +246,8 @@ def test_sable_unverified_baseline_and_empty_baseline(scenario):
     for file in (Path(r.baseline_workspace)/'infra').rglob('*.tf'):
         file.unlink()
     status,details,_=sable(c,lambda *a:None)
-    assert status=='NOT_APPLICABLE',details
+    assert status=='UNKNOWN',details
+    assert 'baseline' in details['reason'].lower()
 
 @pytest.mark.parametrize('case,wanted',[
     ('rename_with_moved','PRESERVED'),

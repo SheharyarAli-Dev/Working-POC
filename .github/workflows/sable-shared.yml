@@ -32,3 +32,4 @@ jobs:
           tests/test_sable_isolation.py
           tests/test_integration.py::test_git_diff_handles_non_utf8_fixture_content
           tests/test_integration.py::test_shared_sable_evidence_drives_final_gate
+          tests/test_integration.py::test_shared_gate_reviews_missing_sable_baseline
