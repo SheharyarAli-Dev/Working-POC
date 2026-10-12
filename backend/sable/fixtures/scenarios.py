@@ -124,7 +124,7 @@ moved {
 _s("rename_no_moved",
    "Bucket renamed without moved block",
    "rename_or_move",
-   "Rename without explicit evidence; name similarity alone cannot decide → UNKNOWN.",
+   "No moved block, but exact physical bucket identity and stable Asset/lifecycle tags uniquely support continuity → PRESERVED.",
    {"main.tf": '''
 resource "aws_iam_role" "app" {
   name = "app-role"
@@ -364,7 +364,7 @@ resource "aws_iam_role_policy" "app_policy" {
 _s("replacement_wrong_bucket",
    "Replaced with unrelated bucket — obligation detached",
    "replacement",
-   "New bucket has different physical identity and no policy targeting it → REGRESSED (misbinding).",
+   "New bucket has different physical identity and no moved, tag, or application-reference evidence; successor is unresolved → UNKNOWN.",
    {"main.tf": '''
 resource "aws_iam_role" "app" {
   name = "app-role"
