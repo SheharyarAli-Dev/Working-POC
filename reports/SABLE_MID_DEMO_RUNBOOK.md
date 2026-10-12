@@ -70,7 +70,7 @@ The **SHARED SABLE EXECUTION TRACE** uses the selected run's persisted shared-or
 
 The shared Service determines applicable modules from candidate inputs and routes changed files to module input surfaces. CAVR analyzes dependency/security inputs, SATRA analyzes application/test-integrity inputs, and SABLE analyzes Terraform inputs. The Service runs applicable analyzers concurrently and publishes their evidence through the shared evidence store and event stream. The final gate consumes those module results; there is no direct sequential CAVR-to-SATRA-to-SABLE chain.
 
-The final gate checks current evidence integrity and its candidate-snapshot and module-input-hash bindings. SABLE `PRESERVED` and `NOT_APPLICABLE` are acceptable outcomes, `REGRESSED` blocks, and `UNKNOWN` requires review. Other applicable module results also affect the aggregate decision.
+The final gate checks that each applicable module has current evidence with `integrity_valid` exactly `true` and matching candidate-snapshot and module-input-hash bindings. For SABLE, only `PRESERVED` is acceptable; `REGRESSED` blocks, while `UNKNOWN`, `NOT_APPLICABLE`, missing evidence, or failed bindings require review. A missing or empty baseline is reported as SABLE `UNKNOWN`, so it cannot authorize `ACCEPT`. Other applicable module results also affect the aggregate decision, and no applicable security surface yields `REVIEW`.
 
 ## Screenshots and verified checks
 
