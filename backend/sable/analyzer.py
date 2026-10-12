@@ -13,7 +13,7 @@ def analyze(context,emit):
     details={'baseline_graph':b['graph'],'candidate_graph':c['graph'],'moves':c['moves'],'hypotheses':[],'obligation':{'principal':role,'protected_asset':asset,'actions':actions,'authority':'trusted baseline + registered policy'},'parse_errors':b['errors']+c['errors']}
     emit('sable.baseline_loaded',details['obligation'])
     if not b['resources']:
-        return 'NOT_APPLICABLE',{**details,'reason':'No trusted baseline boundary: first-generation continuity is N/A'},['No continuity claim before a trusted baseline exists']
+        return 'UNKNOWN',{**details,'reason':'No trusted baseline boundary: the registered continuity obligation cannot be verified'},['Trusted SABLE baseline missing or empty']
     if details['parse_errors'] or asset not in b['resources'] or role not in b['resources']:
         return 'UNKNOWN',{**details,'reason':'Baseline authority or HCL parsing is incomplete'},details['parse_errors'] or ['Baseline authority missing']
     base=evaluate(b,role,asset,actions);details['baseline_verification']=base
