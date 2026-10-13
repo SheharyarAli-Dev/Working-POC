@@ -7,7 +7,43 @@ This chapter states only the SABLE requirements that can be checked against the 
 The reviewer supplies a baseline, a candidate Terraform snapshot, and the registered obligation; starts a SABLE run through the standalone or shared workflow; and inspects the verdict, reasons, and evidence. In the integrated workflow, the shared orchestrator stores SABLE evidence and reports the final gate decision.
 
 \section{Use Case Diagram}
-The process diagram in Chapter 5 shows the implemented analysis and evidence path. It is the current component/process design used for this report, rather than a proposed future system.
+% Additive rubric artefact: use cases reflect the implemented dedicated SABLE page and shared Run Workflow.
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[
+  usecase/.style={draw, ellipse, align=center, text width=0.25\textwidth, minimum height=10mm, inner sep=2pt, font=\small},
+  flow/.style={-{Stealth}, thick}
+]
+\node[draw, rounded corners, minimum width=0.78\textwidth, minimum height=84mm] (system) {};
+\node[font=\small\bfseries, anchor=north] at ([yshift=-2mm]system.north) {Implemented ASENT analysis interfaces};
+\coordinate (developer) at ([xshift=-0.55\textwidth,yshift=17mm]system.center);
+\coordinate (reviewer) at ([xshift=0.55\textwidth,yshift=17mm]system.center);
+\foreach \actor/\name in {developer/Developer,reviewer/Reviewer} {
+  \draw (\actor) circle (2.3mm);
+  \draw (\actor) -- ++(0,-8mm);
+  \draw (\actor) ++(0,-3mm) -- ++(-4mm,-3mm);
+  \draw (\actor) ++(0,-3mm) -- ++(4mm,-3mm);
+  \draw (\actor) ++(0,-8mm) -- ++(-3mm,-5mm);
+  \draw (\actor) ++(0,-8mm) -- ++(3mm,-5mm);
+  \node[font=\scriptsize, below=18mm of \actor] {\name};
+}
+\node[usecase] (sable) at ([xshift=-0.26\textwidth,yshift=17mm]system.center) {Select obligation and baseline/candidate inputs};
+\node[usecase, below=8mm of sable] (run) {Start standalone SABLE or shared analysis run};
+\node[usecase] (inspect) at ([xshift=0.26\textwidth,yshift=17mm]system.center) {Inspect module status, reasons, and evidence};
+\node[usecase, below=8mm of inspect] (decision) {Inspect shared final decision and evidence bindings};
+\coordinate (dev-trunk-top) at ([xshift=-0.48\textwidth,yshift=17mm]system.center);
+\coordinate (dev-trunk-bottom) at ([xshift=-0.48\textwidth,yshift=-17mm]system.center);
+\coordinate (review-trunk-top) at ([xshift=0.48\textwidth,yshift=17mm]system.center);
+\coordinate (review-trunk-bottom) at ([xshift=0.48\textwidth,yshift=-17mm]system.center);
+\draw[flow] (developer) -- (sable.west);
+\draw[flow] (developer) -- (dev-trunk-top) -- (dev-trunk-bottom) -- (run.west);
+\draw[flow] (reviewer) -- (inspect.east);
+\draw[flow] (reviewer) -- (review-trunk-top) -- (review-trunk-bottom) -- (decision.east);
+\end{tikzpicture}
+\caption{Implemented SABLE and shared-workflow use cases. The diagram shows user actions supported by the current interfaces; it does not imply live AWS access or deployment.}
+\label{fig:asent-use-cases}
+\end{figure}
+The developer supplies supported analysis inputs and starts a run. A reviewer can inspect the module result, reasons, evidence, and (for the integrated route) the shared gate decision. The registered obligation is selected from the local SABLE interface; infrastructure is analyzed as supplied and is not applied to AWS.
 
 \section{Detailed Use Cases}
 \begin{enumerate}

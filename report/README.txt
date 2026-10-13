@@ -14,10 +14,13 @@ The PDF is written as build\texput.pdf. Rename or copy it only after checking
 the build log and rendered pages. The wrapper handles the class's pdfTeX
 compression primitive and selects numeric natbib options for IEEEtran.
 
-The code branch verified for this report is integration/sable-satra-cavr at
-665b2241693c4833e9815038d8a8cdf63707bd6d. See Chapter 8 for CI provenance and
-Chapter 9 for SABLE UI evidence. Run repository setup scripts from the project
-root, not from this report directory.
+The integrated implementation is merged to master at
+ffe8aa91ca89702e5db65b8f7ff129aa72f761cc from exact tested PR #5 head
+554b6d51acca29f99c396c3040362015ee460262. Some dedicated SABLE UI figures in
+Chapter 8 are explicitly identified as historical captures from earlier source
+snapshots; current post-merge UI evidence and its run identifiers are in the
+demo runbook. See Chapter 7 for CI provenance. Run repository setup scripts
+from the project root, not from this report directory.
 
 Some team records remain pending official evidence: proposal-panel actions,
 meeting/progress minutes, approved schedule, coordinator name, and member-level
