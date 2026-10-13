@@ -1,16 +1,21 @@
 from pathlib import Path
+from types import SimpleNamespace
 import pytest
 from backend.cavr.analyzer import analyze as cavr
 from backend.cavr.trigger_discovery import scan
 from backend.cavr.runtime_monitor import normalize
 from backend.cavr.repair import rank_repairs
 from backend.sable.analyzer import analyze as sable
+from backend.sable.authorization import evaluate_authorization
+from backend.sable.policy_semantics import evaluate as evaluate_policy_semantics
+from backend.sable.hcl_parser import parse as parse_hcl
 from backend.satra.analyzer import analyze as satra
 from backend.satra.security_contract import build
 from backend.satra.test_validator import preflight,killed,judge
 from backend.integrations.osv_adapter import OSV
 from backend.config import ROOT
 from backend.orchestrator.context_service import ContextService
+from backend.sable.fixtures.scenarios import SCENARIOS as SABLE_FIXTURES
 
 
 def test_cavr_safe_cache_and_advisory(service,scenario,tmp_path):
@@ -96,11 +101,196 @@ def test_repair_constraints():
 def test_sable_real_hcl(scenario,case,wanted):
     _,c=scenario(case);status,d,_=sable(c,lambda *a:None);assert status==wanted,d
     assert not d['parse_errors'];assert d['baseline_verification']['holds']
+    if wanted in ('PRESERVED','REGRESSED'):assert d['projected_authorization']['known'] is True
     if case=='sable_regressed':assert any(v['local_predicate'] for v in d['candidate_only']) and not d['projected_authorization']['holds']
 
 def test_sable_unknown_parse_and_disabled(scenario,service):
     r,c=scenario();(c.path/'infra/main.tf').write_text('resource "broken" {');assert sable(c,lambda *a:None)[0]=='UNKNOWN'
-    service.change_threats(record_id='SABLE-S3IAM-001',enabled=False);c=ContextService(r.candidate_workspace,r.baseline_workspace,service.threats.snapshot());assert sable(c,lambda *a:None)[0]=='UNKNOWN'
+    service.change_threats(record_id='SABLE-S3IAM-001',enabled=False);c=ContextService(r.candidate_workspace,r.baseline_workspace,service.threats.snapshot())
+    status,details,_=sable(c,lambda *a:None)
+    assert status=='UNKNOWN' and 'SABLE-S3IAM-001' in details['missing_rules']
+
+def test_sable_unsupported_iam_stays_unknown(scenario):
+    _,c=scenario('sable_preserved')
+    policy=c.path/'infra/main.tf'
+    text=policy.read_text()
+    text=text.replace('Action = ["s3:GetObject", "s3:PutObject"], Resource = ["${module.storage.active_arn}/*"]',
+                      'Action = ["s3:GetObject", "s3:PutObject"], Condition = { Bool = { "aws:SecureTransport" = "true" } }, Resource = ["${module.storage.active_arn}/*"]')
+    policy.write_text(text)
+    status,details,_=sable(c,lambda *a:None)
+    assert status=='UNKNOWN',details
+    assert not details['projected_authorization']['known']
+
+def test_sable_unresolved_role_binding_with_valid_policy_is_unknown(scenario):
+    _,c=scenario('sable_preserved')
+    main=c.path/'infra/main.tf'
+    main.write_text(main.read_text()+'''\nresource "aws_iam_role_policy" "dynamic_extra" {
+  role = var.additional_role
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{ Effect = "Allow", Action = ["s3:*"], Resource = ["*"] }]
+  })
+}
+''')
+    status,details,_=sable(c,lambda *a:None)
+    assert status=='UNKNOWN',details
+    authorization=details['projected_authorization']
+    assert not authorization['known']
+    assert authorization['grants'], 'the known valid policy should still be represented'
+    assert any('aws_iam_role_policy.dynamic_extra: role binding unresolved' in item for item in authorization['unknown'])
+
+def test_sable_standalone_evaluator_fails_closed_on_unresolved_role_binding(scenario):
+    _,c=scenario('sable_preserved')
+    main=c.path/'infra/main.tf'
+    main.write_text(main.read_text()+'''\nresource "aws_iam_role_policy" "dynamic_extra" {
+  role = var.additional_role
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{ Effect = "Allow", Action = ["s3:*"], Resource = ["*"] }]
+  })
+}
+''')
+    model=parse_hcl(c.path/'infra')
+    result=evaluate_authorization(
+        model,
+        'aws_iam_role.app',
+        'module.storage.aws_s3_bucket.active_invoices',
+        ['s3:GetObject','s3:PutObject'],
+    )
+    assert not result.known
+    assert not result.holds
+    assert result.grants, 'the known registered-role policy must remain represented'
+    assert any('aws_iam_role_policy.dynamic_extra: role binding unresolved' in item for item in result.outside_model)
+
+def test_sable_standalone_evaluator_fails_closed_on_null_role_binding():
+    model={"resources": {
+        "aws_iam_role.app": {"type": "aws_iam_role", "attributes": {"name": "app-role"}},
+        "aws_s3_bucket.data": {"type": "aws_s3_bucket", "attributes": {"bucket": "customer-data"}},
+        "aws_iam_role_policy.valid": {"type": "aws_iam_role_policy", "module": "", "attributes": {
+            "role": "aws_iam_role.app.id", "policy": {"Statement": [{"Effect": "Allow",
+                "Action": ["s3:GetObject", "s3:PutObject"], "Resource": ["arn:aws:s3:::customer-data/*"]}]}}},
+        "aws_iam_role_policy.dynamic_extra": {"type": "aws_iam_role_policy", "module": "", "attributes": {
+            "role": None, "policy": {"Statement": [{"Effect": "Allow", "Action": ["s3:*"], "Resource": ["*"]}]}}},
+    }}
+    result=evaluate_authorization(
+        model,
+        'aws_iam_role.app',
+        'aws_s3_bucket.data',
+        ['s3:GetObject','s3:PutObject'],
+    )
+    assert not result.known
+    assert not result.holds
+    assert result.grants, 'the valid principal policy should remain represented'
+    assert any('aws_iam_role_policy.dynamic_extra: role binding unresolved' in item for item in result.outside_model)
+
+@pytest.mark.parametrize('role_binding',['','   '])
+def test_empty_role_binding_is_unknown_in_both_evaluators(role_binding):
+    model={"resources": {
+        "aws_iam_role.app": {"type": "aws_iam_role", "attributes": {"name": "app-role"}},
+        "aws_s3_bucket.data": {"type": "aws_s3_bucket", "attributes": {"bucket": "customer-data"}},
+        "aws_iam_role_policy.valid": {"type": "aws_iam_role_policy", "module": "", "attributes": {
+            "role": "aws_iam_role.app.id", "policy": {"Statement": [{"Effect": "Allow",
+                "Action": ["s3:GetObject", "s3:PutObject"], "Resource": ["arn:aws:s3:::customer-data/*"]}]}}},
+        "aws_iam_role_policy.blank": {"type": "aws_iam_role_policy", "module": "", "attributes": {
+            "role": role_binding, "policy": {"Statement": [{"Effect": "Allow",
+                "Action": ["s3:*"], "Resource": ["*"]}]}}},
+    }}
+    shared=evaluate_policy_semantics(model,'aws_iam_role.app','aws_s3_bucket.data',['s3:GetObject','s3:PutObject'])
+    standalone=evaluate_authorization(model,'aws_iam_role.app','aws_s3_bucket.data',['s3:GetObject','s3:PutObject'])
+    assert not shared['known'] and not shared['holds']
+    assert not standalone.known and not standalone.holds
+    assert any('role binding unresolved' in message for message in shared['unknown'])
+    assert any('role binding unresolved' in message for message in standalone.outside_model)
+
+def test_sable_explicitly_unrelated_role_binding_is_ignored(scenario):
+    _,c=scenario('sable_preserved')
+    main=c.path/'infra/main.tf'
+    main.write_text(main.read_text()+'''\nresource "aws_iam_role" "other" {
+  name = "invoicehub-unrelated-role"
+  assume_role_policy = jsonencode({ Version = "2012-10-17", Statement = [{ Effect = "Allow", Principal = { Service = "ecs-tasks.amazonaws.com" }, Action = "sts:AssumeRole" }] })
+}
+resource "aws_iam_role_policy" "other_role" {
+  role = aws_iam_role.other.id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{ Effect = "Allow", Action = ["s3:*"], Resource = ["*"] }]
+  })
+}
+''')
+    status,details,_=sable(c,lambda *a:None)
+    assert status=='PRESERVED',details
+    standalone=evaluate_authorization(
+        parse_hcl(c.path/'infra'),
+        'aws_iam_role.app',
+        'module.storage.aws_s3_bucket.active_invoices',
+        ['s3:GetObject','s3:PutObject'],
+    )
+    assert standalone.known and standalone.holds
+
+def test_sable_unsupported_terraform_stays_unknown(scenario):
+    _,c=scenario('sable_preserved')
+    main=c.path/'infra/main.tf'
+    main.write_text(main.read_text()+'\nmodule "multi_storage" { source = "./modules/storage" count = 2 }\n')
+    status,details,_=sable(c,lambda *a:None)
+    assert status=='UNKNOWN',details
+    assert any('Module instances need plan expansion' in error for error in details['parse_errors'])
+
+def test_sable_unverified_baseline_and_empty_baseline(scenario):
+    r,c=scenario('sable_preserved')
+    baseline_policy=Path(r.baseline_workspace)/'infra/main.tf'
+    baseline_policy.write_text(baseline_policy.read_text().replace('s3:PutObject','s3:ListBucket'))
+    status,details,_=sable(c,lambda *a:None)
+    assert status=='UNKNOWN',details
+    assert details['baseline_verification']['holds'] is False
+
+    for file in (Path(r.baseline_workspace)/'infra').rglob('*.tf'):
+        file.unlink()
+    status,details,_=sable(c,lambda *a:None)
+    assert status=='UNKNOWN',details
+    assert 'baseline' in details['reason'].lower()
+
+@pytest.mark.parametrize('case,wanted',[
+    ('rename_with_moved','PRESERVED'),
+    ('rename_no_moved','PRESERVED'),
+    ('move_into_module','PRESERVED'),
+    ('ambiguous_resolved_by_moved','PRESERVED'),
+    ('policy_rewrite_wrong_target','REGRESSED'),
+    ('privilege_weakened_action','REGRESSED'),
+    ('replacement_wrong_bucket','UNKNOWN'),
+    ('ambiguous_set_three_candidates','UNKNOWN'),
+])
+def test_sable_refactor_and_correspondence_cases(tmp_path,scenario,case,wanted):
+    _,source=scenario('sable_preserved')
+    fixture=SABLE_FIXTURES[case]
+    baseline=tmp_path/'baseline'/'infra';candidate=tmp_path/'candidate'/'infra'
+    for root,files in ((baseline,fixture['baseline_tf']),(candidate,fixture['candidate_tf'])):
+        for relative,content in files.items():
+            path=root/relative;path.parent.mkdir(parents=True,exist_ok=True);path.write_text(content)
+    obligation=fixture['obligation']
+    policy={'infrastructure':{'principal':obligation['principal'],'protected_asset':obligation['protected_asset'],'actions':obligation['actions']}}
+    context=SimpleNamespace(path=candidate.parent,baseline=baseline.parent,policy=policy,knowledge=source.knowledge)
+    status,details,_=sable(context,lambda *a:None)
+    assert status==wanted,details
+    if wanted=='PRESERVED':
+        assert details['baseline_verification']['holds']
+        assert details['successor']
+        assert details['projected_authorization']['holds']
+    elif wanted=='REGRESSED':
+        assert details['successor']
+        assert details['projected_authorization']['known']
+        assert not details['projected_authorization']['holds']
+        if case in ('policy_rewrite_wrong_target','privilege_weakened_action'):
+            standalone=evaluate_authorization(
+                parse_hcl(candidate),
+                obligation['principal'],
+                details['successor'],
+                obligation['actions'],
+            )
+            assert standalone.known and not standalone.holds
+            if case=='privilege_weakened_action':
+                assert 's3:PutObject' in standalone.weakening
+    else:
+        assert details['successor'] is None
 
 def test_satra_scc_and_inconclusive(scenario,service,tmp_path):
     r,c=scenario();assert build(c)['expected_status']==403

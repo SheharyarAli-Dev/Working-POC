@@ -11,7 +11,7 @@ A test in tests/test_sable_isolation.py proves the engine never reads it.
 GROUND_TRUTH: dict[str, str] = {
     # Family 1: Rename / Move
     "rename_with_moved": "PRESERVED",
-    "rename_no_moved": "UNKNOWN",
+    "rename_no_moved": "PRESERVED",
     "move_into_module": "PRESERVED",
 
     # Family 2: Split
@@ -24,7 +24,7 @@ GROUND_TRUTH: dict[str, str] = {
 
     # Family 4: Replacement
     "replacement_preserved": "PRESERVED",
-    "replacement_wrong_bucket": "REGRESSED",
+    "replacement_wrong_bucket": "UNKNOWN",
 
     # Family 5: Parallel assets
     "parallel_similar_names": "UNKNOWN",

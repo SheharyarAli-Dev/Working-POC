@@ -13,19 +13,38 @@ def decode_policy(value):
 
 def as_list(v):return v if isinstance(v,list) else [v]
 
+def unresolved_role_binding(value):
+    if not isinstance(value,str) or not value.strip():return True
+    value=unwrap(value).strip()
+    return bool(
+        '${' in value
+        or re.search(r'\b(?:var|local|module|data|each|count)\s*\.',value)
+        or re.search(r'\baws_[A-Za-z0-9_]+\.[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)?\b',value)
+        or any(token in value for token in '[]{}()?')
+    )
+
 def evaluate(model,principal,asset,actions):
     resources=model['resources'];grants=[];unknown=[];denies=[]
     expected='${'+asset+'.arn}/*'
     bucket=resources.get(asset,{}).get('attributes',{}).get('bucket')
     literal='arn:aws:s3:::'+bucket+'/*' if isinstance(bucket,str) and '${' not in bucket else None
+    known_role_bindings={
+        f'{addr}.{attribute}'
+        for addr,node in resources.items() if node['type']=='aws_iam_role'
+        for attribute in ('id','name')
+    }
     for addr,node in resources.items():
         if node['type'] not in ('aws_iam_role_policy','aws_iam_policy','aws_s3_bucket_policy','aws_iam_role_policy_attachment'):continue
         a=node['attributes']
         if node['type']!='aws_iam_role_policy':
             unknown.append(addr+': only inline role policies have full semantics in this slice');continue
-        role=str(unwrap(a.get('role','')))
-        linked=role in (principal+'.id',principal+'.name',resources.get(principal,{}).get('attributes',{}).get('name'))
-        if not linked:continue
+        role_value=a.get('role')
+        role=unwrap(role_value) if isinstance(role_value,str) else role_value
+        principal_bindings=(principal+'.id',principal+'.name',resources.get(principal,{}).get('attributes',{}).get('name'))
+        if role not in principal_bindings:
+            if isinstance(role,str) and role in known_role_bindings:continue
+            if unresolved_role_binding(role):unknown.append(addr+': role binding unresolved')
+            continue
         policy=decode_policy(a.get('policy'))
         if not policy:unknown.append(addr+': policy expression unresolved');continue
         for st in as_list(policy.get('Statement',[])):

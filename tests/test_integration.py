@@ -1,10 +1,21 @@
 from pathlib import Path
 import pytest
-from backend.orchestrator.hashing import snapshot
+from backend.orchestrator.hashing import snapshot,files
 from backend.orchestrator.service import Service
+from backend.orchestrator.context_service import ContextService
+from backend.integrations.git_adapter import diff,init_repo
 pytestmark=pytest.mark.integration
 
 def current(svc,run,module):return [e for e in svc.store.evidence(run.run_id) if e['analyzer']==module and not e['stale']][-1]
+
+def test_git_diff_handles_non_utf8_fixture_content(tmp_path):
+    repo=tmp_path/'repo';(repo/'fixtures').mkdir(parents=True)
+    pdf=repo/'fixtures'/'invoice.pdf'
+    pdf.write_bytes(b'%PDF-1.3\r\n%\xe2\xe3\xcf\xd3\r\n')
+    baseline=init_repo(repo)
+    pdf.unlink()
+    output=diff(repo,baseline)
+    assert 'fixtures/invoice.pdf' in output
 
 def test_safe_accepts_exact_clean_reconstruction(integration_runs):
     svc,runs=integration_runs;r=runs['safe'];assert r.final_decision=='ACCEPT',r.model_dump();assert r.clean_commit
@@ -51,3 +62,60 @@ def test_gateway_and_knowledge_revocation(integration_runs):
     svc.change_threats(record_id='TRIG-ENV',enabled=True);svc.analyze(r.run_id)
     assert svc.store.run(r.run_id).final_decision=='ACCEPT'
     assert len(svc.store.evidence(r.run_id))>before
+
+@pytest.mark.parametrize('scenario,status,decision',[
+    ('sable_preserved','PRESERVED','ACCEPT'),
+    ('sable_regressed','REGRESSED','BLOCK'),
+    ('sable_unknown','UNKNOWN','REVIEW'),
+    ('sable_unresolved_role_binding','UNKNOWN','REVIEW'),
+])
+def test_shared_sable_evidence_drives_final_gate(tmp_path,scenario,status,decision):
+    svc=Service(tmp_path/'runtime')
+    run=svc.create(scenario)
+    # Keep this integration run focused on the shared SABLE path so CI does not
+    # need to execute unrelated CAVR/SATRA analyzers.
+    candidate=Path(run.candidate_workspace)
+    for relative in files(candidate):
+        if relative!='policy.json' and not relative.startswith('infra/'):
+            (candidate/relative).unlink()
+    svc.analyze(run.run_id)
+    run=svc.store.run(run.run_id)
+    published_evidence=svc.store.evidence(run.run_id)
+    rows=[e for e in published_evidence if e['analyzer']=='SABLE' and not e['stale']]
+    assert rows, (
+        'shared orchestrator did not publish SABLE evidence; '
+        f'lifecycle={run.lifecycle!r}; error={run.error!r}; '
+        f'applicable={run.applicable!r}; '
+        f'emitted_events={svc.store.events(run.run_id)!r}; '
+        f'published_evidence={published_evidence!r}'
+    )
+    evidence=rows[-1]
+    context=ContextService(run.candidate_workspace,run.baseline_workspace,svc.threats.snapshot())
+    assert 'SABLE' in run.applicable
+    assert evidence['status']==status
+    assert evidence['candidate_snapshot']==run.candidate_snapshot
+    assert evidence['input_hash']==context.input_hash('SABLE')
+    assert evidence['integrity_valid']
+    assert run.final_decision==decision,run.reasons
+    if scenario=='sable_unresolved_role_binding':
+        assert run.applicable==['SABLE']
+        assert 'SABLE: UNKNOWN' in run.reasons
+        assert any('aws_iam_role_policy.dynamic_extra: role binding unresolved' in item for item in evidence['details']['projected_authorization']['unknown'])
+        assert evidence['details']['projected_authorization']['grants']
+
+def test_shared_gate_reviews_missing_sable_baseline(tmp_path):
+    svc=Service(tmp_path/'runtime')
+    run=svc.create('sable_preserved')
+    for file in Path(run.baseline_workspace).rglob('*.tf'):
+        file.unlink()
+    candidate=Path(run.candidate_workspace)
+    for relative in files(candidate):
+        if relative!='policy.json' and not relative.startswith('infra/'):
+            (candidate/relative).unlink()
+    svc.analyze(run.run_id)
+    run=svc.store.run(run.run_id)
+    evidence=[e for e in svc.store.evidence(run.run_id) if e['analyzer']=='SABLE' and not e['stale']][-1]
+    assert evidence['status']=='UNKNOWN'
+    assert evidence['details']['reason'].startswith('No trusted baseline boundary')
+    assert evidence['integrity_valid']
+    assert run.final_decision=='REVIEW',run.reasons
