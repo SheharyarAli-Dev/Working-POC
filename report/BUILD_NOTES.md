@@ -41,8 +41,12 @@ references. The use-case, architecture, SABLE process, and domain-model pages
 were visually reviewed. The PDF contains four editable TikZ design diagrams
 and the preserved live SABLE evidence. The build emits TeX box warnings and
 duplicate PDF page-object warnings, plus a non-fatal Fontconfig message; it is
-not warning-free. The GitHub report workflow artifact is pending push and
-workflow completion.
+not warning-free. The GitHub report workflow and PDF artifact succeeded on
+report commit `698a84853ee5d55f0a009fcca5f57b5b139e9fd8` ([run
+38430133730](https://github.com/SheharyarAli-Dev/Working-POC/actions/runs/38430133730)).
+The post-merge report build also passed on master merge commit
+`c291308499d0feb1ae13bfa6f4fa955b29862d80` ([run
+38431200560](https://github.com/SheharyarAli-Dev/Working-POC/actions/runs/38431200560)).
 
 The focused source tests passed on the merged tree: 39 tests across
 `test_sable_isolation.py`, `test_sable_frontend_contract.py`, and
