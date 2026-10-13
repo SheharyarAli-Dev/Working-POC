@@ -7,7 +7,7 @@
 - [x] Preserved the authentic 12 October SABLE screenshots and recorded SHA-256 values and outcomes in the runbook. No new 13 October browser demonstration was possible because no browser surface was available.
 - [x] Final local Tectonic build succeeded: 162 pages, no unresolved references; use-case, architecture, SABLE process, and domain-model pages visually reviewed. The local build has TeX box warnings and duplicate page-object/Fontconfig warnings, so it is not described as warning-free.
 - [x] Focused tests on the merged source tree passed: 39 tests across SABLE isolation, SABLE frontend contract, and shared workflow.
-- [x] GitHub report workflow and PDF artifact succeeded on commit `698a84853ee5d55f0a009fcca5f57b5b139e9fd8` (run [38430133730](https://github.com/SheharyarAli-Dev/Working-POC/actions/runs/38430133730)); the post-merge report build also succeeded on `c291308499d0feb1ae13bfa6f4fa955b29862d80` (run [38431200560](https://github.com/SheharyarAli-Dev/Working-POC/actions/runs/38431200560)).
+- [x] GitHub report workflow and PDF artifact succeeded on report commit `698a84853ee5d55f0a009fcca5f57b5b139e9fd8` (run [38430133730](https://github.com/SheharyarAli-Dev/Working-POC/actions/runs/38430133730)); final post-merge build succeeded on master commit `87685665d05b74b2209404190d3d6f9b12347c37` (run [38433891910](https://github.com/SheharyarAli-Dev/Working-POC/actions/runs/38433891910)).
 
 ## External and team evidence still required
 
