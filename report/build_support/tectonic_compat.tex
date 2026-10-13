@@ -1,0 +1,14 @@
+\def\pdfcompresslevel=#1{}
+\makeatletter
+\let\ASENT@originalRequirePackage\RequirePackage
+\def\RequirePackage{\@ifnextchar[{\ASENT@RequirePackageWithOptions}{\ASENT@originalRequirePackage}}
+\def\ASENT@RequirePackageWithOptions[#1]#2{%
+  \def\ASENT@package{#2}%
+  \def\ASENT@natbib{natbib}%
+  \ifx\ASENT@package\ASENT@natbib
+    \ASENT@originalRequirePackage[sort,numbers]{natbib}%
+  \else
+    \ASENT@originalRequirePackage[#1]{#2}%
+  \fi}
+\makeatother
+\input{main.tex}
