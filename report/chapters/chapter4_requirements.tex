@@ -1,0 +1,110 @@
+\chapter{Software Requirements}
+\begin{sloppypar}
+This chapter states only the SABLE requirements that can be checked against the current implementation and tests. The obligation used for the acceptance cases is \texttt{S3-APPROLE-CUSTOMERDATA}: the registered application role must retain \texttt{s3:GetObject} and \texttt{s3:PutObject} on the protected customer-data bucket's object scope.
+\end{sloppypar}
+
+\section{User Interactions / Use Cases}
+The reviewer supplies a baseline, a candidate Terraform snapshot, and the registered obligation; starts a SABLE run through the standalone or shared workflow; and inspects the verdict, reasons, and evidence. In the integrated workflow, the shared orchestrator stores SABLE evidence and reports the final gate decision.
+
+\section{Use Case Diagram}
+% Additive rubric artefact: use cases reflect the implemented dedicated SABLE page and shared Run Workflow.
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[
+  usecase/.style={draw, ellipse, align=center, text width=0.25\textwidth, minimum height=10mm, inner sep=2pt, font=\small},
+  flow/.style={-{Stealth}, thick}
+]
+\node[draw, rounded corners, minimum width=0.78\textwidth, minimum height=84mm] (system) {};
+\node[font=\small\bfseries, anchor=north] at ([yshift=-2mm]system.north) {Implemented ASENT analysis interfaces};
+\coordinate (developer) at ([xshift=-0.55\textwidth,yshift=17mm]system.center);
+\coordinate (reviewer) at ([xshift=0.55\textwidth,yshift=17mm]system.center);
+\foreach \actor/\name in {developer/Developer,reviewer/Reviewer} {
+  \draw (\actor) circle (2.3mm);
+  \draw (\actor) -- ++(0,-8mm);
+  \draw (\actor) ++(0,-3mm) -- ++(-4mm,-3mm);
+  \draw (\actor) ++(0,-3mm) -- ++(4mm,-3mm);
+  \draw (\actor) ++(0,-8mm) -- ++(-3mm,-5mm);
+  \draw (\actor) ++(0,-8mm) -- ++(3mm,-5mm);
+  \node[font=\scriptsize, below=18mm of \actor] {\name};
+}
+\node[usecase] (sable) at ([xshift=-0.26\textwidth,yshift=17mm]system.center) {Select obligation and baseline/candidate inputs};
+\node[usecase, below=8mm of sable] (run) {Start standalone SABLE or shared analysis run};
+\node[usecase] (inspect) at ([xshift=0.26\textwidth,yshift=17mm]system.center) {Inspect module status, reasons, and evidence};
+\node[usecase, below=8mm of inspect] (decision) {Inspect shared final decision and evidence bindings};
+\coordinate (dev-trunk-top) at ([xshift=-0.48\textwidth,yshift=17mm]system.center);
+\coordinate (dev-trunk-bottom) at ([xshift=-0.48\textwidth,yshift=-17mm]system.center);
+\coordinate (review-trunk-top) at ([xshift=0.48\textwidth,yshift=17mm]system.center);
+\coordinate (review-trunk-bottom) at ([xshift=0.48\textwidth,yshift=-17mm]system.center);
+\draw[flow] (developer) -- (sable.west);
+\draw[flow] (developer) -- (dev-trunk-top) -- (dev-trunk-bottom) -- (run.west);
+\draw[flow] (reviewer) -- (inspect.east);
+\draw[flow] (reviewer) -- (review-trunk-top) -- (review-trunk-bottom) -- (decision.east);
+\end{tikzpicture}
+\caption{Implemented SABLE and shared-workflow use cases. The diagram shows user actions supported by the current interfaces; it does not imply live AWS access or deployment.}
+\label{fig:asent-use-cases}
+\end{figure}
+The developer supplies supported analysis inputs and starts a run. A reviewer can inspect the module result, reasons, evidence, and (for the integrated route) the shared gate decision. The registered obligation is selected from the local SABLE interface; infrastructure is analyzed as supplied and is not applied to AWS.
+
+\section{Detailed Use Cases}
+\begin{enumerate}
+    \item Assess a module refactor with one supported successor that still meets the baseline obligation.
+    \item Assess a known wrong-target policy or a policy missing a required action.
+    \item Assess ambiguous correspondence, unresolved role binding, invalid baseline, or unsupported policy semantics and preserve uncertainty.
+    \item In the shared workflow, bind the SABLE result to current candidate evidence and map its status into the shared final decision.
+\end{enumerate}
+
+\section{Functional Requirements}
+% Module FR files (each owned by its member, see OWNERS.md)
+\input{chapters/cavr/ch4_fr_cavr}
+\input{chapters/satra/ch4_fr_satra}
+\subsection{SABLE}
+\setlength{\tabcolsep}{3pt}
+\begin{longtable}{p{0.09\textwidth}p{0.34\textwidth}p{0.48\textwidth}}
+\toprule
+\textbf{ID} & \textbf{Requirement} & \textbf{Acceptance test and expected result}\\
+\midrule
+FR-S1 & Parse the supported Terraform/HCL snapshot, local modules, references, outputs, and explicit move records; expose unsupported constructs. & \path{test_sable_real_hcl}; \path{test_sable_unsupported_terraform_stays_unknown}. Supported cases parse; unsupported module expansion does not produce a safe result.\\
+FR-S2 & Verify that a trusted, non-empty baseline satisfies the registered principal/action/resource obligation before claiming continuity. & \path{test_sable_real_hcl}; \path{test_sable_unverified_baseline_and_empty_baseline}; \path{test_shared_gate_reviews_missing_sable_baseline}. A supported baseline that satisfies the obligation permits continuity analysis; a failing, missing, or empty baseline yields SABLE \texttt{UNKNOWN} and cannot authorize final \texttt{ACCEPT}.\\
+FR-S3 & Identify a unique successor from supported structural evidence and abstain when evidence conflicts or is ambiguous. & \path{test_sable_refactor_and_correspondence_cases}. Rename, move-into-module, and resolved move cases yield \texttt{PRESERVED}; competing candidates yield \texttt{UNKNOWN}.\\
+FR-S4 & Evaluate principal, required actions, and resource scope on the selected successor. & \path{test_sable_real_hcl} and \path{test_sable_refactor_and_correspondence_cases}. A supported valid successor yields \texttt{PRESERVED}; wrong target or missing action yields \texttt{REGRESSED}.\\
+FR-S5 & Do not treat unresolved role bindings, unsupported policy semantics, or untrusted evidence as proof of safety. & \path{test_sable_unsupported_iam_stays_unknown}; \path{test_sable_unresolved_role_binding_with_valid_policy_is_unknown}; \path{test_sable_standalone_evaluator_fails_closed_on_null_role_binding}; \path{test_sable_final_gate_requires_explicit_integrity_evidence}; \path{test_sable_final_gate_rejects_untrusted_evidence}. Unresolved cases yield SABLE \texttt{UNKNOWN}; missing, stale, mismatched, or invalid evidence yields final \texttt{REVIEW}, never \texttt{ACCEPT}.\\
+\bottomrule
+\end{longtable}
+\setlength{\tabcolsep}{6pt}
+
+\subsection{Shared Evidence and Gate}
+\begin{longtable}{p{0.09\textwidth}p{0.35\textwidth}p{0.45\textwidth}}
+\toprule
+\textbf{ID} & \textbf{Requirement} & \textbf{Acceptance test and expected result}\\
+\midrule
+FR-S6 & Publish current SABLE evidence bound to the run's candidate snapshot and SABLE input hash, with valid integrity. & \path{test_shared_sable_evidence_drives_final_gate} asserts applicable SABLE evidence, snapshot equality, input-hash equality, and valid integrity.\\
+FR-S7 & Map current valid SABLE statuses through the shared gate: preserved to accept, regression to block, uncertainty to review, subject to other applicable module evidence. & Parameter cases in \path{test_shared_sable_evidence_drives_final_gate} expect \texttt{PRESERVED}/\texttt{ACCEPT}, \texttt{REGRESSED}/\texttt{BLOCK}, and \texttt{UNKNOWN}/\texttt{REVIEW}; unresolved binding also expects \texttt{UNKNOWN}/\texttt{REVIEW}.\\
+FR-S8 & Prevent stale, mismatched, or integrity-invalid evidence from establishing acceptance. & \path{test_sable_final_gate_rejects_untrusted_evidence}; stale snapshot, input-hash mismatch, invalid integrity, or stale evidence yields \texttt{REVIEW}.\\
+\bottomrule
+\end{longtable}
+\setlength{\tabcolsep}{6pt}
+
+\section{Non-Functional Requirements}
+\subsection{Reliability}
+For the supported cases, analysis must produce a reproducible explicit status, and unsupported semantics must not silently become a safe verdict. This is fixture-tested; it is not a quantified production reliability claim.
+\subsection{Usability}
+The standalone and integrated interfaces expose a verdict and supporting reasons/evidence for review. A live demonstration remains necessary for the presentation rubric.
+\subsection{Performance}
+No latency or scale target has been established in the evidence reported here. Performance measurement remains future evaluation work.
+\subsection{Security}
+The SABLE decision path is local and does not apply Terraform or call AWS. Shared evidence is bound to the candidate snapshot and module input hash and checked for integrity. The evaluator is bounded, not a full AWS authorization engine.
+
+\section{Acceptance Criteria}
+\begin{sloppypar}
+\begin{itemize}
+    \item \textbf{AC-S1 (PRESERVED):} a valid trusted baseline and unique supported successor retain the required principal, actions, and S3 object scope; tests assert \texttt{PRESERVED}.
+    \item \textbf{AC-S2 (REGRESSED):} supported evidence establishes a wrong target or a missing required action; tests assert \texttt{REGRESSED}, not a local-policy-only safe result.
+    \item \textbf{AC-S3 (UNKNOWN):} ambiguous correspondence, unresolved binding, unsupported policy semantics, or unverified baseline prevents a justified safe verdict; tests assert \texttt{UNKNOWN}.
+    \item \textbf{AC-S4 (shared gate):} current integrity-valid evidence maps to \texttt{ACCEPT}/\texttt{BLOCK}/\texttt{REVIEW} according to SABLE status, while stale or untrusted evidence cannot establish acceptance.
+\end{itemize}
+\end{sloppypar}
+
+\section{Requirements Traceability}
+\begin{sloppypar}
+FR-S1--S5 map to SABLE I2--I4 and the analyzer/parser/correspondence/authorization components. FR-S6--S8 map to I1 and the shared orchestrator/final gate. The named test files and direct expected values are listed in Appendix C. The four local shared-integration parameter cases are one parameterized test function; test counts reported in Chapter 8 must not be read as the count of distinct requirements.
+\end{sloppypar}

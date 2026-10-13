@@ -1,0 +1,23 @@
+\chapter*{Executive Summary}
+\addcontentsline{toc}{chapter}{Executive Summary}
+
+\section*{Project Motivation and Goal}
+AI-assisted development can introduce changes across dependency manifests, application code, and infrastructure-as-code. A change may be syntactically valid while weakening a security control, changing the logical resource that a policy protects, or leaving insufficient evidence to make a trustworthy decision. ASENT (Agent Sentinel) is being developed as an assurance gateway between a proposed AI-assisted change and the point where that change is trusted, merged, or deployed. Its goal is to aggregate evidence from relevant security checks into a deterministic decision of \texttt{ACCEPT}, \texttt{REVIEW}, or \texttt{BLOCK}.
+
+\section*{System Scope}
+ASENT is organized around three security boundaries: CAVR addresses dependency security, SATRA-RV addresses application-code security, and SABLE addresses infrastructure security expressed through Terraform. The shared workflow combines module evidence and applies a final gate. This report's strongest verified implementation and contribution evidence concerns SABLE and the shared evidence/final-gate path. It does not treat the presence of other modules in the repository as proof of their authorship or complete readiness.
+
+\section*{Implemented SABLE Approach}
+SABLE analyzes supplied Terraform/\allowbreak{}HCL snapshots locally, builds a bounded resource/\allowbreak{}reference model, checks a registered baseline obligation, identifies a supported successor for the protected logical asset, and evaluates a bounded IAM/\allowbreak{}S3 authorization model against that successor. The outcome is explicit: \texttt{PRESERVED} when the registered obligation continues to hold, \texttt{REGRESSED} when supported evidence shows that it does not hold, or \texttt{UNKNOWN} when input semantics or resource correspondence are insufficient. In the shared workflow, current evidence is associated with the candidate snapshot and checked for freshness, input-\allowbreak{}hash consistency, and integrity before it contributes to the final decision.
+
+\section*{Current Evidence}
+PR~\#5 integrated the CAVR, SATRA-RV, and SABLE work into \texttt{master} at merge commit \texttt{ffe8aa91}; its exact tested head was \texttt{554b6d51}, and all 18 checks passed on that head. Representative Core, SATRA, and SABLE workflow runs are linked in Chapter~7. Separately, the focused SABLE/shared-assurance CI run on source commit \texttt{84f91a9} passed 48 tests, and the local focused selection on the correction-containing checkout passed 27 tests with 10 deselected. These results belong to their identified commits and are not a full-suite pass.
+
+The 2026-10-12 post-merge shared-dashboard demonstration recorded SABLE \texttt{PRESERVED} in run \texttt{21adc601d6b7}, with overall \texttt{REVIEW} because SATRA was \texttt{INCONCLUSIVE}; the wrong-target run \texttt{0849603bfc16} recorded SABLE \texttt{REGRESSED} and overall \texttt{BLOCK}. Both traces showed valid integrity and matching candidate/input bindings. Their original screenshots are preserved under \path{report/evidence}; no AWS resources were applied or queried. This is a two-scenario demonstration, not full acceptance of every module.
+
+An earlier rehearsal on \texttt{sable} commit \texttt{753a55b} recorded preserved, regressed, and unknown outcomes; the unknown screenshot was an intermediate capture, while its persisted final result was \texttt{REVIEW}. Those historical runs are described separately from the post-merge runs above.
+
+\section*{Limitations and Remaining Work}
+The SABLE analyzer supports a bounded subset of Terraform/HCL and IAM/S3 semantics. It does not apply Terraform, query deployed AWS state, or establish the full authorization behavior of AWS. The scenario fixtures are synthetic and authored in-house, so their results are not an independent estimate of real-world effectiveness. SATRA's \texttt{INCONCLUSIVE} status in the retained integrated run also remains visible evidence of an unresolved case, not a passing result.
+
+For FYP-2, the proposed SABLE work is to complete the agreed baseline comparison and broader validation, then extend supported cases only where the confirmed research question requires it. Multi-module testing, other module results, member contribution records, administrative fields, proposal feedback, and the team schedule require confirmation from the relevant team members and supervisor before submission.

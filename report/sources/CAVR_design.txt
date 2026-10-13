@@ -1,0 +1,982 @@
+CAVR
+
+Counterfactual Activation, Verified Repair & Recovery
+
+Automated Dependency Security Verification & Repair for AI-Assisted Development
+
+Scope & Research Design Document
+
+Proposed Final-Year Project | Revised Research Design | Version 2.0 | 26 September 2026
+
+  ------------------------------------------------------------------------------------------------------------------------------------------------------
+  System Type                         Local, automated security middleware
+  ----------------------------------- ------------------------------------------------------------------------------------------------------------------
+  Primary Scope                       Python/PyPI and JavaScript/npm dependency actions in AI-assisted development on Linux
+
+  Core Outcomes                       Verify hidden behavior, enforce safety, auto-repair unsafe dependency states, and provide bounded trust evidence
+
+  Cost Constraint                     No mandatory paid APIs, paid cloud, or commercial security feeds
+
+  Team                                3 members; each owns essential algorithmic work
+
+  Research Status                     GREEN to implement; novelty remains conditional on empirical advantage over strong baselines
+  ------------------------------------------------------------------------------------------------------------------------------------------------------
+
+Executive Summary
+
+CAVR is a proposed local security middleware placed between dependency actions in AI-assisted development and the trusted project environment. It assumes that normal requirements gathering and planning have already happened: requirements, skills, allowlists or lockfiles can tell the coding agent which dependency is permitted, but they do not prove that the exact package version, artifact or transitive dependency tree is safe. CAVR therefore verifies the software that is actually about to enter and execute rather than relying on the weaker assumption that an agent will randomly choose the wrong package.
+
+The system captures dependency-changing tool requests before real execution, checks whether the action is permitted by the approved project policy, extracts task and repository context, infers a minimum capability contract, resolves the exact package and transitive graph, discovers security-sensitive trigger conditions, creates synthetic counterfactual environments to activate dormant behavior, observes operating-system effects, builds a causal capability graph, and makes an evidence-based decision. Rejected or unresolved dependency states never reach the trusted project directly; CAVR attempts a minimal safe repair, re-runs both functional and security verification in a fresh sandbox, reconstructs an accepted state from the trusted baseline, and emits bounded assurance evidence.
+
+The research problem is not package hallucination alone and not generic malware classification. Package hallucination/slopsquatting remains one threat path, but CAVR is also intended for correctly specified packages that are compromised, malicious, vulnerable, or pull unsafe transitive dependencies. Existing work already provides strong static, dynamic, graph-based and ML-based package detectors. The harder gaps targeted here are incomplete activation of condition-dependent behavior, project-context-free decisions, cross-package causal behavior, automated compatible repair, and defensible evidence that the accepted state was cleanly reconstructed under a declared security boundary.
+
+  ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+  Important scope statement: CAVR will not claim that an arbitrary compromised computer is absolutely safe. Its trust claim is bounded: untrusted dependency execution occurs in a disposable transaction; only changes that pass the functional and security obligations are reconstructed into a clean environment; the assurance record states what was verified and what remains unresolved.
+  ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+  ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+Recommended Document Order
+
+  -------------------------------------------------------------------------------------------------------------------------
+  1. Project Identity and Scope                              11. One-Year Research Justification and Milestones
+  ---------------------------------------------------------- --------------------------------------------------------------
+  2. Problem, Motivation and Real-World Need                 12. Three-Member Work Division
+
+  3. Research Questions and Objectives                       13. Complex Computing Problem and Seoul Accord Justification
+
+  4. State of the Art and Research Gap                       14. Stakeholders
+
+  5. Proposed Architecture and Workflow                      15. Prerequisites and Free/Open Infrastructure
+
+  6. Deep Technical Design                                   16. Ethics, Safety, Legal and Threat Model
+
+  7. What We Are Actually Building and Prototype Structure   17. Scope Boundaries, Risks and Limitations
+
+  8. Differentiation and Expected Effectiveness              18. Expected End Product and Research Contributions
+
+  9. Training, Data and Dataset Plan                         19. References
+
+  10. Evaluation Plan                                        
+  -------------------------------------------------------------------------------------------------------------------------
+
+1. Project Identity and Scope
+
+1.1 Working Title
+
+CAVR: Counterfactual Activation, Verified Repair & Recovery - Automated Dependency Security Verification and Repair for AI-Assisted Development.
+
+1.2 One-Sentence Scope
+
+  --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+  Scope: CAVR intercepts dependency actions proposed by a coding agent, developer, manifest update or transitive resolver before they affect the trusted project; checks whether the action is permitted by the approved project requirements; verifies the exact package/version/artifact and transitive behavior using task-aware capability contracts, counterfactual activation and OS-level observation; blocks unjustified behavior; automatically searches for a minimal safe repair; re-verifies the repair; and emits bounded trust evidence using local/open-source tooling.
+  --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+  --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+1.3 Where the System Lies
+
+  -----------------------------------------------------------------------
+  Developer requirements / approved plan / repository policy
+  |
+  v
+  AI Coding Agent or Developer Tool
+  |
+  | dependency-changing action (pip/npm/manifest/lockfile)
+  v
+  +---------------------------------------------+
+  | CAVR EXECUTION GATE |
+  | hook/adapter/wrapper -> policy -> analysis |
+  | -> counterfactual sandbox -> repair |
+  | -> fresh re-verification -> assurance |
+  +---------------------------------------------+
+  |
+  | only freshly reconstructed approved state
+  v
+  Trusted Developer Project / Environment
+  -----------------------------------------------------------------------
+
+  -----------------------------------------------------------------------
+
+CAVR is an enforcement and assurance layer, not a replacement for the coding agent, package registry, package manager, CI system or requirements process. The agent does not need to voluntarily call CAVR: the execution path is configured so an agent-specific pre-tool hook/adapter, shell gateway or PATH-level pip/npm wrapper captures dependency-changing actions before the real package manager or operating system can execute them. The adapter forwards the structured request to a local CAVR service over a Unix socket or localhost API. CAVR releases the action only after its decision path completes.
+
+  ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+  ASENT Module            Security Boundary                                                                                                                   Primary Output
+  ----------------------- ----------------------------------------------------------------------------------------------------------------------------------- ---------------------------------------------------------------------------
+  CAVR                    Dependency/package trust before dependency state reaches the project; hidden activation, causal behavior, safe dependency repair.   VERIFIED / RESTRICTED / REJECTED / UNRESOLVED + repair/assurance evidence
+
+  SATRA-RV                Application-code security verification, trusted/adaptive tests, repair acceptance and differential sandbox verification.            ACCEPT / REJECT / RETRY / INCONCLUSIVE + application-security evidence
+
+  SABLE                   Terraform/IaC least-privilege security-boundary continuity and resource correspondence after structural refactoring.                PRESERVED / REGRESSED / UNKNOWN + infrastructure evidence
+  ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+1.4 Primary Scope and Boundaries
+
+  ------------------------------------------------------------------------------------------------------------------------------------------------
+  In Scope                                                            Out of Scope for the FYP
+  ------------------------------------------------------------------- ----------------------------------------------------------------------------
+  Python/PyPI and JavaScript/npm dependencies                         Firmware, kernel-rootkit and hardware compromise
+
+  Linux-based agent/developer environments                            Guaranteeing the safety of every operating system and ecosystem
+
+  Install/import and targeted runtime activation inside sandbox       Long-term monitoring of arbitrary production applications
+
+  Direct and transitive dependencies                                  General web, email or document malware unrelated to dependencies
+
+  Automated version/path repair; supported package substitution       Universal semantic migration between any two libraries
+
+  Bounded assurance under declared monitoring/isolation assumptions   Absolute proof that no unknown effect exists anywhere outside the boundary
+  ------------------------------------------------------------------------------------------------------------------------------------------------
+
+2. Problem, Motivation and Real-World Need
+
+2.1 The Core Problem
+
+The core problem begins after an implementation plan or dependency requirement exists. A dependency action can be permitted by the project and still be unsafe because the exact release, artifact, transitive dependency, install script or runtime behavior may be compromised or malicious. Package hallucination/slopsquatting is one real threat path, but CAVR does not depend on the assumption that well-configured coding agents routinely ignore complete requirements.
+
+A correctly chosen dependency can still become a supply-chain risk through compromised maintainers or release infrastructure, dependency confusion, malicious transitive dependencies, unsafe versions, install-time payloads, dormant condition-triggered behavior or native components. Therefore CAVR separates two questions: (1) is this dependency action permitted by the approved project plan/policy, and (2) is the exact code that is about to execute justified and trustworthy enough under the declared security model?
+
+  --------------------------------------------------------------------------------------------------------------------------------------------------
+  Requirements vs. CAVR security boundary
+  Requirements / Plan Mode answer: “What dependency may be used?”
+  CAVR answers: “Is the exact dependency version, artifact, transitive tree and observed behavior that is about to execute safe for this project?”
+  If a requested dependency is not permitted, CAVR can block immediately. If it is permitted, security verification still continues.
+  --------------------------------------------------------------------------------------------------------------------------------------------------
+
+  --------------------------------------------------------------------------------------------------------------------------------------------------
+
+2.2 Why "Package Exists" Is Not a Security Decision
+
+  -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+  Main RQ: Can an automated local middleware verify whether a permitted dependency action in AI-assisted development is justified and safe to execute by combining project-specific capability contracts, security-targeted counterfactual activation, cross-package causal behavior, minimal compatible repair and bounded post-repair assurance - without commercial APIs or human analysis in the normal path?
+  -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+  -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+The package-hallucination paper explicitly explains why a master-list existence check is insufficient once an attacker has registered the name [2]. NymGuard addresses unclaimed hallucinated names by proactively detecting and registering them, but a pre-claimed or already-compromised package still requires behavioral security analysis [4].
+
+2.3 Real Incidents That Show the Consequence
+
+  ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+  Incident                               What happened                                                                                                                                                                                        Lesson for CAVR
+  -------------------------------------- ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- --------------------------------------------------------------------------------------
+  PyTorch torchtriton (2022)             A public PyPI package with the same dependency name took precedence and installed a malicious binary that collected environment/system data and SSH/home files [16].                                 Name resolution and package presence are not enough; native/system behavior matters.
+
+  event-stream / flatmap-stream (2018)   A malicious transitive dependency targeted a specific Copay build environment and only activated under narrow conditions [17].                                                                       Dynamic analysis needs trigger-aware conditions and transitive reasoning.
+
+  ua-parser-js (2021)                    Compromised npm versions delivered malware; CISA warned that affected systems could expose sensitive information or allow control [18].                                                              Popular legitimate packages can be poisoned; reputation alone is insufficient.
+
+  Ultralytics (2024)                     A legitimate project was compromised through GitHub Actions/build workflow and later a PyPI token; provenance helped investigation but the signed/published artifacts were still malicious [19].     Authenticity/provenance helps evidence but does not equal benign behavior.
+
+  huggingface-cli demonstration (2024)   A researcher registered an empty hallucinated package and observed more than 30,000 authentic downloads, showing that model-recommended nonexistent names can enter real developer workflows [20].   Slopsquatting is not merely theoretical; developers act on AI package suggestions.
+  ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+2.4 Problems CAVR Intends to Solve
+
+-   A dependency action can reach the host before meaningful behavioral verification, even when the package was explicitly approved by the project.
+
+-   Dormant malware stays quiet unless a specific secret, file, hostname, date, platform or environment variable exists.
+
+-   Static analysis can miss dynamically generated/obfuscated/native behavior; ordinary dynamic analysis can miss untriggered paths.
+
+-   Known-malware classifiers can miss new attacks whose exact behavior was never in the training set.
+
+-   Per-package decisions can miss attack paths distributed across transitive dependencies.
+
+-   Detectors often stop at "malicious" and leave the developer to repair the dependency graph manually.
+
+-   Post-repair claims are often vague; a system may say "fixed" without stating what was actually verified.
+
+3. Research Questions and Objectives
+
+3.1 Main Research Question
+
+  -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+  Main RQ: Can an automated local middleware verify whether a permitted dependency action in AI-assisted development is justified and safe to execute by combining project-specific capability contracts, security-targeted counterfactual activation, cross-package causal behavior, minimal compatible repair and bounded post-repair assurance - without commercial APIs or human analysis in the normal path?
+  -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+  -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+3.2 Sub-Questions
+
+  ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+  RQ                      Question                                                                                                                                          Core output
+  ----------------------- ------------------------------------------------------------------------------------------------------------------------------------------------- ----------------------------------------------
+  RQ1                     Can project usage and task context be converted into a minimum capability contract with acceptable false positives?                               Capability-contract inference algorithm
+
+  RQ2                     Can security-targeted counterfactual environment synthesis expose more hidden malicious paths than one normal sandbox run under a fixed budget?   Adaptive counterfactual activation algorithm
+
+  RQ3                     Can cross-package causal capability graphs detect unjustified end-to-end behavior that per-package analysis misses?                               Causal capability graph + policy engine
+
+  RQ4                     Can a constraint-based repair engine remove rejected dependency paths with minimal compatible change while preserving used functionality?         Verified minimal safe repair
+
+  RQ5                     Can transactional isolation plus explicit verification obligations produce a useful bounded assurance claim rather than a vague "safe" label?     Assurance certificate and evidence model
+  ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+3.3 Objectives
+
+1. Build a local execution gateway that intercepts pip/npm, manifest and lockfile dependency actions initiated by a coding agent or developer before real execution.
+
+2. Derive a project-specific minimum capability contract from call sites, data inputs and declared task intent without requiring a paid LLM.
+
+3. Discover security-relevant environment predicates and prioritize them by risk and reachability.
+
+4. Automatically synthesize safe fake environments and canary secrets to activate hidden branches.
+
+5. Observe file, process, network, secret and syscall effects and connect them into a cross-package causal graph.
+
+6. Enforce VERIFIED, RESTRICTED, REJECTED or UNRESOLVED outcomes before trusted commit.
+
+7. Automatically search for a safe version/path or supported replacement, and verify it functionally and security-wise.
+
+8. Reconstruct the accepted state from a clean baseline and generate tamper-evident evidence and residual-uncertainty reporting.
+
+4. State of the Art and Research Gap
+
+4.1 State of the Art by Problem Layer
+
+  ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+  Layer                                  Representative work                                                      What it does well                                                                                                 Remaining gap relevant to CAVR
+  -------------------------------------- ------------------------------------------------------------------------ ----------------------------------------------------------------------------------------------------------------- ------------------------------------------------------------------------------------------------------------------------------
+  LLM package hallucination prevention   Spracklen et al., USENIX Security 2025 [2]; Djire et al., ASE 2026 [3]   RAG, self-refinement, fine-tuning and decoding-time defenses reduce hallucinated recommendations.                 Reduction is not elimination; a package may already exist and still be malicious.
+
+  Proactive slopsquatting defense        NymGuard, ACM TOSEM 2026 [4]                                             Detects hallucinated names, preemptively registers risky unclaimed names, maintains warnings.                     Cannot decide safety of a name already owned or a legitimate package later compromised.
+
+  Metadata/static/dynamic baseline       MalOSS, NDSS 2021 [5]; Amalfi, ICSE 2022 [6]                             Shows value of combining package metadata, static analysis, dynamic behavior and reproducibility/clone signals.   Coverage and false positives remain hard, especially for triggered and obfuscated behavior.
+
+  Registry malware scanning              Bad Snakes, ICSE 2023 [7]                                                Shows practical deployment constraints; existing scanners can produce unacceptable false positives.               A binary scanner verdict is not enough for safe automated enforcement.
+
+  Behavior-sequence detection            DONAPI, USENIX 2024 [8]                                                  Static + dynamic API-call sequences; handles some obfuscation.                                                    Paper reports misses from timeouts, sleep, environment variables and external conditions.
+
+  Inter-package program analysis         HERCULE, ICSE-SEIP 2025 [9]                                              Integrity check, CodeQL behavior analysis and transitive dependency analysis; F1 about 0.95.                      Current implementation inherits CodeQL limitations and performs no dynamic analysis.
+
+  Static/dynamic graph synergy           ProfMal, ASE 2025 [10]                                                   Object-sensitive static graph augmented by dynamic resolution; 92.4% F1 and real-world discoveries.               Still relies on observed execution and a trained classifier; runtime/trigger scope remains a challenge.
+
+  Explainable near-real-time detection   MalGuard, USENIX 2025 [11]                                               Automatically extracts sensitive APIs, uses lightweight ML and explanations.                                      Feature/classifier evidence can still miss previously unseen intent or unexecuted behavior.
+
+  Installation-time behavior             DySec, IEEE TIFS 2026 [12]                                               eBPF captures 36 behavior features and detects dynamic install-time threats; reported 95.99% accuracy.            Linux/eBPF and dataset dependence; install-time observations do not guarantee hidden conditions were reached.
+
+  Automated vulnerability remediation    OSV-Scanner guided remediation [14]                                      Resolves transitive graphs and proposes minimal manifest/lockfile changes for known vulnerabilities.              Targets known vulnerability records, not unknown malicious behavior or task-specific capability violations.
+
+  Post-compromise recovery               RETRO, OSDI 2010 [13]                                                    Action-history graph, rollback and selective re-execution preserve legitimate state.                              Works after compromise and depends on detailed provenance; CAVR aims to avoid trusted-host contamination in the first place.
+  ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+4.2 The Specific Gap CAVR Targets
+
+The proposed contribution is not "combine static and dynamic analysis"; that already exists in MalOSS, DONAPI and ProfMal. It is not "scan dependencies"; HERCULE and multiple commercial/open tools already do this. It is not "repair vulnerabilities"; OSV-Scanner already performs dependency-graph remediation for known vulnerability records. The proposed research focuses on three harder links that remain weak when treated separately:
+
+-   Purpose-aware verification: judge security-sensitive behavior against what the current project actually needs from the dependency, rather than only against known-malware similarity.
+
+-   Counterfactual activation: automatically discover and synthesize security-relevant environment conditions so dormant behavior is actively tested rather than passively awaited.
+
+-   Verified repair and bounded assurance: compute a minimal safe dependency repair, reconstruct it from a clean baseline, and state exactly which functional/security obligations were satisfied and what uncertainty remains.
+
+  ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+  Novelty caution: These are proposed research contributions, not pre-proven novelty claims. The final thesis must report the literature search, implemented algorithms and empirical comparison. CAVR should claim superiority only where experiments support it.
+  ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+  ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+5. Proposed Architecture and Workflow
+
+CAVR is placed after planning/requirements and before dependency execution. The developer-facing workflow shows how the request is physically captured by hooks/adapters or package-manager wrappers, while the detailed flow shows the complete security path from requirement compliance through counterfactual execution, OS-level observation, automated repair and clean reconstruction.
+
+Developer-Facing CAVR Architecture
+
+[]
+
+Figure 1. CAVR sits in the execution path: approved requirements constrain what may be requested, while CAVR independently verifies what is actually about to execute before the trusted project is changed.
+
+Detailed End-to-End CAVR Flow
+
+[]
+
+Figure 2. Phase-by-phase CAVR workflow with the concrete local/open-source tools used at each stage.
+
+5.1 Phase-by-Phase Behavior
+
+The following flow is the implementation contract for the prototype. Each stage produces evidence consumed by the next stage; no stage may silently promote an unresolved dependency state into the real project.
+
+  ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+  Phase                       What CAVR Does                                                                                  Primary Tools / Inputs                                                                 Output
+  --------------------------- ----------------------------------------------------------------------------------------------- -------------------------------------------------------------------------------------- --------------------------------------------------------
+  P1 Capture                  Capture dependency-changing tool request before execution.                                      Agent pre-tool hook/adapter; shell gateway; pip/npm wrappers; local Unix socket/API.   Normalized action record
+
+  P2 Requirement gate         Check approved plan, skills, allowlist/lockfile and project policy.                             Repository policy, requirements, manifest/lockfile.                                    PERMITTED or immediate BLOCK
+
+  P3 Context                  Extract task, Git diff, imports, call sites, files/data and dependency intent.                  Git; Python AST; Tree-sitter; manifests; changed files.                                Dependency-use context
+
+  P4 Capability contract      Infer minimum justified file/network/process/secret/persistence/native capabilities.            Deterministic capability rules + project evidence.                                     Capability contract + confidence/evidence
+
+  P5 Package resolution       Resolve exact version/artifact/transitive tree; collect known-risk evidence.                    PyPI/npm metadata; artifact hashes; OSV; dependency graph.                             Resolved package graph + known-risk signals
+
+  P6 Trigger discovery        Find security-sensitive conditions controlling risky behavior.                                  AST/Tree-sitter; Semgrep-style rules; reachability to sensitive sinks.                 Prioritized trigger frontier
+
+  P7 Counterfactual sandbox   Create safe synthetic conditions and deliberately exercise high-risk paths.                     Docker/Podman; namespaces; OverlayFS; fake secrets/files/env/time.                     Execution traces under targeted conditions
+
+  P8 OS observation           Record actual file/process/network/syscall behavior, including native effects.                  eBPF/bpftrace; strace fallback; process/file/network monitors.                         Normalized security events
+
+  P9 Causal verification      Connect triggers, packages, processes, sensitive sources and sinks; compare with contract.      NetworkX/SQLite graph + deterministic policy engine.                                   VERIFIED / RESTRICTED / REJECTED / UNRESOLVED evidence
+
+  P10 Repair                  For rejected/unresolved supported cases, find the smallest compatible safe dependency change.   PyPI/npm candidate search; OSV; Z3; dependency constraints.                            Candidate repair(s)
+
+  P11 Re-verification         Install candidate in a new clean sandbox; rerun functional and security obligations.            Fresh container; project tests/build; CAVR analysis.                                   Repair pass/fail
+
+  P12 Reconstruction          Rebuild accepted dependency state from trusted baseline, not the analysis sandbox.              Fresh environment; pinned hashes; clean manifest/lockfile.                             Clean approved project state
+
+  P13 Assurance               Emit auditable evidence, exercised/unresolved conditions and residual uncertainty.              JSON/SARIF/report; hash chain; logs.                                                   Assurance record + handoff
+  ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+6. Deep Technical Design
+
+6.1 Step A - Interception Gateway, Requirement Gate and Context Extraction
+
+CAVR does not depend on the coding agent voluntarily calling a security API. The execution environment is configured so dependency-changing actions are captured before real execution. The preferred path is an agent-specific pre-tool hook/adapter that receives the structured shell/tool request (command, working directory, repository, task/run identifier and changed files) and forwards it to a local CAVR daemon over a Unix domain socket or localhost API. A second enforcement layer places CAVR-controlled pip/npm wrappers earlier in PATH so direct package-manager calls resolve to the wrapper rather than the real executable. Manifest and lockfile changes are also detected before dependency resolution. The gateway first checks the approved plan/skills/allowlist/lockfile: an unpermitted dependency is blocked immediately. For a permitted action, CAVR then extracts the project context using Git diff, imports, AST/Tree-sitter call sites, manifests and dependency relationships and redirects the request into a disposable analysis transaction. Only an explicit CAVR release decision allows the real dependency state to be reconstructed.
+
+6.2 Step B - Capability Contract Inference
+
+The capability contract is a minimum set of security-sensitive actions justified by the package usage. It is derived from the actual code path rather than from a free-form LLM opinion. The first prototype will use deterministic mappings and program evidence; an optional local model can be studied later, but it is not required.
+
+  -----------------------------------------------------------------------
+  Example task: extract text from invoice.pdf
+  Used APIs: PdfReader(path), page.extract_text()
+  Inferred capability contract:
+  ALLOW: read supplied PDF files, memory use, temporary local files
+  DENY by default: ~/.ssh, ~/.aws, browser data, arbitrary shell,
+  unrestricted network, persistence, credential stores
+  -----------------------------------------------------------------------
+
+  -----------------------------------------------------------------------
+
+A practical representation is a capability vector/set such as FILE_READ(scope), FILE_WRITE(scope), NETWORK_CONNECT(scope), PROCESS_EXEC, SECRET_READ(class), PERSISTENCE_WRITE and NATIVE_EXEC. Each inferred capability has evidence and confidence so the policy can distinguish required, optional and unexplained behavior.
+
+6.3 Step C - Security-Relevant Trigger Discovery
+
+Static parsing (Python AST and Tree-sitter) searches for conditions that control security-sensitive code. CAVR does not attempt full symbolic execution. It specifically targets predicates that commonly hide behavior: environment-variable checks, file existence, hostname/user/platform checks, clock/date checks, sleeps/timeouts, container/sandbox checks, CI/cloud metadata checks and external-response conditions.
+
+Each trigger is connected to reachable sensitive sinks. A trigger is high priority when satisfying it can reach a secret read, process execution, persistence write, external connection or unexplained native component.
+
+  ----------------------------------------------------------------------------------------
+  Priority(trigger) = sink_risk * reachability_confidence * novelty / estimated_run_cost
+  High priority examples:
+  getenv("AWS_SECRET_ACCESS_KEY") -> network send
+  exists("~/.ssh/id_rsa") -> file read -> network
+  date > T -> exec shell
+  Low priority example:
+  screen_width > 800 -> UI formatting
+  ----------------------------------------------------------------------------------------
+
+  ----------------------------------------------------------------------------------------
+
+6.4 Step D - Adaptive Counterfactual Activation
+
+This is the core detection research. Instead of executing one generic sandbox run, CAVR automatically changes only high-risk environmental facts and re-runs the package. It creates fake credentials, fake sensitive files, synthetic hostnames, controlled time values and other non-real canaries. New behavior discovered in one run can reveal another predicate, which is added to the frontier.
+
+  -----------------------------------------------------------------------
+  Frontier <- prioritized security triggers
+  while budget remains and Frontier not empty:
+  t <- highest-priority unexplored trigger
+  E' <- synthesize safe environment satisfying t
+  trace <- execute package in disposable overlay under E'
+  graph <- merge(trace)
+  add newly discovered sensitive predicates to Frontier
+  stop early on decisive prohibited behavior
+  -----------------------------------------------------------------------
+
+  -----------------------------------------------------------------------
+
+The algorithm is intended to be cheaper than exhaustive symbolic execution because it explores security-relevant conditions only. Analysis ends when the risk budget is exhausted, coverage stabilizes, or a decisive violation is observed. Unreached high-risk conditions are reported as residual uncertainty rather than silently assumed safe.
+
+6.5 Step E - Runtime Observation and Cross-Language Normalization
+
+The sandbox monitors operating-system-visible behavior using eBPF/bpftrace where available, with strace/ptrace-style fallback for prototype portability. Events are normalized into semantic actions such as FILE_READ, FILE_WRITE, SECRET_ACCESS, PROCESS_CREATE, NETWORK_CONNECT, EXECUTE_BINARY and PERSISTENCE_WRITE. This captures effects from Python, JavaScript, shell code and native components even when a source parser cannot fully understand the implementation.
+
+Real credentials are never placed in the sandbox. Canary values are used instead. If a canary flows into process arguments, files or outbound traffic, CAVR has direct evidence of attempted secret propagation without exposing actual secrets.
+
+6.6 Step F - Causal Capability Graph
+
+All static and dynamic evidence is merged into a graph G = (V, E). Nodes represent packages, modules/functions, processes, files, secrets, endpoints, environment predicates and dependencies. Edges represent calls, reads, writes, spawns, connects, depends_on, conditioned_by and derived_from. This allows CAVR to reason over a chain rather than a single suspicious API.
+
+  --------------------------------------------------------------------------
+  CANARY_AWS
+  | read_by
+  Package A
+  | data_to
+  Package B
+  | passed_to
+  Package C
+  | network_send
+  external endpoint
+  Decision: the end-to-end secret -> external-network path violates the
+  capability contract even if no single package performs the whole attack.
+  --------------------------------------------------------------------------
+
+  --------------------------------------------------------------------------
+
+6.7 Step G - Policy and Decision
+
+  -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+  State                   Meaning                                                                                                              Automatic action
+  ----------------------- -------------------------------------------------------------------------------------------------------------------- --------------------------------------------------------------
+  VERIFIED                Observed/evaluated behavior fits the capability contract and required checks pass.                                   Proceed to clean reconstruction/commit.
+
+  RESTRICTED              Package is needed but should operate with narrower filesystem/network/process capabilities.                          Generate enforcement policy and commit under restrictions.
+
+  REJECTED                Strong evidence of unjustified security-sensitive behavior, known malicious status, or prohibited dependency path.   Block and start repair.
+
+  UNRESOLVED              High-risk condition or behavior cannot be sufficiently verified within the analysis budget.                          Fail closed for autonomous mode and start repair/quarantine.
+  -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+6.8 Step H - Transactional Isolation: Prevent Before Repair
+
+Untrusted installation occurs in a copy-on-write/disposable environment. Local filesystem effects, processes and dependency changes are never committed directly to the trusted project. This changes the recovery problem: instead of trying to perfectly undo malware after it touched the developer environment, CAVR discards the transaction and reconstructs an approved state from a clean baseline.
+
+  -----------------------------------------------------------------------
+  Trusted baseline B
+  |
+  +--> disposable overlay O --> analyze package X
+  |
+  reject ----------+--> destroy O
+  verify ----------+--> reconstruct from B + approved artifacts
+  -----------------------------------------------------------------------
+
+  -----------------------------------------------------------------------
+
+6.9 Step I - Automated Minimal Safe Repair
+
+If a package/version is rejected, CAVR builds a repair search over the dependency graph. For version-level repair, variables represent allowable versions and constraints represent SemVer/dependency requirements. The solver excludes rejected versions/paths and minimizes disruption. Z3 can be used for the constraint portion.
+
+  -----------------------------------------------------------------------
+  Minimize:
+  w1*(direct dependencies changed)
+  + w2*(version distance)
+  + w3*(files/API call sites changed)
+  + w4*(new security risk)
+  Subject to:
+  rejected package/version/path is unreachable
+  dependency constraints are satisfiable
+  candidate has no blocking known vulnerability
+  candidate passes functional + security re-verification
+  -----------------------------------------------------------------------
+
+  -----------------------------------------------------------------------
+
+Repair levels are attempted from least disruptive to most disruptive: (1) safe patch/minor version, (2) safe parent/transitive path, (3) direct-dependency upgrade/override, and (4) supported package replacement. For an entirely malicious/slopsquatted package, CAVR searches alternatives based on the API slice actually used by the project, not on whole-library equivalence. Initial FYP support should limit automatic adapters to clearly mappable APIs/templates; unsupported semantic migrations return UNRESOLVED rather than inventing risky code.
+
+6.10 Step J - Re-Verification
+
+A repair is not accepted because dependency resolution succeeds. The candidate is installed in a fresh disposable environment, project tests/build checks are run, the capability contract is recalculated if the API changed, counterfactual security analysis is re-run, the dependency graph is scanned again, and blocking known vulnerabilities are checked through OSV/public data. A failing candidate is rejected and the next repair is tried.
+
+6.11 Step K - Clean Commit and Bounded Assurance
+
+CAVR never promotes a contaminated sandbox as "clean." It reconstructs the final accepted environment from the trusted baseline plus approved artifacts/manifest changes. Evidence is hash-chained so later modification is detectable. The assurance certificate lists the baseline digest, package/artifact digests, capability obligations, triggered conditions, unresolved conditions, functional checks, dependency-graph status, security checks and residual uncertainty.
+
+  -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+  Trust claim: CAVR proves obligations under its declared boundary; it does not claim universal absence of malware. The strongest claim is: no unapproved analyzed transaction was committed; the accepted dependency graph excludes rejected paths; observed/forced behavior satisfied the declared capability policy; the accepted state was reconstructed from the declared baseline; and unresolved coverage is explicit.
+  -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+  -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+7. What We Are Actually Building and Prototype Structure
+
+7.1 System Type
+
+The end product is a functional local middleware prototype, not only a dashboard animation. The dashboard visualizes real analysis state, but the core value is the backend security engine and its algorithms.
+
+7.2 Prototype Structure
+
+  -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+  Prototype Component              Purpose                                                                     Minimum demonstrable behavior
+  -------------------------------- --------------------------------------------------------------------------- ----------------------------------------------------------------------------------------------
+  Agent / package-action adapter   Captures dependency actions from a coding agent or CLI.                     Intercept pip/npm install and manifest changes before real execution.
+
+  Context & capability panel       Shows why the dependency is requested and inferred required capabilities.   Display call sites, required files/network/process permissions and confidence/evidence.
+
+  Trigger explorer                 Shows discovered high-risk environmental predicates.                        Rank triggers; show which synthetic condition is being activated.
+
+  Sandbox monitor                  Runs package in disposable overlay and streams events.                      Show file/process/network/canary/native behavior from each run.
+
+  Causal graph view                Explains why a path is accepted or rejected.                                Trace package -> resource/process -> sink, including transitive packages.
+
+  Decision/enforcement panel       Applies VERIFIED/RESTRICTED/REJECTED/UNRESOLVED.                            Prevent rejected/unresolved package from real commit.
+
+  Repair engine view               Shows candidate repair search.                                              Rank safe versions/paths; apply manifest/lockfile changes; optionally supported replacement.
+
+  Re-verification view             Shows functional and security re-checks.                                    Run project tests/build + security pipeline for repair candidate.
+
+  Assurance certificate            Produces evidence-backed final result.                                      Download/view JSON/HTML/PDF-like record of obligations and residual uncertainty.
+  -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+7.3 Recommended Demonstration Scenarios
+
+-   Approved benign dependency: agent follows the plan correctly; CAVR verifies the exact version/transitive tree and allows a clean installation with evidence.
+
+-   Known vulnerable dependency: blocked or repaired using public vulnerability data.
+
+-   Trigger-dependent sample: only reveals network/secret behavior after a fake environment variable/file is created.
+
+-   Transitive malicious sample: root dependency looks benign but a nested package creates the prohibited path.
+
+-   Hallucinated/slopsquat-like package: retained as one threat scenario, but not the primary assumption; existence does not bypass behavioral verification.
+
+-   Repair scenario: rejected version is replaced by a safe compatible version/path and re-verified.
+
+-   Unresolved scenario: insufficient coverage causes fail-closed quarantine instead of a false "safe" verdict.
+
+8. Differentiation and Expected Effectiveness
+
+8.1 How CAVR Differs from Existing Solutions
+
+  ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+  Existing approach                 Primary decision basis                                                      What CAVR changes
+  --------------------------------- --------------------------------------------------------------------------- ----------------------------------------------------------------------------------------------------------------------
+  Hallucination prevention [2][3]   Prevent the LLM from producing fake names.                                  Assumes prevention can fail; verifies the dependency before trusted commit.
+
+  NymGuard [4]                      Reserve unclaimed hallucinated names.                                       Works even when a package already exists; asks whether behavior is justified.
+
+  DONAPI [8]                        Known/learned sensitive API-call behavior from static + dynamic analysis.   Adds targeted synthesis of missing trigger conditions and task-specific capability policy.
+
+  HERCULE [9]                       Static integrity/data-flow/transitive analysis.                             Adds dynamic OS behavior and deliberate activation of hidden conditions.
+
+  ProfMal [10]                      Static+dynamic behavior graph classified by a trained graph model.          Uses graph evidence against a contextual capability contract; no mandatory model training.
+
+  DySec [12]                        ML classification of installation-time eBPF traces.                         Uses OS telemetry as causal evidence; explores alternate conditions instead of assuming one trace is representative.
+
+  OSV guided remediation [14]       Known vulnerability record + dependency resolution.                         Repairs unknown behavioral rejection as well as known vulnerable versions; re-runs capability verification.
+
+  RETRO [13]                        Recover after compromise using logged causal history.                       Avoids committing the untrusted transaction; clean state is reconstructed before acceptance.
+  ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+8.2 Why the Design May Be More Effective
+
+The expected advantage is structural rather than a guaranteed accuracy claim. CAVR attempts to reduce three sources of false confidence: (1) "not observed" is not treated as "does not exist" because high-risk conditions are actively synthesized; (2) "not known malware" is not treated as benign because behavior is checked against task justification; and (3) "fixed" is not accepted until the repaired state is rebuilt and re-verified. Whether this produces better precision, recall, repair success and assurance usefulness must be demonstrated by the evaluation in Section 10.
+
+8.3 What CAVR Does Not Need to Beat
+
+CAVR does not need to replace every registry-scale malware detector. A registry operator scans millions of packages with different false-positive constraints. CAVR has richer project context and can spend more analysis on the small number of dependencies an agent is about to introduce. This different operating point makes counterfactual analysis and repair feasible without pretending to be a universal package-registry scanner.
+
+9. Training, Data and Dataset Plan
+
+9.1 Is Model Training Required?
+
+  ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+  Answer: No mandatory training is required for the core CAVR design. The capability inference, trigger discovery, counterfactual scheduler, causal graph, policy, repair solver and assurance logic are designed to be deterministic/program-analysis based. This keeps the system reproducible, local and free of paid model/API dependencies.
+  ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+  ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+A small local ML/embedding model may be explored only as an optional enhancement for package-function similarity or ranking. It must not be a trusted security oracle, and the project remains complete without it.
+
+9.2 Data Sources Used at Runtime
+
+  -------------------------------------------------------------------------------------------------------------------------------
+  Source                                  Use                                                             Cost
+  --------------------------------------- --------------------------------------------------------------- -----------------------
+  PyPI/npm public registry metadata       Versions, dependencies, package metadata, artifact retrieval.   Free/public
+
+  OSV / OSV-Scanner data                  Known vulnerabilities and advisory identifiers.                 Free/open
+
+  Project source and local tests          Capability inference and functional verification.               Local
+
+  Sandbox traces                          Behavior evidence, trigger coverage and causal graph.           Local
+
+  Optional Sigstore/provenance metadata   Artifact provenance evidence when available.                    Open/public tooling
+  -------------------------------------------------------------------------------------------------------------------------------
+
+9.3 Evaluation Datasets
+
+Evaluation can use public research artifacts and controlled inert samples rather than live uncontrolled malware. Suitable sources include the package-hallucination datasets released with Spracklen et al. [2], MalOSS/NDSS benchmark material [5], the HERCULE artifact/benchmark references [9], DySec dataset resources [12], and deliberately constructed benign trigger-conditioned samples that simulate credential/file/network conditions without harming a host. Research malware should remain encrypted and executed only inside isolated laboratory environments according to dataset terms.
+
+9.4 Why No Large Training Dataset Is a Strength
+
+A dataset-dependent classifier can become stale as attacker behavior changes. CAVR still uses known-malware/vulnerability evidence when available, but its central decision asks whether an observed causal behavior is justified by the project. The system can therefore flag a new behavior pattern even if no identical training example exists.
+
+10. Evaluation Plan
+
+10.1 Evaluation Questions and Metrics
+
+  --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+  Area                       Metrics                                                                                                                                     What success means
+  -------------------------- ------------------------------------------------------------------------------------------------------------------------------------------- ---------------------------------------------------------------------------------------------------------
+  Detection quality          Precision, recall, F1, false-positive rate, false-negative rate.                                                                            Better or competitive classification while maintaining acceptable false positives.
+
+  Trigger activation         Security-relevant branch/trigger activation rate; new sensitive paths found per counterfactual run; dormant-malware detection rate.         Counterfactual mode finds paths missed by single-environment dynamic analysis.
+
+  Causal reasoning           Cross-package path detection; source-to-sink attribution accuracy.                                                                          Finds distributed/transitive behavior with explainable causal evidence.
+
+  Efficiency                 Median/95th-percentile analysis time, number of runs, cache hit rate.                                                                       Progressive analysis is usable for dependency actions rather than exhaustive whole-program exploration.
+
+  Repair effectiveness       Auto-repair success rate, number of dependency/files changed, version distance, rejected-path elimination.                                  Repairs are successful and minimal rather than blunt removal.
+
+  Functional preservation    Existing tests/build success; generated API-contract checks where applicable.                                                               Repair preserves used application behavior.
+
+  Security re-verification   Capability contract pass, no rejected dependency path, OSV blocking findings, canary/behavior violations.                                   Fixed candidate does not recreate the original security problem.
+
+  Trust/assurance            No unapproved overlay commit, clean-baseline reconstruction hash checks, evidence-chain tamper detection, residual-uncertainty reporting.   Trust claim is bounded, inspectable and reproducible.
+  --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+10.2 Baselines and Ablation Studies
+
+Evaluation should distinguish whether CAVR adds value beyond existing mechanisms. Suggested baselines are: registry existence/metadata check; OSV known-vulnerability scan; static-only rules/data-flow; one normal dynamic sandbox run; and, where reproducible implementations/artifacts are available, representative research detectors. Ablations should disable one CAVR component at a time: no capability contract, no counterfactual activation, no cross-package causal graph, naive repair instead of optimized repair, and no clean reconstruction/assurance evidence.
+
+10.3 Controlled Scenario Families
+
+  ---------------------------------------------------------------------------------------------------------------------------------
+  Scenario family                              Purpose
+  -------------------------------------------- ------------------------------------------------------------------------------------
+  Benign security-sensitive packages           Measure false positives when legitimate tools use filesystem/network capabilities.
+
+  Known malicious packages / research corpus   Measure baseline detection.
+
+  Condition-gated samples                      Test env/file/time/hostname/platform/sleep triggers.
+
+  Obfuscated/native-wrapper samples            Test OS-level behavior observation when source analysis is incomplete.
+
+  Transitive/distributed behavior              Test cross-package causal paths.
+
+  Repairable version conflicts                 Test dependency solver minimality.
+
+  Whole-package substitution cases             Test supported API-slice replacement and adapter verification.
+
+  Unresolved cases                             Verify fail-closed behavior and honest uncertainty reporting.
+  ---------------------------------------------------------------------------------------------------------------------------------
+
+11. One-Year Research Justification and Milestones
+
+11.1 Why This Is Not a One-Semester "Scanner"
+
+A basic interceptor plus known-vulnerability scanner and one sandbox run can be built early. That would not solve the proposed research problem. The year is justified by separate algorithmic questions that depend on one another: formalizing task-specific capabilities, discovering and prioritizing hidden triggers, synthesizing counterfactual environments, reconstructing cross-package causal behavior, solving minimal dependency repair, and defining/producing bounded assurance evidence. These are new computational capabilities, not time reserved for training, UI integration or repetitive testing.
+
+11.2 Early Prototype vs Research-Grade End Product
+
+  ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+  Time point              What can already work                                                                 What is still missing
+  ----------------------- ------------------------------------------------------------------------------------- --------------------------------------------------------------------------------
+  Month 2-3               Intercept dependency, parse context, basic metadata/OSV checks, disposable install.   No serious answer to hidden triggers, causal intent, auto-repair or trust.
+
+  Month 4-5               Capability contract + security-predicate extraction.                                  Still passive; dormant behavior may remain unexecuted.
+
+  Month 6-7               Adaptive counterfactual execution + causal graph.                                     Can detect harder behavior but still leaves the developer to fix dependencies.
+
+  Month 8-10              Constraint-based version/transitive repair + supported substitution.                  Needs finalized assurance semantics and evidence obligations.
+
+  Month 11-12             Clean reconstruction, assurance certificate, full comparative research results.       Research scope completed.
+  ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+11.3 Proposed 12-Month Work Plan
+
+  -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+  Months                  Primary research output                                                                              Why it is a distinct problem
+  ----------------------- ---------------------------------------------------------------------------------------------------- --------------------------------------------------------------------------------------------------------------------------------
+  1-2                     Threat model, capability vocabulary, context-to-capability rules, interception prototype.            Defines what "justified behavior" means for a dependency.
+
+  3-4                     Static trigger discovery and risk/reachability prioritization.                                       Turns hidden environment dependence into analyzable security predicates.
+
+  5-6                     Adaptive counterfactual environment synthesis and budgeted exploration.                              Must choose which conditions to force without exponential path explosion.
+
+  7-8                     Runtime normalization, canary flow and cross-package causal capability graph.                        Connects source/OS evidence and distributed dependency behavior.
+
+  9-10                    Minimal safe repair solver; safe-version/transitive-path repair; supported API-slice substitution.   Optimization must preserve constraints/function while removing the rejected path.
+
+  11                      Clean reconstruction, capability enforcement, evidence-chain and assurance obligations.              Defines what can be credibly claimed after repair.
+
+  12                      Comparative evaluation, ablation, final research synthesis and defense material.                     Demonstrates which proposed algorithms actually improve outcomes; this validates rather than creates the year-long complexity.
+  -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+  ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+  Direct panel answer: Yes, a shallow prototype can be produced earlier. Finishing early would mean stopping before the hard research questions. The year is used to move from "scan and block" to purpose-aware trigger activation, causal reasoning, automated minimal repair and bounded assurance - each of which is a separate non-trivial computing problem.
+  ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+  ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+12. Three-Member Work Division
+
+All three members own essential security logic. Dashboard styling, deployment and general integration are shared supporting tasks and are not any member's main contribution.
+
+  ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+  Member                                             Core ownership                                                                                                              Algorithms / essential deliverables                                                                                                                                      Primary evaluation ownership
+  -------------------------------------------------- --------------------------------------------------------------------------------------------------------------------------- ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ -------------------------------------------------------------------------------------------------------
+  Member 1 - Capability & Counterfactual Analysis    Interception context, capability-contract inference, trigger discovery and adaptive environment synthesis.                  Capability vocabulary; context-to-capability inference; security-predicate extractor; trigger priority queue; counterfactual scheduler; synthetic canary environments.   Capability precision; trigger activation/coverage; dormant-behavior discovery.
+
+  Member 2 - Causal Enforcement & Runtime Security   Sandbox observation, cross-language normalized events, causal capability graph, policy decision and runtime restrictions.   eBPF/trace event model; canary flow; graph construction; cross-package source-to-sink analysis; VERIFIED/RESTRICTED/REJECTED/UNRESOLVED policy; confinement rules.       Detection precision/recall; cross-package attribution; false positives; policy effectiveness.
+
+  Member 3 - Repair & Assurance                      Dependency repair search, safe replacement, re-verification, clean reconstruction and assurance certificate.                Z3/constraint repair model; candidate ranking; transitive path removal; supported API adapter templates; clean rebuild; hash-chained evidence; assurance obligations.    Repair success/minimality; functional preservation; security re-verification; assurance completeness.
+  ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+12.1 Shared Responsibilities
+
+Shared by all three: final threat model, common event/data schemas, research literature, controlled benchmark design, architecture decisions, code review, end-to-end scenarios, report/paper writing and defense. No member is assigned only UI, documentation, deployment or testing.
+
+13. Complex Computing Problem and Seoul Accord Justification
+
+The Seoul Accord defines a complex computing problem as one having some or all of nine characteristics. CAVR maps strongly to all nine. The official source also defines complex computing activities and the graduate attributes for a computing professional [1].
+
+13.1 Mapping to All Nine Complex Computing Problem Characteristics
+
+  ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+  Seoul Accord characteristic            Official intent (paraphrased)                                                              Why CAVR qualifies
+  -------------------------------------- ------------------------------------------------------------------------------------------ -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+  1. Range of conflicting requirements   Complex problems involve wide-ranging/conflicting technical, computing and other issues.   CAVR must maximize security coverage while limiting false positives, analysis cost and compatibility breakage; automation must fail safely without blocking legitimate work.
+
+  2. Depth of analysis required          No obvious solution; conceptual thinking and innovative abstract models are required.      There is no single "safe package" test. CAVR must model justified capabilities, hidden environment triggers, causal behavior and repair constraints.
+
+  3. Depth of knowledge required         Requires in-depth computing/domain knowledge and principled analysis.                      Program analysis, software supply-chain security, OS isolation/eBPF, graph algorithms, dependency resolution, constraint solving and secure recovery are all required.
+
+  4. Familiarity of issues               Involves infrequently encountered issues.                                                  AI package hallucination/slopsquatting, condition-gated package malware and automated post-detection repair are recent/rapidly evolving problems, not routine CRUD development.
+
+  5. Level of problem                    Outside problems fully covered by standards/standard practice.                             Standards and scanners address pieces, but there is no standard workflow that infers task capabilities, forces hidden conditions, repairs an unsafe dependency and emits bounded assurance.
+
+  6. Stakeholder involvement/conflicts   Diverse stakeholders with varying needs.                                                   Developers want low friction; security teams want strong prevention; organizations want continuity; registries want low false positives; agent vendors want autonomy; end users need safe software.
+
+  7. Consequences                        Significant consequences in multiple contexts.                                             Failure can expose credentials, compromise developer/CI environments, poison builds and propagate into downstream software; over-blocking can also disrupt development.
+
+  8. Interdependence                     High-level problem with many component parts/sub-problems.                                 Capability inference, trigger exploration, sandboxing, causal graphing, policy, dependency repair, functional preservation and assurance are interdependent.
+
+  9. Requirement identification          Requirement/cause is ill-defined or unknown.                                               "What should this third-party package be allowed to do?" is rarely declared. CAVR must infer minimum legitimate capability from code/task context and make uncertainty explicit.
+  ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+13.2 Complex Computing Activity Mapping
+
+  --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+  Activity characteristic             CAVR evidence
+  ----------------------------------- --------------------------------------------------------------------------------------------------------------------------------------------------------------
+  Diverse resources                   Program parsers, registries, vulnerability data, Linux isolation, eBPF, constraint solver, test suites, package artifacts and project context.
+
+  Significant interactions            Static/dynamic evidence, OS behavior, dependency constraints, functionality and security policy interact and can conflict.
+
+  Innovation                          Security-targeted counterfactual activation and project-specific capability verification apply computing principles in a new combination and decision model.
+
+  Consequences                        The activity directly concerns preventing software supply-chain compromise and avoiding unsafe automated dependency actions.
+
+  Familiarity                         The project extends beyond normal operating procedures and requires principle-based research into new agentic-development security conditions.
+  --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+13.3 Seoul Accord Graduate Attribute Alignment
+
+  ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+  Graduate attribute                            How the project demonstrates it
+  --------------------------------------------- ------------------------------------------------------------------------------------------------------------------------------------------------------
+  1. Academic Education                         Uses advanced software engineering, security, algorithms, operating systems and program-analysis knowledge in a professional-scale research project.
+
+  2. Knowledge for Solving Computing Problems   Builds abstract models for capabilities, triggers, causal graphs and repair constraints.
+
+  3. Problem Analysis                           Requires literature research, threat modeling, failure analysis and substantiated conclusions from empirical evidence.
+
+  4. Design / Development of Solutions          Designs and evaluates an automated middleware, algorithms and repair/assurance mechanisms.
+
+  5. Modern Tool Usage                          Uses and critically assesses modern open tools such as Tree-sitter, eBPF, Z3, OSV, containers/namespaces and graph tooling.
+
+  6. Individual and Team Work                   Three members own separate essential engines with shared architecture and cross-review.
+
+  7. Communication                              Requires technical documentation, evidence explanations, scope defense, dashboard communication and research presentation.
+
+  8. Computing Professionalism and Society      Addresses real supply-chain risk, developer safety, secure automation and responsible failure modes.
+
+  9. Ethics                                     Uses inert/canary secrets, isolated malware research, honest bounded assurance, and avoids unsafe live execution/distribution.
+
+  10. Life-long Learning                        Requires study of rapidly evolving LLM coding agents, package attacks, program analysis and security research.
+  ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+14. Stakeholders
+
+  -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+  Stakeholder                         Need from CAVR                                                            Possible conflict
+  ----------------------------------- ------------------------------------------------------------------------- ---------------------------------------------------------------------
+  Developers using AI coding agents   Fast, understandable security decisions and automatic fixes.              Do not want excessive blocking or long analysis.
+
+  DevSecOps / security teams          Evidence, policy enforcement, low false negatives, auditable decisions.   May accept more friction than developers.
+
+  Software organizations              Reduce supply-chain compromise and recovery cost.                         Need predictable performance and compatibility.
+
+  Coding-agent/platform vendors       A clear pre-execution dependency gate that can be called automatically.   Agent autonomy must not bypass security decisions.
+
+  Package registry maintainers        Fewer malicious installations and useful evidence.                        Registry-scale constraints differ from project-scale CAVR analysis.
+
+  Open-source maintainers             Avoid false accusations and receive explainable evidence.                 False positives can harm legitimate projects.
+
+  End users / customers               Receive software not contaminated by unsafe dependencies.                 Indirect stakeholder; relies on developer process.
+
+  Researchers / educators             Reproducible benchmark, algorithms and evidence.                          Need transparent assumptions and limitations.
+  -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+15. Prerequisites and Free/Open Infrastructure
+
+15.1 No Mandatory Paid Component
+
+The project can be implemented without OpenAI/Claude/Gemini APIs, VirusTotal Premium, Snyk paid plans, commercial sandboxes, AWS/Azure/GCP, proprietary threat-intelligence feeds or paid databases. Internet access is useful for public package metadata and OSV data, but these can be cached for repeatable experiments.
+
+15.2 Recommended Technical Prerequisites
+
+  ---------------------------------------------------------------------------------------------------------------------------------------------
+  Category                Free/open choice                                       Role
+  ----------------------- ------------------------------------------------------ --------------------------------------------------------------
+  Operating environment   Ubuntu Linux; native Linux preferred                   Namespaces, OverlayFS, eBPF, seccomp/Landlock.
+
+  Parsing                 Python ast, Tree-sitter                                Imports, call sites, security predicates and code structure.
+
+  Dependency metadata     PyPI/npm public APIs; local package-manager resolver   Versions and transitive graph.
+
+  Known vulnerabilities   OSV / OSV-Scanner                                      Advisory evidence and blocking findings.
+
+  Isolation               Podman/Docker + Linux namespaces + OverlayFS           Disposable package execution.
+
+  Runtime tracing         eBPF/bpftrace; strace fallback                         File/process/network/syscall evidence.
+
+  Policy confinement      seccomp, Landlock, namespaces                          Restrict sensitive capabilities where supported.
+
+  Graph processing        NetworkX + SQLite/PostgreSQL                           Causal capability graph and evidence storage.
+
+  Constraint solving      Z3                                                     Minimal dependency repair search.
+
+  Backend                 Python/FastAPI or equivalent                           Local orchestration service.
+
+  Frontend                React/Vite or equivalent                               Live prototype/dashboard.
+
+  Tests                   pytest/Jest + project-native tools                     Functional verification.
+
+  Integrity               SHA-256/hash chaining; optional Sigstore tooling       Tamper-evident evidence and provenance.
+  ---------------------------------------------------------------------------------------------------------------------------------------------
+
+15.3 Hardware
+
+A normal development workstation with virtualization/container support is enough for the initial scope. More CPU/RAM reduces analysis time but is not a paid requirement. The research should use bounded parallelism rather than assume access to a GPU or cloud cluster.
+
+16. Ethics, Safety, Legal and Threat Model
+
+16.1 Threat Model
+
+Adversary-controlled or compromised third-party dependencies may contain static, obfuscated, dynamically downloaded, native, transitive or condition-gated malicious behavior. The coding agent/developer may unknowingly request such a package. CAVR assumes the Linux host/kernel and CAVR monitor are part of the trusted computing base for the FYP. Kernel/firmware compromise is out of scope.
+
+16.2 Safe Research Rules
+
+-   Use inert canary secrets, never real credentials, in all forced-execution environments.
+
+-   Run malicious research artifacts only in isolated environments with controlled/no external network as required.
+
+-   Do not publish working malicious payloads or live slopsquatting packages.
+
+-   Respect dataset licenses, package-registry terms and responsible-disclosure processes.
+
+-   Label experimental verdicts as research results; do not publicly accuse a package/maintainer without manual validation and responsible disclosure.
+
+-   Assurance reports must state uncertainty and assumptions; never market a bounded result as absolute proof of safety.
+
+16.3 Privacy
+
+The normal system should avoid uploading source code, traces or secrets to external services. Public registry/advisory lookups should send only package identifiers/versions. Local-first processing also supports the project goal of zero paid/API dependency and reduces code leakage.
+
+17. Scope Boundaries, Risks and Limitations
+
+  -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+  Risk / limitation                                    Why it is hard                                                                  Planned handling
+  ---------------------------------------------------- ------------------------------------------------------------------------------- ------------------------------------------------------------------------------------------------------------
+  Path explosion                                       Programs can contain too many possible conditions.                              Security-relevant prioritized trigger frontier; fixed budgets; explicit residual uncertainty.
+
+  False positives from legitimate sensitive behavior   Some packages legitimately need network/files/processes.                        Task-specific capability evidence, scoped permissions, causal explanation, RESTRICTED state.
+
+  Anti-analysis / unknown external services            Behavior may depend on server responses, real accounts or anti-sandbox logic.   Synthetic responses for supported conditions; fail closed when decisive high-risk paths remain unresolved.
+
+  Native/packed code                                   Source-level analysis may not understand it.                                    OS-level normalized telemetry and stricter policy; not full binary semantic analysis.
+
+  Cross-platform support                               eBPF is Linux-specific.                                                         FYP targets Linux; event abstraction is designed so Windows/macOS backends can be future work.
+
+  Package replacement semantics                        Different libraries can behave differently despite similar purpose.             Full automatic substitution limited to supported API slices; otherwise safe quarantine/manual future path.
+
+  No absolute trust proof                              Monitoring boundary can miss effects outside its model.                         Bounded assurance with assumptions, evidence coverage and residual uncertainty.
+
+  Performance                                          Multiple sandbox runs are more expensive than one static scan.                  Escalation/caching; counterfactual runs only for high-risk conditions; package/version hash cache.
+  -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+18. Expected End Product and Research Contributions
+
+18.1 End Product
+
+  -------------------------------------------------------------------------------------------------------------------------------
+  Deliverable                         Description
+  ----------------------------------- -------------------------------------------------------------------------------------------
+  Local CAVR middleware               Functional interceptor/orchestrator for dependency requests.
+
+  Capability & trigger analyzer       Deterministic project-context analysis and prioritized security-predicate extraction.
+
+  Counterfactual sandbox engine       Automated synthetic environment generation, canary injection and controlled re-execution.
+
+  Causal capability graph engine      Cross-package graph that explains source-to-sink security behavior.
+
+  Policy/enforcement engine           VERIFIED/RESTRICTED/REJECTED/UNRESOLVED decision and fail-closed control.
+
+  Automated repair engine             Version/transitive path repair and supported package/API substitution.
+
+  Re-verification engine              Functional + security re-check in a fresh transaction.
+
+  Assurance evidence                  Clean reconstruction record, hashes, coverage and residual uncertainty.
+
+  Interactive research prototype      Dashboard that demonstrates the real pipeline and evidence, not only static UI.
+
+  Evaluation corpus/results           Controlled scenarios, baseline/ablation results and reproducible configuration.
+  -------------------------------------------------------------------------------------------------------------------------------
+
+18.2 Proposed Research Contributions / Novelty Hypotheses
+
+1. Context-derived minimum capability contracts for dependency actions in AI-assisted development, so security decisions are based on what the project actually needs rather than only malware similarity.
+
+2. Security-targeted counterfactual activation: discover high-risk environmental predicates and synthesize safe conditions to deliberately expose dormant behavior under a bounded exploration budget.
+
+3. Cross-package causal capability reasoning that connects task intent, program calls, OS events, canary data flows and transitive dependencies into an explainable policy decision.
+
+4. Verified minimal safe repair: optimize dependency/version/path change for security and compatibility, then re-run both functional and security obligations before acceptance.
+
+5. Bounded assurance by construction: untrusted execution is transactional; the accepted state is reconstructed from a declared baseline and accompanied by tamper-evident evidence plus explicit residual uncertainty.
+
+18.3 Final Research Positioning
+
+  --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+  Position: CAVR is best described as an automated pre-commit dependency security middleware for AI-assisted development. It is broader than a slopsquatting detector, more contextual than a generic malware classifier, and more preventive than post-compromise recovery. Its research value depends on demonstrating that counterfactual activation, capability-based causal reasoning, automated repair and bounded assurance materially improve outcomes over simpler baselines.
+  --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+  --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+19. References and Studied Sources
+
+[1] Seoul Accord, "Section D - Graduate Attributes" (official document; complex computing problems, complex activities and graduate attributes). Link
+
+[2] J. Spracklen et al., "We Have a Package for You! A Comprehensive Analysis of Package Hallucinations by Code Generating LLMs," 34th USENIX Security Symposium, 2025. Distinguished Paper Award. Link
+
+[3] A. E. Djire et al., "Evaluating Inference-Time Defenses Against Package Hallucination in LLM-Generated Code," ASE 2026 Research Papers. Link
+
+[4] Z. Huang et al., "Package Hallucinations as Phantoms in Open-source Software Supply Chains: An Empirical Security Analysis," ACM TOSEM, 2026, DOI 10.1145/3830237. Link
+
+[5] R. Duan et al., "Towards Measuring Supply Chain Attacks on Package Managers for Interpreted Languages," NDSS 2021. Link
+
+[6] A. Sejfia and M. Schaefer, "Practical Automated Detection of Malicious npm Packages," ICSE 2022. Link
+
+[7] D. L. Vu, Z. Newman, and J. S. Meyers, "Bad Snakes: Understanding and Improving Python Package Index Malware Scanning," ICSE 2023. Link
+
+[8] C. Huang et al., "DONAPI: Malicious NPM Packages Detector using Behavior Sequence Knowledge Mapping," 33rd USENIX Security Symposium, 2024. Link
+
+[9] R. Shariffdeen et al., "Detecting Python Malware in the Software Supply Chain with Program Analysis" (HERCULE), ICSE-SEIP 2025. Link
+
+[10] "ProfMal: Detecting Malicious NPM Packages by the Synergy between Static and Dynamic Analysis," ASE 2025. Link
+
+[11] X. Gao et al., "MalGuard: Towards Real-Time, Accurate, and Actionable Detection of Malicious Packages in PyPI Ecosystem," USENIX Security 2025. Link
+
+[12] S. T. Mehedi et al., "DySec: A Machine Learning-Based Dynamic Analysis for Detecting Malicious Packages in PyPI Ecosystem," IEEE publication, 2026. Link
+
+[13] T. Kim, X. Wang, N. Zeldovich, and M. F. Kaashoek, "Intrusion Recovery Using Selective Re-execution" (RETRO), OSDI 2010. Link
+
+[14] Google, OSV-Scanner Guided Remediation documentation (transitive graph analysis and minimal dependency fixes). Link
+
+[15] C. Lamb and S. Zacchiroli, "Reproducible Builds: Increasing the Integrity of Software Supply Chains," IEEE Software, 2022. Link
+
+[16] PyTorch Foundation, "Compromised PyTorch-nightly dependency chain between December 25th and December 30th, 2022." Link
+
+[17] npm Security, "Details about the event-stream incident," 2018. Link
+
+[18] CISA, "Malware Discovered in Popular NPM Package, ua-parser-js," 2021. Link
+
+[19] Python Package Index Blog, "Supply-chain attack analysis: Ultralytics," 2024. Link
+
+[20] B. Lanyado, Lasso Security, "Diving Deeper into AI Package Hallucinations," 2024 (industry research / real-world benign namespace experiment; not a peer-reviewed paper). Link
+
+Reference Use Notes
+
+Peer-reviewed/accepted papers support the main state-of-the-art claims; tool documentation supports current remediation capability; official incident reports support real-world examples. The Lasso source is explicitly treated as industry research, not peer-reviewed evidence.
