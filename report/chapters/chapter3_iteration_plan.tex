@@ -1,16 +1,14 @@
 \chapter{Proposal Feedback and Iteration Plan}
 \section{Proposal Feedback Summary}
-The SABLE contributor reports that the proposal re-defense passed without remarks or major/minor modifications and that no SABLE-specific action was communicated. This is a member's recollection, not a written panel record or completed Form 10. The mid-evaluation itself is supervisor-only. The supervisor should confirm whether any earlier proposal action was assigned; no unreported action is inferred here.
+The SABLE contributor reports that the proposal re-defense passed without remarks or major/minor modifications and that no SABLE-specific action was communicated. The team reports no outstanding proposal or panel actions for this submission. This is a team confirmation, not a written panel record or completed Form 10. The mid-evaluation itself is supervisor-only.
 \section{Proposal Action Register}
-\textbf{SABLE member report; supervisor confirmation pending:} the row records the SABLE contributor's recollection of the re-defense outcome. It is not represented as an official panel record. Other members' feedback and actions must be recorded by their owners from their own authoritative records.
+\textbf{Team-reported status:} the row records the SABLE contributor's recollection of the re-defense outcome and the team's confirmation that no proposal or panel actions remain outstanding. It is not represented as an official panel record.
 \begin{longtable}{p{0.06\textwidth}p{0.26\textwidth}p{0.23\textwidth}p{0.13\textwidth}p{0.16\textwidth}}
 \caption{Proposal Action Register -- supporting table 1}\\
 \toprule
 No. & Feedback / Required Change & Action Taken & Status & Evidence\\
 \midrule
-1 & No SABLE-specific proposal action communicated; re-defense reported as passed without remarks or major/minor modifications. & No proposal change reported for SABLE. & Awaiting supervisor confirmation of prior actions. & SABLE contributor recollection, 12 Oct 2026.\\
-2 & & & &\\
-3 & & & &\\
+1 & No SABLE-specific proposal action communicated; re-defense reported as passed without remarks or major/minor modifications. & No proposal change reported for SABLE; team reports no outstanding proposal or panel actions. & Team-reported complete; no signed action register. & SABLE contributor recollection and team confirmation.\\
 \bottomrule
 \end{longtable}
 \section{Iteration Strategy}
@@ -22,10 +20,10 @@ For SABLE, work proceeded from a bounded obligation and fixtures to parser/corre
 The SABLE mid-scope deliverables are: I1 candidate snapshot/input-hash/evidence-integrity binding; I2 supported Terraform/HCL normalization for modules, references, and tested inline IAM policies; I3 verification of the registered baseline obligation; I4 successor correspondence and explicit \texttt{PRESERVED}/\texttt{REGRESSED}/\texttt{UNKNOWN} results. Chapter 4 and Appendix B map these deliverables to test assertions. The initial published SABLE milestone was commit \texttt{9a4dc3d9}; the unresolved-role-binding correction followed in \texttt{58b0a3d}. The integrated source tree with the missing-baseline and evidence-integrity corrections is commit \texttt{84f91a9}. PR \#5 merged at \texttt{ffe8aa9} from exact tested head \texttt{554b6d5}; all 18 check runs succeeded on that exact head. The report was completed on the \texttt{report} branch, then merged normally to \texttt{master} through PR \#6; artifact verification was recorded in PR \#7.
 \end{sloppypar}
 \section{Iteration 2 Plan}
-Proposed SABLE continuation is to confirm the baseline comparison protocol, validate labels independently, execute the planned comparative evaluation, and broaden supported cases only where the research question requires it. No schedule, owner, or completed experiment is asserted here; the team and supervisor must confirm the plan.
+Proposed SABLE continuation comprises the baseline comparison protocol, independent label validation, comparative evaluation, and expansion of supported cases only where justified by the research question. These are future research activities. No approved dates or owner assignments are represented in this mid-evaluation report.
 \section{Work Breakdown and Responsibilities}
-The repository evidence reviewed for this report supports the SABLE implementation and shared-gate contribution described in Chapter 9. A complete team task allocation, owner/date log, and contribution record for other modules were not verified in the source material reviewed. Confirm them against the team's records before submission.
+The repository evidence supports the SABLE implementation and shared-gate contribution described in Chapter 9. The team confirms that module contributions were divided and cross-checked by the respective members. This report distinguishes that team confirmation from repository authorship evidence and does not infer individual ownership from module presence alone.
 \section{Progress Against Plan}
 For SABLE I1--I4, the verified combined source tree contains the snapshot/evidence path, supported normalization, fail-closed baseline verification, successor selection, authorization projection, and explicit outcome tests. The correction-containing local selection reported 27 passed and 10 deselected; the initial published-commit CI reported 44 passed on \texttt{9a4dc3d}. Later CI on source commit \texttt{84f91a9} reported 48 SABLE shared-assurance tests passed, 84 SATRA tests passed, and successful Core and Docker-enabled full-suite jobs. All 18 check runs succeeded on exact merged PR head \texttt{554b6d5}. These results are from distinct snapshots and runs; Chapter 8 gives their provenance and the Windows full-suite limitations. They establish implementation checks, not completion of the later comparative research plan.
 \section{Delays, Deviations and Recovery Plan}
-The available evidence records no confirmed schedule baseline or approved delay/recovery log, so this report does not assign dates or declare a project-wide schedule deviation. The local test host's default pytest temporary directory was inaccessible; the selected tests passed using a fresh writable project-local \texttt{--basetemp}. Confirm any proposal-panel action or schedule impact from the team's official records.
+The available report materials contain no approved schedule baseline or dated delay/recovery log, so this report assigns no dates and declares no project-wide schedule deviation. The local test host's default pytest temporary directory was inaccessible; the selected tests passed using a fresh writable project-local \texttt{--basetemp}. The team's confirmation of no outstanding panel or schedule actions is recorded in the appendices; it is not presented as an official schedule or panel record.
