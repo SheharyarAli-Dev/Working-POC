@@ -80,6 +80,14 @@ def ensure_repository(settings):
     destination = repo_path_for(settings, slug)
     if (destination / ".git").exists():
         run_git(destination, "fetch", "--quiet", "--all", "--tags", "--prune")
+        # Automatically clean up local repair branches that have been deleted from remote origin
+        gone_branches = run_git(destination, "branch", "-vv", tolerate=True)
+        for line in gone_branches.splitlines():
+            if ": gone]" in line and "satra/repair/" in line:
+                parts = line.strip().split()
+                if parts:
+                    branch_name = parts[0].lstrip("*").strip()
+                    run_git(destination, "branch", "-D", branch_name, tolerate=True)
         return destination
     destination.parent.mkdir(parents=True, exist_ok=True)
     outcome = subprocess.run(

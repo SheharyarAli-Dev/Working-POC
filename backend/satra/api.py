@@ -585,7 +585,8 @@ def satra_recommit_approve(req: ApproveRecommitRequest):
                 [repair.get("target_file")] if repair.get("target_file") else [],
                 repair=repair
             )
-            pushed = push_repair_branch_if_allowed(repo_dir, made["branch"], settings)
+            approval_record = {"approved": True, "operator": req.user, "run_id": req.run_id}
+            pushed = push_repair_branch_if_allowed(repo_dir, made["branch"], settings, approval_record=approval_record)
         except Exception as e:
             raise HTTPException(500, f"Git repair operation failed: {str(e)}")
 
