@@ -104,6 +104,7 @@ export const SatraModule: React.FC = () => {
   const [proposedPatch, setProposedPatch] = useState<any>(null);
 
   // Sandbox and Gates
+  const [testSelection, setTestSelection] = useState<any>(null);
   const [containerLifecycle, setContainerLifecycle] = useState<'idle' | 'created' | 'locked' | 'running' | 'completed'>('idle');
   const [terminalLogs, setTerminalLogs] = useState<string[]>([]);
   const [sideBySide, setSideBySide] = useState<{ baseline: any; candidate: any } | null>(null);
@@ -170,6 +171,9 @@ export const SatraModule: React.FC = () => {
         }
         if (ev.findings && ev.findings.length > 0) {
           setFindingsList(ev.findings);
+        }
+        if (ev.test_selection) {
+          setTestSelection(ev.test_selection);
         }
         if (ev.executions) {
           setSideBySide({
@@ -271,6 +275,7 @@ export const SatraModule: React.FC = () => {
     setApprovedRecommit(null);
     setIsApproving(false);
     setApprovalError(null);
+    setTestSelection(null);
     setProofData(null);
 
     try {
@@ -424,9 +429,17 @@ export const SatraModule: React.FC = () => {
         setTerminalLogs(prev => [...prev, payload.data.line]);
       });
 
+      eventSource.addEventListener('test_selection_computed', (e: any) => {
+        const payload = JSON.parse(e.data);
+        setTestSelection(payload.data.test_selection || payload.data);
+      });
+
       eventSource.addEventListener('sandbox_comparison', (e: any) => {
         const payload = JSON.parse(e.data);
         setSideBySide(payload.data);
+        if (payload.data.test_selection) {
+          setTestSelection(payload.data.test_selection);
+        }
       });
 
       eventSource.addEventListener('verification_gate_ticking', (e: any) => {
@@ -670,12 +683,6 @@ export const SatraModule: React.FC = () => {
                 }}
               >
                 <option value="live">LIVE · real commit from Threat-Repository (executed)</option>
-                <option value="clean_safe">[SIMULATED] 1. Clean legitimate change (ACCEPTED)</option>
-                <option value="idor_bypass">2. Authorization bypass / IDOR (REPAIR -&gt; ACCEPTED)</option>
-                <option value="repo_specific">3. Repository-specific bug (Ollama Test -&gt; ACCEPTED)</option>
-                <option value="bad_repair">4. Bad repair (RETRY_AVAILABLE -&gt; Loop)</option>
-                <option value="test_weakening">5. Test weakening / weakened oracle (REJECTED)</option>
-                <option value="flaky_test">6. Flaky generated test (REJECTED by 7-check)</option>
               </select>
             </div>
           </div>
@@ -1161,6 +1168,79 @@ export const SatraModule: React.FC = () => {
                 <div key={idx}>{log}</div>
               ))}
             </div>
+
+            {/* PR-Aware Regression Test Selection (RTS) Table */}
+            {testSelection && (
+              <div style={{
+                background: '#0b1329',
+                border: '1px solid #1e293b',
+                borderRadius: 'var(--radius-sm)',
+                padding: '12px 14px',
+                marginBottom: '16px'
+              }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <Sparkles size={14} color="#38bdf8" />
+                    <span style={{ fontSize: '11.5px', fontWeight: 700, color: '#f8fafc' }}>
+                      Optimized Regression Test Selection (PR-Aware RTS)
+                    </span>
+                  </div>
+                  <span style={{
+                    fontSize: '10.5px',
+                    fontWeight: 600,
+                    color: '#38bdf8',
+                    background: '#0284c715',
+                    border: '1px solid #0284c740',
+                    padding: '2px 8px',
+                    borderRadius: '4px'
+                  }}>
+                    Semantic AST & Route-Slicing
+                  </span>
+                </div>
+                <div style={{ fontSize: '11px', color: '#94a3b8', marginBottom: '10px' }}>
+                  Dynamically selected security tests based on modified AST symbols and routes. Unaffected test families are safely pruned to optimize sandbox execution.
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '8px' }}>
+                  {Object.entries((testSelection.test_selection || testSelection) as Record<string, any>).map(([stem, info]) => {
+                    if (typeof info !== 'object' || !info) return null;
+                    const isSelected = info.selected;
+                    return (
+                      <div
+                        key={stem}
+                        style={{
+                          background: isSelected ? '#064e3b35' : '#1e293b40',
+                          border: `1px solid ${isSelected ? '#059669' : '#334155'}`,
+                          borderRadius: '4px',
+                          padding: '8px 10px',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: '4px'
+                        }}
+                      >
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <span style={{ fontFamily: 'monospace', fontSize: '11px', fontWeight: 700, color: isSelected ? '#a7f3d0' : '#94a3b8' }}>
+                            {stem}.py
+                          </span>
+                          <span style={{
+                            fontSize: '9.5px',
+                            fontWeight: 700,
+                            padding: '1px 6px',
+                            borderRadius: '3px',
+                            background: isSelected ? '#059669' : '#475569',
+                            color: '#ffffff'
+                          }}>
+                            {isSelected ? 'EVALUATED' : 'PRUNED'}
+                          </span>
+                        </div>
+                        <div style={{ fontSize: '10px', color: isSelected ? '#6ee7b7' : '#64748b' }}>
+                          {info.reason || (isSelected ? 'Direct PR AST impact' : 'No code intersection')}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
 
             {/* Baseline vs Candidate Side-by-Side Table */}
             {sideBySide && (
