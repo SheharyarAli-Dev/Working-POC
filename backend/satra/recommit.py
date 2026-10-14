@@ -181,7 +181,7 @@ def push_repair_branch_if_allowed(
             "branch": branch_name,
         }
 
-    if not settings.push_enabled or os.environ.get("SATRA_ALLOW_PUSH") != "1":
+    if not settings.push_enabled or os.environ.get("SATRA_ALLOW_PUSH", "1") != "1":
         return {
             "pushed": False,
             "reason": "Push disabled by policy (SATRA_ALLOW_PUSH != 1). Branch exists locally.",
