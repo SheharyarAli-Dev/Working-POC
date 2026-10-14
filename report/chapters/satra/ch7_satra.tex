@@ -1,8 +1,47 @@
-% OWNER: Syed Sheharyar Ali
 \section{SATRA-RV Testing}
-\subsection{Test Cases}
-% Table: Test ID | Purpose | Input | Expected | Result
-\subsection{Test Results}
-\subsection{Edge and Failure Cases}
-\subsection{Defects and Corrective Actions}
+\label{sec:satra-testing}
+
+\subsection{Test Cases and Expected Outcomes}
+The selected tests verify bounded implementation behaviors. The names below are from \path{tests/test_satra*.py} and the SATRA workflow selection; they are not a claim that every possible vulnerability family or application framework is tested.
+
+\begin{longtable}{p{0.24\textwidth}p{0.48\textwidth}p{0.18\textwidth}}
+\toprule
+\textbf{Test area / representative test} & \textbf{Expected behavior} & \textbf{Recorded result}\\
+\midrule
+\endfirsthead
+\toprule
+\textbf{Test area / representative test} & \textbf{Expected behavior} & \textbf{Recorded result}\\
+\midrule
+\endhead
+Commit ingestion: \path{test_satra_ingest.py} & Accept valid refs from the allowlisted repository; reject malformed SHAs/refs and unapproved URLs; preserve add/delete/rename and merge-parent behavior. & SATRA CI passed\\
+Trusted manifest: \path{test_satra_trust_and_seed.py} & Detect modified, deleted, missing, or planted trusted files; preserve normalized line-ending fingerprints and refuse unsafe reseeding. & SATRA CI passed\\
+Localization and contract: \path{test_satra_localize.py}, \path{test_satra_rule_contract.py} & Localize security-relevant edits; keep unsupported or authority-free contract cases inconclusive. & SATRA CI passed\\
+Dictionary and counterfactual: \path{test_satra_dictionary.py}, \path{test_satra_counterfactuals.py} & Check registered supported rules, synthesize the supported ownership mutation, and distinguish a weakened oracle from a genuine assertion kill. & SATRA CI passed\\
+Sandbox: \path{test_satra_sandbox.py} & Enforce network isolation, read-only root, temporary storage, and execution timeout in the container-backed checks. & 4 required checks ran without skips in SATRA CI\\
+Validator and gate: \path{test_satra_ollama_and_validator.py}, \path{test_satra_decision_and_repair.py} & Reject malformed, vacuous, weakened, or misaligned tests; classify errors separately from assertion failures; evaluate the gate and evidence bundle. & SATRA CI passed\\
+API and live path: \path{test_satra_live_pipeline.py} & Refuse untrusted host execution without an allowed backend and exercise the real pipeline through completion with non-simulated evidence. & SATRA CI passed\\
+Recommit/audit: \path{test_satra_recommit.py} & Require approval/policy checks, create unique local repair branches, and detect tampering of the append-only audit record. & SATRA CI passed\\
+\bottomrule
+\end{longtable}
+
+\subsection{CI Results and Provenance}
+The latest verified SATRA-specific workflow record used here is SATRA CI run \href{https://github.com/SheharyarAli-Dev/Working-POC/actions/runs/38260995764}{38260995764} on exact PR~\#5 head \texttt{554b6d51acca29f99c396c3040362015ee460262}. The workflow reported 84 SATRA tests passed and required the four Docker sandbox tests to be present and unskipped. Its Docker-enabled full-suite job recorded 1,432 passed, 26 skipped, zero failures, and zero errors. Skips included tests intentionally belonging to a separate frontend-render job and opt-in network cases; the result is not a claim that every project test ran in this job. The separate Core CI run \href{https://github.com/SheharyarAli-Dev/Working-POC/actions/runs/38260995652}{38260995652} passed the production frontend build and its 26 component-render checks. All 18 PR checks passed on the exact PR head before normal merge as \texttt{ffe8aa91}.
+
+The subsequent `origin/master` changes through report commit \texttt{b16b48409a9ddceecc76d49d6cceaf5846511432} add report material and workflow/report provenance; they do not modify SATRA implementation files. The counts above therefore remain provenance for the unchanged SATRA source snapshot at \texttt{554b6d5}, not a newly executed test run on the report commit. A new report workflow verifies the report artifact only and is not SATRA CI.
+
+An older SATRA source report documents 83 passed tests on commit \texttt{02953a4}; that earlier count is not used as the current integrated result. Historical totals are retained only when their source commit is named.
+
+\subsection{Failure Cases, Defects, and Limitations}
+The tests exercise invalid commit inputs, damaged trusted authority, missing contracts, weakened or vacuous assertions, mutation survival, execution errors, missing Docker, recommit branch collisions, and audit tampering. These establish behavior for their checked cases. They do not prove that every security defect will be found or every generated test will be sound.
+
+On the native Windows workstation, the recorded full-suite run had 1,400 passed, 36 failed, 10 skipped, and 12 setup errors. These failures and errors are not recast as successful tests. The local Docker engine and pinned Linux sandbox could not be started there; the sandbox evidence cited above comes from the Ubuntu CI run where Docker was built and required checks ran. The current implementation is bounded to the supported Python/InvoiceHub contracts, partial dictionary entries remain partial, and independent comparative research is not complete.
+
+No fresh SATRA-specific browser run was captured for this report pass. The retained shared Run Workflow scenarios exercised SABLE and reported SATRA as \texttt{INCONCLUSIVE} on Windows; these are evidence that the shared gate keeps uncertainty visible, not successful SATRA acceptance results. The dedicated SATRA page and recorded replay are described in Chapter~6, but are not substituted for a fresh live test result.
+
 \subsection{Current Validation Status}
+\begin{itemize}
+    \item \textbf{Verified by the exact-head CI record:} 84 focused SATRA tests passed; all four required Docker sandbox cases ran without skips; the Docker-enabled broad suite reported 1,432 passed, 26 skipped, zero failures, and zero errors.
+    \item \textbf{Verified by separate Core CI:} frontend production build and 26 component-render checks passed on exact PR head \texttt{554b6d5}.
+    \item \textbf{Verified by integrated pull-request checks:} all 18 checks succeeded on exact PR head \texttt{554b6d5}; this is a CI record, not a new local execution for this report edit.
+    \item \textbf{Not verified here:} a fresh browser-captured SATRA success case; broad language/framework coverage; all dictionary families at runnable depth; production-scale performance; a live cloud deployment; or comparative research advantage.
+\end{itemize}

@@ -1,3 +1,24 @@
-% OWNER: Syed Sheharyar Ali (Chapter 4 is shared; each member writes their module's FRs here)
+% SATRA requirements are restricted to behavior implemented in the merged source.
 \subsection{SATRA-RV Functional Requirements}
-% Numbered, testable FRs, e.g. FR-SATRA-01 ... with a one-line acceptance check each.
+\begin{longtable}{p{0.12\textwidth}p{0.45\textwidth}p{0.35\textwidth}}
+\toprule
+\textbf{ID} & \textbf{Requirement} & \textbf{Acceptance evidence in source/tests}\\
+\midrule
+\endfirsthead
+\toprule
+\textbf{ID} & \textbf{Requirement} & \textbf{Acceptance evidence in source/tests}\\
+\midrule
+\endhead
+FR-SATRA-01 & Compare a baseline and candidate and localize changed Python functions and security-relevant route, authorization, and query regions. & \path{backend/satra/ingest.py}, \path{diff_localizer.py}, \path{astscan.py}; \path{test_satra_ingest.py}, \path{test_satra_localize.py}.\\
+FR-SATRA-02 & Use trusted SRS/policy inputs and detect changes to the pinned trusted manifest before treating tests as authoritative. & \path{backend/satra/trust.py}, \path{backend/satra/trusted/}; \path{test_satra_trust_and_seed.py}.\\
+FR-SATRA-03 & Derive a supported security contract from trusted authority and abstain when the applicable contract or semantics are unsupported. & \path{backend/satra/security_contract.py}; \path{test_satra_rule_contract.py}, \path{test_satra_ollama_and_validator.py}.\\
+FR-SATRA-04 & Run trusted baseline/candidate checks and ordinary candidate tests; distinguish assertion failures from setup or infrastructure errors. & \path{backend/satra/analyzer.py}, \path{pytest_runner.py}, \path{test_validator.py}; \path{test_satra_live_pipeline.py}, \path{test_satra_ollama_and_validator.py}.\\
+FR-SATRA-05 & Challenge the security oracle with a supported counterfactual and reject weakened tests that accept the insecure behavior. & \path{backend/satra/counterfactuals.py}, \path{test_validator.py}; \path{test_satra_counterfactuals.py}, \path{test_satra_decision_and_repair.py}.\\
+FR-SATRA-06 & Limit the executable dictionary to its explicitly supported rules and expose partial rules as partial rather than full verification. & \path{backend/satra/dictionary.py}; \path{test_satra_dictionary.py}. Four entries have runnable trusted tests; five more are model/static-only.\\
+FR-SATRA-07 & Run untrusted test code in the available isolated backend, and refuse host execution of arbitrary candidate code when the Docker backend is unavailable unless the explicitly controlled fallback applies. & \path{backend/satra/pytest_runner.py}, \path{backend/satra/runner_entry.py}, \path{test_validator.py}; \path{test_satra_sandbox.py}, \path{test_satra_live_pipeline.py}.\\
+FR-SATRA-08 & Treat optional generated tests as candidates and validate them before accepting them as evidence; model output alone cannot determine a verdict. & \path{backend/satra/ollama_adapter.py}, \path{backend/satra/live_pipeline.py}, \path{backend/satra/test_validator.py}; \path{test_satra_ollama_and_validator.py}.\\
+FR-SATRA-09 & Produce an explicit accept, reject, or inconclusive module result from available contract, test, oracle, and execution evidence. & \path{backend/satra/decision_engine.py}, \path{analyzer.py}; \path{test_satra_decision_and_repair.py}, \path{test_satra_live_pipeline.py}.\\
+FR-SATRA-10 & Keep recommit approval explicit and record verified repair activity in the audit trail. & \path{backend/satra/recommit.py}, \path{audit_trail.py}; \path{test_satra_recommit.py}. A testable local recommit path does not demonstrate a production push.\\
+FR-SATRA-11 & Expose SATRA run progress and evidence through the local API and UI, including the changed diff, gate results, and proof details. & \path{backend/satra/api.py}; \path{frontend/src/components/SatraModule.tsx} and \path{frontend/src/components/satra/}; dedicated API/UI routes and SSE are distinct from the shared Run Workflow route.\\
+\bottomrule
+\end{longtable}
