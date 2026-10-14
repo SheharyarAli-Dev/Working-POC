@@ -18,6 +18,7 @@ export const RunWorkflowModule: React.FC = () => {
   const [moduleEvidence, setModuleEvidence] = useState<any[]>([]);
   const [events, setEvents] = useState<any[]>([]);
   const [loading, setLoading] = useState<boolean>(false);
+  const [selectedWorkflowStage, setSelectedWorkflowStage] = useState('snapshot');
 
   useEffect(() => {
     fetch('/api/scenarios')
@@ -49,6 +50,9 @@ export const RunWorkflowModule: React.FC = () => {
 
   const triggerRun = async () => {
     setLoading(true);
+    setCurrentRun(null);
+    setModuleEvidence([]);
+    setEvents([]);
     try {
       const res = await fetch('/api/runs', {
         method: 'POST',
@@ -91,13 +95,67 @@ export const RunWorkflowModule: React.FC = () => {
       } catch {
         clearInterval(interval);
       }
-    }, 1500);
+    }, 700);
   };
 
   const currentEvidence = moduleEvidence.filter((e) =>
     !e.stale && e.candidate_snapshot === currentRun?.candidate_snapshot
   );
+  const hasEvent = (kind: string) => events.some((event) => event.kind === kind);
+  const lastEvent = (kind: string) => [...events].reverse().find((event) => event.kind === kind);
+  const finalGateEvent = [...events].reverse().find((event) =>
+    event.kind === 'final_gate.changed' && event.data?.statuses
+  );
+  const workflowFinished = ['COMPLETE', 'ERROR', 'INTERRUPTED'].includes(currentRun?.lifecycle || '');
+  const moduleRunState = (module: string) => {
+    const started = events.some((event) => event.kind === 'module.started' && event.data?.module === module);
+    const result = lastEvent(`${module.toLowerCase()}.decision`);
+    if (currentRun?.applicable && !currentRun.applicable.includes(module)) return { state: 'complete', detail: 'Not applicable to this change' };
+    if (result) return { state: 'complete', detail: result.data?.status || 'Evidence recorded' };
+    if (started) return { state: 'active', detail: 'Analyzing current candidate snapshot' };
+    if (workflowFinished) return { state: 'waiting', detail: 'No analysis event recorded for this module' };
+    return { state: 'waiting', detail: 'Waiting for the shared router' };
+  };
+  const sableBaselineEvent = lastEvent('sable.baseline_loaded');
+  const sableCandidates = events.filter((event) => event.kind === 'sable.successor_candidate');
+  const sableProjectionEvent = lastEvent('sable.obligation_projected');
+  const sableDecisionEvent = lastEvent('sable.decision');
+  const snapshotEventForFlow = lastEvent('workspace.snapshot');
+  const snapshotFileNames = typeof snapshotEventForFlow?.data?.git_diff === 'string'
+    ? [...snapshotEventForFlow.data.git_diff.matchAll(/^diff --git a\/(.*?) b\//gm)].map((match) => match[1]).slice(0, 5)
+    : [];
+  const topSuccessors = [...sableCandidates].sort((a, b) => (b.data?.score || 0) - (a.data?.score || 0)).slice(0, 3);
+  const sableLiveSteps = [
+    { label: 'Verify trusted baseline', done: Boolean(sableBaselineEvent), skipped: false, detail: sableBaselineEvent ? `Obligation loaded for ${sableBaselineEvent.data?.principal || 'registered principal'}` : 'Waiting for SABLE baseline check' },
+    { label: 'Match protected resource', done: sableCandidates.length > 0 || Boolean(sableDecisionEvent), skipped: false, detail: sableCandidates.length ? `${sableCandidates.length} successor candidate(s) scored from Terraform evidence` : sableDecisionEvent ? (sableDecisionEvent.data?.status === 'UNKNOWN' ? 'No safe unique successor was established' : 'No candidate match was needed') : 'Waiting for normalized Terraform resources' },
+    { label: 'Project authorization', done: Boolean(sableProjectionEvent) || Boolean(sableDecisionEvent), skipped: Boolean(sableDecisionEvent) && !sableProjectionEvent, detail: sableProjectionEvent ? `${sableProjectionEvent.data?.known ? 'Known' : 'Unknown'} authorization result for ${sableProjectionEvent.data?.successor || 'selected successor'}` : sableDecisionEvent && !sableProjectionEvent ? 'Not reached: earlier evidence did not support projection' : 'Waiting for a selected successor' },
+    { label: 'Record SABLE decision', done: Boolean(sableDecisionEvent), skipped: false, detail: sableDecisionEvent ? `${sableDecisionEvent.data?.status} · ${sableDecisionEvent.data?.duration_ms ? `${Math.round(sableDecisionEvent.data.duration_ms)} ms` : 'result recorded'}` : 'Waiting for the analyzer result' },
+  ];
   const evidenceFor = (module: string) => [...currentEvidence].reverse().find((e) => e.analyzer === module);
+  const moduleStartedEvent = (module: string) => [...events].reverse().find((event) => event.kind === 'module.started' && event.data?.module === module);
+  const moduleDecisionEvent = (module: string) => lastEvent(`${module.toLowerCase()}.decision`);
+  const recentEvents = events.slice(-8).reverse();
+  const eventHeadline = (event: any) => {
+    if (event.kind === 'run.created') return 'Candidate accepted for analysis';
+    if (event.kind === 'workspace.snapshot') return 'Candidate frozen and fingerprinted';
+    if (event.kind === 'module.started') return `${event.data?.module || 'Module'} analysis started`;
+    if (event.kind === 'sable.baseline_loaded') return 'Trusted SABLE obligation loaded';
+    if (event.kind === 'sable.successor_candidate') return 'Terraform successor scored';
+    if (event.kind === 'sable.obligation_projected') return 'Authorization projected onto successor';
+    if (event.kind.endsWith('.decision')) return `${event.data?.module || event.kind.split('.')[0]} decision recorded`;
+    if (event.kind === 'final_gate.changed') return event.data?.statuses ? 'Shared final gate evaluated' : 'Candidate awaiting evidence';
+    return event.kind.replace(/[._]/g, ' ');
+  };
+  const eventDetail = (event: any) => {
+    if (event.kind === 'workspace.snapshot') return `${event.data?.files ?? '—'} files · ${String(event.data?.hash || '').slice(0, 16)}`;
+    if (event.kind === 'module.started') return `Input ${String(event.data?.input_hash || '').slice(0, 14)}`;
+    if (event.kind === 'sable.successor_candidate') return `${event.data?.address || 'candidate'} · score ${event.data?.score ?? '—'} · ${(event.data?.signals || []).length} signals`;
+    if (event.kind === 'sable.obligation_projected') return `${event.data?.known ? 'Known' : 'Unknown'} · ${event.data?.holds ? 'obligation holds' : 'obligation does not hold'}`;
+    if (event.kind.endsWith('.decision')) return `${event.data?.status || 'recorded'}${event.data?.duration_ms ? ` · ${Math.round(event.data.duration_ms)} ms` : ''}`;
+    if (event.kind === 'final_gate.changed') return event.data?.statuses ? `${event.data?.decision} · ${Object.entries(event.data.statuses).map(([m, status]) => `${m} ${status}`).join(' / ')}` : (event.data?.reasons || []).join('; ');
+    return event.data?.reason || event.data?.status || 'Persisted event';
+  };
+  const cavrEvidence = evidenceFor('CAVR');
   const sableEvidence = evidenceFor('SABLE');
   const sableStatus = sableEvidence?.status ?? 'PENDING';
   const sableStartEvent = [...events].reverse().find((event) =>
@@ -148,6 +206,46 @@ export const RunWorkflowModule: React.FC = () => {
         ? `Unknown: ${baselineVerification.reason || 'result is not known'}`
         : `Does not hold: ${baselineVerification.reason || 'registered authorization check failed'}`;
   const nodeCount = (graph: any) => Array.isArray(graph?.nodes) ? graph.nodes.length : null;
+  const liveObligation = sableBaselineEvent?.data || sableEvidence?.details?.obligation || {};
+  const liveProjection = sableProjectionEvent?.data || projection;
+  const visualSuccessor = liveProjection?.successor || sableDetails.successor || topSuccessors[0]?.data?.address || 'aws_s3_bucket.new_asset';
+  const gateStatuses = finalGateEvent?.data?.statuses || {};
+  const workflowStages = [
+    { id: 'snapshot', title: 'Snapshot', short: 'Freeze candidate', done: hasEvent('workspace.snapshot'), active: loading || Boolean(currentRun && !hasEvent('workspace.snapshot')), result: snapshotEventForFlow ? `${snapshotEventForFlow.data?.files ?? '—'} files · SHA-256 ${String(snapshotEventForFlow.data?.hash || '').slice(0, 18)}…` : loading ? 'Requesting a fresh snapshot' : 'Waiting for a run', evidence: snapshotFileNames.join(' · ') || 'Changed paths appear from the backend snapshot event' },
+    { id: 'cavr', title: 'CAVR', short: 'Code boundary', done: Boolean(moduleDecisionEvent('CAVR')), active: moduleRunState('CAVR').state === 'active', result: moduleStatus('CAVR'), evidence: 'Dependency and static code inspection. Sandbox execution is not run on this CAVR path.' },
+    { id: 'satra', title: 'SATRA', short: 'Test evidence', done: Boolean(moduleDecisionEvent('SATRA')), active: moduleRunState('SATRA').state === 'active', result: moduleStatus('SATRA'), evidence: events.some((event) => event.kind === 'satra.counterfactual_result') ? 'Counterfactual test result recorded in this run.' : 'Test and counterfactual evidence appears when emitted.' },
+    { id: 'sable', title: 'SABLE', short: 'Terraform + IAM', done: Boolean(sableDecisionEvent), active: moduleRunState('SABLE').state === 'active', result: sableEvidence ? sableEvidence.status : 'PENDING', evidence: liveProjection ? `${liveProjection.successor || 'Successor'} · ${liveProjection.known ? liveProjection.holds ? 'obligation holds' : 'obligation fails' : 'authorization unknown'}` : sableCandidates.length ? `${sableCandidates.length} successor hypothesis/hypotheses scored` : 'Baseline and resource matching pending' },
+    { id: 'binding', title: 'Bind', short: 'Check evidence', done: sableSnapshotIntegrityValid, active: Boolean(sableEvidence) && !sableSnapshotIntegrityValid, result: sableEvidence ? sableSnapshotIntegrityValid ? 'VERIFIED' : 'INVALID' : 'PENDING', evidence: `Snapshot ${sableEvidence?.candidate_snapshot === currentRun?.candidate_snapshot ? 'matches' : 'not yet matched'} · input hash ${sableInputHashMatches ? 'matches' : sableInputHashMatches === false ? 'mismatch' : 'pending'}` },
+    { id: 'gate', title: 'Decision', short: 'Shared gate', done: Boolean(finalGateEvent), active: workflowFinished && !finalGateEvent, result: finalGateEvent?.data?.decision || 'PENDING', evidence: currentRun?.reasons?.join(' · ') || 'The gate evaluates current module statuses and evidence bindings.' },
+  ];
+  const activeWorkflowStage = workflowStages.find((stage) => stage.id === selectedWorkflowStage) || workflowStages.find((stage) => stage.active) || workflowStages[0];
+  const satraTestEvents = events.filter((event) => event.kind === 'satra.test_result');
+  const cavrNodes = Array.isArray(evidenceFor('CAVR')?.details?.nodes) ? evidenceFor('CAVR')?.details?.nodes.slice(0, 4) : [];
+  const renderResourceGraph = (graph: any, title: string, candidate = false) => {
+    const nodes = Array.isArray(graph?.nodes) ? graph.nodes : [];
+    const edges = Array.isArray(graph?.edges) ? graph.edges : [];
+    const coords: Record<string, { x: number; y: number }> = {};
+    const bucketIndex = new Map<string, number>();
+    nodes.forEach((node: any, index: number) => {
+      const type = String(node.type || '');
+      const x = type.includes('role_policy') || type.includes('iam_policy') ? 205 : type.includes('role') ? 77 : type.includes('bucket') ? 333 : 77 + (index % 3) * 128;
+      const n = bucketIndex.get(type) || 0;
+      bucketIndex.set(type, n + 1);
+      coords[node.id] = { x, y: type.includes('bucket') && n > 0 ? 140 : 82 };
+    });
+    return <div className={`workflow-resource-graph ${candidate ? 'candidate' : 'baseline'}`}>
+      <div className="workflow-resource-graph-title"><strong>{title}</strong><span>{nodes.length ? `${nodes.length} Terraform resources` : 'Awaiting graph evidence'}</span></div>
+      {nodes.length ? <svg viewBox="0 0 410 190" role="img" aria-label={`${title} SABLE resource graph`}>
+        <defs><marker id={candidate ? 'graph-arrow-candidate' : 'graph-arrow-baseline'} viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#93aab4"/></marker></defs>
+        {edges.map((edge: any, index: number) => { const a = coords[edge.source], b = coords[edge.target]; return a && b ? <g key={`${edge.source}-${edge.target}-${index}`}><path d={`M ${a.x + (a.x < b.x ? 56 : -56)} ${a.y} L ${b.x + (a.x < b.x ? -56 : 56)} ${b.y}`} markerEnd={`url(#${candidate ? 'graph-arrow-candidate' : 'graph-arrow-baseline'})`} className="resource-edge"/><text x={(a.x+b.x)/2} y={(a.y+b.y)/2-5} textAnchor="middle">{edge.relation || 'references'}</text></g> : null; })}
+        {nodes.map((node: any) => { const point = coords[node.id]; const selected = candidate && (node.id === (liveProjection?.successor || sableDetails.successor)); const name = String(node.id).split('.').pop() || node.id; return <g key={node.id} className={selected ? 'selected-successor' : ''}>
+          <rect x={point.x-55} y={point.y-25} width="110" height="50" rx="9"/>
+          <text x={point.x} y={point.y-3} className="resource-node-name">{name.length > 19 ? `${name.slice(0,17)}…` : name}</text>
+          <text x={point.x} y={point.y+12} className="resource-node-type">{String(node.type).replace('aws_','').replaceAll('_',' ')}</text>
+        </g>; })}
+      </svg> : <div className="resource-graph-empty">Graph details aren’t available for this run.</div>}
+    </div>;
+  };
 
   return (
     <div className="workflow-module-container">
@@ -172,11 +270,124 @@ export const RunWorkflowModule: React.FC = () => {
             {scenarios.map((s) => <option key={s.id} value={s.id}>{s.title} ({s.id})</option>)}
           </select>
         </div>
-        <button className="run-scenario-btn" onClick={triggerRun} disabled={loading}>
-          {loading ? <RefreshCw className="spin" size={16} /> : <Play size={16} />}
-          <span>{loading ? 'Evaluating Boundaries...' : 'Execute Assurance Workflow'}</span>
+        <button className="run-scenario-btn" onClick={triggerRun} disabled={loading || Boolean(currentRun && !workflowFinished)}>
+          {loading || currentRun && !workflowFinished ? <RefreshCw className="spin" size={16} /> : <Play size={16} />}
+          <span>{loading ? 'Starting Workflow…' : currentRun && !workflowFinished ? 'Workflow Running…' : 'Execute Assurance Workflow'}</span>
         </button>
       </div>
+
+      <section className="workflow-live-panel" aria-label="Live workflow execution" aria-live="polite">
+        <div className="workflow-live-heading">
+          <div><span className={'workflow-live-dot' + (currentRun && !workflowFinished ? ' running' : '')} />
+            <strong>{loading ? 'OPENING RUN' : currentRun && !workflowFinished ? 'LIVE EXECUTION' : workflowFinished ? 'EXECUTION TRACE' : 'READY TO RUN'}</strong>
+            <span className="workflow-live-caption">{loading ? 'Requesting a fresh candidate snapshot…' : 'Stages update from persisted backend events'}</span>
+          </div>
+          <span className="workflow-live-meta">{loading ? 'Waiting for backend response' : `${events.length} event${events.length === 1 ? '' : 's'} · ${currentRun?.run_id || 'Run a scenario to begin'}`}</span>
+        </div>
+        <div className="workflow-stage-track" role="tablist" aria-label="Workflow stages">
+          {workflowStages.map((stage, index) => <React.Fragment key={stage.id}>
+            <button role="tab" aria-selected={selectedWorkflowStage === stage.id} className={`workflow-stage-tab${stage.done ? ' done' : ''}${stage.active ? ' active' : ''}${selectedWorkflowStage === stage.id ? ' selected' : ''}`} onClick={() => setSelectedWorkflowStage(stage.id)}>
+              <span className="workflow-stage-mark">{stage.done ? '✓' : index + 1}</span><strong>{stage.title}</strong><small>{stage.short}</small><em>{stage.result}</em>
+            </button>
+            {index < workflowStages.length - 1 && <span className={'workflow-stage-link' + (stage.done ? ' complete' : '') + (loading || currentRun && !workflowFinished ? ' flowing' : '')}><i/></span>}
+          </React.Fragment>)}
+        </div>
+        <div className="workflow-stage-detail">
+          <div className="stage-detail-label"><span>STAGE {workflowStages.findIndex((stage) => stage.id === activeWorkflowStage.id) + 1} / {workflowStages.length}</span><strong>{activeWorkflowStage.title}</strong><small>{activeWorkflowStage.short}</small></div>
+          <div className="stage-detail-live"><span className={activeWorkflowStage.done ? 'stage-light done' : activeWorkflowStage.active ? 'stage-light active' : 'stage-light'}/><strong>{activeWorkflowStage.active ? 'In progress' : activeWorkflowStage.done ? 'Recorded' : 'Waiting'}</strong><p>{activeWorkflowStage.evidence}</p></div>
+        </div>
+        <div className={'workflow-visual-board' + (loading || currentRun && !workflowFinished ? ' running' : '') + (workflowFinished ? ' finished' : '')}>
+          <div className={'visual-source' + (hasEvent('workspace.snapshot') ? ' complete' : '') + (loading ? ' loading' : '')}>
+            <div className="visual-file-stack"><i/><i/><i/><b>TF</b></div>
+            <strong>{loading ? 'Preparing' : 'Candidate'}</strong><small>{hasEvent('workspace.snapshot') ? `${lastEvent('workspace.snapshot').data?.files ?? '—'} files · fingerprinted` : loading ? 'Request sent to backend' : 'Workspace changes'}</small>
+          </div>
+          <div className="visual-bus"><i/><span>FROZEN INPUT</span><i/></div>
+          <div className="visual-lanes">
+            {['CAVR', 'SABLE', 'SATRA'].map((lane) => { const state = moduleRunState(lane); return <div className={`visual-lane ${lane.toLowerCase()} ${state.state}`} key={lane}>
+              <span className="visual-lane-icon">{lane === 'CAVR' ? '⌘' : lane === 'SABLE' ? '▤' : '⬡'}</span><span className="visual-lane-copy"><strong>{lane}</strong><small>{lane === 'CAVR' ? 'Code + dependencies' : lane === 'SABLE' ? 'Terraform + IAM' : 'Security tests'}</small><em>{lane === 'CAVR' ? 'Static path · no sandbox run' : lane === 'SABLE' ? 'Resource + access comparison' : 'Test evidence follows run events'}</em></span><span className="visual-lane-state">{state.state === 'complete' ? state.detail : state.state === 'active' ? 'Analyzing…' : 'Queued'}</span>
+            </div>; })}
+          </div>
+          <div className="visual-bus evidence-bus"><i/><span>BOUND EVIDENCE</span><i/></div>
+          <div className={`visual-gate ${finalGateEvent ? String(finalGateEvent.data?.decision || 'review').toLowerCase() : ''}`}><span className="visual-gate-shape">{finalGateEvent?.data?.decision === 'ACCEPT' ? '✓' : finalGateEvent?.data?.decision === 'BLOCK' ? '×' : '◇'}</span><strong>{finalGateEvent?.data?.decision || 'GATE'}</strong><small>{finalGateEvent ? 'Shared decision' : 'Awaiting evidence'}</small></div>
+          <div className={'visual-snapshot-strip' + (hasEvent('workspace.snapshot') ? ' captured' : '')}>
+            <div className="snapshot-strip-title"><strong>{loading && !snapshotEventForFlow ? 'CAPTURING CANDIDATE' : 'SNAPSHOT CONTENTS'}</strong><small>{snapshotEventForFlow ? `${snapshotEventForFlow.data?.files ?? '—'} files · SHA-256 ${String(snapshotEventForFlow.data?.hash || '').slice(0, 18)}…` : loading ? 'Waiting for backend fingerprint' : 'File list appears from the run snapshot'}</small></div>
+            <div className="snapshot-file-list">{snapshotFileNames.length ? snapshotFileNames.map((file) => <span className="snapshot-file-chip" key={file}><b>TF</b>{file}</span>) : <><span className="snapshot-file-placeholder"/><span className="snapshot-file-placeholder"/><span className="snapshot-file-placeholder"/></>}</div>
+            {loading && !snapshotEventForFlow && <i className="snapshot-scan-beam"/>}
+          </div>
+          <small className="visual-board-note">Live visualization · station states follow this run’s recorded events</small>
+        </div>
+        <div className="workflow-proof-modules">
+          <div className="workflow-module-scene cavr-scene"><div className="module-scene-head"><strong>CAVR · PACKAGE ASSURANCE</strong><span>{moduleStatus('CAVR')}</span></div><div className="package-chain">{cavrNodes.length ? cavrNodes.map((node: any, i: number) => <React.Fragment key={`${node.name}-${i}`}><div className="package-node"><b>{node.cache_hit ? '↻' : '⬡'}</b><strong>{node.name}</strong><small>{node.version}</small></div>{i < cavrNodes.length - 1 && <i className="package-link"/>}</React.Fragment>) : <div className="package-empty">Package evidence appears after CAVR completes.</div>}</div><small className="module-scene-foot">{lastEvent('cavr.cache_hit') ? `Verified cache hit · ${lastEvent('cavr.cache_hit').data?.package || 'package'}` : cavrEvidence ? 'Current snapshot package evidence recorded' : 'No current CAVR evidence'}</small></div>
+          <div className="workflow-module-scene satra-scene"><div className="module-scene-head"><strong>SATRA · TEST COMPARISON</strong><span>{moduleStatus('SATRA')}</span></div><div className="satra-test-grid">{(satraTestEvents.length ? satraTestEvents.slice(0,4) : ['trusted_baseline','trusted_candidate','ordinary_candidate','trusted_counterfactual'].map((label) => ({data:{label,available:null}}))).map((event: any) => {const d=event.data || {}; const state=d.available === false ? 'unavailable' : d.available ? d.exit_code === 0 ? 'passed' : 'failed' : 'pending'; return <div className={`satra-test-cell ${state}`} key={d.label}><span>{state === 'passed' ? '✓' : state === 'failed' ? '×' : state === 'unavailable' ? '–' : '·'}</span><strong>{String(d.label || '').replaceAll('_',' ')}</strong><small>{state === 'unavailable' ? 'Not run' : state === 'pending' ? 'Awaiting run' : state === 'passed' ? 'Passed' : 'Failed'}</small></div>;})}</div><small className="module-scene-foot">{satraTestEvents.find((event) => event.data?.available === false)?.data?.reason || (satraTestEvents.length ? 'Statuses from SATRA test_result events' : 'Test availability and results appear from SATRA events')}</small></div>
+        </div>
+        <div className="workflow-live-modules">
+          {['CAVR', 'SABLE', 'SATRA'].map((module) => {
+            const state = moduleRunState(module);
+            const description = module === 'CAVR' ? 'Dependency + code-boundary inspection' : module === 'SABLE' ? 'Terraform resource + IAM correspondence' : 'Isolated test comparison';
+            const executionNote = module === 'CAVR' ? 'Static path · sandbox not invoked' : module === 'SATRA' ? 'Sandbox evidence shown when emitted' : 'No cloud resources created';
+            return <div key={module} className={'workflow-live-module ' + state.state}>
+              <span className="workflow-live-module-icon">{state.state === 'complete' ? '✓' : state.state === 'active' ? <span className="workflow-live-spinner" /> : '·'}</span>
+              <span><strong>{module}</strong><small>{description}</small><small className="workflow-lane-state">{state.detail} · {executionNote}</small></span>
+            </div>;
+          })}
+        </div>
+        <div className="workflow-live-sable">
+          <div className="workflow-live-sable-title"><Network size={15}/><strong>SABLE · live reasoning from analyzer events</strong></div>
+          <div className="workflow-live-sable-steps">
+            {sableLiveSteps.map((step, index) => <div key={step.label} className={'workflow-live-sable-step' + (step.done ? step.skipped ? ' skipped' : ' done' : '') + (index === sableLiveSteps.findIndex((item) => !item.done) && currentRun && !workflowFinished ? ' active' : '')}>
+              <span>{step.done ? step.skipped ? '↷' : '✓' : index + 1}</span><strong>{step.label}</strong><small>{step.detail}</small>
+            </div>)}
+          </div>
+        </div>
+        <div className="workflow-live-deepdive">
+          <div className="workflow-live-deepdive-head">
+            <div><span>BOUNDARY REASONING · SABLE ENGINE</span><strong>Did the access boundary follow the asset?</strong></div>
+            <span className={'workflow-live-verdict ' + (sableDecisionEvent?.data?.status || sableStatus).toLowerCase()}>{sableDecisionEvent?.data?.status || sableStatus}</span>
+          </div>
+          <div className="workflow-graph-comparison"><div className="graph-comparison-heading"><strong>RESOURCE CORRESPONDENCE</strong><span>{visualSuccessor}</span></div><div className="workflow-graph-pair">{renderResourceGraph(baselineGraph, 'Trusted baseline')}{renderResourceGraph(candidateGraph, 'Candidate configuration', true)}</div><div className="graph-comparison-note">Nodes and reference edges are drawn from persisted SABLE evidence. Dashed green outline marks the selected successor.</div></div>
+          <div className="workflow-obligation-rail">
+            <div><small>REGISTERED PRINCIPAL</small><code>{liveObligation.principal || 'Waiting for baseline'}</code></div><b>→</b>
+            <div><small>PROTECTED ASSET</small><code>{liveObligation.protected_asset || 'Waiting for baseline'}</code></div><b>→</b>
+            <div><small>REQUIRED ACTIONS</small><code>{(liveObligation.actions || []).join(' · ') || 'Waiting for baseline'}</code></div>
+          </div>
+          <div className="workflow-live-proof-grid">
+            <div className="workflow-hypothesis-board">
+              <div className="workflow-proof-heading">SUCCESSOR HYPOTHESES <span>{sableCandidates.length} SCORED</span></div>
+              {topSuccessors.length ? topSuccessors.map((candidate) => {
+                const best = Math.max(...topSuccessors.map((item) => item.data?.score || 0), 1);
+                return <div className="workflow-hypothesis" key={candidate.data?.address}>
+                  <div><code>{candidate.data?.address}</code><b>{candidate.data?.score}</b></div>
+                  <span className="workflow-hypothesis-meter"><i style={{ width: `${Math.max(4, (candidate.data?.score || 0) / best * 100)}%` }}/></span>
+                  <small>{(candidate.data?.signals || []).slice(0, 4).map((signal: any) => signal.signal).join(' · ')}</small>
+                </div>;
+              }) : <div className="workflow-proof-wait">Candidate resources and correspondence signals will appear as SABLE evaluates them.</div>}
+            </div>
+            <div className="workflow-authorization-board">
+              <div className="workflow-proof-heading">AUTHORIZATION PROJECTION <span>{liveProjection ? liveProjection.holds ? 'OBLIGATION HOLDS' : liveProjection.known ? 'OBLIGATION FAILS' : 'UNKNOWN' : 'AWAITING MATCH'}</span></div>
+              {liveProjection ? <>
+                <div className="workflow-projected-target"><small>SELECTED SUCCESSOR</small><code>{liveProjection.successor || sableDetails.successor || 'Unresolved'}</code></div>
+                <div className="workflow-action-compare"><div><small>EXPECTED ACTIONS</small><code>{(liveProjection.expected_actions || []).join(' · ') || '—'}</code></div><div><small>OBSERVED ACTIONS</small><code>{(liveProjection.actual_actions || []).join(' · ') || '—'}</code></div></div>
+                <div className="workflow-projected-resource"><small>RESOURCE SCOPE</small><code>{liveProjection.expected_resource || 'Not established'}</code></div>
+              </> : <div className="workflow-proof-wait">SABLE projects permissions only after a unique, evidence-supported successor is found.</div>}
+            </div>
+          </div>
+          <div className="workflow-binding-rail">
+            <span className={sableEvidence?.integrity_valid ? 'valid' : ''}>EVIDENCE INTEGRITY <b>{sableEvidence ? sableEvidence.integrity_valid ? 'VALID' : 'FAILED' : 'PENDING'}</b></span>
+            <span className={sableEvidence?.candidate_snapshot === currentRun?.candidate_snapshot ? 'valid' : ''}>CANDIDATE SNAPSHOT <b>{sableEvidence ? sableEvidence.candidate_snapshot === currentRun?.candidate_snapshot ? 'MATCH' : 'MISMATCH' : 'PENDING'}</b></span>
+            <span className={sableInputHashMatches ? 'valid' : ''}>INPUT BINDING <b>{sableInputHashMatches === null ? 'PENDING' : sableInputHashMatches ? 'MATCH' : 'MISMATCH'}</b></span>
+            <code>{sableEvidence?.input_hash ? String(sableEvidence.input_hash).slice(0, 18) + '…' : 'Awaiting SABLE evidence envelope'}</code>
+          </div>
+        </div>
+        <details className="workflow-event-ledger">
+          <summary className="workflow-event-ledger-head"><strong>Run evidence timeline</strong><span>Open for backend event details</span><b>{events.length} EVENTS</b></summary>
+          <div className="workflow-event-ledger-grid">
+            {recentEvents.length ? recentEvents.map((event) => <div className="workflow-event-item" key={event.id}>
+              <span className="workflow-event-seq">EVT {String(event.id).padStart(3, '0')}</span><i/>
+              <div><strong>{eventHeadline(event)}</strong><small>{eventDetail(event)}</small></div>
+            </div>) : <div className="workflow-proof-wait">Run a scenario to see persisted event details.</div>}
+          </div>
+        </details>
+      </section>
 
       <div className={`workflow-decision-banner ${decision.toLowerCase()}`}>
         <div className="gate-icon-col">
@@ -194,6 +405,9 @@ export const RunWorkflowModule: React.FC = () => {
         </div>
       </div>
 
+      <details className="workflow-deep-evidence">
+        <summary>Technical evidence · module outcomes · Terraform input</summary>
+        <div className="workflow-deep-evidence-content">
       <div className="tri-boundary-grid">
         <div className="boundary-card">
           <div className="b-header">
@@ -278,6 +492,8 @@ export const RunWorkflowModule: React.FC = () => {
         </div>
         <div className="b-meta"><strong>Overall final gate:</strong> {decision} · {currentRun?.reasons?.join(' · ') || 'No final-gate reasons recorded'}</div>
       </section>
+        </div>
+      </details>
     </div>
   );
 };
