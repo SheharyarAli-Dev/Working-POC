@@ -12,7 +12,7 @@
 
 \DeclareOption*{\PassOptionsToClass{\CurrentOption}{book}}
 \ProcessOptions\relax
-\LoadClass[12pt, a4paper]{book}
+\LoadClass[12pt, a4paper, openany]{book}
 
 
 \RequirePackage{amssymb, amsmath, amsthm, amstext}
@@ -252,13 +252,12 @@
 
 
 	
+\pagenumbering{roman}
 \tableofcontents
 		\clearpage
 \listoffigures
 		\clearpage
 \listoftables
-\pagenumbering{arabic}
-\setcounter{page}{0}	
 
 
 	
