@@ -35,15 +35,18 @@ def test_ownership_regression(integration_runs):
     assert r.final_decision=='BLOCK' and e['status']=='REJECT'
     assert e['details']['executions']['trusted_candidate']['failed']>=2
 
-def test_cavr_repair_invalidates_satra_then_reverifies(integration_runs):
+def test_cross_module_lab_file_is_unresolved_and_not_repaired_in_m1(integration_runs):
+    # Plan step 14: the vendored lab file (LOCAL) has no M1 verdict, so CAVR is UNRESOLVED, never REJECTED, and no repair
+    # starts. Before step 14 the sandbox rejected it and the repair was applied; that path is M2 (m2_deep_analyzer.py).
     svc,runs=integration_runs;r=runs['cross_module'];events=svc.store.events(r.run_id)
-    assert r.final_decision=='ACCEPT',r.model_dump()
-    assert any(e['kind']=='repair.applied' for e in events)
-    assert any(e['kind']=='evidence.invalidated' and e['data']['module']=='SATRA' for e in events)
-    assert any(e['kind']=='module.rerun' and e['data']['module']=='SATRA' for e in events)
-    assert any(e['analyzer']=='CAVR' and e['status']=='REJECTED' and e['stale'] for e in svc.store.evidence(r.run_id))
-    assert current(svc,r,'CAVR')['status']=='VERIFIED'
-    assert current(svc,r,'SATRA')['candidate_snapshot']==r.candidate_snapshot
+    cavr=current(svc,r,'CAVR')
+    # The lab file also calls PdfReader outside apply_configuration, so pypdf's subprocess sink is reachable (escalated).
+    assert cavr['status']=='UNRESOLVED' and cavr['details']['pipeline']['rule']=='SINK_REACHABLE'
+    lab=next(e for e in cavr['details']['lock_entries'] if e['name']=='invoice-pdf-lab')
+    assert (lab['status'],lab['rule'])==('UNRESOLVED','LOCAL_ARTIFACT_UNVERIFIED')
+    assert r.final_decision=='REVIEW' and 'CAVR: UNRESOLVED' in r.reasons,r.model_dump()
+    assert not any(e['kind'] in ('repair.applied','cavr.repair_candidate_checked','cavr.counterfactual_started') for e in events)
+    assert not any(e['analyzer']=='CAVR' and e['status']=='REJECTED' for e in svc.store.evidence(r.run_id))
 
 def test_satra_repair_differential(integration_runs):
     svc,runs=integration_runs;r=runs['satra_weak'];svc.analyze(r.run_id,auto_repair=True);fresh=svc.store.run(r.run_id)
@@ -55,7 +58,8 @@ def test_gateway_and_knowledge_revocation(integration_runs):
     assert svc.dependency_event(r.run_id,'pip install pypdf==6.19.0')['allowed']
     assert not svc.dependency_event(r.run_id,'npm install unknown')['allowed']
     before=len(svc.store.evidence(r.run_id));result=svc.change_threats(record_id='TRIG-ENV',enabled=False)
-    assert result['cleared_cache_entries']>0
+    # Since plan step 14 CAVR keeps no rows in the orchestrator's old cache; the current CAVR evidence is invalidated instead.
+    assert result['invalidated_evidence']
     assert svc.current_run(r.run_id).final_decision=='REVIEW'
     svc.analyze(r.run_id);assert svc.store.run(r.run_id).final_decision=='REVIEW'
     assert current(svc,r,'CAVR')['status']=='UNRESOLVED'
