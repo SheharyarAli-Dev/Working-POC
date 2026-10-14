@@ -2,6 +2,7 @@ from pathlib import Path
 from types import SimpleNamespace
 import pytest
 from backend.cavr.analyzer import analyze as cavr
+from backend.cavr.m2_deep_analyzer import analyze as m2_deep_analysis
 from backend.cavr.trigger_discovery import scan
 from backend.cavr.runtime_monitor import normalize
 from backend.cavr.repair import rank_repairs
@@ -19,16 +20,18 @@ from backend.sable.fixtures.scenarios import SCENARIOS as SABLE_FIXTURES
 
 
 def test_cavr_safe_cache_and_advisory(service,scenario,tmp_path):
+    # Since plan step 14 the analyzer delegates to pipeline.verify_request; PyPI and OSV are the recorded ones (conftest.py).
     r,c=scenario();first=cavr(c,service.store,tmp_path/'first',lambda *a:None);second=cavr(c,service.store,tmp_path/'second',lambda *a:None)
-    assert first[0]=='VERIFIED';assert first[1]['nodes'][0]['metadata']['registry_digest_verified']
-    assert second[1]['nodes'][0]['cache_hit'] and second[1]['nodes'][0]['deep_analysis_ms']==0
-    assert first[1]['nodes'][0]['osv']['response_sha256']
+    assert first[0]=='VERIFIED',first[1]['reason'];assert first[1]['pipeline']['packages'][0]['evidence']['artifact']['rule']=='HASH_MATCH'
+    assert not first[1]['nodes'][0]['cache_hit'] and second[1]['nodes'][0]['cache_hit'] and second[0]=='VERIFIED'
+    assert all(a['response_sha256'] for a in second[1]['pipeline']['packages'][0]['evidence']['advisories'])
     assert OSV(tmp_path/'empty').query('nonexistent-example','1.0')['available'] is False
     service.change_threats(record_id='TRIG-ENV',enabled=False)
     new=ContextService(r.candidate_workspace,r.baseline_workspace,service.threats.snapshot());assert cavr(new,service.store,tmp_path/'disabled',lambda *a:None)[0]=='UNRESOLVED'
 
+# M2: the sandbox path. Since plan step 14 it is not on the orchestrator path; it is called directly here.
 def test_controlled_dormant_execution(service,scenario,tmp_path):
-    r,c=scenario('cavr_canary');status,details,_=cavr(c,service.store,tmp_path/'lab',lambda *a:None)
+    r,c=scenario('cavr_canary');status,details,_=m2_deep_analysis(c,service.store,tmp_path/'lab',lambda *a:None)
     node=next(n for n in details['nodes'] if n['name']=='invoice-pdf-lab')
     assert status=='REJECTED',node.get('runtime')
     normal,activated=node['runtime']['runs'];assert normal['exit_code']==activated['exit_code']==0

@@ -2803,3 +2803,113 @@ Run on 2026-10-11.
    Real: the trace holds the read of `canary.txt`, then the connect to the harness port, and the harness received the exact marker. Without a received marker, with another payload, without the read, or in the wrong order, there is no confirmation (`test_the_connection_alone_is_not_a_confirmed_flow`).
 3. **Was a wrong verdict ever given?**
    No. The lab file was REJECTED in both modes. What was missing under strace was one event, its violation and the causal confirmation; what was wrong on 3.12 was a crash instead of UNRESOLVED.
+
+## Step 14 — orchestrator analyzer delegates to the pipeline (2026-10-14)
+
+Plan commit 14. Decided by Maryam on 2026-10-14 (answers to the four questions left open on 2026-10-10): update the
+orchestrator tests that encode the old path; live PyPI/OSV in production with recorded data injected in tests; map
+`policy.json` `dependencies.allowed`; report the RESTRICTED branch, do not edit it. Commits `cc81d9d` (move) and `fe59fc0` (delegation).
+
+### Ch 6 Implementation
+
+| File | Function / name | What it does |
+|---|---|---|
+| `backend/cavr/m2_deep_analyzer.py` (new, = old `analyzer.py` + docstring) | `analyze` | The sandbox-based analysis, unchanged, marked M2. Called only by `tests/test_modules.py::test_controlled_dormant_execution`. |
+| `backend/cavr/analyzer.py` (rewritten, 234 lines) | `analyze(context, store, outdir, emit)` | Same signature and return shape. Runs `verify_request(["pip","install","-r","requirements.txt"], context.path, gate_policy(context.policy), ...)`, maps the verdict, catches every exception as UNRESOLVED. |
+| | `MODULE_STATUS` | VERIFIED→VERIFIED, REJECTED→REJECTED, BLOCK→REJECTED, UNRESOLVED→UNRESOLVED; any other value → UNRESOLVED. |
+| | `gate_policy(policy_json)` | `dependencies.allowed` (bare names only) → `approved_requirements`; `allow_network/process/secret: false` → `NETWORK_CONNECT/PROCESS_EXEC/SECRET_READ:none`; `purpose` → task description. Unusable → None → `POLICY_MISSING` (UNRESOLVED). |
+| | `rule_coverage(knowledge)` | Kept from the old analyzer: a disabled or narrowed seed behaviour/trigger rule → UNRESOLVED. |
+| | `_lock_entry`, `_covered` | Each lockfile entry: `COVERED_BY_VERDICT`, `LOCKED_NOT_VERIFIED`, `LOCAL_ARTIFACT_UNVERIFIED` (escalation M2), `UNSUPPORTED_ECOSYSTEM`, or `VERDICT_NOT_VERIFIED`. |
+| | `_storage(store)` | One `CavrStorage` on the orchestrator's own database file (`Store.path`), so the 8-field cache and verdict log are shared with the dashboard in production. |
+| | `TRANSPORT`, `LIVE_ADVISORIES`, `ADVISORY_CACHE_DIR`, `QUARANTINE_DIR` | The outside world; defaults are real PyPI and live OSV, directories under `<service root>/cavr/`. |
+| `tests/conftest.py` | `cavr_recorded_world` (session, autouse) | Points those settings at the real pypdf 6.19.0 wheel + recorded registry response and the recorded OSV answer. |
+| `backend/cavr/capability_contract.py` | docstring | `infer` is now used only by the M2 module. |
+
+Key algorithm: (1) capture and verify the candidate's requirements with the pipeline; (2) map its status;
+(3) a VERIFIED verdict must also cover every PyPI lock entry (requested or in a requested tree), the lock must have
+no LOCAL entry, and the seed rules must be intact, otherwise UNRESOLVED; (4) never upgrade a status, only downgrade.
+
+### Design decisions
+
+| Decision | Alternative | Why |
+|---|---|---|
+| BLOCK → module status REJECTED, `pipeline_status: "BLOCK"` kept | Return "BLOCK" | `final_gate.BLOCKING["CAVR"]` and `Service._module`'s `blocking` flag know only REJECTED; "BLOCK" would become REVIEW. Both are orchestrator files. |
+| Request = `pip install -r requirements.txt` of the whole candidate | Only the requirements edit against the baseline | The final gate accepts a whole snapshot; the old analyzer also verified every locked node. |
+| LOCAL lock entries → UNRESOLVED (escalated M2) | Keep the sandbox for them | Maryam: sandbox only as M2. The vendored file is not a PyPI artifact; M1 has no verdict for it. |
+| LOCAL entries kept out of `details.nodes` (in `lock_entries`) | List them in `nodes` | `Service._repair` looks for a node named `invoice-pdf-lab` and then runs the sandbox; without it that branch cannot start from this path. |
+| Map `policy.json` names without version specifiers | Require a separate `cavr-policy.json` | InvoiceHub has none (Maryam's choice); the `==` pin and lockfile rules still fix the version. A true `allow_*` flag grants nothing because it names no scope. |
+| Keep the seed rule-coverage check | Rely only on the pipeline | Disabling a rule weakens the scan; the pipeline's cache key covers sink rules only. |
+| Shared verdict cache in `Store.path` | A separate database | In production `CavrStorage()` and `Store(DATA)` already use the same `asent.sqlite3`. |
+| Move the old analyzer with `git mv` first, then rewrite | Delete it | Keeps the M2 sandbox analysis and its test; history stays readable. |
+
+### Requirements covered
+
+IDs from `RequirementsTab.tsx` (Maryam to confirm; no `FR-CAVR-NN` exists in the repository).
+
+| ID | What this covers | Acceptance check |
+|---|---|---|
+| FR-6 Fail-closed policy | Exception, unknown verdict, LOCAL entry, uncovered lock entry, missing policy → UNRESOLVED/REVIEW | `test_a_fault_or_an_unknown_verdict_is_unresolved` (5), `test_an_exception_in_the_analyzer_reaches_the_final_gate_as_review` |
+| FR-2 Requirement gate | Gate BLOCK reaches the final gate as BLOCK, no download | `test_each_pipeline_verdict_drives_the_final_gate[block-block]`, `test_a_gate_block_downloads_nothing` |
+| FR-1/3/4 C3 + C4 on the orchestrator path | Real hash, OSV, contract decide the run | `test_each_pipeline_verdict_drives_the_final_gate` (4) |
+| Cache (8-field key) | Second run is a hit; advisories re-checked | `test_the_second_analysis_is_a_cache_hit_that_rechecks_advisories` |
+
+### Ch 7 Test cases
+
+`tests/test_cavr_orchestrator.py`, 18 functions, 37 cases, run 2026-10-14: 37 passed. Before the new analyzer: 36 errors (no `TRANSPORT` setting).
+
+| Test ID | Purpose | Input | Expected | Result |
+|---|---|---|---|---|
+| `test_each_pipeline_verdict_drives_the_final_gate[verified-accept]` | VERIFIED → ACCEPT | `safe` | CAVR VERIFIED, SATRA ACCEPT, SABLE PRESERVED, ACCEPT, clean commit | pass |
+| `…[rejected-block]` | REJECTED → BLOCK | wheel served with one bit flipped | `HASH_MISMATCH`, CAVR REJECTED, blocking, BLOCK | pass |
+| `…[block-block]` | BLOCK → BLOCK | `requirements.txt` = `left-pad==1.0` | `NOT_ON_ALLOWLIST`, CAVR REJECTED, BLOCK | pass |
+| `…[unresolved-review]` | UNRESOLVED → REVIEW | every URL raises `TransportError` | CAVR UNRESOLVED, REVIEW | pass |
+| `test_a_gate_block_downloads_nothing` | No download on BLOCK | `left-pad==1.0` | 0 transport calls | pass |
+| `test_network_loss_is_unresolved_and_says_why` | Edge: no network | `NoNetwork` | UNRESOLVED, reason names it | pass |
+| `test_a_fault_or_an_unknown_verdict_is_unresolved` (5) | Failure: exception, None, "PASS", VERIFIED without / with malformed packages | stubbed `verify_request` | UNRESOLVED | pass |
+| `test_an_exception_in_the_analyzer_reaches_the_final_gate_as_review` | Failure through `Service.analyze` | stub raises | REVIEW, "CAVR: UNRESOLVED" | pass |
+| `test_an_emit_that_fails_is_unresolved_not_a_lost_verdict` | Failure: event store | emit raises `OSError` | UNRESOLVED | pass |
+| `test_a_local_artifact_has_no_m1_verdict_and_is_unresolved` | LOCAL next to VERIFIED pypdf | `vendor/helper.py` LOCAL entry | pipeline VERIFIED, CAVR UNRESOLVED, escalation M2, not in `nodes` | pass |
+| `test_the_lab_scenario_reaches_pypdf_outside_the_guard_and_is_escalated` | Real lab scenario | `cavr_canary` | pipeline UNRESOLVED `SINK_REACHABLE`; lab `LOCAL_ARTIFACT_UNVERIFIED` | pass |
+| `test_the_sandbox_is_not_reached_from_the_orchestrator_path` (2) | M2 stays out | `cavr_canary`, `auto_repair=True`, with / without tampered pypdf | 0 sandbox calls, no repair events; REVIEW / BLOCK | pass |
+| `test_a_locked_package_the_request_does_not_reach_is_unresolved` | Uncovered lock entry | extra PyPI lock entry | `LOCKED_NOT_VERIFIED`, UNRESOLVED | pass |
+| `test_disabled_seed_rule_makes_a_verified_verdict_unresolved` | Rule coverage | `TRIG-ENV` disabled | UNRESOLVED | pass |
+| `test_gate_policy_maps_dependencies_allowed_and_the_denied_flags` | Mapping | names, flags | canonical names; only JSON `false` denies | pass |
+| `test_a_policy_that_cannot_be_mapped_is_no_policy` (9) | Failure: bad shapes, specifier, non-text purpose | | None | pass |
+| `test_a_project_without_dependencies_allowed_is_unresolved` | No policy | `dependencies` removed | `POLICY_MISSING`, 0 transport calls | pass |
+| `test_the_second_analysis_is_a_cache_hit_that_rechecks_advisories` | 8-field cache | same context twice | 2nd hit, 8 key fields, advisories checked, `cavr.cache_hit` event | pass |
+| `test_the_evidence_keeps_the_fields_the_orchestrator_reads` | Shape for `Service.report` | `safe` | name/version/sha256/artifact | pass |
+| `test_the_status_map_is_the_one_documented` (4) | Map, no RESTRICTED | | as documented | pass |
+| `test_the_orchestrator_analyzer_does_not_import_the_sandbox` | M2 not imported | AST of `analyzer.py` | no sandbox / M2 / runtime-policy imports | pass |
+| `tests/test_integration.py::test_cross_module_lab_file_is_unresolved_and_not_repaired_in_m1` | Replaces `test_cavr_repair_invalidates_satra_then_reverifies` (approved) | `cross_module`, `auto_repair` | UNRESOLVED, REVIEW, no repair | pass |
+
+- Full suite before: 1448 passed, 11 skipped. After `cc81d9d`: 1448 passed, 11 skipped. After `fe59fc0`: 1485 passed, 11 skipped, 0 failed (run twice, the second time before the notes commit).
+- Mutation check (by hand, not kept): BLOCK mapped to "BLOCK" → 3 failed; lock-entry problems dropped → 2 failed.
+
+### Defects found and fixed
+
+- My first lab-scenario test expected pypdf VERIFIED. The pipeline correctly said UNRESOLVED `SINK_REACHABLE`: the vendored lab file calls `PdfReader` outside `apply_configuration`. The test was corrected, and a separate LOCAL test was added for a project where pypdf is VERIFIED.
+- LOCAL entries were missing from the reason when the pipeline verdict was not VERIFIED; they are now always listed.
+- Review: 0 cavr-reviewer passes, no verdict, 0 MINOR recorded.
+
+### Known limitations / deferred
+
+- **RESTRICTED branch, reported, not changed** (`backend/orchestrator/final_gate.py:16`, tested in `tests/test_shared.py:54-58`): CAVR-only logic in an orchestrator file. Neither analyzer has ever returned RESTRICTED, so it cannot be reached. Recommend that the orchestrator's owner delete it. -> orchestrator owner.
+- `Service._repair` (orchestrator) still imports and calls `run_counterfactual` / `verify_runtime`. It cannot start from this path (no LOCAL node in `nodes`; tested), but the code stays in `service.py`. -> orchestrator owner / M2.
+- The `cavr_canary` / `cross_module` demo no longer ends in REJECTED + repair + ACCEPT; it is REVIEW. The proof that the lab file sends the canary is M2 (`m2_deep_analyzer.py`).
+- Production orchestrator runs now call pypi.org and api.osv.dev; offline they are REVIEW (fail closed).
+- The pipeline's `analyzer_version` digests the sink rules only. `Service.change_threats` clears the old cache, not the verdict cache, so an added trigger or capability rule does not force a new analysis. Disabling a seed rule is caught by `rule_coverage`. -> M2.
+- A project without a lockfile is judged by the pipeline's own rules (`lockfile.present: false`), no longer "lock required".
+- `frontend/src/components/RunWorkflowModule.tsx` and `ThreatRepository.tsx` (not CAVR's) read `details.nodes`; nodes no longer carry `contract`, `static`, `runtime` or `threat_correlations`. Not checked in a browser.
+- `reports/scenario-validation.json` is rewritten by the test run; restored, not committed.
+
+### Tool disclosure (Ch 8.7)
+
+- **Generated by Claude Code:** the four questions, `analyzer.py`, `tests/test_cavr_orchestrator.py`, the conftest fixture, the test-expectation edits, these notes, three commits.
+- **Reviewed / decided by Maryam:** the four decisions above; the code has not yet been reviewed by her.
+- **Verified by:** the new tests run against the old analyzer (36 errors) and the new one (37 passed), the full suite at each commit, and two mutations.
+
+### Supervisor Q&A prep
+
+1. **Why does a gate BLOCK show as REJECTED in the orchestrator?** The final gate blocks CAVR only on REJECTED. Passing "BLOCK" would turn into REVIEW, which is weaker. The pipeline's own word is kept in `details.pipeline_status`.
+2. **Where did the sandbox go?** It is in `m2_deep_analyzer.py`, unchanged and still tested. The orchestrator analyzer does not import it, and a test with `auto_repair` and a REJECTED CAVR shows it is never called.
+3. **Can anything unknown still be ACCEPTed?** No. Only a VERIFIED pipeline verdict that covers every lock entry, with no LOCAL entry and with intact seed rules, is VERIFIED. Exceptions, unknown statuses and malformed verdicts are UNRESOLVED (5 cases tested).

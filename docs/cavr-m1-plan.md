@@ -418,6 +418,10 @@ the pipeline returns UNRESOLVED `ADVISORIES_UNAVAILABLE` for the same data. Dele
 `test_cavr_safe_cache_and_advisory` in `tests/test_modules.py`, which the plan says to ask about first. Options A-D are in
 `docs/report-notes/cavr-report-notes.md`, section "Step 14". Separately: that registry record is accepted for 30 days,
 so from 2026-10-25 the same test fails with the current code.
+**Decided 2026-10-14 by Maryam and done:** delegate; update the old-path tests in `tests/test_modules.py` and
+`tests/test_integration.py`; live PyPI/OSV in production, recorded data in tests (`tests/conftest.py`); policy from
+`policy.json` `dependencies.allowed`; the RESTRICTED branch in `final_gate.py` is reported, not edited. The registry-record
+expiry no longer applies to the orchestrator path (it does not read `advisories/registry-*.json`).
 
 Handled in the batch 12-13 review fix (2026-10-10): demo-condition runs are no longer logged or cached; `/simple/*`,
 `POST /api/cavr/cache` and `/api/cavr/dialog/*` removed; `GET /api/cavr/cache` lists the real verdict cache;
@@ -532,5 +536,5 @@ Found in the demo-polish review (2026-10-11, MINOR items, derived by reading) an
 - [x] 13 dashboard API (backend and `frontend/src/components/cavr/` committed 2026-10-10, `ca5a0e2`, batch review fix in the
       next commit; the chips, timeline and proof drawer in `frontend/src/components/CavrModule.tsx` done on 2026-10-11
       at Maryam's request, `384ec4f` and `f705496`, see "Demo polish"; not yet opened in a browser)
-- [ ] 14 orchestrator analyzer (not started; stopped 2026-10-10: delegating changes the outcome of
-      `tests/test_modules.py::test_cavr_safe_cache_and_advisory`, see "Open after step 13" and the Step 14 note)
+- [x] 14 orchestrator analyzer (committed 2026-10-14, `cc81d9d` move to `m2_deep_analyzer.py`, `fe59fc0` delegation;
+      decisions in the Step 14 note of 2026-10-14; not reviewed by cavr-reviewer)
