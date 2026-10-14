@@ -48,6 +48,10 @@ The shared-workflow scenarios were run against the then-current \texttt{origin/m
 \toprule
 \textbf{Scenario / run} & \textbf{CAVR} & \textbf{SATRA} & \textbf{SABLE evidence and result} & \textbf{Separate shared gate}\\
 \midrule
+\endfirsthead
+\toprule
+\textbf{Scenario / run} & \textbf{CAVR} & \textbf{SATRA} & \textbf{SABLE evidence and result} & \textbf{Separate shared gate}\\
+\midrule
 \endhead
 \path{sable_preserved} / \texttt{6c8f5e7554d0} & \texttt{VERIFIED} & \texttt{INCONCLUSIVE} & Baseline obligation: \texttt{aws\_iam\_role.app} retains \texttt{s3:GetObject}/\texttt{s3:PutObject} on protected invoice data; unique successor \path{module.storage.aws_s3_bucket.active_invoices}; projected obligation holds; SABLE \texttt{PRESERVED}. & \texttt{REVIEW}; SATRA \texttt{INCONCLUSIVE}.\\
 \path{sable_regressed} / \texttt{4387b88d8e38} & \texttt{VERIFIED} & \texttt{INCONCLUSIVE} & Same obligation; candidate policy points to \path{module.storage.aws_s3_bucket.archive_invoices}; projected obligation fails; SABLE \texttt{REGRESSED}. & \texttt{BLOCK}; SABLE \texttt{REGRESSED} and SATRA \texttt{INCONCLUSIVE}.\\
@@ -66,6 +70,10 @@ At branch head \texttt{753a55b} on \texttt{sable}, the shared Run Workflow was e
 \setlength{\tabcolsep}{2pt}
 \begin{longtable}{p{0.14\textwidth}p{0.15\textwidth}p{0.14\textwidth}p{0.27\textwidth}p{0.16\textwidth}}
 \caption{Earlier Shared-Workflow Rehearsals -- supporting table 2}\\
+\toprule
+\textbf{Scenario} & \textbf{Run ID} & \textbf{SABLE} & \textbf{Final gate} & \textbf{Evidence binding}\\
+\midrule
+\endfirsthead
 \toprule
 \textbf{Scenario} & \textbf{Run ID} & \textbf{SABLE} & \textbf{Final gate} & \textbf{Evidence binding}\\
 \midrule
@@ -90,6 +98,10 @@ The following historical results are from the dedicated SABLE page exercised on 
 \setlength{\tabcolsep}{5pt}
 \begin{longtable}{p{0.24\textwidth}p{0.20\textwidth}p{0.18\textwidth}p{0.22\textwidth}}
 \caption{Latest SABLE Module UI Demonstration -- supporting table 3}\\
+\toprule
+\textbf{Scenario} & \textbf{SABLE verdict} & \textbf{SABLE mapping} & \textbf{Evidence chain}\\
+\midrule
+\endfirsthead
 \toprule
 \textbf{Scenario} & \textbf{SABLE verdict} & \textbf{SABLE mapping} & \textbf{Evidence chain}\\
 \midrule
