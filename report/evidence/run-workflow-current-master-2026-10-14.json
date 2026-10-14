@@ -1,0 +1,462 @@
+{
+  "date": "2026-10-14",
+  "source_commit": "b16b48409a9ddceecc76d49d6cceaf5846511432",
+  "source_branch": "codex/run-workflow-proof-20261014 (based on origin/master)",
+  "execution": "Local FastAPI shared orchestrator; manual scenarios; isolated ASENT_DATA directory",
+  "browser_capture": null,
+  "runs": [
+    {
+      "scenario": "sable_preserved",
+      "run_id": "6c8f5e7554d0",
+      "lifecycle": "COMPLETE",
+      "source": "NORMAL SAFE CASE",
+      "modules": {
+        "CAVR": {
+          "status": "VERIFIED",
+          "integrity_valid": true,
+          "candidate_snapshot": "061e827a28e19f5ff48fccb1743c0f317eb6c95438b34cab5981585d1f77b1a6",
+          "input_hash": "311feb115a5f77b0d1b77994a7c3a50ad4a127c6a4294e5ef4116c14ccb5c318",
+          "input_hash_matches_start_event": true
+        },
+        "SATRA": {
+          "status": "INCONCLUSIVE",
+          "integrity_valid": true,
+          "candidate_snapshot": "061e827a28e19f5ff48fccb1743c0f317eb6c95438b34cab5981585d1f77b1a6",
+          "input_hash": "d87ee96cbeada2241f478dbc6caf1bb534c55c999fde09f091e1c6791571a4dd",
+          "input_hash_matches_start_event": true
+        },
+        "SABLE": {
+          "status": "PRESERVED",
+          "integrity_valid": true,
+          "candidate_snapshot": "061e827a28e19f5ff48fccb1743c0f317eb6c95438b34cab5981585d1f77b1a6",
+          "input_hash": "96eba5d3cda77cb146829ed830019289665227d911d5a704bdb81b97d496a0a8",
+          "input_hash_matches_start_event": true
+        }
+      },
+      "sable": {
+        "obligation": {
+          "principal": "aws_iam_role.app",
+          "protected_asset": "aws_s3_bucket.invoice_data",
+          "actions": [
+            "s3:GetObject",
+            "s3:PutObject"
+          ],
+          "authority": "trusted baseline + registered policy"
+        },
+        "baseline_verification": {
+          "known": true,
+          "holds": true,
+          "expected_actions": [
+            "s3:GetObject",
+            "s3:PutObject"
+          ],
+          "actual_actions": [
+            "s3:GetObject",
+            "s3:PutObject"
+          ],
+          "expected_resource": "${aws_s3_bucket.invoice_data.arn}/*",
+          "unexpected_resources": [],
+          "grants": [
+            {
+              "policy": "aws_iam_role_policy.invoice_access",
+              "actions": [
+                "s3:GetObject",
+                "s3:PutObject"
+              ],
+              "resources": [
+                "${aws_s3_bucket.invoice_data.arn}/*"
+              ],
+              "effect": "Allow"
+            }
+          ],
+          "reason": "Exact modeled least privilege holds"
+        },
+        "successor": "module.storage.aws_s3_bucket.active_invoices",
+        "projected_authorization": {
+          "known": true,
+          "holds": true,
+          "expected_actions": [
+            "s3:GetObject",
+            "s3:PutObject"
+          ],
+          "actual_actions": [
+            "s3:GetObject",
+            "s3:PutObject"
+          ],
+          "expected_resource": "${module.storage.aws_s3_bucket.active_invoices.arn}/*",
+          "unexpected_resources": [],
+          "grants": [
+            {
+              "policy": "aws_iam_role_policy.invoice_access",
+              "actions": [
+                "s3:GetObject",
+                "s3:PutObject"
+              ],
+              "resources": [
+                "${module.storage.aws_s3_bucket.active_invoices.arn}/*"
+              ],
+              "effect": "Allow"
+            }
+          ],
+          "reason": "Exact modeled least privilege holds"
+        },
+        "successor_candidates": [
+          {
+            "address": "module.storage.aws_s3_bucket.active_invoices",
+            "score": 28,
+            "signals": [
+              {
+                "signal": "resource type",
+                "weight": 1
+              },
+              {
+                "signal": "explicit moved block",
+                "weight": 10
+              },
+              {
+                "signal": "physical bucket identity",
+                "weight": 7
+              },
+              {
+                "signal": "stable Asset attribute",
+                "weight": 4
+              },
+              {
+                "signal": "lifecycle role",
+                "weight": 2
+              },
+              {
+                "signal": "same exported application reference",
+                "weight": 4
+              }
+            ],
+            "references": [
+              "aws_iam_role_policy.invoice_access"
+            ],
+            "module": "module.storage."
+          },
+          {
+            "address": "module.storage.aws_s3_bucket.archive_invoices",
+            "score": 5,
+            "signals": [
+              {
+                "signal": "resource type",
+                "weight": 1
+              },
+              {
+                "signal": "stable Asset attribute",
+                "weight": 4
+              }
+            ],
+            "references": [],
+            "module": "module.storage."
+          }
+        ],
+        "decision": "PRESERVED"
+      },
+      "shared_gate": {
+        "decision": "REVIEW",
+        "statuses": {
+          "CAVR": "VERIFIED",
+          "SATRA": "INCONCLUSIVE",
+          "SABLE": "PRESERVED"
+        },
+        "reasons": [
+          "SATRA: INCONCLUSIVE"
+        ]
+      }
+    },
+    {
+      "scenario": "sable_regressed",
+      "run_id": "4387b88d8e38",
+      "lifecycle": "COMPLETE",
+      "source": "CONTROLLED REPRODUCTION",
+      "modules": {
+        "CAVR": {
+          "status": "VERIFIED",
+          "integrity_valid": true,
+          "candidate_snapshot": "0221f7c23d207069ad1d52836b7e23f6a379c2a03fb399e973fbc423ff5d41c8",
+          "input_hash": "311feb115a5f77b0d1b77994a7c3a50ad4a127c6a4294e5ef4116c14ccb5c318",
+          "input_hash_matches_start_event": true
+        },
+        "SABLE": {
+          "status": "REGRESSED",
+          "integrity_valid": true,
+          "candidate_snapshot": "0221f7c23d207069ad1d52836b7e23f6a379c2a03fb399e973fbc423ff5d41c8",
+          "input_hash": "ca4a063e06ecde6cd5b58c84d08019fc81188e06d08413d9da88bfcd1fbddf5b",
+          "input_hash_matches_start_event": true
+        },
+        "SATRA": {
+          "status": "INCONCLUSIVE",
+          "integrity_valid": true,
+          "candidate_snapshot": "0221f7c23d207069ad1d52836b7e23f6a379c2a03fb399e973fbc423ff5d41c8",
+          "input_hash": "d87ee96cbeada2241f478dbc6caf1bb534c55c999fde09f091e1c6791571a4dd",
+          "input_hash_matches_start_event": true
+        }
+      },
+      "sable": {
+        "obligation": {
+          "principal": "aws_iam_role.app",
+          "protected_asset": "aws_s3_bucket.invoice_data",
+          "actions": [
+            "s3:GetObject",
+            "s3:PutObject"
+          ],
+          "authority": "trusted baseline + registered policy"
+        },
+        "baseline_verification": {
+          "known": true,
+          "holds": true,
+          "expected_actions": [
+            "s3:GetObject",
+            "s3:PutObject"
+          ],
+          "actual_actions": [
+            "s3:GetObject",
+            "s3:PutObject"
+          ],
+          "expected_resource": "${aws_s3_bucket.invoice_data.arn}/*",
+          "unexpected_resources": [],
+          "grants": [
+            {
+              "policy": "aws_iam_role_policy.invoice_access",
+              "actions": [
+                "s3:GetObject",
+                "s3:PutObject"
+              ],
+              "resources": [
+                "${aws_s3_bucket.invoice_data.arn}/*"
+              ],
+              "effect": "Allow"
+            }
+          ],
+          "reason": "Exact modeled least privilege holds"
+        },
+        "successor": "module.storage.aws_s3_bucket.active_invoices",
+        "projected_authorization": {
+          "known": true,
+          "holds": false,
+          "expected_actions": [
+            "s3:GetObject",
+            "s3:PutObject"
+          ],
+          "actual_actions": [
+            "s3:GetObject",
+            "s3:PutObject"
+          ],
+          "expected_resource": "${module.storage.aws_s3_bucket.active_invoices.arn}/*",
+          "unexpected_resources": [
+            "${module.storage.aws_s3_bucket.archive_invoices.arn}/*"
+          ],
+          "grants": [
+            {
+              "policy": "aws_iam_role_policy.invoice_access",
+              "actions": [
+                "s3:GetObject",
+                "s3:PutObject"
+              ],
+              "resources": [
+                "${module.storage.aws_s3_bucket.archive_invoices.arn}/*"
+              ],
+              "effect": "Allow"
+            }
+          ],
+          "reason": "Missing, widened or misbound role-to-asset authorization"
+        },
+        "successor_candidates": [
+          {
+            "address": "module.storage.aws_s3_bucket.active_invoices",
+            "score": 28,
+            "signals": [
+              {
+                "signal": "resource type",
+                "weight": 1
+              },
+              {
+                "signal": "explicit moved block",
+                "weight": 10
+              },
+              {
+                "signal": "physical bucket identity",
+                "weight": 7
+              },
+              {
+                "signal": "stable Asset attribute",
+                "weight": 4
+              },
+              {
+                "signal": "lifecycle role",
+                "weight": 2
+              },
+              {
+                "signal": "same exported application reference",
+                "weight": 4
+              }
+            ],
+            "references": [],
+            "module": "module.storage."
+          },
+          {
+            "address": "module.storage.aws_s3_bucket.archive_invoices",
+            "score": 5,
+            "signals": [
+              {
+                "signal": "resource type",
+                "weight": 1
+              },
+              {
+                "signal": "stable Asset attribute",
+                "weight": 4
+              }
+            ],
+            "references": [
+              "aws_iam_role_policy.invoice_access"
+            ],
+            "module": "module.storage."
+          }
+        ],
+        "decision": "REGRESSED"
+      },
+      "shared_gate": {
+        "decision": "BLOCK",
+        "statuses": {
+          "CAVR": "VERIFIED",
+          "SATRA": "INCONCLUSIVE",
+          "SABLE": "REGRESSED"
+        },
+        "reasons": [
+          "SABLE: REGRESSED",
+          "SATRA: INCONCLUSIVE"
+        ]
+      }
+    },
+    {
+      "scenario": "sable_unknown",
+      "run_id": "87a4cf660cba",
+      "lifecycle": "COMPLETE",
+      "source": "CONTROLLED REPRODUCTION",
+      "modules": {
+        "SABLE": {
+          "status": "UNKNOWN",
+          "integrity_valid": true,
+          "candidate_snapshot": "97523c94fe6de4db1ee549eea13d904619c000818feb92d4a54737b9c1b2a197",
+          "input_hash": "407221f4fefaa773f22ff6c70d0e67152c4ceac0d3e369c5f6b96d67aa814846",
+          "input_hash_matches_start_event": true
+        },
+        "CAVR": {
+          "status": "VERIFIED",
+          "integrity_valid": true,
+          "candidate_snapshot": "97523c94fe6de4db1ee549eea13d904619c000818feb92d4a54737b9c1b2a197",
+          "input_hash": "311feb115a5f77b0d1b77994a7c3a50ad4a127c6a4294e5ef4116c14ccb5c318",
+          "input_hash_matches_start_event": true
+        },
+        "SATRA": {
+          "status": "INCONCLUSIVE",
+          "integrity_valid": true,
+          "candidate_snapshot": "97523c94fe6de4db1ee549eea13d904619c000818feb92d4a54737b9c1b2a197",
+          "input_hash": "d87ee96cbeada2241f478dbc6caf1bb534c55c999fde09f091e1c6791571a4dd",
+          "input_hash_matches_start_event": true
+        }
+      },
+      "sable": {
+        "obligation": {
+          "principal": "aws_iam_role.app",
+          "protected_asset": "aws_s3_bucket.invoice_data",
+          "actions": [
+            "s3:GetObject",
+            "s3:PutObject"
+          ],
+          "authority": "trusted baseline + registered policy"
+        },
+        "baseline_verification": {
+          "known": true,
+          "holds": true,
+          "expected_actions": [
+            "s3:GetObject",
+            "s3:PutObject"
+          ],
+          "actual_actions": [
+            "s3:GetObject",
+            "s3:PutObject"
+          ],
+          "expected_resource": "${aws_s3_bucket.invoice_data.arn}/*",
+          "unexpected_resources": [],
+          "grants": [
+            {
+              "policy": "aws_iam_role_policy.invoice_access",
+              "actions": [
+                "s3:GetObject",
+                "s3:PutObject"
+              ],
+              "resources": [
+                "${aws_s3_bucket.invoice_data.arn}/*"
+              ],
+              "effect": "Allow"
+            }
+          ],
+          "reason": "Exact modeled least privilege holds"
+        },
+        "successor": null,
+        "projected_authorization": null,
+        "successor_candidates": [
+          {
+            "address": "module.storage.aws_s3_bucket.active_invoices",
+            "score": 7,
+            "signals": [
+              {
+                "signal": "resource type",
+                "weight": 1
+              },
+              {
+                "signal": "stable Asset attribute",
+                "weight": 4
+              },
+              {
+                "signal": "lifecycle role",
+                "weight": 2
+              }
+            ],
+            "references": [
+              "aws_iam_role_policy.invoice_access"
+            ],
+            "module": "module.storage."
+          },
+          {
+            "address": "module.storage.aws_s3_bucket.archive_invoices",
+            "score": 7,
+            "signals": [
+              {
+                "signal": "resource type",
+                "weight": 1
+              },
+              {
+                "signal": "stable Asset attribute",
+                "weight": 4
+              },
+              {
+                "signal": "lifecycle role",
+                "weight": 2
+              }
+            ],
+            "references": [],
+            "module": "module.storage."
+          }
+        ],
+        "decision": "UNKNOWN"
+      },
+      "shared_gate": {
+        "decision": "REVIEW",
+        "statuses": {
+          "CAVR": "VERIFIED",
+          "SATRA": "INCONCLUSIVE",
+          "SABLE": "UNKNOWN"
+        },
+        "reasons": [
+          "SATRA: INCONCLUSIVE",
+          "SABLE: UNKNOWN"
+        ]
+      }
+    }
+  ],
+  "ui_commit": "f41629f (codex/run-workflow-proof-20261014; pushed to origin)"
+}
