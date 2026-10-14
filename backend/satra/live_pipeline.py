@@ -12,7 +12,7 @@ from backend.satra import ingest
 from backend.satra.diff_localizer import localize_change_set
 from backend.satra.security_contract import derive_contracts_for_regions
 from backend.satra.trust import verify_manifest
-from backend.satra.contract_runner import trusted_suite
+from backend.satra.contract_runner import trusted_suite, select_tests_for_regions
 from backend.satra.test_validator import (
     judge_counterfactual_oracles, run_tests_in_worktree, validate_generated_test,
 )
@@ -119,7 +119,7 @@ async def _ollama_stage(run_id, publish, settings, contracts, regions, handle, m
         await client.client.aclose()
 
 
-async def _repair_stage(run_id, publish, contracts, handle, attempt_budget):
+async def _repair_stage(run_id, publish, contracts, handle, attempt_budget, target_families=None):
     """Bounded deterministic repair. A patch is only reported if the sandbox re-verifies it."""
     if handle["root_commit"] or not any(c["source_of_authority"]["policy_rule_id"] for c in contracts):
         return None
@@ -135,7 +135,7 @@ async def _repair_stage(run_id, publish, contracts, handle, attempt_budget):
         if not changed:
             return None
         diff = _tree_diff(handle["candidate"], patched, changed)
-        reverify = await asyncio.to_thread(trusted_suite, patched, Path(tmp) / "out")
+        reverify = await asyncio.to_thread(trusted_suite, patched, Path(tmp) / "out", target_families)
         ok = bool(reverify.get("available") and reverify.get("exit_code") == 0)
         payload = {"label": "untrusted candidate", "target_file": changed[0], "patch_diff": diff,
                    "retry_attempt": 1, "max_retries": attempt_budget, "reverified_in_sandbox": ok,
@@ -181,15 +181,19 @@ async def run_live_pipeline(run_id, commit_sha, publish, store_evidence, store_p
                 "invariant": contracts[0]["invariant"],
                 "applicable_rules": sorted({c["source_of_authority"]["policy_rule_id"] for c in contracts})}})
 
+        # PR-Aware Semantic AST & Route-Slicing Regression Test Selection (RTS)
+        selected_stems, selection_map = select_tests_for_regions(regions)
+        publish(run_id, "test_selection_computed", {"test_selection": selection_map})
+
         publish(run_id, "box_glow", {"box": "env"})
         publish(run_id, "step_change", {"step": "sandbox", "name": "Differential Sandbox Verification",
-                                        "detail": "Trusted tests on baseline and candidate (network none, read-only)"})
+                                        "detail": "Targeted test execution via PR-aware AST slicing (network none, read-only)"})
         publish(run_id, "sandbox_lifecycle", {"lifecycle": "running"})
         out = Path(tempfile.mkdtemp(prefix="satra-out-"))
         no_base = {"available": False, "reason": "root commit has no baseline"}
-        base_res = no_base if handle["root_commit"] else await asyncio.to_thread(trusted_suite, handle["baseline"], out / "base")
-        cand_res = await asyncio.to_thread(trusted_suite, handle["candidate"], out / "cand")
-        repeat_res = await asyncio.to_thread(trusted_suite, handle["candidate"], out / "repeat")
+        base_res = no_base if handle["root_commit"] else await asyncio.to_thread(trusted_suite, handle["baseline"], out / "base", selected_stems)
+        cand_res = await asyncio.to_thread(trusted_suite, handle["candidate"], out / "cand", selected_stems)
+        repeat_res = await asyncio.to_thread(trusted_suite, handle["candidate"], out / "repeat", selected_stems)
         for label, res in (("baseline", base_res), ("candidate", cand_res)):
             publish(run_id, "terminal_log", {"line": "[%s] %s" % (label.upper(), _suite_label(res))})
 
@@ -205,7 +209,8 @@ async def run_live_pipeline(run_id, commit_sha, publish, store_evidence, store_p
             "baseline": {"trusted_security_tests": _suite_label(base_res), "functional_suite": _suite_label(base_res),
                          "health_boot": "n/a", "oracle_mutation_score": "n/a"},
             "candidate": {"trusted_security_tests": _suite_label(cand_res), "functional_suite": _suite_label(cand_res),
-                          "health_boot": "n/a", "oracle_mutation_score": oracle["diagnosis"]}})
+                          "health_boot": "n/a", "oracle_mutation_score": oracle["diagnosis"]},
+            "test_selection": selection_map})
 
         adaptive = {"called": False, "accepted_tests": [], "candidates": []}
         if contracts:
@@ -250,7 +255,7 @@ async def run_live_pipeline(run_id, commit_sha, publish, store_evidence, store_p
         if decision != "ACCEPTED" and findings:
             publish(run_id, "step_change", {"step": "repair", "name": "Bounded Repair Synthesis",
                                             "detail": "Deterministic repair, re-verified in sandbox before display"})
-            repair = await _repair_stage(run_id, publish, contracts, handle, settings.repair_budget)
+            repair = await _repair_stage(run_id, publish, contracts, handle, settings.repair_budget, selected_stems)
             if repair and repair.get("reverified_in_sandbox"):
                 decision = "ACCEPTED"
                 reason = "Target security defect removed by bounded AST repair and re-verified cleanly in sandbox."
@@ -299,6 +304,7 @@ async def run_live_pipeline(run_id, commit_sha, publish, store_evidence, store_p
                   "ollama": {k: v for k, v in adaptive.items() if k != "accepted_tests"},
                   "repair": repair,
                   "recommit": recommit_data,
+                  "test_selection": selection_map,
                   "executions": {"baseline": base_res, "candidate": cand_res, "repeat": repeat_res}}
         store_evidence(run_id, record)
         store_proof(run_id, {"run_id": run_id, "docker_command": "asent-sandbox:local --network none --read-only --cap-drop ALL",
