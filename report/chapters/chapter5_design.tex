@@ -77,6 +77,15 @@ The editable diagrams.net source page 08 separates the registered obligation, ba
 \end{figure}
 \end{landscape}
 
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\textwidth]{figures/diagrams/cavr-domain.pdf}
+\caption{CAVR domain model: the records produced by \texttt{verify\_request} (\texttt{backend/cavr/pipeline.py}) and how they compose into a request verdict. Filled diamonds are composition; dashed arrows are dependencies.}
+\label{fig:cavr-domain-model}
+\end{figure}
+
+Figure~\ref{fig:cavr-domain-model} shows the data CAVR works with. A \emph{capture record} holds the requested requirements; the \emph{gate decision} evaluates it against the project policy and the lockfile. Each permitted requirement produces a \emph{package verdict} that is composed of the evidence of every stage: the dependency tree with the SHA-256 of every downloaded wheel, the capability contract inferred from the project's call sites, one advisory result per package of the tree, the scan results and the sink judgement. The \emph{cache key} is built from eight fields, two of which are the subtree digest and the contract digest, so any change to the artifact, its dependencies, the project's use of the package, the policy or the analyzer leads to a new analysis. Every stage result has the same shape (\texttt{result}, \texttt{rule}, \texttt{reason}), which is what lets the request verdict name the exact stage and rule that decided it. Each request verdict is written to the verdict log, and from the dashboard it is also recorded in the hash-chained evidence and its certificate.
+
 \section{Data Design}
 \begin{figure}[htbp]
 \centering
@@ -90,7 +99,32 @@ Figure~\ref{fig:asent-erd} shows the persistent data. The shared run store keeps
 The parser's normalized resource model carries Terraform address, type, attributes, module context, and graph references. Correspondence returns ranked hypotheses and conflict reasons. Authorization results contain known/holds values, expected and unexpected resources, missing actions, widening, misbinding, and outside-model evidence. The orchestrator evidence includes run identity, analyzer, candidate snapshot, input hash, status, stale state, and integrity result. The gate uses these fields to decide whether evidence is current and trustworthy.
 
 \section{Process / Behavior Design}
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\textwidth]{figures/diagrams/system-sequence.pdf}
+\caption{End-to-end sequence of an ASENT assurance run: API, orchestrator, parallel module analyzers, evidence store and shared final gate (\texttt{backend/orchestrator/service.py}).}
+\label{fig:asent-system-sequence}
+\end{figure}
+
+Figure~\ref{fig:asent-system-sequence} shows one assurance run across the whole system. \texttt{POST /api/runs} makes the orchestrator snapshot the candidate workspace and work out which modules apply; the API returns at once and the analysis continues in a background thread. For each applicable module, evidence whose inputs are byte-identical to earlier valid evidence is reused; otherwise the CAVR, SATRA-RV and SABLE analyzers run in parallel, and each result is stored as evidence bound to the candidate snapshot and the module's input hash, with every step recorded as a hash-chained event. The final gate then decides \texttt{ACCEPT}, \texttt{BLOCK} or \texttt{REVIEW}; on \texttt{ACCEPT} a clean workspace is reconstructed from a fresh Git clone plus the verified files, and on \texttt{BLOCK} or \texttt{REVIEW} an optional bounded repair is proposed and verified again by the modules. The dashboard follows the run through the stream, evidence and report endpoints.
+
 The sequence in Figure~\ref{fig:sable-current-process} is fail-closed at decision boundaries: a missing, empty, or unverified baseline cannot establish continuity; no unique supported successor means no projected safe result; unsupported policy meaning cannot prove the obligation; SABLE \texttt{NOT\_APPLICABLE} and stale, mismatched, or integrity-invalid evidence cannot establish acceptance. The shared gate requires \texttt{integrity\_valid} to be exactly true and checks candidate-snapshot and module-input-hash bindings. Tests exercise these conditions and map unknown or not-applicable SABLE evidence to final \texttt{REVIEW}.
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\textwidth]{figures/diagrams/sable-sequence.pdf}
+\caption{Sequence of a SABLE analysis (\texttt{backend/sable/analyzer.py}): rules, HCL parsing, baseline verification, successor correspondence and projected authorization.}
+\label{fig:sable-sequence}
+\end{figure}
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.85\textwidth]{figures/diagrams/sable-state.pdf}
+\caption{States of a SABLE analysis. Every path that cannot establish the obligation ends in \texttt{UNKNOWN}; all results are stored as evidence for the final gate.}
+\label{fig:sable-state}
+\end{figure}
+
+Figures~\ref{fig:sable-sequence} and~\ref{fig:sable-state} show the order in which SABLE establishes its result. The SABLE rules are loaded from the threat repository, and both Terraform trees are parsed. The registered obligation must first hold on the trusted baseline; only then are successor candidates of the protected asset ranked, and a successor is accepted only with a sufficient score and margin and an unambiguous principal. The obligation is then evaluated on that successor: \texttt{PRESERVED} when it is known to hold, \texttt{REGRESSED} when it is known to fail, and \texttt{UNKNOWN} whenever rules, baseline, correspondence or policy semantics are insufficient, so uncertainty is never reported as preserved.
 
 \begin{figure}[htbp]
 \centering
