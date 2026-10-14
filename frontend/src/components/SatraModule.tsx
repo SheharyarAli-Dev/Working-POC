@@ -285,8 +285,8 @@ export const SatraModule: React.FC = () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           scenario: scenarioKey,
-          owner: 'asent-sentinel',
-          repo: 'invoicehub-secure',
+          owner: 'SheharyarAli-Dev',
+          repo: 'Threat-Repository',
           branch: 'main',
           auto_repair: true,
           retry_attempt: retryAttempt,
@@ -656,7 +656,7 @@ export const SatraModule: React.FC = () => {
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
             <span className="satra-repo-chip">
               <Code2 size={14} color="#0284c7" />
-              <span>asent-sentinel / invoicehub-secure</span>
+              <span>SheharyarAli-Dev / Threat-Repository</span>
               <span className="satra-repo-branch">
                 <GitBranch size={11} style={{ display: 'inline', marginRight: 3 }} />
                 main
