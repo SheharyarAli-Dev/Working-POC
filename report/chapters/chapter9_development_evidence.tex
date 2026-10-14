@@ -43,7 +43,7 @@ The shared-workflow scenarios were run against the then-current \texttt{origin/m
 
 \small
 \setlength{\tabcolsep}{2pt}
-\begin{longtable}{p{0.15\textwidth}p{0.12\textwidth}p{0.15\textwidth}p{0.32\textwidth}p{0.21\textwidth}}
+\begin{longtable}{p{0.18\textwidth}p{0.11\textwidth}p{0.12\textwidth}p{0.32\textwidth}p{0.22\textwidth}}
 \caption{Current-source shared-workflow scenario evidence (2026-10-14) -- supporting table 1}\\
 \toprule
 \textbf{Scenario / run} & \textbf{CAVR} & \textbf{SATRA} & \textbf{SABLE evidence and result} & \textbf{Separate shared gate}\\
@@ -53,9 +53,9 @@ The shared-workflow scenarios were run against the then-current \texttt{origin/m
 \textbf{Scenario / run} & \textbf{CAVR} & \textbf{SATRA} & \textbf{SABLE evidence and result} & \textbf{Separate shared gate}\\
 \midrule
 \endhead
-\shortstack[l]{\texttt{sable\_preserved}\\\texttt{6c8f5e7554d0}} & \texttt{VERIFIED} & \texttt{INCONCLUSIVE} & The baseline role retains \texttt{s3:GetObject} and \texttt{s3:PutObject} on protected invoice data. The unique successor is \texttt{module.storage}/\texttt{active\_invoices}; the projected obligation holds. SABLE \texttt{PRESERVED}. & \texttt{REVIEW}; SATRA \texttt{INCONCLUSIVE}.\\
-\shortstack[l]{\texttt{sable\_regressed}\\\texttt{4387b88d8e38}} & \texttt{VERIFIED} & \texttt{INCONCLUSIVE} & The same baseline obligation is checked against \texttt{module.storage}/\texttt{archive\_invoices}. The projected authorization fails. SABLE \texttt{REGRESSED}. & \texttt{BLOCK}; SABLE \texttt{REGRESSED} and SATRA \texttt{INCONCLUSIVE}.\\
-\shortstack[l]{\texttt{sable\_unknown}\\\texttt{87a4cf660cba}} & \texttt{VERIFIED} & \texttt{INCONCLUSIVE} & The baseline obligation is recorded, but successor correspondence is ambiguous; there is no unique mapping or authorization projection. SABLE \texttt{UNKNOWN}. & \texttt{REVIEW}; SABLE \texttt{UNKNOWN} and SATRA \texttt{INCONCLUSIVE}.\\
+\shortstack[l]{\texttt{sable\_preserved}\\\texttt{6c8f5e7554d0}} & \texttt{VERIFIED} & \shortstack[l]{\texttt{INCON}\\\texttt{CLUSIVE}} & The baseline role retains \texttt{s3:GetObject} and \texttt{s3:PutObject} on protected invoice data. The unique successor is \texttt{module.storage}/\texttt{active\_invoices}; the projected obligation holds. SABLE \texttt{PRESERVED}. & \texttt{REVIEW}; SATRA \texttt{INCONCLUSIVE}.\\
+\shortstack[l]{\texttt{sable\_regressed}\\\texttt{4387b88d8e38}} & \texttt{VERIFIED} & \shortstack[l]{\texttt{INCON}\\\texttt{CLUSIVE}} & The same baseline obligation is checked against \texttt{module.storage}/\texttt{archive\_invoices}. The projected authorization fails. SABLE \texttt{REGRESSED}. & \texttt{BLOCK}; SABLE \texttt{REGRESSED} and SATRA \texttt{INCONCLUSIVE}.\\
+\shortstack[l]{\texttt{sable\_unknown}\\\texttt{87a4cf660cba}} & \texttt{VERIFIED} & \shortstack[l]{\texttt{INCON}\\\texttt{CLUSIVE}} & The baseline obligation is recorded, but successor correspondence is ambiguous; there is no unique mapping or authorization projection. SABLE \texttt{UNKNOWN}. & \texttt{REVIEW}; SABLE \texttt{UNKNOWN} and SATRA \texttt{INCONCLUSIVE}.\\
 \bottomrule
 \end{longtable}
 \normalsize
@@ -68,7 +68,7 @@ At branch head \texttt{753a55b} on \texttt{sable}, the shared Run Workflow was e
 
 \small
 \setlength{\tabcolsep}{2pt}
-\begin{longtable}{p{0.14\textwidth}p{0.15\textwidth}p{0.14\textwidth}p{0.27\textwidth}p{0.16\textwidth}}
+\begin{longtable}{p{0.18\textwidth}p{0.16\textwidth}p{0.15\textwidth}p{0.26\textwidth}p{0.20\textwidth}}
 \caption{Earlier Shared-Workflow Rehearsals -- supporting table 2}\\
 \toprule
 \textbf{Scenario} & \textbf{Run ID} & \textbf{SABLE} & \textbf{Final gate} & \textbf{Evidence binding}\\
@@ -78,9 +78,9 @@ At branch head \texttt{753a55b} on \texttt{sable}, the shared Run Workflow was e
 \textbf{Scenario} & \textbf{Run ID} & \textbf{SABLE} & \textbf{Final gate} & \textbf{Evidence binding}\\
 \midrule
 \endhead
-\path{sable_preserved} & \texttt{b107fd\allowbreak{}8f0f2f} & \texttt{PRESERVED} & \texttt{REVIEW}; SATRA \texttt{INCONCLUSIVE} & Integrity valid; snapshot and input hash match\\
-\path{sable_regressed} & \texttt{5c6fe1\allowbreak{}aa3a96} & \texttt{REGRESSED} & \texttt{BLOCK}; SABLE \texttt{REGRESSED}; SATRA \texttt{INCONCLUSIVE} & Integrity valid; snapshot and input hash match\\
-\path{sable_unknown} & \texttt{b6d358\allowbreak{}8ec006} & \texttt{UNKNOWN} & \texttt{REVIEW}; SABLE \texttt{UNKNOWN}; SATRA \texttt{INCONCLUSIVE} & Integrity valid; snapshot and input hash match\\
+\texttt{sable\_preserved} & \texttt{b107fd\allowbreak{}8f0f2f} & \texttt{PRESERVED} & \texttt{REVIEW}; SATRA \texttt{INCONCLUSIVE} & Integrity valid; snapshot and input hash match\\
+\texttt{sable\_regressed} & \texttt{5c6fe1\allowbreak{}aa3a96} & \texttt{REGRESSED} & \texttt{BLOCK}; SABLE \texttt{REGRESSED}; SATRA \texttt{INCONCLUSIVE} & Integrity valid; snapshot and input hash match\\
+\texttt{sable\_unknown} & \texttt{b6d358\allowbreak{}8ec006} & \texttt{UNKNOWN} & \texttt{REVIEW}; SABLE \texttt{UNKNOWN}; SATRA \texttt{INCONCLUSIVE} & Integrity valid; snapshot and input hash match\\
 \bottomrule
 \end{longtable}
 \normalsize
