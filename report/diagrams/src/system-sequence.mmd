@@ -1,0 +1,40 @@
+%%{init: {"theme":"base","themeVariables":{"fontFamily":"Helvetica","fontSize":"14px","primaryColor":"#ffffff","primaryBorderColor":"#222222","lineColor":"#333333","actorBkg":"#ffffff","actorBorder":"#222222","noteBkgColor":"#f5f5f5","noteBorderColor":"#999999"},"sequence":{"mirrorActors":false,"wrap":true,"width":150}}}%%
+sequenceDiagram
+  autonumber
+  actor U as Developer / AI agent
+  participant UI as React dashboard
+  participant API as FastAPI<br/>(main.py)
+  participant S as Service orchestrator<br/>(service.py)
+  participant CX as ContextService +<br/>WorkspaceManager
+  participant M as CAVR · SATRA · SABLE<br/>analyzers
+  participant ST as Store + EvidenceBus<br/>(SQLite, hash-chained events)
+  participant G as Final gate<br/>(final_gate.py)
+
+  U->>UI: start run (manual, watch or replay)
+  UI->>API: POST /api/runs
+  API->>S: create(scenario / source, SRS, plan, policy)
+  S->>CX: snapshot candidate workspace, baseline, applicable modules
+  S->>ST: save RunContext, emit run.created
+  API-->>UI: 202 Accepted (run id)
+  S->>S: analyze() in a background thread
+  loop each applicable module
+    alt inputs byte-identical to valid earlier evidence
+      S->>ST: reuse evidence (evidence.revalidated)
+    else inputs changed
+      par in parallel (ThreadPoolExecutor)
+        S->>M: analyze(context)
+        M-->>S: status, details, residual uncertainty
+      end
+      S->>ST: store Evidence (candidate snapshot, input hash, status, blocking flag)
+    end
+  end
+  S->>G: decide(applicable, evidence, snapshot, input hashes)
+  G-->>S: ACCEPT / BLOCK / REVIEW + reasons
+  S->>ST: emit final_gate.changed
+  alt ACCEPT
+    S->>CX: reconstruct clean workspace (fresh Git clone + verified files)
+  else BLOCK or REVIEW, auto-repair on
+    S->>M: bounded repair proposal, re-verified by the modules
+  end
+  UI->>API: GET /api/runs/{id}/stream, /evidence, /report
+  API-->>UI: live events, evidence, final decision, report
