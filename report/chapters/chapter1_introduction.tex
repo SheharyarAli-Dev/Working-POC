@@ -88,6 +88,10 @@ The CAVR and SABLE lists are what the mid-stage prototypes implement. The SATRA-
 \toprule
 \textbf{Module} & \textbf{In scope} & \textbf{Explicit boundary}\\
 \midrule
+\endfirsthead
+\toprule
+\textbf{Module} & \textbf{In scope} & \textbf{Explicit boundary}\\
+\midrule
 \endhead
 CAVR & Mid-stage prototype: capture of \texttt{pip install} commands and \path{requirements.txt} edits; requirement gate; download of the real PyPI wheel with a SHA-256 check; transitive tree; OSV advisory check; AST scan of wheel sources; capability contract from the project's call sites; verdict cache; pip wrapper; dashboard page with six real requests. & PyPI wheels only: no npm, no source distributions. No package is executed: sandbox execution, counterfactual activation, the causal graph, repair and re-verification are designed but not part of the mid stage. No detection-rate or false-positive result on a package corpus. Unknown or unsupported input ends \texttt{UNRESOLVED}.\\
 SATRA-RV & Mid-stage evidence in this report is limited to the SATRA test suite and integrated runs; shared-workflow examples remain \texttt{INCONCLUSIVE}. The design's broader vulnerability-family list, adaptive-test workflow and acceptance criteria are not claimed as completed or demonstrated here. & No dependency trust analysis and no infrastructure analysis; those are CAVR and SABLE. No hosted LLM API, model training or fine-tuning. No production execution and no live exploitation of third-party systems. No universal vulnerability coverage and no proof that an application is secure. Insufficient evidence ends \texttt{INCONCLUSIVE}.\\
@@ -104,6 +108,10 @@ The mid-stage CAVR scope is the first four phases of the CAVR flow in the integr
 \setlength{\tabcolsep}{3pt}
 \begin{longtable}{p{0.12\textwidth}p{0.21\textwidth}p{0.37\textwidth}p{0.20\textwidth}}
 \caption{Project Modules -- supporting table 2}\\
+\toprule
+\textbf{Module} & \textbf{Input} & \textbf{What it does} & \textbf{Outcome}\\
+\midrule
+\endfirsthead
 \toprule
 \textbf{Module} & \textbf{Input} & \textbf{What it does} & \textbf{Outcome}\\
 \midrule

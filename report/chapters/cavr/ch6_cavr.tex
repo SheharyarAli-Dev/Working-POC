@@ -17,6 +17,10 @@ The pipeline runs nine stages in a fixed order. Each stage adds its result to th
 \toprule
 \textbf{No.} & \textbf{Stage} & \textbf{Module} & \textbf{What it produces and when it stops the request}\\
 \midrule
+\endfirsthead
+\toprule
+\textbf{No.} & \textbf{Stage} & \textbf{Module} & \textbf{What it produces and when it stops the request}\\
+\midrule
 \endhead
 1 & C1 capture & \path{capture.py}, \path{manifest_parser.py} & The request as a structured record. Unsupported or unreadable input marks the record incomplete.\\
 2 & C2 requirement gate & \path{requirement_gate.py} & \texttt{PERMITTED}, \texttt{BLOCK} or \texttt{UNRESOLVED} from the policy, allowlist and lockfile. \texttt{BLOCK} stops here, before any download.\\
@@ -69,6 +73,10 @@ The files below were added or rewritten in this iteration. All are in \path{back
 \setlength{\tabcolsep}{3pt}
 \begin{longtable}{p{0.27\textwidth}p{0.07\textwidth}p{0.57\textwidth}}
 \caption{Implementation -- supporting table 2}\\
+\toprule
+\textbf{File} & \textbf{Lines} & \textbf{Classes, functions and what they do}\\
+\midrule
+\endfirsthead
 \toprule
 \textbf{File} & \textbf{Lines} & \textbf{Classes, functions and what they do}\\
 \midrule
@@ -226,6 +234,10 @@ Figure~\ref{fig:cavr-certificate-verified} shows the Assurance tab for another \
 \toprule
 \textbf{Decision} & \textbf{Alternative considered} & \textbf{Why}\\
 \midrule
+\endfirsthead
+\toprule
+\textbf{Decision} & \textbf{Alternative considered} & \textbf{Why}\\
+\midrule
 \endhead
 Unknown is \texttt{UNRESOLVED} at every stage. & Treat a missing value as zero or as clean. & A missing measurement is not a measurement of zero. A fail-open default would let a network error or an unread file end as \texttt{VERIFIED}.\\
 Explicit pip option tables. & Skip every token that starts with a dash, as the old wrapper did. & The old way read the value of \path{-i}, \path{-t} or \path{--index-url} as a package name.\\
@@ -279,6 +291,10 @@ The six cases below are the six chips of the CAVR page. Each was run through \te
 \setlength{\tabcolsep}{3pt}
 \begin{longtable}{p{0.04\textwidth}p{0.24\textwidth}p{0.36\textwidth}p{0.11\textwidth}p{0.14\textwidth}}
 \caption{Demonstration Evidence -- supporting table 4}\\
+\toprule
+\textbf{No.} & \textbf{Request} & \textbf{Verdict, stage and rule} & \textbf{Cache} & \textbf{Time (ms)}\\
+\midrule
+\endfirsthead
 \toprule
 \textbf{No.} & \textbf{Request} & \textbf{Verdict, stage and rule} & \textbf{Cache} & \textbf{Time (ms)}\\
 \midrule
@@ -433,6 +449,10 @@ The same requests were run through the pip wrapper in the same data directory:
 \toprule
 \textbf{Wrapper request} & \textbf{Verdict, stage and rule} & \textbf{Exit code}\\
 \midrule
+\endfirsthead
+\toprule
+\textbf{Wrapper request} & \textbf{Verdict, stage and rule} & \textbf{Exit code}\\
+\midrule
 \endhead
 \texttt{install pypdf==6.19.0} & \texttt{VERIFIED}, \texttt{verdict}, \texttt{ALL\_CHECKS\_PASSED}; cache \texttt{HIT} & 0\\
 \texttt{install pypdf==5.1.0} & \texttt{REJECTED}, \texttt{advisories}, \texttt{KNOWN\_VULNERABILITY} & 1\\
@@ -492,6 +512,10 @@ The last wrapper run is a real connection failure with no demo switch. For the v
 \toprule
 \textbf{Commit} & \textbf{What it contains}\\
 \midrule
+\endfirsthead
+\toprule
+\textbf{Commit} & \textbf{What it contains}\\
+\midrule
 \endhead
 \texttt{3be14db} & Refuse host execution of unpinned package source (sandbox runner).\\
 \texttt{73f7892} & C1: parse \texttt{pip install} commands into capture records.\\
@@ -527,6 +551,10 @@ The last wrapper run is a real connection failure with no demo switch. For the v
 \setlength{\tabcolsep}{3pt}
 \begin{longtable}{p{0.16\textwidth}p{0.12\textwidth}p{0.62\textwidth}}
 \caption{Demonstration Evidence -- supporting table 7}\\
+\toprule
+\textbf{Run} & \textbf{Commit} & \textbf{Result}\\
+\midrule
+\endfirsthead
 \toprule
 \textbf{Run} & \textbf{Commit} & \textbf{Result}\\
 \midrule

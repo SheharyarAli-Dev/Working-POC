@@ -157,6 +157,162 @@ Each row leads from a requirement of Chapter 4 to the code that implements it an
 \toprule
 \textbf{ID} & \textbf{Code file and functions} & \textbf{Test file and tests}\\
 \midrule
+\endfirsthead
+\toprule
+\textbf{ID} & \textbf{\shortstack[l]{Milestone/\\component}} & \textbf{\shortstack[l]{Acceptance\\condition}} & \textbf{\shortstack[l]{Test\\evidence}}\\
+\midrule
+FR-S1 & I2; HCL parser & Supported resources and local references normalize; unsupported expansion is surfaced. & \path{test_sable_real_hcl}; \path{test_sable_unsupported_terraform_stays_unknown}.\\
+FR-S2 & I3; baseline authorization & Registered obligation holds on baseline before continuity can be assessed. & \path{test_sable_real_hcl}; \path{test_sable_unverified_baseline_and_empty_baseline}.\\
+FR-S3 & I4; correspondence & Unique supported successor is selected; ambiguous or conflicting candidates abstain. & \path{test_sable_refactor_and_correspondence_cases}.\\
+FR-S4 & I4; authorization projection & Correct successor retains required S3 role/action/scope; wrong target and weakened action fail. & \path{test_sable_refactor_and_correspondence_cases}; \path{test_sable_real_hcl}.\\
+FR-S5 & I2/I3; bounded semantics & Unsupported semantics and unresolved role attachment remain unknown; known unrelated role binding can be ignored. & \path{test_sable_unsupported_iam_stays_unknown}; \path{test_sable_unresolved_role_binding_with_valid_policy_is_unknown}; evaluator-specific regression tests.\\
+FR-S6 & I1; evidence publication & SABLE evidence matches current candidate snapshot and input hash, with valid integrity. & \path{test_shared_sable_evidence_drives_final_gate}.\\
+FR-S7 & Shared final gate & Preserved accepts, regression blocks, unknown reviews for the SABLE-only integration cases. & Four parameter cases in \path{test_shared_sable_evidence_drives_final_gate}.\\
+FR-S8 & I1; evidence validation & Stale or untrusted evidence cannot establish acceptance. & \path{test_sable_final_gate_rejects_untrusted_evidence}.\\
+\bottomrule
+\end{longtable}
+\setlength{\tabcolsep}{6pt}
+
+The expected labels apply only to the named controlled fixtures and supported policy subset. They do not imply that arbitrary Terraform programs are fully interpreted.
+
+\section*{CAVR}
+\subsection*{CAVR requirement details}
+The functional requirements FR-C1 to FR-C12 are stated in Chapter 4 with their acceptance tests. This part gives the detail behind each one: what it takes in, what it does, every result it can return, and its limits. Rule names are the ones the code returns. C1 to C4 are the mid goals and P1 to P13 are the phases of the approved CAVR design.
+
+\paragraph{FR-C1: capture of a \texttt{pip install} command (goal C1, design phase P1).}
+\begin{sloppypar}
+\begin{description}
+    \item[Input] A command as a string or a token list. The launcher may be \texttt{pip}, \texttt{pip3}, \texttt{pip3.12}, a path to pip, \texttt{python -m pip}, \texttt{python3 -m pip} or \texttt{py -m pip}.
+    \item[Behaviour] \path{parse_pip_command} in \path{backend/cavr/capture.py} splits the command, finds the subcommand and separates options from requirements with explicit option tables. Only \texttt{install} is captured. A \texttt{-r} or \texttt{-c} file is read when it is inside the directory the command ran in; nested includes are resolved relative to the including file.
+    \item[Result] One capture record with \texttt{source}, \texttt{command}, \texttt{action}, \texttt{options}, \texttt{requirements}, \texttt{constraints}, \texttt{unsupported}, \texttt{errors}, \texttt{files} and \texttt{complete}. Each requirement has \texttt{name}, \path{canonical_name}, \texttt{specifier}, \texttt{version}, \texttt{pinned}, \texttt{extras}, \texttt{marker}, \texttt{hashes}, \texttt{raw} and \texttt{origin}.
+    \item[Not verified] A VCS requirement, a direct URL, a local path, an editable install, a custom index option, a source-build option and an unknown option each go to \texttt{unsupported}. A malformed requirement, a missing or unreadable file and a file that includes itself go to \texttt{errors}. Either makes \texttt{complete} false. Credentials inside a URL are replaced by \texttt{***}.
+    \item[Limits] A requirements file of at most 1\,000\,000 bytes, valid UTF-8, and at most 100 files per command.
+\end{description}
+\end{sloppypar}
+
+\paragraph{FR-C2: capture of a \texttt{requirements.txt} edit (goal C1, design phase P1).}
+\begin{sloppypar}
+\begin{description}
+    \item[Input] Two snapshots of the same file from \path{snapshot_requirements} in \path{backend/cavr/manifest_parser.py}. A snapshot holds the path, whether the file exists, the SHA-256 of its bytes and its content. A missing file is a valid snapshot.
+    \item[Behaviour] \path{capture_requirements_edit} keys each line by canonical name and marker and compares the two files. The actions are \texttt{ADDED}, \path{VERSION_CHANGED}, \texttt{MODIFIED} (extras or hashes differ) and \texttt{REMOVED}.
+    \item[Result] A capture record with source \path{requirements_edit}. \texttt{requirements} holds only the added and changed lines; \texttt{removed} holds the removed ones. The record also has \texttt{path}, \path{before_sha256}, \path{after_sha256}, \texttt{changed}, \texttt{changes} and \path{removed_options}.
+    \item[Not verified] An unparseable line, an include line, two differing lines for the same package and marker, and a new file that cannot be read are reported and make \texttt{complete} false. Completeness is judged on the whole new file, not only on the changed lines.
+\end{description}
+\end{sloppypar}
+
+\paragraph{FR-C3: requirement gate (goal C2, design phase P2).}
+\begin{sloppypar}
+\begin{description}
+    \item[Input] A capture record, the parsed project policy (\path{approved_requirements}, \path{denied_packages}) and an optional lockfile.
+    \item[Behaviour] \path{evaluate_requirement} in \path{backend/cavr/requirement_gate.py} applies the first rule that fits, in this order: \path{POLICY_MISSING}, \path{POLICY_INVALID}, \path{REQUIREMENT_INVALID}, \texttt{DENYLIST}, \path{NOT_PINNED}, \path{NOT_ON_ALLOWLIST}, \path{LOCKFILE_INVALID}, \path{NOT_IN_LOCKFILE}, and only then \texttt{ALLOWED}. A requirement is pinned when it has exactly one \texttt{==} clause. The gate parses the request again and recomputes completeness itself; it does not trust the flags of the record.
+    \item[Result] \texttt{BLOCK} for \texttt{DENYLIST}, \path{NOT_PINNED}, \path{NOT_ON_ALLOWLIST} and \path{NOT_IN_LOCKFILE}. \texttt{UNRESOLVED} for a missing or invalid policy, an invalid lockfile, an invalid request and an incomplete capture (\path{CAPTURE_INCOMPLETE}). \texttt{PERMITTED} with rule \texttt{ALLOWED} otherwise, or \path{NOTHING_TO_VERIFY} for an edit that only removes lines. For a whole record, any \texttt{BLOCK} wins, then incompleteness, then any \texttt{UNRESOLVED}.
+    \item[Evidence] \texttt{result}, \texttt{rule}, \texttt{reason}, \texttt{package}, \texttt{version}, \path{policy_version} (the SHA-256 of the policy's canonical JSON) and one decision per requirement.
+    \item[Effect] A \texttt{BLOCK} ends the request before any network call.
+\end{description}
+\end{sloppypar}
+
+\paragraph{FR-C4: artifact SHA-256 verification (goal C3, design phase P5).}
+\begin{sloppypar}
+\begin{description}
+    \item[Input] A package name, an exact version and a quarantine directory.
+    \item[Behaviour] \path{fetch_artifact} in \path{backend/cavr/pypi_client.py} reads the PyPI release JSON, selects the wheel the running interpreter would install, and checks the chosen entry before downloading: not yanked, hosted on \path{files.pythonhosted.org} over HTTPS, a 64-hex SHA-256 present. It streams the file into quarantine, reads it back from disk, hashes it and compares the digest with the registry's. Redirects are not followed.
+    \item[Result] \texttt{OK} with rule \path{HASH_MATCH}. \texttt{REJECTED} with rule \path{HASH_MISMATCH}; the file is kept as \path{<filename>.rejected}. \texttt{UNRESOLVED} with one of \path{REGISTRY_UNAVAILABLE}, \path{RELEASE_NOT_FOUND}, \path{REGISTRY_INVALID}, \path{REGISTRY_DIGEST_MISSING}, \path{URL_NOT_ALLOWED}, \texttt{YANKED}, \path{NO_WHEEL}, \path{NO_COMPATIBLE_WHEEL}, \path{TOO_LARGE}, \path{DOWNLOAD_FAILED} or \path{INVALID_REQUEST}.
+    \item[Evidence] The registry URL, the files the registry listed, the chosen filename and URL, the registry digest and size, the computed digest and size, and the path of the file in quarantine.
+    \item[Limits] A registry answer of at most 20~MiB, a wheel of at most 200~MiB and a deadline of 120~s.
+\end{description}
+\end{sloppypar}
+
+\paragraph{FR-C5: transitive tree and subtree digest (goal C3, design phase P5).}
+\begin{sloppypar}
+\begin{description}
+    \item[Input] The pinned root requirement, the project lockfile and the quarantine directory.
+    \item[Behaviour] \path{build_tree} in \path{backend/cavr/dep_tree.py} loads each node once, so a cycle ends. Loading a node is the download and hash check of FR-C4 followed by \path{read_wheel} in \path{backend/cavr/wheel_meta.py}, which checks the zip directory before reading any entry and then reads \texttt{METADATA}. Each \texttt{Requires-Dist} line is kept or excluded by its marker for the running interpreter, and each kept child must have exactly one lockfile version that satisfies the line.
+    \item[Result] \texttt{OK} with rule \path{TREE_BUILT} and the subtree digest: the SHA-256 of the root, the sorted nodes (name, version, SHA-256) and the sorted edges. \texttt{REJECTED} when any node is rejected, with that node's rule (\path{HASH_MISMATCH}, \path{UNSAFE_PATH} or \path{METADATA_MISMATCH}). \texttt{UNRESOLVED} with \path{CHILD_NOT_PINNED}, \path{CHILD_PIN_CONFLICT}, \path{LOCKFILE_INVALID}, \path{LOCKFILE_HASH_MISMATCH}, \path{PYTHON_INCOMPATIBLE}, \path{MARKER_INVALID}, \path{TREE_BUDGET}, a wheel-metadata rule (\path{ZIP_BUDGET}, \path{DUPLICATE_ENTRY}, \path{METADATA_MISSING}, \path{DIST_INFO_AMBIGUOUS}, \path{METADATA_INVALID}, \path{NOT_A_WHEEL}) or any unresolved rule of FR-C4.
+    \item[Limits] At most 200 nodes. Per wheel: at most 20\,000 entries, 500~MiB of declared uncompressed data, a compression ratio of 200 and 8~MiB for one metadata file.
+\end{description}
+\end{sloppypar}
+
+\paragraph{FR-C6: OSV advisories with version ranges (goal C3, design phase P5).}
+\begin{sloppypar}
+\begin{description}
+    \item[Input] A package name and version, the advisory cache directory, and whether to ask OSV live.
+    \item[Behaviour] \path{check_advisories} in \path{backend/cavr/advisories.py} asks OSV through the existing adapter and passes each advisory to \path{match_advisory}, which walks the events of each ecosystem range: \texttt{introduced} is inclusive, \texttt{fixed} is exclusive and \path{last_affected} is inclusive. The pipeline does this for every node of the tree on every run; the answer is never stored in the verdict cache.
+    \item[Result] \texttt{REJECTED} with rule \path{KNOWN_VULNERABILITY} when any advisory affects the version; the reason gives the count and the first three identifiers, and the result holds all of them. \texttt{OK} with rule \path{NO_KNOWN_VULNERABILITY}. \texttt{UNRESOLVED} with \path{ADVISORIES_UNAVAILABLE} (no OSV answer, or only PyPI's own advisory list), \path{ADVISORIES_STALE} (older than the age limit, or dated in the future), \path{ADVISORIES_INVALID}, \path{RANGE_UNSUPPORTED} (a range that cannot be evaluated) or \path{RANGE_DISAGREEMENT} (OSV returned an advisory that the local range check says does not affect the version).
+    \item[Limits] A stored OSV answer is used for at most 30 days.
+\end{description}
+\end{sloppypar}
+
+\paragraph{FR-C7: AST scan of wheel sources (goal C3, design phase P6, static part).}
+\begin{sloppypar}
+\begin{description}
+    \item[Input] The path of a verified wheel in quarantine.
+    \item[Behaviour] \path{scan_wheel} in \path{backend/cavr/ast_scan.py} parses every \texttt{.py} and \texttt{.pyw} entry with \texttt{ast} and applies the sink and trigger rules of the threat repository. A second pass resolves import aliases, so a sink called through an alias is found. Lines of a \texttt{.pth} file that start with \texttt{import} are scanned as code. Nothing from the wheel is imported or run.
+    \item[Result] \texttt{OK} with rule \path{SCAN_COMPLETE} and the lists of sinks (file, line, capability), triggers and dynamic-code calls. \texttt{UNRESOLVED} with \path{SCAN_BUDGET}, \path{SOURCE_NOT_PARSED}, \path{PTH_EXECUTES_CODE}, \path{COMPILED_CODE_NOT_SCANNED} (a native extension or a bytecode-only file) or \path{CODE_NOT_SCANNED}. Finding a sink does not change the scan result; sinks are judged in FR-C10.
+    \item[Limits] A source file of at most 5~MiB and 100~MiB of source per wheel.
+\end{description}
+\end{sloppypar}
+
+\paragraph{FR-C8: capability contract (goal C4, design phases P3 and P4).}
+\begin{sloppypar}
+\begin{description}
+    \item[Input] The import names of the wheel, read from its metadata and never from the distribution name; the project directory; the policy's \path{allowed_scopes} and \path{project_task_description}.
+    \item[Behaviour] \path{extract_project_context} in \path{backend/cavr/context_extractor.py} walks the project without following links, skips hidden directories, caches and virtual environments, and records each import and each use of an imported name as a call, a decorator or a reference. \path{infer_capability_contract} in \path{backend/cavr/capability_contract.py} selects the uses of the wheel's import names. A scope entry grants a capability, or denies it when the scope is \texttt{none}. A threat-repository capability rule applies when every word of its task is in the project task description. A capability is allowed when the policy grants it and no applying rule denies it; every other capability of the vocabulary is denied.
+    \item[Result] \texttt{OK} with rule \path{CONTRACT_INFERRED}, the imports, call sites, allowed and denied capabilities, conflicts, and a digest over the contract and the project sources. \texttt{UNRESOLVED} with \path{NO_CALL_SITE_AUTHORITY} (never imported, or imported and never used), \path{STAR_IMPORT}, \path{IMPORT_NAMES_UNKNOWN}, \path{CAPABILITY_POLICY_INVALID}, \path{PROJECT_NOT_READ}, or a context rule: \path{PROJECT_MISSING}, \path{SOURCE_NOT_READ}, \path{SOURCE_NOT_PARSED}, \path{PROJECT_BUDGET}.
+    \item[Limits] At most 5000 project files, 2~MiB per file and 50~MiB in total.
+\end{description}
+\end{sloppypar}
+
+\paragraph{FR-C9: eight-field verdict cache (goal C3, design phase P5).}
+\begin{sloppypar}
+\begin{description}
+    \item[Key] \texttt{ecosystem}, \texttt{name}, \texttt{version}, \path{artifact_sha256}, \path{subtree_digest}, \path{contract_digest}, \path{policy_version} and \path{analyzer_version}. \path{cache_key} in \path{backend/cavr/verdict_cache.py} refuses to build a key unless all eight are usable, writes the version in canonical form so that \texttt{1.0} and \texttt{1.0.0} are one key, and hashes the canonical JSON of the eight values.
+    \item[Behaviour] \path{store} accepts only a \texttt{VERIFIED} or \texttt{REJECTED} analysis of at most 2~MiB. \path{lookup} uses a row only when its integrity digest matches and its own eight columns give the key it is filed under. The integrity digest is a SHA-256 over the key, the eight fields, the status, the verdict JSON and the stored time.
+    \item[Result] \path{lookup} returns \texttt{HIT}, \texttt{MISS}, \path{KEY_INCOMPLETE}, \path{ROW_TAMPERED} or \path{CACHE_UNAVAILABLE}. \path{store} returns \texttt{STORED}, \path{NOT_CACHEABLE}, \path{KEY_INCOMPLETE} or \path{CACHE_UNAVAILABLE}. A cache error is a miss and never an exception.
+    \item[Scope] Only the scan and sink analysis is cached. The download, the tree, the contract and the advisory check run on every request.
+\end{description}
+\end{sloppypar}
+
+\paragraph{FR-C10: pipeline and verdict (all four goals).}
+\begin{sloppypar}
+\begin{description}
+    \item[Input] A \texttt{pip install} command, a requirements edit or a capture record; the project directory; the policy; the store.
+    \item[Behaviour] \path{verify_request} in \path{backend/cavr/pipeline.py} runs nine stages in order: capture, requirement gate, artifact, tree, contract, cache lookup, advisories, AST scan with sink judgement, verdict. \path{judge_sinks} in \path{backend/cavr/reachability.py} gives each sink one of \texttt{ALLOWED} (its capability is granted with scope \texttt{*}), \path{GUARD_DISABLED}, \texttt{UNREACHABLE} or \texttt{REACHABLE}.
+    \item[Result] \texttt{VERIFIED} with rule \path{ALL_CHECKS_PASSED}. \texttt{REJECTED} when the downloaded bytes do not match the registry, a wheel is unsafe, or OSV lists any package of the tree as affected. \texttt{UNRESOLVED} when anything is unknown, including a reachable sink the contract does not allow (\path{SINK_REACHABLE}, with the escalation text ``deep analysis required (M2)''), the same release asked for twice with different extras, hashes or markers (\path{DUPLICATE_REQUIREMENT}), and a fault inside a stage (\path{INTERNAL_ERROR}). \texttt{BLOCK} from the gate. With several requirements, \texttt{REJECTED} wins over \texttt{UNRESOLVED}, which wins over \texttt{VERIFIED}.
+    \item[Evidence] \texttt{status}, \texttt{stage}, \texttt{rule}, \texttt{reason}, \path{fast_gate_ms}, \path{cache_hit}, \texttt{escalated}, \texttt{escalation}, the request, the gate decision, one entry per package with the evidence of each stage, \path{policy_version}, \path{analyzer_version} and \texttt{logged}. One row per call goes to the verdict log.
+\end{description}
+\end{sloppypar}
+
+\paragraph{FR-C11: pip wrapper (goal C1, design phase P1).}
+\begin{sloppypar}
+\begin{description}
+    \item[Input] The pip arguments and the wrapper options \path{--cavr-project}, \path{--cavr-policy}, \path{--cavr-python}, \path{--cavr-json} and \path{--install}. The policy file is the one named by \path{--cavr-policy}, else by the environment variable \path{CAVR_POLICY}, else \path{cavr-policy.json} in the project.
+    \item[Behaviour] \path{main} in \path{backend/cavr/pip_shim.py} calls \path{verify_request} on the pip command and prints the verdict with the evidence of each stage. With \path{--install} and a \texttt{VERIFIED} verdict, \path{install_plan} writes one hash-pinned line per node of the verified tree and pip is run once with the fixed options \path{--isolated}, \path{--require-hashes}, \path{--no-deps} and \path{--only-binary}. The user's own arguments are not passed to pip.
+    \item[Result] Exit code 0 for \texttt{VERIFIED}, 1 for \texttt{REJECTED}, 2 for \texttt{UNRESOLVED} and for a usage error, 3 for \texttt{BLOCK}, and 4 when an install was asked for after \texttt{VERIFIED} and pip did not succeed. A missing policy file is \texttt{UNRESOLVED} and nothing is downloaded.
+\end{description}
+\end{sloppypar}
+
+\paragraph{FR-C12: dashboard (all four goals; design phase P13 for the evidence chain).}
+\begin{sloppypar}
+\begin{description}
+    \item[Input] One of six request chips listed by \path{/api/cavr/scenarios}: \texttt{verified}, \path{verified_again}, \path{known_vulnerable}, \path{not_on_allowlist}, \path{tampered_wheel} and \path{network_off}.
+    \item[Behaviour] \path{run_verification} in \path{backend/cavr/api.py} runs \path{verify_request} for the sample project and publishes one event per stage that ran, with every value copied from the verdict. \path{stage_summary} builds the six-stage timeline: capture, gate, artifact, cache, analysis, verdict. The two demo conditions replace only the network transport; such a run gets no store and downloads into its own directory.
+    \item[Result] The proof of a run holds the verdict, the hash comparison and the stage summary. A stage that did not run has no value, and the page prints a dash for it. A demo-condition run is not logged, not cached and not counted. The metrics are the cache hit rate and the p50 and p95 of \path{fast_gate_ms} by verdict and by cache lookup, computed from the verdict log. Every event of a run is recorded in a hash chain that can be checked.
+\end{description}
+\end{sloppypar}
+
+\subsection*{CAVR traceability: requirement, code file, test}
+Each row leads from a requirement of Chapter 4 to the code that implements it and the tests that check it. The code files are in \path{backend/cavr/}. The tests are the acceptance tests named in Chapter 4, grouped by the file that defines them.
+
+\setlength{\tabcolsep}{3pt}
+\begin{longtable}{p{0.08\textwidth}p{0.30\textwidth}p{0.53\textwidth}}
+\caption{CAVR traceability: requirement, code file, test -- supporting table 2}\\
+\toprule
+\textbf{ID} & \textbf{Code file and functions} & \textbf{Test file and tests}\\
+\midrule
+\endfirsthead
+\toprule
+\textbf{ID} & \textbf{Code file and functions} & \textbf{Test file and tests}\\
+\midrule
 \endhead
 FR-C1 & \path{capture.py}: \path{parse_pip_command}, \path{parse_requirement} & \path{tests/test_cavr_capture.py}: \path{test_pip_install_with_two_pins}; \path{test_pip_launcher_forms}; \path{test_unsupported_forms_are_recorded_not_captured}.\\
 FR-C2 & \path{manifest_parser.py}: \path{snapshot_requirements}, \path{capture_requirements_edit} & \path{tests/test_cavr_manifest.py}: \path{test_added_requirement}; \path{test_version_changed}; \path{test_removed_requirement}; \path{test_unparseable_line_is_reported_and_is_not_a_package}.\\
@@ -180,6 +336,10 @@ The CAVR non-functional requirements are listed here with the check that covers 
 \setlength{\tabcolsep}{3pt}
 \begin{longtable}{p{0.10\textwidth}p{0.36\textwidth}p{0.45\textwidth}}
 \caption{CAVR non-functional requirements -- supporting table 3}\\
+\toprule
+\textbf{ID} & \textbf{Requirement} & \textbf{Check}\\
+\midrule
+\endfirsthead
 \toprule
 \textbf{ID} & \textbf{Requirement} & \textbf{Check}\\
 \midrule
@@ -212,6 +372,10 @@ The last table states which phases of the approved CAVR design the mid-stage fas
 \setlength{\tabcolsep}{3pt}
 \begin{longtable}{p{0.24\textwidth}p{0.18\textwidth}p{0.48\textwidth}}
 \caption{CAVR coverage of the approved design -- supporting table 4}\\
+\toprule
+\textbf{Design phase} & \textbf{Status at mid} & \textbf{What exists}\\
+\midrule
+\endfirsthead
 \toprule
 \textbf{Design phase} & \textbf{Status at mid} & \textbf{What exists}\\
 \midrule
