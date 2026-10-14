@@ -31,8 +31,8 @@ because the verdict also depends on the code around a call site (see
 `fast_gate.disabled_jbig2_sinks`): two project states with the same call sites and a different
 guard must not share a cached verdict.
 
-`infer(context, node)` at the end of the file is the older orchestrator contract; it is used
-by `analyzer.py` until plan step 14. Its call-site evidence is the orchestrator's
+`infer(context, node)` at the end of the file is the older orchestrator contract. Since plan
+step 14 it is used only by the M2 sandbox analysis, `m2_deep_analyzer.py`. Its call-site evidence is the orchestrator's
 `ContextService.dependency_context` plus `use_through_local_artifacts` (below), which follows
 the one hop that the orchestrator's reader does not: application -> vendored LOCAL artifact -> pypdf.
 """
