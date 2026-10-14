@@ -252,13 +252,12 @@
 
 
 	
+\pagenumbering{roman}
 \tableofcontents
 		\clearpage
 \listoffigures
 		\clearpage
 \listoftables
-\pagenumbering{arabic}
-\setcounter{page}{0}	
 
 
 	
