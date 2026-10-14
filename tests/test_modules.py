@@ -2,6 +2,7 @@ from pathlib import Path
 from types import SimpleNamespace
 import pytest
 from backend.cavr.analyzer import analyze as cavr
+from backend.cavr.m2_deep_analyzer import analyze as m2_deep_analysis
 from backend.cavr.trigger_discovery import scan
 from backend.cavr.runtime_monitor import normalize
 from backend.cavr.repair import rank_repairs
@@ -27,8 +28,9 @@ def test_cavr_safe_cache_and_advisory(service,scenario,tmp_path):
     service.change_threats(record_id='TRIG-ENV',enabled=False)
     new=ContextService(r.candidate_workspace,r.baseline_workspace,service.threats.snapshot());assert cavr(new,service.store,tmp_path/'disabled',lambda *a:None)[0]=='UNRESOLVED'
 
+# M2: the sandbox path. Since plan step 14 it is not on the orchestrator path; it is called directly here.
 def test_controlled_dormant_execution(service,scenario,tmp_path):
-    r,c=scenario('cavr_canary');status,details,_=cavr(c,service.store,tmp_path/'lab',lambda *a:None)
+    r,c=scenario('cavr_canary');status,details,_=m2_deep_analysis(c,service.store,tmp_path/'lab',lambda *a:None)
     node=next(n for n in details['nodes'] if n['name']=='invoice-pdf-lab')
     assert status=='REJECTED',node.get('runtime')
     normal,activated=node['runtime']['runs'];assert normal['exit_code']==activated['exit_code']==0
