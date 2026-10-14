@@ -19,6 +19,16 @@ jobs:
           root_file: main.tex
           latexmk_use_lualatex: false
           continue_on_error: false
+      - name: Preserve LaTeX diagnostics on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: FYP1-report-build-diagnostics
+          path: |
+            report/main.log
+            report/main.fdb_latexmk
+            report/main.fls
+          if-no-files-found: ignore
       - uses: actions/upload-artifact@v4
         with:
           name: FYP1-mid-report
