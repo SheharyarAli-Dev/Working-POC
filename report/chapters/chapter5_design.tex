@@ -1,62 +1,38 @@
 \chapter{System Design}
 \section{System Architecture}
-% Additive report artefact; preserves the existing SABLE process model and authored component text below.
-Figure~\ref{fig:asent-overall-architecture} summarizes the implemented application boundary and module/evidence flow. Figure~\ref{fig:sable-current-process} remains the detailed SABLE behavior view. The React frontend calls the FastAPI application; the shared route invokes the orchestrator, which runs applicable analyzers, stores their candidate-bound evidence, and asks the final gate to validate it. The dedicated module routes remain available alongside the shared workflow.
+The React frontend calls FastAPI routes. The shared service orchestrator freezes the candidate, routes applicable analyzers, stores their evidence and events, and asks the shared final gate to validate current bindings and compute the workflow result. Module-specific interfaces remain available in addition to the shared Run Workflow. Figure~\ref{fig:asent-overall-architecture} is page 02 of the editable diagrams.net source \texttt{ASENT\_All\_Diagrams.drawio}; its labels and flow correspond to the current local application.
 
-\begin{figure}[htbp]
+\begin{landscape}
+\begin{figure}[p]
 \centering
-\begin{tikzpicture}[
-  layer/.style={draw, rounded corners, align=center, text width=0.24\textwidth, minimum height=12mm, inner sep=3pt, font=\small},
-  module/.style={draw, rounded corners, align=center, text width=0.20\textwidth, minimum height=12mm, inner sep=2pt, font=\small},
-  flow/.style={-{Stealth}, thick},
-  transform shape
-]
-\node[layer] (ui) at (-4.2,0) {React frontend\\run forms and evidence views};
-\node[layer] (api) at (0,0) {FastAPI\\shared and module routes};
-\node[layer] (orch) at (4.2,0) {Orchestrator\\context, routing, run service};
-\node[module] (cavr) at (-3.7,-2.0) {CAVR\\dependency and capability checks};
-\node[module] (satra) at (0,-2.0) {SATRA-RV\\application-code checks};
-\node[module] (sable) at (3.7,-2.0) {SABLE\\Terraform and IAM/S3 checks};
-\node[layer, text width=0.30\textwidth] (evidence) at (0,-4.1) {Run/evidence storage\\module results and candidate/input bindings};
-\node[layer, text width=0.35\textwidth] (gate) at (0,-6.2) {Shared final gate\\checks freshness, bindings, integrity\\returns ACCEPT / REVIEW / BLOCK};
-\draw[flow] (ui) -- (api);
-\draw[flow] (api) -- (orch);
-\draw[flow] (orch.south) -- ++(0,-0.35) -| (cavr.north);
-\draw[flow] (orch.south) -- ++(0,-0.55) -| (satra.north);
-\draw[flow] (orch.south) -- (sable.north);
-\draw[flow] (cavr.south) -- (evidence.north west);
-\draw[flow] (satra.south) -- (evidence.north);
-\draw[flow] (sable.south) -- (evidence.north east);
-\draw[flow] (evidence) -- (gate);
-\end{tikzpicture}
-\caption{Implemented ASENT component and evidence flow. The three analyzers produce module-specific evidence; the shared gate validates applicable evidence and computes the workflow result. The diagram represents local application and CI behavior, not a hosted deployment.}
+\includegraphics[width=0.97\linewidth,height=0.84\textheight,keepaspectratio]{figures/asent/asent-architecture.png}
+\caption{Implemented ASENT architecture and evidence flow. Applicable analyzers publish module evidence through the local evidence bus/store; the shared final gate checks evidence bindings before returning an overall result. This is not a hosted deployment diagram.}
 \label{fig:asent-overall-architecture}
 \end{figure}
+\end{landscape}
 
-\begin{figure}[htbp]
+\section{Process and Shared Decision Design}
+The SABLE behavior in Figure~\ref{fig:sable-current-process} is page 07 of the editable diagrams.net source. Its decision order is grounded in \path{backend/sable/analyzer.py}, \path{backend/sable/correspondence.py}, and the authorization evaluators: verify the trusted baseline obligation, rank candidate successors, and evaluate the same principal/action/resource scope against the selected successor. If the baseline, correspondence, binding, or authorization semantics are insufficient, the result remains \texttt{UNKNOWN}.
+
+\begin{landscape}
+\begin{figure}[p]
 \centering
-\begin{tikzpicture}[
-  node distance=7mm,
-  stage/.style={draw, rounded corners, align=center, text width=0.78\textwidth, minimum height=8mm, inner sep=4pt},
-  flow/.style={->, >=stealth, thick}
-]
-\node[stage] (input) {Trusted baseline + registered obligation \quad | \quad Candidate Terraform/HCL snapshot};
-\node[stage, below=of input] (parse) {\texttt{hcl\_parser.py}: normalize resources, local modules, references, outputs, and moves};
-\node[stage, below=of parse] (verify) {Baseline authorization check \quad + \quad successor ranking from structural evidence};
-\node[stage, below=of verify] (project) {\texttt{authorization.py} / \texttt{policy\_semantics.py}: project principal, actions, and resource scope onto the selected successor};
-\node[stage, below=of project] (verdict) {SABLE result: \texttt{PRESERVED} \quad | \quad \texttt{REGRESSED} \quad | \quad \texttt{UNKNOWN}};
-\node[stage, below=of verdict] (evidence) {Shared orchestrator: publish evidence bound to candidate snapshot and SABLE input hash};
-\node[stage, below=of evidence] (gate) {Shared final gate: verify freshness, binding, and integrity; decide \texttt{ACCEPT}, \texttt{BLOCK}, or \texttt{REVIEW}};
-\draw[flow] (input) -- (parse);
-\draw[flow] (parse) -- (verify);
-\draw[flow] (verify) -- (project);
-\draw[flow] (project) -- (verdict);
-\draw[flow] (verdict) -- (evidence);
-\draw[flow] (evidence) -- (gate);
-\end{tikzpicture}
-\caption{Implemented SABLE analysis and shared evidence/final-gate path. Any other applicable module may also affect the workflow decision.}
+\includegraphics[width=0.97\linewidth,height=0.84\textheight,keepaspectratio]{figures/asent/sable-assurance-flow.png}
+\caption{SABLE baseline-first Terraform obligation verification from page 07 of the editable diagrams.net source. No Terraform apply or live AWS authorization query is part of this path.}
 \label{fig:sable-current-process}
 \end{figure}
+\end{landscape}
+
+The shared final gate is a separate operation from the module verdict. Figure~\ref{fig:asent-shared-final-gate} is page 09 of the same editable source and shows how applicable CAVR, SATRA-RV, and SABLE statuses are combined only after evidence integrity, candidate snapshot, and input hashes are checked. A preserved SABLE result alone therefore does not imply an overall \texttt{ACCEPT}.
+
+\begin{landscape}
+\begin{figure}[p]
+\centering
+\includegraphics[width=0.97\linewidth,height=0.84\textheight,keepaspectratio]{figures/asent/shared-final-gate.png}
+\caption{Shared final-gate outcomes from page 09 of the editable diagrams.net source. A trustworthy blocking status yields \texttt{BLOCK}; incomplete, stale, mismatched, invalid, or inconclusive evidence requires \texttt{REVIEW}; \texttt{ACCEPT} requires all applicable evidence to be acceptable.}
+\label{fig:asent-shared-final-gate}
+\end{figure}
+\end{landscape}
 
 \section{Architectural Components}
 \begin{longtable}{p{0.27\textwidth}p{0.65\textwidth}}
@@ -87,30 +63,16 @@ The implemented design retains B0--B4 analysis configurations for the planned co
 \section{Domain Model}
 The principal domain objects are the trusted baseline obligation (identifier, principal, protected asset, required actions and scope), normalized Terraform resources and references, successor hypotheses with evidence signals, authorization evaluation, candidate-bound module evidence, and the shared decision. The obligation under the acceptance tests is \texttt{S3-APPROLE-CUSTOMERDATA}.
 
-% Additive SABLE data model grounded in backend/sable and backend/orchestrator records.
-\begin{figure}[htbp]
+The editable diagrams.net source page 08 separates the registered obligation, baseline and candidate resource models, successor hypothesis, authorization projection, module result, bound evidence, and shared final decision. Figure~\ref{fig:sable-domain-model} uses that source page directly; correspondence and authorization are shown as distinct operations because the implementation first chooses a supported successor and then checks the obligation on it.
+
+\begin{landscape}
+\begin{figure}[p]
 \centering
-\begin{tikzpicture}[
-  entity/.style={draw, rounded corners, align=left, text width=0.31\textwidth, minimum height=15mm, inner sep=3pt, font=\small},
-  flow/.style={-{Stealth}, thick},
-  transform shape
-]
-\node[entity] (obligation) at (-3.4,0) {\textbf{Registered obligation}\\id, principal, protected asset\\actions, resource scope};
-\node[entity] (resource) at (3.4,0) {\textbf{Normalized resource}\\address, type, attributes\\module context, references};
-\node[entity] (hypothesis) at (-3.4,-2.7) {\textbf{Successor hypothesis}\\candidate address and score\\move, tags, lifecycle, reference signals};
-\node[entity] (authorization) at (3.4,-2.7) {\textbf{Authorization projection}\\principal attachment\\actions and resource scope\\known/holds and reasons};
-\node[entity] (evidence) at (-3.4,-5.4) {\textbf{SABLE evidence}\\run and status\\candidate snapshot + input hash\\integrity and stale state};
-\node[entity] (decision) at (3.4,-5.4) {\textbf{Shared decision}\\applicable module evidence\\ACCEPT / REVIEW / BLOCK};
-\draw[flow] (resource.south west) -- (hypothesis.north east);
-\draw[flow] (obligation) -- (hypothesis);
-\draw[flow] (hypothesis) -- (authorization);
-\draw[flow] (authorization) -- (evidence);
-\draw[flow] (evidence) -- (decision);
-\end{tikzpicture}
-\caption{SABLE domain objects and the shared decision link. Successor signals are drawn from the supported parser/correspondence model; evidence is bound to the analyzed candidate and module input before the gate can use it.}
+\includegraphics[width=0.97\linewidth,height=0.84\textheight,keepaspectratio]{figures/asent/sable-domain-model.png}
+\caption{SABLE domain model from page 08 of the editable diagrams.net source. Evidence is eligible for the shared decision only when it is current, candidate-bound, integrity-valid, and matched to the module input.}
 \label{fig:sable-domain-model}
 \end{figure}
-This model separates the registered security obligation from a Terraform address: correspondence proposes a candidate successor using observed structural signals, then authorization is evaluated against that successor. SABLE publishes its result with candidate and input bindings; the shared gate checks evidence integrity and can still return \texttt{REVIEW} or \texttt{BLOCK} because of SABLE or another applicable module.
+\end{landscape}
 
 \section{Data Design}
 The parser's normalized resource model carries Terraform address, type, attributes, module context, and graph references. Correspondence returns ranked hypotheses and conflict reasons. Authorization results contain known/holds values, expected and unexpected resources, missing actions, widening, misbinding, and outside-model evidence. The orchestrator evidence includes run identity, analyzer, candidate snapshot, input hash, status, stale state, and integrity result. The gate uses these fields to decide whether evidence is current and trustworthy.
