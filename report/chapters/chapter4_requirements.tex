@@ -7,15 +7,15 @@ This chapter states the project requirements that can be checked against the cur
 The reviewer supplies a baseline, a candidate Terraform snapshot, and the registered obligation; starts a SABLE run through the standalone or shared workflow; and inspects the verdict, reasons, and evidence. In the integrated workflow, the shared orchestrator stores SABLE evidence and reports the final gate decision.
 
 \section{Use Case Diagram}
-The figure is page 01, ``Use-case diagram ? implemented ASENT interfaces,'' from the editable diagrams.net source \texttt{ASENT\_All\_Diagrams.drawio}. It names user goals supported by the local interfaces and does not imply user accounts or cloud deployment.
-\begin{landscape}
-\begin{figure}[p]
+\begin{figure}[htbp]
 \centering
-\includegraphics[width=0.97\linewidth,height=0.84\textheight,keepaspectratio]{figures/asent/asent-use-cases.png}
-\caption{Implemented ASENT use cases derived from the current local UI and API routes.}
-\label{fig:asent-use-cases}
+\includegraphics[width=\textwidth]{figures/diagrams/usecase.pdf}
+\caption{ASENT use cases. Actors are the developer, the AI coding agent and the reviewer; PyPI, OSV and the Git repository are external systems. The dashed use case is planned for M2.}
+\label{fig:asent-usecase}
 \end{figure}
-\end{landscape}
+
+Figure~\ref{fig:asent-usecase} shows who uses ASENT and for what; every use case corresponds to a route of the local API (\texttt{/api/runs}, \texttt{/api/cavr}, \texttt{/api/satra}, \texttt{/api/sable}, \texttt{/api/threat-repository}) or to the \texttt{cavr install} wrapper. The developer provides the project context, starts assurance runs and module runs; the AI coding agent starts runs through the watch/replay adapters and installs packages through the wrapper; the reviewer inspects decisions, evidence and certificates, approves SATRA repair recommits, audits SABLE runs and manages the shared threat knowledge. Starting a run \emph{includes} the applicable module analyses, and installing through the wrapper always \emph{includes} dependency verification, so no package is installed without a CAVR verdict. Deep sandbox analysis \emph{extends} dependency verification and is planned for M2.
+
 The developer supplies supported analysis inputs and starts a run. A reviewer can inspect the module result, reasons, evidence, and (for the integrated route) the shared gate decision. The registered obligation is selected from the local SABLE interface; infrastructure is analyzed as supplied and is not applied to AWS.
 
 \section{Detailed Use Cases}

@@ -1,0 +1,39 @@
+%%{init: {"theme":"base","themeVariables":{"fontFamily":"Helvetica","fontSize":"14px","primaryColor":"#ffffff","primaryBorderColor":"#222222","lineColor":"#333333","actorBkg":"#ffffff","actorBorder":"#222222","noteBkgColor":"#f5f5f5","noteBorderColor":"#999999"},"sequence":{"mirrorActors":false,"wrap":true,"width":150}}}%%
+sequenceDiagram
+  autonumber
+  actor R as Developer / reviewer
+  participant API as SATRA API<br/>(satra/api.py)
+  participant P as Live pipeline<br/>(live_pipeline.py)
+  participant I as Ingest + localizer<br/>(ingest.py, diff_localizer.py)
+  participant C as Contract<br/>(trust.py, security_contract.py)
+  participant SB as Sandbox tests<br/>(contract_runner.py, Docker)
+  participant O as Counterfactual oracle<br/>(test_validator.py)
+  participant LLM as Ollama<br/>(optional)
+  participant D as DecisionEngine<br/>(7 gates)
+
+  R->>API: POST /runs (commit)
+  API->>P: run_live_pipeline(run, commit)
+  P->>I: fetch repository + commit, build change set
+  I-->>P: changed functions mapped to routes, guards, sinks
+  P->>C: verify trusted manifest, derive security contracts
+  C-->>P: contracts (subject, action, secure outcome, policy rule)
+  P->>SB: selected trusted tests on baseline, candidate, candidate again
+  SB-->>P: pass / fail counts
+  P->>O: mutate baseline (break the guard), run security tests
+  O-->>P: does the oracle catch the mutant?
+  opt contract exists
+    P->>LLM: generate one test for the contract
+    LLM-->>P: candidate test (untrusted)
+    P->>O: validate on baseline and mutant before use
+  end
+  P->>D: evaluate gates (manifest, regions, contract, baseline, oracle, repeat)
+  D-->>P: ACCEPT / BLOCK / REVIEW
+  opt not accepted and findings exist
+    P->>SB: bounded deterministic repair, re-verified in sandbox
+  end
+  P-->>API: ACCEPTED / REJECTED / INCONCLUSIVE + findings + evidence
+  opt ACCEPTED
+    API-->>R: recommit ready (branch + PR preview)
+    R->>API: POST /recommit/approve (explicit human approval)
+    API->>API: create repair branch, push if allowed, append audit trail
+  end

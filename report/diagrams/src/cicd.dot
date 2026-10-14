@@ -1,0 +1,55 @@
+digraph CICD {
+  rankdir=TB; newrank=true; nodesep=0.35; ranksep=0.5; compound=true;
+  graph [fontname="Helvetica", fontsize=13, style="rounded", color="#999999", bgcolor="white"];
+  node  [fontname="Helvetica", fontsize=11, shape=box, style="rounded", color="#222222", margin="0.12,0.06"];
+  edge  [color="#333333", arrowsize=0.7, fontname="Helvetica", fontsize=10];
+
+  subgraph cluster_dev { label="1 · Development";
+    commits [label="Small commits\n(Claude Code assisted,\nreviewed by the author)"];
+    mod     [label="Module branches\ncavr · satra-feature · sable"];
+    rbr     [label="report branch\n(LaTeX chapters)"];
+  }
+  subgraph cluster_ci { label="2 · CI  ·  ci.yml  (push to any branch, PR to master)";
+    lint [label=<<b>Lint</b><br/>compileall + Bandit (high)>];
+    mat  [label=<<b>Per-module tests</b> (matrix)<br/>CAVR · SABLE · Shared + Threat repo<br/>no-container sandbox mode>];
+    full [label=<<b>Full suite</b><br/>(integration), Python 3.12>];
+    fe   [label=<<b>Frontend</b><br/>build + render tests>];
+    junit[label="JUnit reports\n+ dashboard dist (artifacts)"];
+  }
+  subgraph cluster_mod { label="Module workflows";
+    satra [label=<<b>SATRA CI</b> · satra-ci.yml<br/>SATRA suite in Docker sandbox<br/>+ full suite (satra-feature, PRs to master)>];
+    sable [label=<<b>SABLE shared assurance</b><br/>sable-shared.yml<br/>focused SABLE + gate tests (every push)>];
+  }
+  subgraph cluster_rev { label="3 · Review";
+    pr  [label="Pull request\ninto master"];
+    ok  [label="checks green +\nteammate\napproval?", shape=diamond, style="", margin="0.02,0.02"];
+    mg  [label="Merge commit\n(branch kept)"];
+  }
+  subgraph cluster_cd { label="4 · CD  ·  cd.yml  (push to master)";
+    db  [label=<<b>Docker build + push to GHCR</b><br/>tags: latest, commit sha>];
+    sm  [label=<<b>Smoke test</b> the published image<br/>(docker run + curl)>];
+    tag [label="tag v* ?", shape=diamond, style="", margin="0.02,0.02"];
+    rel [label=<<b>GitHub Release</b><br/>source zip + dashboard dist zip>];
+  }
+  subgraph cluster_rep { label="Report  ·  report.yml  (push / PR touching report/**)";
+    tex [label="LaTeX build\n(main.tex)"];
+    pdf [label="Artifact:\nFYP1-mid-report PDF"];
+  }
+
+  commits -> mod; commits -> rbr;
+  mod -> lint [label="push"];
+  lint -> mat -> full -> junit;
+  lint -> fe -> junit;
+  mod -> satra [style=dashed]; mod -> sable [style=dashed];
+  junit -> pr; satra -> pr; sable -> pr;
+  pr -> ok; ok -> mg [label="yes"];
+  ok -> mod [label="no: fix on branch", style=dashed, constraint=false];
+  mg -> db;
+  db -> sm -> tag; tag -> rel [label="yes"];
+  rbr -> tex [label="push"]; tex -> pdf;
+  {rank=same; commits; mod; rbr;}
+  {rank=same; lint; mat; full; satra; sable;}
+  {rank=same; fe; junit; tex; pdf;}
+  {rank=same; pr; ok; mg;}
+  {rank=same; db; sm; tag; rel;}
+}
