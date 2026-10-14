@@ -42,8 +42,8 @@ The two dedicated-page report figures are focused crops of the saved UI captures
 The shared-workflow scenarios were run against the then-current \texttt{origin/master} backend/source snapshot at \texttt{b16b48409a\allowbreak{}9ddceecc76\allowbreak{}d49d6cceaf\allowbreak{}5846511432}, in an isolated worktree. Subsequent master commits \texttt{e875904} and \texttt{dfd70d4} update the dedicated SATRA live pipeline and UI; those changes are described and their CI provenance is listed in Chapter~6 and Chapter~7, and are not retroactively attributed to these earlier scenario runs. The shared Run Workflow UI change was built and committed as \texttt{f41629f} on \texttt{codex/run-workflow-proof-20261014}, and the local API/orchestrator was started with a separate data directory. Three manual scenarios were run to completion through the actual shared service. The SABLE UI reads persisted baseline, successor, obligation-projection, decision, and final-gate events; its binding indicators compare the evidence integrity flag, candidate snapshot, and module input hash to the run and module-start event. The concise records and hashes are in \path{report/evidence/}\path{run-workflow-current-master-2026-10-14.json}.
 
 \small
-\setlength{\tabcolsep}{3pt}
-\begin{longtable}{p{0.14\textwidth}p{0.15\textwidth}p{0.15\textwidth}p{0.23\textwidth}p{0.20\textwidth}}
+\setlength{\tabcolsep}{2pt}
+\begin{longtable}{p{0.15\textwidth}p{0.12\textwidth}p{0.15\textwidth}p{0.32\textwidth}p{0.21\textwidth}}
 \caption{Current-source shared-workflow scenario evidence (2026-10-14) -- supporting table 1}\\
 \toprule
 \textbf{Scenario / run} & \textbf{CAVR} & \textbf{SATRA} & \textbf{SABLE evidence and result} & \textbf{Separate shared gate}\\
@@ -53,9 +53,9 @@ The shared-workflow scenarios were run against the then-current \texttt{origin/m
 \textbf{Scenario / run} & \textbf{CAVR} & \textbf{SATRA} & \textbf{SABLE evidence and result} & \textbf{Separate shared gate}\\
 \midrule
 \endhead
-\path{sable_preserved} / \texttt{6c8f5e7554d0} & \texttt{VERIFIED} & \texttt{INCONCLUSIVE} & Baseline obligation: \texttt{aws\_iam\_role.app} retains \texttt{s3:GetObject}/\texttt{s3:PutObject} on protected invoice data; unique successor \path{module.storage.aws_s3_bucket.active_invoices}; projected obligation holds; SABLE \texttt{PRESERVED}. & \texttt{REVIEW}; SATRA \texttt{INCONCLUSIVE}.\\
-\path{sable_regressed} / \texttt{4387b88d8e38} & \texttt{VERIFIED} & \texttt{INCONCLUSIVE} & Same obligation; candidate policy points to \path{module.storage.aws_s3_bucket.archive_invoices}; projected obligation fails; SABLE \texttt{REGRESSED}. & \texttt{BLOCK}; SABLE \texttt{REGRESSED} and SATRA \texttt{INCONCLUSIVE}.\\
-\path{sable_unknown} / \texttt{87a4cf660cba} & \texttt{VERIFIED} & \texttt{INCONCLUSIVE} & Baseline obligation is recorded, but correspondence is ambiguous; no unique successor or authorization projection; SABLE \texttt{UNKNOWN}. & \texttt{REVIEW}; SABLE \texttt{UNKNOWN} and SATRA \texttt{INCONCLUSIVE}.\\
+\shortstack[l]{\texttt{sable\_preserved}\\\texttt{6c8f5e7554d0}} & \texttt{VERIFIED} & \texttt{INCONCLUSIVE} & The baseline role retains \texttt{s3:GetObject} and \texttt{s3:PutObject} on protected invoice data. The unique successor is \texttt{module.storage}/\texttt{active\_invoices}; the projected obligation holds. SABLE \texttt{PRESERVED}. & \texttt{REVIEW}; SATRA \texttt{INCONCLUSIVE}.\\
+\shortstack[l]{\texttt{sable\_regressed}\\\texttt{4387b88d8e38}} & \texttt{VERIFIED} & \texttt{INCONCLUSIVE} & The same baseline obligation is checked against \texttt{module.storage}/\texttt{archive\_invoices}. The projected authorization fails. SABLE \texttt{REGRESSED}. & \texttt{BLOCK}; SABLE \texttt{REGRESSED} and SATRA \texttt{INCONCLUSIVE}.\\
+\shortstack[l]{\texttt{sable\_unknown}\\\texttt{87a4cf660cba}} & \texttt{VERIFIED} & \texttt{INCONCLUSIVE} & The baseline obligation is recorded, but successor correspondence is ambiguous; there is no unique mapping or authorization projection. SABLE \texttt{UNKNOWN}. & \texttt{REVIEW}; SABLE \texttt{UNKNOWN} and SATRA \texttt{INCONCLUSIVE}.\\
 \bottomrule
 \end{longtable}
 \normalsize
