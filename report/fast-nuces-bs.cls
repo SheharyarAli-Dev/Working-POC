@@ -12,7 +12,7 @@
 
 \DeclareOption*{\PassOptionsToClass{\CurrentOption}{book}}
 \ProcessOptions\relax
-\LoadClass[12pt, a4paper]{book}
+\LoadClass[12pt, a4paper, openany]{book}
 
 
 \RequirePackage{amssymb, amsmath, amsthm, amstext}
