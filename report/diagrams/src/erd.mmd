@@ -1,0 +1,149 @@
+%%{init: {"theme":"base","themeVariables":{"fontFamily":"Helvetica","fontSize":"13px","primaryColor":"#ffffff","primaryBorderColor":"#222222","lineColor":"#555555","attributeBackgroundColorOdd":"#ffffff","attributeBackgroundColorEven":"#f6f6f6"},"er":{"layoutDirection":"TB","entityPadding":12}}}%%
+erDiagram
+  %% Shared run store (backend/db/storage.py)
+  RUNS {
+    TEXT id PK "run id"
+    TEXT body "RunContext JSON"
+  }
+  EVIDENCE {
+    TEXT id PK
+    TEXT run_id "-> RUNS.id"
+    TEXT module "cavr / satra / sable"
+    TEXT body "Evidence JSON"
+    TEXT content_hash
+    INTEGER stale
+  }
+  EVENTS {
+    INTEGER id PK
+    TEXT run_id "-> RUNS.id"
+    TEXT kind
+    TEXT body
+    TEXT previous_hash "hash chain"
+    TEXT hash
+  }
+  CACHE {
+    TEXT key PK
+    TEXT body
+  }
+  EXPERIMENTS {
+    TEXT id PK
+    TEXT body
+  }
+  RUNS ||..o{ EVIDENCE : "has (logical)"
+  RUNS ||..o{ EVENTS : "logs (logical)"
+
+  %% CAVR store (backend/cavr/storage.py)
+  CAVR_TRUSTED_PACKAGES {
+    TEXT name PK
+    TEXT version PK
+    TEXT sha256
+    TEXT source
+    TEXT status
+    TEXT capabilities
+    TEXT added_at
+  }
+  CAVR_QUARANTINE_RECORDS {
+    TEXT run_id PK
+    TEXT package
+    TEXT version
+    TEXT sha256
+    TEXT status
+    TEXT quarantined_at
+    TEXT file_path
+    TEXT decision
+  }
+  CAVR_AUDIT_LOG {
+    INTEGER id PK
+    TEXT run_id
+    TEXT package
+    TEXT action
+    TEXT user
+    TEXT reason
+    TEXT timestamp
+  }
+  CAVR_QUARANTINE_RECORDS ||..o{ CAVR_AUDIT_LOG : "run_id (logical)"
+  CAVR_VERDICT_CACHE {
+    TEXT cache_key PK "digest of the 8 fields"
+    TEXT ecosystem
+    TEXT name
+    TEXT version
+    TEXT artifact_sha256
+    TEXT subtree_digest
+    TEXT contract_digest
+    TEXT policy_version
+    TEXT analyzer_version
+    TEXT status "VERIFIED / REJECTED only"
+    TEXT verdict_json "stored analysis"
+    TEXT stored_at
+    TEXT integrity
+  }
+  CAVR_VERDICT_LOG {
+    INTEGER id PK
+    TEXT recorded_at
+    TEXT source
+    TEXT requested
+    TEXT status
+    TEXT stage
+    TEXT rule
+    REAL fast_gate_ms
+    INTEGER cache_hit
+    INTEGER escalated
+    TEXT cache_lookup "HIT / MISS / NOT_REACHED"
+  }
+  CAVR_VERDICT_CACHE }o..o{ CAVR_VERDICT_LOG : "cache_lookup (logical)"
+
+  %% SABLE store (backend/sable/storage.py)
+  SABLE_OBLIGATIONS {
+    TEXT obligation_id PK
+    TEXT principal
+    TEXT actions
+    TEXT protected_asset
+    TEXT resource_scope
+    TEXT authority_source
+    TEXT baseline_evidence
+    TEXT created_at
+  }
+  SABLE_RUNS {
+    TEXT run_id PK
+    TEXT scenario_id
+    TEXT obligation_id "-> OBLIGATIONS"
+    TEXT verdict
+    TEXT decision_hash
+    TEXT created_at
+    TEXT completed_at
+    TEXT evidence_json
+    TEXT proof_json
+  }
+  SABLE_AUDIT_LOG {
+    INTEGER id PK
+    TEXT run_id "-> SABLE_RUNS"
+    TEXT action
+    TEXT user
+    TEXT reason
+    TEXT created_at
+  }
+  SABLE_OBLIGATIONS ||..o{ SABLE_RUNS : "checked in (logical)"
+  SABLE_RUNS ||..o{ SABLE_AUDIT_LOG : "audited by (logical)"
+
+  %% Threat repository (backend/threat_repo/repository.py)
+  THREAT_RECORDS {
+    TEXT id PK
+    TEXT category
+    TEXT body
+  }
+  THREAT_VERSIONS {
+    INTEGER revision PK
+    TEXT version
+    TEXT digest
+    TEXT created_at
+    TEXT body "snapshot of all records"
+  }
+  THREAT_CHANGES {
+    INTEGER id PK
+    TEXT version "-> THREAT_VERSIONS.version"
+    TEXT changed_ids "record ids"
+    TEXT reason
+    TEXT timestamp
+  }
+  THREAT_VERSIONS ||..o{ THREAT_CHANGES : "version (logical)"
+  THREAT_CHANGES }o..o{ THREAT_RECORDS : "changed_ids (logical)"
