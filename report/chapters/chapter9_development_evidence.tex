@@ -24,7 +24,7 @@ A separate capture from the dedicated SABLE page covers the distinct \texttt{pol
 \begin{figure}[!htbp]
     \centering
     \includegraphics[width=0.96\textwidth,height=0.73\textheight,keepaspectratio]{ThesisFigs/sable_wrong_target_result_detail_crop.png}
-    \caption{Dedicated SABLE page: wrong-target scenario result for the \texttt{S3-APPROLE-CUSTOMERDATA} obligation. The UI reports \texttt{REGRESSED}, mapped to \texttt{BLOCK}.}
+    \caption[Dedicated SABLE wrong-target result for the S3-APPROLE-CUSTOMERDATA obligation.]{Dedicated SABLE page: wrong-target scenario result for the \texttt{S3-APPROLE-CUSTOMERDATA} obligation. The UI reports \texttt{REGRESSED}, mapped to \texttt{BLOCK}.}
     \label{fig:sable-customer-data-result}
 \end{figure}
 \clearpage
@@ -39,18 +39,23 @@ A separate capture from the dedicated SABLE page covers the distinct \texttt{pol
 The two dedicated-page report figures are focused crops of the saved UI captures; only the visible area was trimmed for readability and the displayed application content was not changed. They support the distinct \texttt{policy\_rewrite\_wrong\_target} scenario, associated with local run \texttt{sable-1791646956750}: the \texttt{S3-APPROLE-CUSTOMERDATA} obligation and policy target change from \texttt{customer\_data} to \texttt{temp\_storage}. These are not screenshots of the integrated invoice-storage run above. None of the screenshots establishes live AWS behavior or applied infrastructure.
 
 \subsection{Current-source shared-workflow scenario evidence (2026-10-14)}
-The shared-workflow scenarios were run against the then-current \texttt{origin/master} backend/source snapshot at \texttt{b16b48409a9ddceecc76d49d6cceaf5846511432}, in an isolated worktree. Subsequent master commits \texttt{e875904} and \texttt{dfd70d4} update the dedicated SATRA live pipeline and UI; those changes are described and their CI provenance is listed in Chapter~6 and Chapter~7, and are not retroactively attributed to these earlier scenario runs. The shared Run Workflow UI change was built and committed as \texttt{f41629f} on \texttt{codex/run-workflow-proof-20261014}, and the local API/orchestrator was started with a separate data directory. Three manual scenarios were run to completion through the actual shared service. The SABLE UI reads persisted baseline, successor, obligation-projection, decision, and final-gate events; its binding indicators compare the evidence integrity flag, candidate snapshot, and module input hash to the run and module-start event. The concise records and hashes are in \path{report/evidence/run-workflow-current-master-2026-10-14.json}.
+The shared-workflow scenarios were run against the then-current \texttt{origin/master} backend/source snapshot at \texttt{b16b48409a\allowbreak{}9ddceecc76\allowbreak{}d49d6cceaf\allowbreak{}5846511432}, in an isolated worktree. Subsequent master commits \texttt{e875904} and \texttt{dfd70d4} update the dedicated SATRA live pipeline and UI; those changes are described and their CI provenance is listed in Chapter~6 and Chapter~7, and are not retroactively attributed to these earlier scenario runs. The shared Run Workflow UI change was built and committed as \texttt{f41629f} on \texttt{codex/run-workflow-proof-20261014}, and the local API/orchestrator was started with a separate data directory. Three manual scenarios were run to completion through the actual shared service. The SABLE UI reads persisted baseline, successor, obligation-projection, decision, and final-gate events; its binding indicators compare the evidence integrity flag, candidate snapshot, and module input hash to the run and module-start event. The concise records and hashes are in \path{report/evidence/}\path{run-workflow-current-master-2026-10-14.json}.
 
 \small
-\setlength{\tabcolsep}{3pt}
-\begin{longtable}{p{0.14\textwidth}p{0.15\textwidth}p{0.15\textwidth}p{0.23\textwidth}p{0.20\textwidth}}
+\setlength{\tabcolsep}{4pt}
+\begin{longtable}{p{0.20\textwidth}p{0.50\textwidth}p{0.26\textwidth}}
+\caption{Current-source shared-workflow scenario evidence (2026-10-14) -- supporting table 1}\\
 \toprule
-\textbf{Scenario / run} & \textbf{CAVR} & \textbf{SATRA} & \textbf{SABLE evidence and result} & \textbf{Separate shared gate}\\
+\textbf{Scenario / run} & \textbf{Module and SABLE evidence} & \textbf{Separate shared gate}\\
+\midrule
+\endfirsthead
+\toprule
+\textbf{Scenario / run} & \textbf{Module and SABLE evidence} & \textbf{Separate shared gate}\\
 \midrule
 \endhead
-\path{sable_preserved} / \texttt{6c8f5e7554d0} & \texttt{VERIFIED} & \texttt{INCONCLUSIVE} & Baseline obligation: \texttt{aws\_iam\_role.app} retains \texttt{s3:GetObject}/\texttt{s3:PutObject} on protected invoice data; unique successor \path{module.storage.aws_s3_bucket.active_invoices}; projected obligation holds; SABLE \texttt{PRESERVED}. & \texttt{REVIEW}; SATRA \texttt{INCONCLUSIVE}.\\
-\path{sable_regressed} / \texttt{4387b88d8e38} & \texttt{VERIFIED} & \texttt{INCONCLUSIVE} & Same obligation; candidate policy points to \path{module.storage.aws_s3_bucket.archive_invoices}; projected obligation fails; SABLE \texttt{REGRESSED}. & \texttt{BLOCK}; SABLE \texttt{REGRESSED} and SATRA \texttt{INCONCLUSIVE}.\\
-\path{sable_unknown} / \texttt{87a4cf660cba} & \texttt{VERIFIED} & \texttt{INCONCLUSIVE} & Baseline obligation is recorded, but correspondence is ambiguous; no unique successor or authorization projection; SABLE \texttt{UNKNOWN}. & \texttt{REVIEW}; SABLE \texttt{UNKNOWN} and SATRA \texttt{INCONCLUSIVE}.\\
+\shortstack[l]{\texttt{sable\_preserved}\\\texttt{6c8f5e7554d0}} & CAVR: VERIFIED; SATRA: INCONCLUSIVE. The baseline role retains \texttt{s3:GetObject} and \texttt{s3:PutObject} on protected invoice data. Its unique successor is \texttt{module.storage}/\texttt{active\_invoices}; the projected obligation holds. SABLE verdict: \texttt{PRESERVED}. & \texttt{REVIEW}, because SATRA is INCONCLUSIVE.\\
+\shortstack[l]{\texttt{sable\_regressed}\\\texttt{4387b88d8e38}} & CAVR: VERIFIED; SATRA: INCONCLUSIVE. The same baseline obligation is checked against \texttt{module.storage}/\texttt{archive\_invoices}. The projected authorization fails. SABLE verdict: \texttt{REGRESSED}. & \texttt{BLOCK}, because SABLE is REGRESSED and SATRA is INCONCLUSIVE.\\
+\shortstack[l]{\texttt{sable\_unknown}\\\texttt{87a4cf660cba}} & CAVR: VERIFIED; SATRA: INCONCLUSIVE. The baseline obligation is recorded, but successor correspondence is ambiguous; there is no unique mapping or authorization projection. SABLE verdict: \texttt{UNKNOWN}. & \texttt{REVIEW}, because SABLE is UNKNOWN and SATRA is INCONCLUSIVE.\\
 \bottomrule
 \end{longtable}
 \normalsize
@@ -63,14 +68,19 @@ At branch head \texttt{753a55b} on \texttt{sable}, the shared Run Workflow was e
 
 \small
 \setlength{\tabcolsep}{2pt}
-\begin{longtable}{p{0.14\textwidth}p{0.15\textwidth}p{0.14\textwidth}p{0.27\textwidth}p{0.16\textwidth}}
+\begin{longtable}{p{0.20\textwidth}p{0.18\textwidth}p{0.32\textwidth}p{0.20\textwidth}}
+\caption{Earlier Shared-Workflow Rehearsals -- supporting table 2}\\
 \toprule
-\textbf{Scenario} & \textbf{Run ID} & \textbf{SABLE} & \textbf{Final gate} & \textbf{Evidence binding}\\
+\textbf{Scenario / run ID} & \textbf{SABLE} & \textbf{Final gate} & \textbf{Evidence binding}\\
+\midrule
+\endfirsthead
+\toprule
+\textbf{Scenario / run ID} & \textbf{SABLE} & \textbf{Final gate} & \textbf{Evidence binding}\\
 \midrule
 \endhead
-\path{sable_preserved} & \texttt{b107fd\allowbreak{}8f0f2f} & \texttt{PRESERVED} & \texttt{REVIEW}; SATRA \texttt{INCONCLUSIVE} & Integrity valid; snapshot and input hash match\\
-\path{sable_regressed} & \texttt{5c6fe1\allowbreak{}aa3a96} & \texttt{REGRESSED} & \texttt{BLOCK}; SABLE \texttt{REGRESSED}; SATRA \texttt{INCONCLUSIVE} & Integrity valid; snapshot and input hash match\\
-\path{sable_unknown} & \texttt{b6d358\allowbreak{}8ec006} & \texttt{UNKNOWN} & \texttt{REVIEW}; SABLE \texttt{UNKNOWN}; SATRA \texttt{INCONCLUSIVE} & Integrity valid; snapshot and input hash match\\
+\shortstack[l]{\texttt{sable\_preserved}\\\texttt{b107fd\allowbreak{}8f0f2f}} & \texttt{PRESERVED} & \texttt{REVIEW}; SATRA \texttt{INCONCLUSIVE} & Integrity valid; snapshot and input hash match\\
+\shortstack[l]{\texttt{sable\_regressed}\\\texttt{5c6fe1\allowbreak{}aa3a96}} & \texttt{REGRESSED} & \texttt{BLOCK}; SABLE \texttt{REGRESSED}; SATRA \texttt{INCONCLUSIVE} & Integrity valid; snapshot and input hash match\\
+\shortstack[l]{\texttt{sable\_unknown}\\\texttt{b6d358\allowbreak{}8ec006}} & \texttt{UNKNOWN} & \texttt{REVIEW}; SABLE \texttt{UNKNOWN}; SATRA \texttt{INCONCLUSIVE} & Integrity valid; snapshot and input hash match\\
 \bottomrule
 \end{longtable}
 \normalsize
@@ -87,6 +97,11 @@ The following historical results are from the dedicated SABLE page exercised on 
 \small
 \setlength{\tabcolsep}{5pt}
 \begin{longtable}{p{0.24\textwidth}p{0.20\textwidth}p{0.18\textwidth}p{0.22\textwidth}}
+\caption{Latest SABLE Module UI Demonstration -- supporting table 3}\\
+\toprule
+\textbf{Scenario} & \textbf{SABLE verdict} & \textbf{SABLE mapping} & \textbf{Evidence chain}\\
+\midrule
+\endfirsthead
 \toprule
 \textbf{Scenario} & \textbf{SABLE verdict} & \textbf{SABLE mapping} & \textbf{Evidence chain}\\
 \midrule
@@ -169,6 +184,7 @@ The contribution tied to the published SABLE branch is the Terraform infrastruct
 
 The checked repository evidence supports the following attribution at this report cut-off:
 \begin{longtable}{p{0.29\textwidth}p{0.62\textwidth}}
+\caption{Contribution of Each Team Member -- supporting table 4}\\
 \toprule
 \textbf{Area} & \textbf{Evidence-supported contribution and status}\\
 \midrule
@@ -183,6 +199,7 @@ The repository evidence reviewed for this batch supports attribution for SABLE a
 \section{Repository and Version Control Evidence}
 
 \begin{longtable}{p{0.30\textwidth}p{0.61\textwidth}}
+\caption{Repository and Version Control Evidence -- supporting table 5}\\
 \toprule
 \textbf{Evidence item} & \textbf{Recorded reference and status}\\
 \midrule
@@ -218,6 +235,7 @@ Third-party component versions and notices should be kept aligned with the repos
 \section{Risks and Mitigation}
 
 \begin{longtable}{p{0.30\textwidth}p{0.61\textwidth}}
+\caption{Risks and Mitigation -- supporting table 6}\\
 \toprule
 \textbf{Risk} & \textbf{Mitigation and remaining exposure}\\
 \midrule
