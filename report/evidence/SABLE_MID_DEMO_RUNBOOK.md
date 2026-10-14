@@ -91,9 +91,19 @@ The preserved run's candidate snapshot is `061e827a28e19f5ff48fccb1743c0f317eb6c
 
 The original rendered captures from this 2026-10-12 session are now preserved unchanged in the report evidence directory: `evidence/asent-sable-preserved-live.png`, `evidence/asent-sable-preserved-live-input.png`, and `evidence/asent-sable-regressed-live.png`. Their SHA-256 hashes are `DC4CED6E52135FADA37BFF497942E09A11D8576D08C39517B139525A2773229C`, `873E3716EB1D6CA6C083F3063DD45AC26D0A9C7EF931675FCD0B642F2DF43A81`, and `6108CA26308E99AB09B9A7949BA2C662A2A74F598F8928C5BA57D9CA29B7FC30`, respectively. They support the recorded live interactions; screenshots alone are not a substitute for the live demonstration.
 
-On 2026-10-13, the local dashboard service started on the exact merged source tree and `/api/health` returned `ok`; the dashboard route returned HTTP 200. The computer-use environment exposed no browser surfaces (`iab` and `edge` both unavailable), so no new UI scenario or screenshot was produced during this report pass. The 2026-10-12 UI run remains the latest actual demonstration.
+On 2026-10-14, an isolated worktree based on current `origin/master` (`b16b48409a9ddceecc76d49d6cceaf5846511432`) ran the shared local API/orchestrator for the three scenarios below. All reached `COMPLETE`; the event ledger, module evidence, binding values, SABLE obligation/projection and separate final gate were saved in `run-workflow-current-master-2026-10-14.json`. The UI production build passed for commit `f41629f` (pushed feature branch based on the run source). Browser surfaces were unavailable, so no fresh screenshot of these results was captured; the older retained images below remain screenshots of the 2026-10-12 interactions only.
 
 SATRA was inconclusive on this Windows host. Its persisted evidence records `OSError: [WinError 10106] The requested service provider could not be loaded or initialized` while importing `asyncio.windows_events` / `_overlapped`. This explains the aggregate `REVIEW` and additional `BLOCK` reason; it does not change the SABLE verdicts. No AWS credentials, AWS API calls, or Terraform apply were used.
+
+### Current-source shared workflow records - 2026-10-14
+
+| Scenario | Run ID | SABLE result | CAVR / SATRA | Separate shared gate | Binding |
+|---|---|---|---|---|---|
+| `sable_preserved` | `6c8f5e7554d0` | `PRESERVED`; obligation held on `module.storage.aws_s3_bucket.active_invoices`. | `VERIFIED` / `INCONCLUSIVE` | `REVIEW` because SATRA was inconclusive. | All applicable module evidence integrity-valid; snapshots and module input hashes match. |
+| `sable_regressed` | `4387b88d8e38` | `REGRESSED`; policy targets `module.storage.aws_s3_bucket.archive_invoices`, not the protected successor. | `VERIFIED` / `INCONCLUSIVE` | `BLOCK` for SABLE regression; SATRA also inconclusive. | All applicable module evidence integrity-valid; snapshots and module input hashes match. |
+| `sable_unknown` | `87a4cf660cba` | `UNKNOWN`; candidate correspondence was ambiguous, so no unique successor/projection was recorded. | `VERIFIED` / `INCONCLUSIVE` | `REVIEW` for unknown/inconclusive evidence. | All applicable module evidence integrity-valid; snapshots and module input hashes match. |
+
+The full SHA-256 snapshots, SABLE input hashes, baseline obligation, candidate signals, projection fields, event sequence, and final-gate statuses are in `report/evidence/run-workflow-current-master-2026-10-14.json`. These are actual API-backed runs on the current-master backend plus UI source commit `f41629f` in the isolated worktree. They are not browser screenshot evidence, and none is an overall `ACCEPT`.
 
 ### Earlier rendered screenshots and checks
 

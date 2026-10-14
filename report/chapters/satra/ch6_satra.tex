@@ -1,14 +1,50 @@
-% OWNER: Syed Sheharyar Ali
+% Implementation description checked against the integrated application source.
 \section{SATRA-RV: Application-Code Security Verification}
-\subsection{Design}
-% Components, data flow and interfaces of this module as implemented in Iteration 1.
-\subsection{Implementation}
-% What was built in this iteration and where (files, classes, functions).
-\subsection{Completed Features}
-\subsection{Technical Implementation Details}
-% Important files, classes, functions, algorithms, configurations.
+\label{sec:satra-implementation}
+
+\subsection{Scope and Design}
+SATRA-RV evaluates selected application-code changes against trusted security authority and executable tests. The integrated implementation is deliberately bounded: the shared analyzer currently recognizes the supported Python/FastAPI-style InvoiceHub contract and returns \texttt{INCONCLUSIVE} when required knowledge, baseline authority, or semantics are unavailable. The module does not claim language-independent analysis or complete coverage of the CWE catalogue.
+
+Figure~\ref{fig:satra-assurance-flow} is the report rendering of page 06, ``SATRA-RV application security and test validation flow,'' in the editable diagrams.net source \texttt{ASENT\_All\_Diagrams.drawio}. The shared analyzer in \path{backend/satra/analyzer.py} consumes the frozen baseline and candidate context, localizes changed regions, derives a supported contract, runs tests, checks a counterfactual, and publishes a module status. The separate commit-ingestion demonstration path in \path{backend/satra/live_pipeline.py} performs repository allowlisting and worktree preparation, trusted-manifest verification, a seven-gate decision, and optional test-generation/repair stages. These paths share SATRA utilities but have different entry points and evidence; this distinction prevents dedicated-module behavior from being mistaken for an event emitted by the shared route.
+
+\begin{figure}[p]
+\centering
+\includegraphics[width=\textheight,height=0.78\textwidth,keepaspectratio]{figures/asent/satra-assurance-flow.png}
+\caption{SATRA-RV analysis path from paired source snapshots to an evidence-based result. The diagram is rendered from page 06 of the editable diagrams.net source; generated test candidates are untrusted until validated.}
+\label{fig:satra-assurance-flow}
+\end{figure}
+
+\subsection{Implemented Features and Components}
+\begin{longtable}{p{0.26\textwidth}p{0.65\textwidth}}
+\toprule
+\textbf{Component} & \textbf{Implemented responsibility}\\
+\midrule
+\path{backend/satra/ingest.py} & Validates allowed repository/ref inputs, resolves commits, records the change set, and prepares isolated baseline/candidate worktrees for the dedicated live pipeline.\\
+\path{backend/satra/trust.py} and \path{backend/satra/trusted/} & Verifies SHA-256 fingerprints for trusted SRS, policy, pytest configuration, fixtures, and security tests before use.\\
+\path{backend/satra/diff_localizer.py}, \path{astscan.py}, \path{security_contract.py} & Localizes changed Python regions and derives a bounded security contract from supported route and trusted-policy semantics.\\
+\path{backend/satra/dictionary.py} & Defines nine rule records. Four Tier-1 entries (IDOR, SQL injection, path traversal, and authentication) have trusted executable tests; five additional rules are marked partial and do not have runnable counterfactual tests in this dictionary.\\
+\path{backend/satra/analyzer.py}, \path{contract_runner.py}, \path{pytest_runner.py} & The shared SATRA analyzer runs trusted checks on baseline and candidate, ordinary candidate tests, and a controlled ownership counterfactual, then records test results and reasons. The test runner uses Docker when present; its bundled-source fallback is explicitly described as not an arbitrary-code sandbox.\\
+\path{backend/satra/test_validator.py}, \path{counterfactuals.py} & Preflight checks generated test syntax and vocabulary, evaluate baseline/mutant/repeat outcomes, and classify an assertion failure separately from an infrastructure error.\\
+\path{backend/satra/live_pipeline.py}, \path{ollama_adapter.py} & The dedicated live path can request optional local Ollama test candidates and validate them against the contract and counterfactual; unavailable Ollama is reported as skipped. Model output is not authoritative.\\
+\path{backend/satra/decision_engine.py}, \path{repair.py}, \path{repair_inline.py} & The dedicated path evaluates its explicit gate set and may propose bounded deterministic repairs; proposed changes are reported only after re-verification.\\
+\path{backend/satra/recommit.py}, \path{audit_trail.py} & Prepare a uniquely named local repair branch with audit metadata, require explicit approval/policy checks before recommit, and maintain a tamper-evident local audit record. This does not establish that a repair was pushed to a production repository.\\
+\path{backend/satra/api.py}, \path{frontend/src/components/SatraModule.tsx} & Expose the dedicated SATRA API and React interface, including commit selection, diff, live progress, gate matrix, evidence drawer, and approval interaction.\\
+\bottomrule
+\end{longtable}
+
 \subsection{Algorithms and Technical Decisions}
-% Key algorithms, alternatives considered, and why (trade-offs).
-\subsection{Tools, Frameworks and Technologies}
-\subsection{Demonstration Evidence}
-% Screenshots/commands from the live demo, commit hashes, CI runs.
+The deterministic checks start from a baseline/candidate pair rather than treating a green candidate test suite as sufficient. The localizer associates changed syntax with security-relevant functions and routes. A contract is formed only when the configured trusted policy and supported application semantics provide authority. The trusted tests are run against both sides; the candidate is also checked by its ordinary tests. For the ownership rule, SATRA applies a supported AST counterfactual that removes the ownership guard and checks whether the security oracle rejects it. The validator requires a passing secure baseline, a killed counterfactual, and a repeatable result; execution errors are not classified as successful mutant kills.
+
+The shared analyzer and dedicated live pipeline have distinct status policies and integrations. In the shared route, the bounded analyzer reports \texttt{ACCEPT}, \texttt{REJECT}, or \texttt{INCONCLUSIVE}; the ASENT final gate then checks that applicable evidence is current, integrity-valid, and bound to the same candidate snapshot and module input. The dedicated live pipeline additionally exposes its SATRA gate progression and optional local Ollama stage. Neither path treats generated text as proof. SATRA's module result and ASENT's shared result must therefore be reported separately.
+
+The security dictionary is not uniformly executable. Its four full rules are supported by trusted tests, while the command-injection, insecure-deserialization, SSRF, XSS, and CSRF entries are partial/static or template-level records. The implementation and its UI expose this difference rather than claiming complete detection. Requirements and test names are listed in Chapter~4 and the source test inventory at \path{docs/satra/test-inventory.md}.
+
+\subsection{Programming Style, Tools, and Technologies}
+The implementation uses both procedural and object-oriented programming. Most analyzer stages, AST operations, rule loading, and test evaluation are module-level functions. Object-oriented structures are used where state and interfaces are useful, including Pydantic request/data models, the \texttt{DecisionEngine}, the local Ollama client, and API/service helpers. The React UI is implemented with functional components and hooks. It would be inaccurate to describe the project as exclusively object-oriented or exclusively procedural.
+
+The code uses Python, FastAPI, Pydantic, pytest, Python's AST facilities, Git worktrees, Docker/Podman where available, and a React/TypeScript frontend. Ollama is optional and local to the developer environment; it is not required for the deterministic shared analyzer. CI runs Python 3.12 on Ubuntu and explicitly builds/verifies the SATRA sandbox before the Docker-dependent cases.
+
+\subsection{Demonstration Evidence and Limits}
+The integrated source was merged through PR~\#5 at exact tested head \texttt{554b6d51acca29f99c396c3040362015ee460262} (merge \texttt{ffe8aa91}). The SATRA CI run \href{https://github.com/SheharyarAli-Dev/Working-POC/actions/runs/38260995764}{38260995764} and Core CI run \href{https://github.com/SheharyarAli-Dev/Working-POC/actions/runs/38260995652}{38260995652} succeeded on that exact head. The SATRA workflow ran its focused suite and four required Docker sandbox checks; Chapter~7 gives the counts and scope. Current \texttt{origin/master} report commits after this merge do not alter the SATRA implementation; no fresh SATRA test execution is attributed to those later report-only commits.
+
+The repository contains a dedicated SATRA frontend and a recorded defense replay, but this report does not treat a replay as a fresh live run. Fresh completed SATRA-specific browser screenshots and independently reviewed run outputs are not present in the report evidence directory. The integrated Run Workflow rehearsals are SABLE-focused and record SATRA as \texttt{INCONCLUSIVE} on the native-Windows host; they demonstrate the shared gate's handling of that status, not a successful SATRA acceptance. No live cloud deployment is claimed. The source design and test report also leave comparative research, independent benchmark validity, and production-scale detection rates as future work.
