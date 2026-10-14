@@ -1,0 +1,53 @@
+%%{init: {"theme":"base","themeVariables":{"fontFamily":"Helvetica","fontSize":"14px","primaryColor":"#ffffff","primaryBorderColor":"#222222","lineColor":"#333333","actorBkg":"#ffffff","actorBorder":"#222222","noteBkgColor":"#f5f5f5","noteBorderColor":"#999999"},"sequence":{"mirrorActors":false,"wrap":true,"width":150}}}%%
+sequenceDiagram
+  autonumber
+  actor Dev as Developer / AI agent
+  participant W as cavr install<br/>(pip_shim.py)
+  participant P as verify_request<br/>(pipeline.py)
+  participant G as Requirement gate<br/>(requirement_gate.py)
+  participant PyPI as PyPI<br/>(pypi_client.py, dep_tree.py)
+  participant K as Contract<br/>(capability_contract.py)
+  participant C as Verdict cache<br/>(verdict_cache.py)
+  participant OSV as OSV<br/>(advisories.py)
+  participant A as AST scan + reachability<br/>(ast_scan.py, reachability.py)
+  participant L as verdict_log<br/>(CavrStorage)
+
+  Dev->>W: cavr install pypdf==6.19.0 [--install]
+  W->>P: verify_request(pip command, project, policy)
+  P->>P: C1 capture the request
+  P->>G: check policy + lockfile
+  alt not permitted
+    G-->>P: BLOCK (e.g. NOT_ON_ALLOWLIST)
+  else permitted
+    G-->>P: PERMITTED
+    P->>PyPI: download wheel + every dependency
+    PyPI-->>P: bytes + registry SHA-256 (or error)
+    Note over P,PyPI: SHA-256 of bytes vs registry digest, Requires-Dist tree, subtree digest
+    alt hash mismatch
+      Note over P,PyPI: REJECTED (HASH_MISMATCH)
+    else tree OK
+      P->>K: infer contract from project call sites
+      K-->>P: allowed / denied capabilities + digest
+      P->>C: lookup(8-field key)
+      C-->>P: HIT (stored analysis) or MISS
+    end
+    P->>OSV: advisories for every tree package (every run)
+    OSV-->>P: affected / not affected / unavailable
+    alt affected
+      Note over P,PyPI: REJECTED (KNOWN_VULNERABILITY)
+    else something unknown
+      Note over P,PyPI: UNRESOLVED (e.g. REGISTRY_UNAVAILABLE)
+    else all known, cache MISS
+      P->>A: scan wheels, judge denied sinks
+      A-->>P: OK, or not scannable, or SINK_REACHABLE
+      P->>C: store analysis (VERIFIED only)
+    end
+  end
+  P->>L: one row (status, rule, fast_gate_ms, cache lookup)
+  P-->>W: verdict
+  alt VERIFIED and --install
+    W->>W: pip install --require-hashes --no-deps --only-binary from the verified tree
+    W-->>Dev: exit 0 (4 if pip fails)
+  else otherwise
+    W-->>Dev: exit 0 VERIFIED, 1 REJECTED, 2 UNRESOLVED, 3 BLOCK. Nothing installed
+  end

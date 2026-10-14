@@ -34,6 +34,8 @@ The shared final gate is a separate operation from the module verdict. Figure~\r
 \end{figure}
 \end{landscape}
 
+CAVR \texttt{RESTRICTED} is accepted by the gate only when the restriction is enforced; no current CAVR path emits it.
+
 \section{Architectural Components}
 \begin{longtable}{p{0.27\textwidth}p{0.65\textwidth}}
 \caption{Architectural Components -- supporting table 1}\\
@@ -76,7 +78,43 @@ The editable diagrams.net source page 08 separates the registered obligation, ba
 \end{landscape}
 
 \section{Data Design}
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\textwidth]{figures/diagrams/erd.pdf}
+\caption{Entity--relationship diagram of the SQLite stores (\texttt{db/storage.py}, \texttt{cavr/storage.py}, \texttt{sable/storage.py}, \texttt{threat\_repo/repository.py}). Dashed relationships are logical: the code writes the same identifier into both tables but declares no foreign keys.}
+\label{fig:asent-erd}
+\end{figure}
+
+Figure~\ref{fig:asent-erd} shows the persistent data. The shared run store keeps each run as a \texttt{RunContext} JSON document, the module evidence bound to it (with a content hash and a stale flag) and the run events as a hash chain. The CAVR store holds the M1 \texttt{verdict\_cache}, keyed by a digest of the eight key fields and storing only complete analyses with an integrity value, and the \texttt{verdict\_log}, one row per request, from which the cache hit rate and the p50/p95 latency are computed; the trusted-package, quarantine and audit tables come from the earlier prototype. The SABLE store holds registered obligations, SABLE runs and their audit log, and the threat repository versions its records so that every change has a version and a reason. Integrity is enforced by the code (shared identifiers, content hashes, hash chains) rather than by declared foreign keys.
+
 The parser's normalized resource model carries Terraform address, type, attributes, module context, and graph references. Correspondence returns ranked hypotheses and conflict reasons. Authorization results contain known/holds values, expected and unexpected resources, missing actions, widening, misbinding, and outside-model evidence. The orchestrator evidence includes run identity, analyzer, candidate snapshot, input hash, status, stale state, and integrity result. The gate uses these fields to decide whether evidence is current and trustworthy.
 
 \section{Process / Behavior Design}
 The sequence in Figure~\ref{fig:sable-current-process} is fail-closed at decision boundaries: a missing, empty, or unverified baseline cannot establish continuity; no unique supported successor means no projected safe result; unsupported policy meaning cannot prove the obligation; SABLE \texttt{NOT\_APPLICABLE} and stale, mismatched, or integrity-invalid evidence cannot establish acceptance. The shared gate requires \texttt{integrity\_valid} to be exactly true and checks candidate-snapshot and module-input-hash bindings. Tests exercise these conditions and map unknown or not-applicable SABLE evidence to final \texttt{REVIEW}.
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[height=0.88\textheight]{figures/diagrams/cavr-activity.pdf}
+\caption{Activity diagram of the CAVR fast gate, \texttt{verify\_request} in \texttt{backend/cavr/pipeline.py}. Numbers follow the stage order in the code; the dashed element is planned (M2).}
+\label{fig:cavr-activity}
+\end{figure}
+
+Figure~\ref{fig:cavr-activity} follows \texttt{verify\_request} stage by stage. The request is captured as a structured record (1) and checked by the requirement gate against the project policy and the lockfile (2); a request that is not permitted ends as \texttt{BLOCK} before anything is downloaded. Every wheel of the dependency tree is then downloaded from PyPI and its SHA-256 compared with the registry digest, and the tree and its subtree digest are built from the real \texttt{Requires-Dist} metadata (3--4); a mismatch is \texttt{REJECTED}. The capability contract is inferred from the project's own imports and call sites (5); only then can the 8-field cache key be formed and looked up (6), because it contains the contract digest. OSV is asked for every package of the tree on every run, also on a cache hit (7): an affected version is \texttt{REJECTED}, and any unknown input (registry, contract or advisories) is \texttt{UNRESOLVED}. On a cache miss the wheels are scanned statically and every denied sink is judged against the project's call-site reachability (8). A reachable denied sink is not treated as proven malicious: the verdict is \texttt{UNRESOLVED} with an escalation to M2 deep analysis. Only a complete analysis is stored in the cache. Every verdict writes one row to the verdict log; requests made from the dashboard also write the hash-chained evidence and the certificate.
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\textwidth]{figures/diagrams/cavr-sequence.pdf}
+\caption{Sequence of a \texttt{cavr install} request (\texttt{pip\_shim.py}) through \texttt{verify\_request} and its collaborators, with the wrapper's exit codes.}
+\label{fig:cavr-sequence}
+\end{figure}
+
+Figure~\ref{fig:cavr-sequence} shows the same pipeline as messages between components. The wrapper never passes the user's arguments to pip; it only calls \texttt{verify\_request} and prints the verdict (exit code 0 \texttt{VERIFIED}, 1 \texttt{REJECTED}, 2 \texttt{UNRESOLVED}, 3 \texttt{BLOCK}). Only with \texttt{--install} and a \texttt{VERIFIED} verdict does it write a requirements file of the verified tree with \texttt{--hash=sha256} pins and run pip with \texttt{--require-hashes --no-deps --only-binary :all:}, so pip cannot install a different file, an unverified dependency or an sdist; a pip failure gives exit code 4.
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.85\textwidth]{figures/diagrams/cavr-state.pdf}
+\caption{Lifecycle of a CAVR request. All four verdicts are logged; only a \texttt{VERIFIED} request with \texttt{--install} is installed.}
+\label{fig:cavr-state}
+\end{figure}
+
+Figure~\ref{fig:cavr-state} shows the states of one request. \texttt{REJECTED} is reached only with positive evidence of a problem (a hash mismatch or an OSV advisory); every gap in the evidence leads to \texttt{UNRESOLVED}, which is never treated as a pass. \texttt{UNRESOLVED} with \texttt{SINK\_REACHABLE} is the state that M2 deep analysis will take over.

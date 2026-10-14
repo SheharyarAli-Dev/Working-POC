@@ -213,6 +213,15 @@ Merged CI evidence & Core CI 38260995652, SATRA CI 38260995764, and SABLE shared
 
 The 44-test run executes the initial focused SABLE/shared-gate selection on commit \texttt{9a4dc3d}; it predates the unresolved-role-binding correction. PR~\#2 is merged; its current status is linked above. That pipeline change is separate from the successful combined-commit runs listed here.
 
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\textwidth]{figures/diagrams/cicd.pdf}
+\caption{Development and CI/CD workflow of the repository (\texttt{.github/workflows}: \texttt{ci.yml}, \texttt{satra-ci.yml}, \texttt{sable-shared.yml}, \texttt{cd.yml}, \texttt{report.yml}).}
+\label{fig:asent-cicd}
+\end{figure}
+
+Figure~\ref{fig:asent-cicd} shows how code reaches \texttt{master}. Each member works on a module branch with small commits. Every push runs CI (\texttt{ci.yml}): lint (\texttt{compileall} and Bandit at high severity), per-module test jobs for CAVR, SABLE and the shared/threat-repository code, the full integration suite on Python~3.12, and the frontend build with render tests, keeping JUnit reports as artifacts. SATRA-RV has its own workflow that runs its suite in the Docker sandbox, and SABLE has a focused shared-assurance workflow. A pull request is merged with a merge commit only when the checks are green and a teammate has approved it. A push to \texttt{master} runs CD (\texttt{cd.yml}): the Docker image is built and pushed to GitHub Container Registry and the published image is smoke-tested; a \texttt{v*} tag also creates a GitHub Release. Changes under \texttt{report/} build this report as a PDF artifact.
+
 \section{Milestones and Commit Evidence}
 
 The initial published SABLE milestone was commit \texttt{9a4dc3d}, followed by its focused CI run. The unresolved-role-binding correction was committed as \texttt{58b0a3d}; later baseline and evidence-gate corrections are in \texttt{84f91a9}. PR~\#5 passed all 18 checks on head \texttt{554b6d5} and merged as \texttt{ffe8aa9}. The three earlier shared-workflow rehearsal runs at SABLE head \texttt{753a55b} are historical. The integrated branch shows which module snapshots were tested together; it does not establish individual ownership for CAVR or SATRA-RV, and it does not supply official proposal-action records.
