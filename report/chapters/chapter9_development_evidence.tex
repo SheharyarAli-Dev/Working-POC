@@ -1,6 +1,6 @@
 \chapter{Project Management and Development Evidence}
 
-This chapter records implementation, repository, testing, tool-use, and risk evidence available for the current SABLE branch. Team-wide claims are limited to evidence visible in the shared repository. Contributions for other modules should be reconciled against their own branches and commits before the complete team report is submitted.
+This chapter records implementation, repository, testing, tool-use, and risk evidence available for the current SABLE branch. The team's cross-checked module contribution statement is recorded separately from repository evidence; this chapter does not attribute work to individuals based only on commit presence.
 
 \section{Work Completed}
 
@@ -165,36 +165,35 @@ The criterion-by-criterion SABLE evidence map for Form 2 and Form 3, including a
 
 \section{Work Remaining}
 
-The following items remain outside the evidence established by the focused SABLE CI run and the three current-checkout rehearsal runs:
+At this mid-evaluation cutoff, the following research and validation boundaries remain beyond the evidence established by the focused SABLE CI run and the three current-checkout rehearsal runs:
 \begin{itemize}
-    \item broaden and document the supported Terraform and IAM model, including explicit handling for additional resource and policy constructs;
-    \item expand independent evaluation beyond the 33 authored synthetic scenarios and investigate false-safe and false-regression cases;
-    \item expand integrated Run Workflow validation beyond the three rehearsed scenarios, obtain a refreshed completed-state capture for the unknown run, and investigate the displayed SATRA \texttt{INCONCLUSIVE} result before claiming full-system acceptance;
-    \item keep the combined CI workflow green on the integrated branch and verify the report/code branch merge sequence with the team; and
-    \item consolidate the team's feedback/action register, design artefacts, and member-by-member contribution evidence in the report appendices.
+    \item SABLE supports a bounded Terraform and IAM model; additional resource and policy constructs are outside its current evaluated scope;
+    \item the independent evaluation uses 33 authored synthetic scenarios and does not establish general false-safe or false-regression rates;
+    \item the retained shared-workflow rehearsal covers three scenarios, includes an unknown run with intermediate evidence, and shows SATRA \texttt{INCONCLUSIVE}; it does not establish full-system acceptance; and
+    \item no signed panel action register or meeting record is included, while the team's no-outstanding-actions and cross-checked-contributions statements are recorded as team confirmations.
 \end{itemize}
-
-These are remaining or evidence-consolidation tasks, not completed features.
+These statements define current evidence and research limits; they are not a list of uncompleted administrative instructions.
 
 \section{Individual Responsibilities}
 
-The contribution tied to the published SABLE branch is the Terraform infrastructure-security module and the related shared evidence/final-gate integration described in the implementation chapter. Work on the other modules and on shared project artefacts should be attributed using the corresponding module branch, commit, pull request, or review evidence. A module's presence in the inherited repository is not, by itself, proof that a team member authored it during this iteration.
+The published SABLE branch contains the Terraform infrastructure-security module and the related shared evidence/final-gate integration described in the implementation chapter. The team confirms that CAVR, SATRA-RV, and SABLE contributions were divided and cross-checked by the respective members. Repository history provides technical provenance but is not treated as the sole record of individual contribution.
 
 \section{Contribution of Each Team Member}
 
-The checked repository evidence supports the following attribution at this report cut-off:
+The team reports that module contributions were divided and cross-checked by the respective members. The table records that team confirmation alongside repository evidence where it is available:
 \begin{longtable}{p{0.29\textwidth}p{0.62\textwidth}}
 \caption{Contribution of Each Team Member -- supporting table 4}\\
 \toprule
 \textbf{Area} & \textbf{Evidence-supported contribution and status}\\
 \midrule
-SABLE — Muhammad Ali Sajjad (23I-0110) & Terraform/HCL normalization, bounded IAM/S3 authorization, successor matching, scenario tests, and shared-gate evidence integration on the published \texttt{sable} branch. Git history for SABLE files records commits \texttt{adda287}, \texttt{7794336}, and \texttt{7a965b8}; the published milestone is \texttt{9a4dc3d}. Focused CI passed on the published milestone.\\
+CAVR -- Maryam Fatima & The team confirms her contribution to the CAVR module; package-artifact verification, dependency analysis, and bounded execution evidence are documented in the CAVR chapters.\\
+SATRA-RV -- Syed Sheharyar Ali (23I-0097) & The team confirms his contribution to SATRA-RV; security-contract analysis, test selection, and repair-validation evidence are documented in the SATRA chapters.\\
+SABLE -- Muhammad Ali Sajjad (23I-0110) & The team confirms his contribution to SABLE; Terraform/HCL normalization, bounded IAM/S3 authorization, successor matching, scenario tests, and shared-gate evidence integration are documented in the SABLE chapters. Git history for SABLE files records commits \texttt{adda287}, \texttt{7794336}, and \texttt{7a965b8}; the published milestone is \texttt{9a4dc3d}. Focused CI passed on the published milestone.\\
 Shared workflow gate & Evidence freshness/integrity and final-decision behavior are covered by the shared-gate test selection executed with SABLE. Verified by focused tests.\\
-CAVR and SATRA-RV ownership & Branch-level ownership has not been verified for this report version; no individual attribution is claimed here.\\
 \bottomrule
 \end{longtable}
 
-The repository evidence reviewed for this batch supports attribution for SABLE and the shared-gate checks only. Ownership of CAVR and SATRA-RV remains unassigned here until their branch and commit histories have been checked. The integrated screenshot demonstrates their current reported statuses in one run, not ownership or full correctness.
+The repository evidence supports SABLE and shared-gate technical provenance. The team-reported member allocation for CAVR and SATRA-RV is recorded as a team confirmation, separate from the integrated screenshot, which shows module statuses but does not establish ownership or full correctness.
 
 \section{Repository and Version Control Evidence}
 
@@ -224,13 +223,13 @@ The narrowly scoped unresolved-role-binding correction in \path{backend/sable/au
 
 \section{Tools and Tool-Assisted Development}
 
-OpenAI Codex assisted with the SABLE repository review and evaluator correction, regression-test work, rubric and source review, report/runbook edits, and the live dashboard evidence update. Microsoft Edge rendered the dashboard demonstration; GitHub Actions supplied the recorded CI evidence. The selected tests and persisted UI outcomes are reported as evidence rather than attributed to the model. This entry records the SABLE tool use established for this contribution; the SABLE author must confirm whether any earlier external or GenAI tools and data handling should also be disclosed. No tool use is attributed here to CAVR, SATRA-RV, or another member.
+OpenAI Codex assisted with the SABLE repository review and evaluator correction, regression-test work, rubric and source review, report/runbook edits, and the live dashboard evidence update. Microsoft Edge rendered the dashboard demonstration; GitHub Actions supplied the recorded CI evidence. The selected tests and persisted UI outcomes are reported as evidence rather than attributed to the model. This entry records the SABLE tool use established for this contribution. No unsupported tool-use attribution is made to CAVR, SATRA-RV, or another member.
 
 \section{External Components and Dependencies}
 
 The SABLE path uses Python, \texttt{python-hcl2} for parsing Terraform HCL, NetworkX for the resource-reference graph, and the repository's FastAPI/Pydantic API stack. Pytest executes the automated checks, and GitHub Actions provides the recorded CI environment. Terraform CLI, Checkov, Trivy, and Docker/Podman are optional external tools detected by the environment interface; their availability affects the strength or isolation of optional scans. No live AWS API call or infrastructure deployment is used as proof by the SABLE static decision path.
 
-Third-party component versions and notices should be kept aligned with the repository dependency files and \texttt{THIRD\_PARTY\_NOTICES.md}. The report does not claim that an optional scanner ran unless its availability and output are captured in the particular run evidence.
+Third-party component versions and notices are documented in the repository dependency files and \texttt{THIRD\_PARTY\_NOTICES.md}. Optional scanner execution is claimed only where its availability and output appear in the particular run evidence.
 
 \section{Risks and Mitigation}
 
