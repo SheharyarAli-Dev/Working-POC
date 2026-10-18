@@ -1,4 +1,10 @@
 \chapter{Repository and Contribution Evidence}
+\section*{CAVR module evidence}
+The report identifies the CAVR implementation on the \texttt{cavr} branch at commit \texttt{d63183d}. Chapter~7 records 1,254 passed, zero failed, and 26 skipped CAVR tests in CI run 38137109059 on that commit; the seven opt-in live tests were separately reported as passed on 2026-10-11. The six API scenario results in Chapter~6 were recorded at commit \texttt{42e2524}. These are distinct source snapshots and evidence types. The team confirms Maryam Fatima's CAVR contribution; repository history is technical provenance and is not presented as sole proof of individual ownership.
+
+\section*{SATRA-RV module evidence}
+Chapter~7 records the SATRA workflow at exact tested PR~\#5 head \texttt{554b6d5}: 84 focused SATRA tests passed, the four required Docker sandbox checks ran without skips, and the Docker-enabled full suite recorded 1,432 passed, 26 skipped, zero failures, and zero errors (run 38260995764). The later dedicated SATRA updates at \texttt{e875904} and \texttt{dfd70d4} have successful current-master CI runs 38540057836 and 38542552735; the report does not attribute the older 84-test total to those later changes. No fresh SATRA-specific browser capture is recorded. The team confirms Syed Sheharyar Ali's SATRA-RV contribution; that allocation is identified as team confirmation, not inferred from commits.
+
 \section*{SABLE milestone evidence}
 The initial published SABLE implementation milestone is commit \texttt{9a4dc3d}; its focused GitHub Actions run reported 44 passed. The unresolved-role-binding correction and regression tests were committed as \texttt{58b0a3d}; later baseline and evidence-gate corrections are included in combined source commit \texttt{84f91a9}. The SABLE shared-assurance job passed 48 tests on that source snapshot. PR \#5 merged at \texttt{ffe8aa9} from exact tested head \texttt{554b6d5}; all 18 check runs succeeded on that head. The earlier correction-containing local selection reported 27 passed and 10 deselected. These results have distinct provenance.
 
