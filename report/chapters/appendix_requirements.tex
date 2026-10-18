@@ -23,6 +23,37 @@ FR-S8 & I1; evidence validation & Stale or untrusted evidence cannot establish a
 
 The expected labels apply only to the named controlled fixtures and supported policy subset. They do not imply that arbitrary Terraform programs are fully interpreted.
 
+\section*{SATRA-RV}
+The following trace summarizes the SATRA-RV functional requirements stated in Chapter 4 and points to their implementation-level acceptance evidence. These cases cover the implemented Python workflow; they do not imply broad vulnerability-family or framework coverage.
+
+\setlength{\tabcolsep}{3pt}
+\begin{longtable}{p{0.10\textwidth}p{0.43\textwidth}p{0.38\textwidth}}
+\caption{SATRA-RV requirement trace -- supporting table 2}\\
+\toprule
+\textbf{ID} & \textbf{Acceptance condition} & \textbf{Test evidence}\\
+\midrule
+\endfirsthead
+\toprule
+\textbf{ID} & \textbf{Acceptance condition} & \textbf{Test evidence}\\
+\midrule
+\endhead
+FR-SATRA-01 & Baseline and candidate changes are ingested and security-relevant Python regions are localized. & \path{test_satra_ingest.py}; \path{test_satra_localize.py}.\\
+FR-SATRA-02 & Changes to trusted test authority are detected before those tests are relied upon. & \path{test_satra_trust_and_seed.py}.\\
+FR-SATRA-03 & A supported security contract is derived from trusted authority; unsupported or authority-free cases remain inconclusive. & \path{test_satra_rule_contract.py}; \path{test_missing_contract_produces_inconclusive_never_not_applicable}.\\
+FR-SATRA-04 & Baseline, candidate, and ordinary tests are evaluated with assertion failures distinguished from execution errors. & \path{test_satra_live_pipeline.py}; \path{test_satra_ollama_and_validator.py}.\\
+FR-SATRA-05 & Supported counterfactuals challenge the oracle; weakened tests do not count as security evidence. & \path{test_satra_counterfactuals.py}; \path{test_satra_decision_and_repair.py}.\\
+FR-SATRA-06 & Only supported dictionary rules are treated as executable; partial rules remain identified as partial. & \path{test_satra_dictionary.py}.\\
+FR-SATRA-07 & Candidate tests run through the configured isolated backend; unsafe host execution is refused when required. & \path{test_satra_sandbox.py}; \path{test_satra_live_pipeline.py}.\\
+FR-SATRA-08 & Generated test candidates are validated before they can contribute evidence. & \path{test_satra_ollama_and_validator.py}.\\
+FR-SATRA-09 & Available contract, test, oracle, and execution evidence yields an explicit module decision. & \path{test_satra_decision_and_repair.py}; \path{test_satra_live_pipeline.py}.\\
+FR-SATRA-10 & Repair recommit requires explicit approval and records activity in the audit trail. & \path{test_recommit_flow_with_local_bare_remote}; \path{test_audit_trail_append_only_and_tamper_detection}.\\
+FR-SATRA-11 & The local SATRA interface exposes run progress and evidence through its API/UI path. & API/UI implementation paths are identified in Chapter 4; no dedicated API/UI test is cited in this trace.\\
+\bottomrule
+\end{longtable}
+\setlength{\tabcolsep}{6pt}
+
+The test names and bounded behavior are detailed in Appendix C. Inconclusive outcomes and unavailable execution backends remain visible; this trace makes no claim of complete vulnerability coverage.
+
 \section*{CAVR}
 \subsection*{CAVR requirement details}
 The functional requirements FR-C1 to FR-C12 are stated in Chapter 4 with their acceptance tests. This part gives the detail behind each one: what it takes in, what it does, every result it can return, and its limits. Rule names are the ones the code returns. C1 to C4 are the mid goals and P1 to P13 are the phases of the approved CAVR design.
@@ -153,7 +184,7 @@ Each row leads from a requirement of Chapter 4 to the code that implements it an
 
 \setlength{\tabcolsep}{3pt}
 \begin{longtable}{p{0.08\textwidth}p{0.30\textwidth}p{0.53\textwidth}}
-\caption{CAVR traceability: requirement, code file, test -- supporting table 2}\\
+\caption{CAVR traceability: requirement, code file, test -- supporting table 3}\\
 \toprule
 \textbf{ID} & \textbf{Code file and functions} & \textbf{Test file and tests}\\
 \midrule
@@ -183,7 +214,7 @@ The CAVR non-functional requirements are listed here with the check that covers 
 
 \setlength{\tabcolsep}{3pt}
 \begin{longtable}{p{0.10\textwidth}p{0.36\textwidth}p{0.45\textwidth}}
-\caption{CAVR non-functional requirements -- supporting table 3}\\
+\caption{CAVR non-functional requirements -- supporting table 4}\\
 \toprule
 \textbf{ID} & \textbf{Requirement} & \textbf{Check}\\
 \midrule
@@ -219,7 +250,7 @@ The last table states which phases of the approved CAVR design the mid-stage fas
 
 \setlength{\tabcolsep}{3pt}
 \begin{longtable}{p{0.24\textwidth}p{0.18\textwidth}p{0.48\textwidth}}
-\caption{CAVR coverage of the approved design -- supporting table 4}\\
+\caption{CAVR coverage of the approved design -- supporting table 5}\\
 \toprule
 \textbf{Design phase} & \textbf{Status at mid} & \textbf{What exists}\\
 \midrule

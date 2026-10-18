@@ -1,9 +1,63 @@
 \chapter{Detailed Test Cases}
-The local command and aggregate result are reported in Chapter 8. The cases below identify the expected behavior and the existing assertion location; the four shared-gate rows are parameter values of one test function.
+The local commands and aggregate results are reported in Chapter 7. The cases below identify expected behavior and existing assertion locations; they do not add new test results. The four SABLE shared-gate rows are parameter values of one test function.
+
+\section*{CAVR}
+These representative cases trace the implemented fast-gate behavior to existing CAVR tests. They do not claim deep-analysis completion or general malware-detection effectiveness.
 
 \setlength{\tabcolsep}{3pt}
+\begin{longtable}{p{0.25\textwidth}p{0.43\textwidth}p{0.22\textwidth}}
+\caption{CAVR Detailed Test Cases -- supporting table 1}\\
+\toprule
+\textbf{Case} & \textbf{Expected observable outcome} & \textbf{Assertion location}\\
+\midrule
+\endfirsthead
+\toprule
+\textbf{Case} & \textbf{Expected observable outcome} & \textbf{Assertion location}\\
+\midrule
+\endhead
+Pip request capture & Supported pinned requirements are captured; unsupported forms and malformed requests are reported rather than treated as verified packages. & \path{test_cavr_capture.py}: \path{test_pip_install_with_two_pins}; \path{test_unsupported_forms_are_recorded_not_captured}.\\
+Requirement policy gate & A denied, unpinned, unapproved, or lockfile-mismatched package is blocked before download; missing policy remains unresolved. & \path{test_cavr_requirement_gate.py}: \path{test_denylisted_name_is_blocked_even_when_it_is_also_on_the_allowlist}; \path{test_unpinned_requirement_is_blocked}; \path{test_missing_policy_is_unresolved}; \path{test_cavr_pipeline.py}: \path{test_gate_block_makes_zero_downloads}.\\
+Artifact integrity & Bytes matching the registry SHA-256 are accepted; altered bytes are rejected and unavailable registry evidence remains unresolved. & \path{test_cavr_pypi_client.py}: \path{test_real_pypdf_wheel_matches_the_recorded_registry_digest}; \path{test_one_flipped_byte_is_rejected}; \path{test_cavr_pipeline.py}: \path{test_registry_unreachable_is_unresolved}.\\
+Dependency tree & Pinned compatible dependencies form a tree; missing child pins or a tampered dependency prevent a verified tree. & \path{test_cavr_dep_tree.py}: \path{test_three_level_tree}; \path{test_child_missing_from_the_lockfile_is_unresolved}; \path{test_tampered_leaf_rejects_the_whole_tree}.\\
+Advisory check & A recorded affected version is rejected; no advisory data yields an unresolved result. & \path{test_cavr_advisories.py}: \path{test_recorded_pypdf_5_1_0_is_rejected_with_the_advisory_ids}; \path{test_no_data_is_unresolved}; version-range boundaries are checked by \path{test_introduced_fixed_range}.\\
+Static wheel scan and capability contract & Aliased sinks are found without importing package code; unsupported scan input and a package without project call-site authority remain unresolved. & \path{test_cavr_ast_scan.py}: \path{test_sink_called_through_an_import_alias_is_still_found}; \path{test_scanning_does_not_execute_the_package}; \path{test_syntax_error_is_an_explicit_finding_and_unresolved}. \path{test_cavr_contract.py}: \path{test_invoicehub_contract_for_pypdf}; \path{test_unused_package_has_no_call_site_authority}.\\
+End-to-end gate and wrapper & A verified fixture carries guard evidence; rejected, blocked, and unresolved cases do not invoke pip installation. & \path{test_cavr_pipeline.py}: \path{test_pypdf_6_19_0_is_verified_with_the_guard_evidence}; \path{test_cavr_pip_shim.py}: \path{test_install_on_rejected_never_invokes_pip}; \path{test_install_on_unresolved_never_invokes_pip}.\\
+\bottomrule
+\end{longtable}
+\setlength{\tabcolsep}{6pt}
+
+\section*{SATRA-RV}
+These representative cases identify existing SATRA-RV assertions. Their scope is limited to supported Python contracts, fixtures, and the configured execution backend.
+
+\setlength{\tabcolsep}{3pt}
+\begin{longtable}{p{0.25\textwidth}p{0.43\textwidth}p{0.22\textwidth}}
+\caption{SATRA-RV Detailed Test Cases -- supporting table 2}\\
+\toprule
+\textbf{Case} & \textbf{Expected observable outcome} & \textbf{Assertion location}\\
+\midrule
+\endfirsthead
+\toprule
+\textbf{Case} & \textbf{Expected observable outcome} & \textbf{Assertion location}\\
+\midrule
+\endhead
+Change ingestion & Valid revisions are resolved; hostile references are rejected; added, deleted, and renamed files are represented. & \path{test_satra_ingest.py}: \path{test_added_and_deleted}; \path{test_rename_records_both_paths}; \path{test_hostile_ref_rejected}.\\
+Trusted-test integrity & Modified, deleted, planted, or missing trusted test material is detected. & \path{test_satra_trust_and_seed.py}: \path{test_modified_file_is_detected}; \path{test_deleted_file_is_detected}; \path{test_planted_file_is_detected}.\\
+Security localization and contract & Supported ownership or SQL changes are localized; missing contract authority yields an inconclusive result. & \path{test_satra_localize.py}: \path{test_astscan_detects_removed_ownership_guard}; \path{test_astscan_detects_string_built_sql}; \path{test_satra_ollama_and_validator.py}: \path{test_missing_contract_produces_inconclusive_never_not_applicable}.\\
+Candidate-test validation & Syntax errors, missing or weakened assertions, and contract misalignment are rejected; a valid aligned test is accepted. & \path{test_satra_ollama_and_validator.py}: \path{test_validator_rejects_syntax_error}; \path{test_validator_rejects_weakened_assertion}; \path{test_validator_accepts_valid_test}.\\
+Counterfactual oracle check & Supported mutations are generated and evaluated; weakened oracle behavior is distinguished from a genuine assertion failure. & \path{test_satra_counterfactuals.py}: \path{test_mutate_file_ast_ownership}; \path{test_static_integrity_catches_broadened_assertion}; \path{test_satra_ollama_and_validator.py}: \path{test_killed_distinguishes_error_vs_failure}.\\
+Decision evidence & Clean evidence can be accepted; weakened-oracle evidence blocks, and the evidence bundle is recorded. & \path{test_satra_decision_and_repair.py}: \path{test_decision_engine_accepts_clean_run}; \path{test_decision_engine_blocks_on_weakened_oracle}; \path{test_decision_engine_evidence_bundle}.\\
+Sandbox behavior & The configured container checks enforce network isolation, read-only root, temporary storage, and timeout. & \path{test_satra_sandbox.py}: \path{test_sandbox_network_isolated}; \path{test_sandbox_readonly_root}; \path{test_sandbox_tmpfs_isolated}; \path{test_sandbox_execution_timeout}.\\
+Live execution and recommit & Host execution is refused when Docker is unavailable; recommit checks require an approval record and audit checks detect tampering. & \path{test_satra_live_pipeline.py}: \path{test_host_execution_refused_without_docker}; \path{test_satra_recommit.py}: \path{test_recommit_flow_with_local_bare_remote}; \path{test_audit_trail_append_only_and_tamper_detection}.\\
+\bottomrule
+\end{longtable}
+\setlength{\tabcolsep}{6pt}
+
+The appendix identifies existing assertions and expected outcomes, not additional run results. Chapter 7 reports the recorded CI provenance and its limitations.
+
+\section*{SABLE}
+\setlength{\tabcolsep}{3pt}
 \begin{longtable}{p{0.24\textwidth}p{0.39\textwidth}p{0.26\textwidth}}
-\caption{Detailed Test Cases -- supporting table 1}\\
+\caption{SABLE Detailed Test Cases -- supporting table 3}\\
 \toprule
 \textbf{Case} & \textbf{Expected observable outcome} & \textbf{Assertion location}\\
 \midrule
