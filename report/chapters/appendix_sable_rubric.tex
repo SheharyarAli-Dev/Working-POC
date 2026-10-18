@@ -1,8 +1,87 @@
-\chapter{SABLE Evidence Against the Mid-Evaluation Rubric}
-\label{app:sable-rubric}
-The criterion titles below were checked against the official FYP-1 Mid-Evaluation Guidelines and Rubrics (Form~2, pp.~1--2; Form~3, pp.~2--3), not inferred from repository notes alone. This appendix assesses only evidence attributable to the SABLE contribution. It is not a mark prediction or a team-wide compliance statement. \textbf{MET} means repository or CI evidence supports the stated SABLE scope; \textbf{PARTIAL} means the criterion is only partly supported by the evidence available at mid-evaluation; \textbf{NOT VERIFIABLE} means repository artifacts cannot establish the requested performance or personal evidence.
+\chapter{Module Evidence Against the Mid-Evaluation Rubric}
+\label{app:module-rubric}
+The criterion titles below were checked against the official FYP-1 Mid-Evaluation Guidelines and Rubrics (Form~2, pp.~1--2; Form~3, pp.~2--3). This appendix assesses module evidence in the requested order: CAVR, SATRA-RV, then SABLE. It is not a mark prediction or a team-wide compliance statement. \textbf{MET} means repository or CI evidence supports the stated bounded scope; \textbf{PARTIAL} means evidence supports only part of the criterion; \textbf{NOT VERIFIABLE} means repository artifacts cannot establish the requested performance or personal evidence. Contribution attribution follows the report's team-confirmed statements and is not inferred from module presence in Git history.
 
-The verified integrated implementation references are commits \texttt{9a4dc3d} (initial SABLE milestone), \texttt{58b0a3d} (unresolved-role-binding correction), \texttt{84f91a9} (baseline/evidence-gate corrections and focused CI source), exact tested PR~\#5 head \texttt{554b6d51ac\allowbreak{}ca29f99c39\allowbreak{}6c30403620\allowbreak{}15ee460262}, and normal merge \texttt{ffe8aa91ca\allowbreak{}89702e5db6\allowbreak{}5b8f7ff129\allowbreak{}aa72f761cc}. Later master commits \texttt{e875904} and \texttt{dfd70d4} change the dedicated SATRA path and its UI, not the SABLE analyzer or the evidence scenarios below. The 2026-10-14 shared-workflow API rehearsals completed against the then-current source commit \texttt{b16b484}; run IDs \texttt{6c8f5e7554d0}, \texttt{4387b88d8e38}, and \texttt{87a4cf660cba} verify preserved, regressed, and unknown outcomes with integrity, snapshot, and input-hash bindings. Their shared gates were REVIEW, BLOCK, and REVIEW because SATRA was INCONCLUSIVE in all three; no overall ACCEPT is claimed. The machine-readable evidence is \path{report/evidence/run-workflow-current-master-2026-10-14.json}. SABLE shared-assurance CI also passed at later current-master commit \texttt{dfd70d4} in run \href{https://github.com/SheharyarAli-Dev/Working-POC/actions/runs/38542552760}{38542552760}. The UI source was built and committed as \texttt{f41629f} on its pushed feature branch. No fresh screenshot was produced because no browser surface initialized. Focused and integration test totals below retain their original commit provenance; they are not described as tests of the report commit.
+\section{CAVR evidence}
+\subsection{Form 2: Presentation and Demonstration}
+\small
+\begin{longtable}{p{0.16\textwidth}p{0.14\textwidth}p{0.62\textwidth}}
+\caption{Form 2 rubric evidence -- CAVR}\\
+\toprule
+\textbf{Criterion} & \textbf{CAVR status} & \textbf{Evidence and limits}\\
+\midrule
+1. Previous proposal actions addressed (CLO6) & PARTIAL & The report records the team's statement that no actions are outstanding; no signed official action register is included.\\
+2. Iteration plan and work breakdown progress (CLO2) & MET for bounded CAVR scope & Chapter~3 milestones map to the implementation described in the CAVR chapters; this does not assert completion of future research evaluation.\\
+3. Live prototype with core module demo (CLO4) & MET for recorded scenarios & Chapter~6 records six CAVR API scenarios at commit \texttt{42e2524}, including verified, rejected, blocked, and unresolved outcomes. These are recorded runs, not a new live demonstration.\\
+4. Requirements and acceptance criteria (CLO2) & MET for stated requirements & Chapter~4 and Appendices~B--C map FR-C1--FR-C12 to bounded behavior and existing test assertions.\\
+5. Design artefacts and evolution (CLO3) & MET for documented design & Chapters~5--6 describe the integrated architecture, CAVR stages, interfaces, and limits; the editable design source is identified in the report.\\
+6. Repository, milestones, and member evidence (CLO6) & PARTIAL & Chapter~6 identifies CAVR branch head \texttt{d63183d}; Chapter~7 records run 38137109059. Maryam Fatima's contribution is team-confirmed; Git provenance alone is not used to prove individual ownership.\\
+7. Testing and early validation (CLO4) & MET for bounded checks & Chapter~7 records 1,254 passed, zero failed, 26 skipped on the CAVR CI selection and seven separate live tests passed; the skipped live and frontend cases are disclosed.\\
+8. Presentation, Q\&A, team participation, and tool ownership (CLO5) & NOT VERIFIABLE & Repository evidence cannot establish oral performance or balanced participation. The report records tool use where established; it does not infer it from commits.\\
+\bottomrule
+\end{longtable}
+\normalsize
+
+\subsection{Form 3: Report Evaluation}
+\small
+\begin{longtable}{p{0.16\textwidth}p{0.14\textwidth}p{0.62\textwidth}}
+\caption{Form 3 rubric evidence -- CAVR}\\
+\toprule
+\textbf{Criterion} & \textbf{CAVR status} & \textbf{Evidence and limits}\\
+\midrule
+1. Report format and artefacts (CLO2) & PARTIAL & CAVR requirements, implementation, testing, and evidence are documented; report-wide signatures and official panel records are not supplied by this module evidence.\\
+2. Problem formulation, R\&D, and gap analysis (CLO1) & PARTIAL & The CAVR design and literature framing are documented; no completed comparative evaluation or independent effectiveness study is claimed.\\
+3. Project vision, scope, and success criteria (CLO2) & MET for bounded scope & Chapter~4 states the package, policy, integrity, and verdict requirements and their unresolved boundaries.\\
+4. Requirements and acceptance criteria (CLO2) & MET for mapped requirements & Appendix~B details CAVR FR-C1--FR-C12; Appendix~C identifies representative existing assertions.\\
+5. Architecture and component/interface design (CLO3) & MET for documented interfaces & Chapters~5--6 map the module API, dashboard, pipeline, and verification components to the implementation.\\
+6. Data, process, and behavior design (CLO3) & MET for bounded behavior & The report documents capture, gate, artifact, dependency, analysis, and verdict stages, including explicit unresolved outcomes.\\
+7. Implementation documentation (CLO4) & MET for reported implementation & CAVR Chapters~6--7 and the cited demo material describe source files, interfaces, setup, tests, and limits.\\
+8. Testing plan and tool/risk disclosure (CLO5) & PARTIAL & Test scope and external-service, platform, and skip limits are recorded; comparative research and production behavior remain unverified.\\
+\bottomrule
+\end{longtable}
+\normalsize
+
+\section{SATRA-RV evidence}
+\subsection{Form 2: Presentation and Demonstration}
+\small
+\begin{longtable}{p{0.16\textwidth}p{0.14\textwidth}p{0.62\textwidth}}
+\caption{Form 2 rubric evidence -- SATRA-RV}\\
+\toprule
+\textbf{Criterion} & \textbf{SATRA-RV status} & \textbf{Evidence and limits}\\
+\midrule
+1. Previous proposal actions addressed (CLO6) & PARTIAL & The report records the team's statement that no actions are outstanding; no signed official action register is included.\\
+2. Iteration plan and work breakdown progress (CLO2) & MET for bounded SATRA scope & Chapters~3 and 6 document the implementation milestones and the distinct shared-analyzer and dedicated-pipeline paths.\\
+3. Live prototype with core module demo (CLO4) & PARTIAL & The dedicated UI and recorded replay are described, but the report explicitly records no fresh SATRA-specific browser capture. Shared workflow rehearsals returned SATRA INCONCLUSIVE.\\
+4. Requirements and acceptance criteria (CLO2) & MET for stated requirements & Chapter~4 and Appendices~B--C map FR-SATRA-01--FR-SATRA-11 to implementation paths and existing assertions.\\
+5. Design artefacts and evolution (CLO3) & MET for documented design & Chapter~5 and the editable diagram source document the shared architecture and SATRA analysis flow.\\
+6. Repository, milestones, and member evidence (CLO6) & PARTIAL & Chapter~7 identifies exact tested PR~\#5 head \texttt{554b6d5} and CI run 38260995764. Syed Sheharyar Ali's contribution is team-confirmed; individual ownership is not inferred from Git history.\\
+7. Testing and early validation (CLO4) & MET for bounded checks & Exact-head CI recorded 84 focused tests passed and four required Docker checks without skips. Later selector mapping has no dedicated unit test identified in the report.\\
+8. Presentation, Q\&A, team participation, and tool ownership (CLO5) & NOT VERIFIABLE & Repository evidence cannot establish oral performance, balanced participation, or individual understanding.\\
+\bottomrule
+\end{longtable}
+\normalsize
+
+\subsection{Form 3: Report Evaluation}
+\small
+\begin{longtable}{p{0.16\textwidth}p{0.14\textwidth}p{0.62\textwidth}}
+\caption{Form 3 rubric evidence -- SATRA-RV}\\
+\toprule
+\textbf{Criterion} & \textbf{SATRA-RV status} & \textbf{Evidence and limits}\\
+\midrule
+1. Report format and artefacts (CLO2) & PARTIAL & SATRA requirements, implementation, tests, and evidence are documented; report-wide signatures and official panel records are not established by module evidence.\\
+2. Problem formulation, R\&D, and gap analysis (CLO1) & PARTIAL & The bounded Python security-contract problem and research framing are documented; completed comparative evaluation and broad framework coverage are not claimed.\\
+3. Project vision, scope, and success criteria (CLO2) & MET for bounded scope & Chapters~1, 3, and 4 state supported contract, test, counterfactual, execution, and decision boundaries.\\
+4. Requirements and acceptance criteria (CLO2) & MET for mapped requirements & Appendix~B traces SATRA functional requirements; Appendix~C identifies representative existing test assertions.\\
+5. Architecture and component/interface design (CLO3) & MET for documented interfaces & Chapters~5--6 describe module API, UI, shared analyzer, dedicated pipeline, and their different evidence paths.\\
+6. Data, process, and behavior design (CLO3) & MET for bounded behavior & The SATRA flow, trust checks, localization, contract, sandboxed execution, validation, and decision stages are documented with uncertainty limits.\\
+7. Implementation documentation (CLO4) & MET for reported implementation & SATRA Chapters~6--7 document source components, setup, interface, test scope, and current limitations.\\
+8. Testing plan and tool/risk disclosure (CLO5) & PARTIAL & CI provenance, sandbox checks, skips, local setup errors, and missing fresh browser capture are disclosed; untested selector mapping and broad coverage remain limitations.\\
+\bottomrule
+\end{longtable}
+\normalsize
+
+\section{SABLE evidence}
+SABLE evidence retains its exact commit and run provenance. Its 2026-10-14 shared-workflow rehearsals recorded preserved, regressed, and unknown module outcomes, with aggregate REVIEW, BLOCK, and REVIEW because SATRA was INCONCLUSIVE; no overall ACCEPT is claimed. The machine-readable evidence is \path{report/evidence/run-workflow-current-master-2026-10-14.json}. No fresh SABLE screenshot was produced for that later report pass. Focused and integration totals retain their original source commits and are not described as tests of this report revision.
 
 \section{Form 2: Presentation and Demonstration}
 \small
