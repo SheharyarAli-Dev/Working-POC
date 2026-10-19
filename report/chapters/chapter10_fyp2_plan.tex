@@ -1,4 +1,22 @@
 \chapter{Remaining FYP Plan}
+\section{CAVR Continuation: Proposed Research Work}
+The CAVR design identifies the following research questions and evaluation directions. They are proposed work, not completed FYP-2 results or an approved team schedule.
+\begin{enumerate}
+    \item Evaluate whether task and repository context can infer a minimum capability contract with acceptable false positives, including benign security-sensitive package behavior.
+    \item Under a fixed exploration budget, compare security-targeted counterfactual environment synthesis with a single normal sandbox run for activation of hidden behavior.
+    \item Compare the proposed approach with registry metadata checks, OSV, static-only analysis, a normal dynamic sandbox, and reproducible research detectors; use component ablations to measure the contribution of capability contracts, counterfactual activation, causal graphs, repair, and clean reconstruction.
+    \item Evaluate minimal compatible repair and fresh-state re-verification for preservation of used functionality, and report detection, false-positive, repair, and assurance limits on controlled scenarios.
+\end{enumerate}
+
+\section{SATRA-RV Continuation: Proposed Research Work}
+The SATRA-RV design defines independent benchmark ground truth and mandatory stress cases. The following are proposed evaluation directions, not completed FYP-2 results or an approved team schedule.
+\begin{enumerate}
+    \item Define each security obligation and expected outcome independently of SATRA-RV, and validate candidate security mutants with a separate policy oracle or reviewer before evaluation.
+    \item Evaluate the four core combinations of application state (unchanged or regressed) and security-test state (trusted or weakened), including legitimate secure refactors and the design's additional adversarial test changes.
+    \item Compare the combined gate with trusted tests, test-integrity heuristics, and mutation-based evidence; report when a case is preserved, weakened, regressed, inconclusive, or invalid under the defined labels.
+    \item Measure the bounded benchmark outcomes and reproducibility, retaining invalid or inconclusive cases in the report rather than treating them as successful detections.
+\end{enumerate}
+
 \section{SABLE Continuation: Proposed Research Work}
 The following items describe proposed SABLE research work, not completed mid-stage features or an approved team schedule. They are planning topics for the next project stage; this report does not represent them as supervisor-approved priorities, owner assignments, dates, or a final protocol.
 \begin{enumerate}
