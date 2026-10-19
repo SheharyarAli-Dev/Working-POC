@@ -1,58 +1,5 @@
 \chapter{Detailed Requirements}\label{app:cavr-requirements}
-This appendix traces SABLE acceptance conditions and SATRA-RV functional requirements to existing tests, and gives the detailed requirements, traceability, non-functional requirements, and acceptance criteria for CAVR. Requirement identifiers refer to Chapter 4.
-
-\section*{SABLE}
-
-\setlength{\tabcolsep}{3pt}
-\begin{longtable}{p{0.09\textwidth}p{0.19\textwidth}p{0.32\textwidth}p{0.31\textwidth}}
-\caption{SABLE -- supporting table 1}\\
-\toprule
-\textbf{ID} & \textbf{\shortstack[l]{Milestone/\\component}} & \textbf{\shortstack[l]{Acceptance\\condition}} & \textbf{\shortstack[l]{Test\\evidence}}\\
-\midrule
-FR-S1 & I2; HCL parser & Supported resources and local references normalize; unsupported expansion is surfaced. & \path{test_sable_real_hcl}; \path{test_sable_unsupported_terraform_stays_unknown}.\\
-FR-S2 & I3; baseline authorization & Registered obligation holds on baseline before continuity can be assessed. & \path{test_sable_real_hcl}; \path{test_sable_unverified_baseline_and_empty_baseline}.\\
-FR-S3 & I4; correspondence & Unique supported successor is selected; ambiguous or conflicting candidates abstain. & \path{test_sable_refactor_and_correspondence_cases}.\\
-FR-S4 & I4; authorization projection & Correct successor retains required S3 role/action/scope; wrong target and weakened action fail. & \path{test_sable_refactor_and_correspondence_cases}; \path{test_sable_real_hcl}.\\
-FR-S5 & I2/I3; bounded semantics & Unsupported semantics and unresolved role attachment remain unknown; known unrelated role binding can be ignored. & \path{test_sable_unsupported_iam_stays_unknown}; \path{test_sable_unresolved_role_binding_with_valid_policy_is_unknown}; evaluator-specific regression tests.\\
-FR-S6 & I1; evidence publication & SABLE evidence matches current candidate snapshot and input hash, with valid integrity. & \path{test_shared_sable_evidence_drives_final_gate}.\\
-FR-S7 & Shared final gate & Preserved accepts, regression blocks, unknown reviews for the SABLE-only integration cases. & Four parameter cases in \path{test_shared_sable_evidence_drives_final_gate}.\\
-FR-S8 & I1; evidence validation & Stale or untrusted evidence cannot establish acceptance. & \path{test_sable_final_gate_rejects_untrusted_evidence}.\\
-\bottomrule
-\end{longtable}
-\setlength{\tabcolsep}{6pt}
-
-The expected labels apply only to the named controlled fixtures and supported policy subset. They do not imply that arbitrary Terraform programs are fully interpreted.
-
-\section*{SATRA-RV}
-The following trace summarizes the SATRA-RV functional requirements stated in Chapter 4 and points to their implementation-level acceptance evidence. These cases cover the implemented Python workflow; they do not imply broad vulnerability-family or framework coverage.
-
-\setlength{\tabcolsep}{3pt}
-\begin{longtable}{p{0.13\textwidth}p{0.40\textwidth}p{0.35\textwidth}}
-\caption{SATRA-RV requirement trace -- supporting table 2}\\
-\toprule
-\textbf{ID} & \textbf{Acceptance condition} & \textbf{Test evidence}\\
-\midrule
-\endfirsthead
-\toprule
-\textbf{ID} & \textbf{Acceptance condition} & \textbf{Test evidence}\\
-\midrule
-\endhead
-FR-SATRA-01 & Baseline and candidate changes are ingested and security-relevant Python regions are localized. & \path{test_satra_ingest.py}; \path{test_satra_localize.py}.\\
-FR-SATRA-02 & Changes to trusted test authority are detected before those tests are relied upon. & \path{test_satra_trust_and_seed.py}.\\
-FR-SATRA-03 & A supported security contract is derived from trusted authority; unsupported or authority-free cases remain inconclusive. & \path{test_satra_rule_contract.py}; \path{test_missing_contract_produces_inconclusive_never_not_applicable}.\\
-FR-SATRA-04 & Baseline, candidate, and ordinary tests are evaluated with assertion failures distinguished from execution errors. & \path{test_satra_live_pipeline.py}; \path{test_satra_ollama_and_validator.py}.\\
-FR-SATRA-05 & Supported counterfactuals challenge the oracle; weakened tests do not count as security evidence. & \path{test_satra_counterfactuals.py}; \path{test_satra_decision_and_repair.py}.\\
-FR-SATRA-06 & Only supported dictionary rules are treated as executable; partial rules remain identified as partial. & \path{test_satra_dictionary.py}.\\
-FR-SATRA-07 & Candidate tests run through the configured isolated backend; unsafe host execution is refused when required. & \path{test_satra_sandbox.py}; \path{test_satra_live_pipeline.py}.\\
-FR-SATRA-08 & Generated test candidates are validated before they can contribute evidence. & \path{test_satra_ollama_and_validator.py}.\\
-FR-SATRA-09 & Available contract, test, oracle, and execution evidence yields an explicit module decision. & \path{test_satra_decision_and_repair.py}; \path{test_satra_live_pipeline.py}.\\
-FR-SATRA-10 & Repair recommit requires explicit approval and records activity in the audit trail. & \path{test_recommit_flow_with_local_bare_remote}; \path{test_audit_trail_append_only_and_tamper_detection}.\\
-FR-SATRA-11 & The local SATRA interface exposes run progress and evidence through its API/UI path. & API/UI implementation paths are identified in Chapter 4; no dedicated API/UI test is cited in this trace.\\
-\bottomrule
-\end{longtable}
-\setlength{\tabcolsep}{6pt}
-
-The test names and bounded behavior are detailed in Appendix C. Inconclusive outcomes and unavailable execution backends remain visible; this trace makes no claim of complete vulnerability coverage.
+This appendix gives detailed requirements and traces acceptance conditions to existing tests. The module sections follow CAVR, SATRA-RV, then SABLE; requirement identifiers refer to Chapter 4.
 
 \section*{CAVR}
 \subsection*{CAVR requirement details}
@@ -316,3 +263,55 @@ Figure~\ref{fig:cavr-verdict-log} shows the verdict log at the end of the sessio
     \caption[Verdict log after repeated demo runs]{Verdict log after repeated demo runs in one session: ten requests with status, stage and rule, \texttt{fast\_gate\_ms} and cache lookup. Demo-condition runs are not logged.}
     \label{fig:cavr-verdict-log}
 \end{figure}
+\section*{SATRA-RV}
+The following trace summarizes the SATRA-RV functional requirements stated in Chapter 4 and points to their implementation-level acceptance evidence. These cases cover the implemented Python workflow; they do not imply broad vulnerability-family or framework coverage.
+
+\setlength{\tabcolsep}{3pt}
+\begin{longtable}{p{0.13\textwidth}p{0.40\textwidth}p{0.35\textwidth}}
+\caption{SATRA-RV requirement trace -- supporting table 2}\\
+\toprule
+\textbf{ID} & \textbf{Acceptance condition} & \textbf{Test evidence}\\
+\midrule
+\endfirsthead
+\toprule
+\textbf{ID} & \textbf{Acceptance condition} & \textbf{Test evidence}\\
+\midrule
+\endhead
+FR-SATRA-01 & Baseline and candidate changes are ingested and security-relevant Python regions are localized. & \path{test_satra_ingest.py}; \path{test_satra_localize.py}.\\
+FR-SATRA-02 & Changes to trusted test authority are detected before those tests are relied upon. & \path{test_satra_trust_and_seed.py}.\\
+FR-SATRA-03 & A supported security contract is derived from trusted authority; unsupported or authority-free cases remain inconclusive. & \path{test_satra_rule_contract.py}; \path{test_missing_contract_produces_inconclusive_never_not_applicable}.\\
+FR-SATRA-04 & Baseline, candidate, and ordinary tests are evaluated with assertion failures distinguished from execution errors. & \path{test_satra_live_pipeline.py}; \path{test_satra_ollama_and_validator.py}.\\
+FR-SATRA-05 & Supported counterfactuals challenge the oracle; weakened tests do not count as security evidence. & \path{test_satra_counterfactuals.py}; \path{test_satra_decision_and_repair.py}.\\
+FR-SATRA-06 & Only supported dictionary rules are treated as executable; partial rules remain identified as partial. & \path{test_satra_dictionary.py}.\\
+FR-SATRA-07 & Candidate tests run through the configured isolated backend; unsafe host execution is refused when required. & \path{test_satra_sandbox.py}; \path{test_satra_live_pipeline.py}.\\
+FR-SATRA-08 & Generated test candidates are validated before they can contribute evidence. & \path{test_satra_ollama_and_validator.py}.\\
+FR-SATRA-09 & Available contract, test, oracle, and execution evidence yields an explicit module decision. & \path{test_satra_decision_and_repair.py}; \path{test_satra_live_pipeline.py}.\\
+FR-SATRA-10 & Repair recommit requires explicit approval and records activity in the audit trail. & \path{test_recommit_flow_with_local_bare_remote}; \path{test_audit_trail_append_only_and_tamper_detection}.\\
+FR-SATRA-11 & The local SATRA interface exposes run progress and evidence through its API/UI path. & API/UI implementation paths are identified in Chapter 4; no dedicated API/UI test is cited in this trace.\\
+\bottomrule
+\end{longtable}
+\setlength{\tabcolsep}{6pt}
+
+The test names and bounded behavior are detailed in Appendix C. Inconclusive outcomes and unavailable execution backends remain visible; this trace makes no claim of complete vulnerability coverage.
+
+\section*{SABLE}
+
+\setlength{\tabcolsep}{3pt}
+\begin{longtable}{p{0.09\textwidth}p{0.19\textwidth}p{0.32\textwidth}p{0.31\textwidth}}
+\caption{SABLE -- supporting table 1}\\
+\toprule
+\textbf{ID} & \textbf{\shortstack[l]{Milestone/\\component}} & \textbf{\shortstack[l]{Acceptance\\condition}} & \textbf{\shortstack[l]{Test\\evidence}}\\
+\midrule
+FR-S1 & I2; HCL parser & Supported resources and local references normalize; unsupported expansion is surfaced. & \path{test_sable_real_hcl}; \path{test_sable_unsupported_terraform_stays_unknown}.\\
+FR-S2 & I3; baseline authorization & Registered obligation holds on baseline before continuity can be assessed. & \path{test_sable_real_hcl}; \path{test_sable_unverified_baseline_and_empty_baseline}.\\
+FR-S3 & I4; correspondence & Unique supported successor is selected; ambiguous or conflicting candidates abstain. & \path{test_sable_refactor_and_correspondence_cases}.\\
+FR-S4 & I4; authorization projection & Correct successor retains required S3 role/action/scope; wrong target and weakened action fail. & \path{test_sable_refactor_and_correspondence_cases}; \path{test_sable_real_hcl}.\\
+FR-S5 & I2/I3; bounded semantics & Unsupported semantics and unresolved role attachment remain unknown; known unrelated role binding can be ignored. & \path{test_sable_unsupported_iam_stays_unknown}; \path{test_sable_unresolved_role_binding_with_valid_policy_is_unknown}; evaluator-specific regression tests.\\
+FR-S6 & I1; evidence publication & SABLE evidence matches current candidate snapshot and input hash, with valid integrity. & \path{test_shared_sable_evidence_drives_final_gate}.\\
+FR-S7 & Shared final gate & Preserved accepts, regression blocks, unknown reviews for the SABLE-only integration cases. & Four parameter cases in \path{test_shared_sable_evidence_drives_final_gate}.\\
+FR-S8 & I1; evidence validation & Stale or untrusted evidence cannot establish acceptance. & \path{test_sable_final_gate_rejects_untrusted_evidence}.\\
+\bottomrule
+\end{longtable}
+\setlength{\tabcolsep}{6pt}
+
+The expected labels apply only to the named controlled fixtures and supported policy subset. They do not imply that arbitrary Terraform programs are fully interpreted.
