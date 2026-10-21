@@ -23,13 +23,13 @@ The SABLE behavior in Figure~\ref{fig:sable-current-process} is page 07 of the e
 \end{figure}
 \end{landscape}
 
-The shared final gate is a separate operation from the module verdict. Figure~\ref{fig:asent-shared-final-gate} is page 09 of the same editable source and shows how applicable CAVR, SATRA-RV, and SABLE statuses are combined only after evidence integrity, candidate snapshot, and input hashes are checked. A preserved SABLE result alone therefore does not imply an overall \texttt{ACCEPT}.
+The shared final gate is a separate operation from the module verdict. Figure~\ref{fig:asent-shared-final-gate} is generated from the editable PlantUML source \path{report/sources/diagrams/shared-final-gate.puml}. It reflects the report-branch implementation: select the last non-stale evidence row in returned storage order, validate integrity and candidate/input binding before interpreting its status, then apply the common decision precedence. A preserved SABLE result alone therefore does not imply an overall \texttt{ACCEPT}.
 
 \begin{landscape}
 \begin{figure}[p]
 \centering
-\includegraphics[width=0.97\linewidth,height=0.84\textheight,keepaspectratio]{figures/asent/shared-final-gate.png}
-\caption{Shared final-gate outcomes from page 09 of the editable diagrams.net source. A trustworthy blocking status yields \texttt{BLOCK}; incomplete, stale, mismatched, invalid, or inconclusive evidence requires \texttt{REVIEW}; \texttt{ACCEPT} requires all applicable evidence to be acceptable.}
+\includegraphics[width=0.97\linewidth,height=0.84\textheight,keepaspectratio]{figures/asent/shared-final-gate.pdf}
+\caption{Shared final-gate behavior. The gate selects the last non-stale row in supplied order, requires valid integrity and matching candidate/input bindings before classifying status, and gives trustworthy blockers precedence over review reasons.}
 \label{fig:asent-shared-final-gate}
 \end{figure}
 \end{landscape}

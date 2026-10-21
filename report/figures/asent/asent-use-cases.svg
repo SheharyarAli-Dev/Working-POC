@@ -1,44 +1,34 @@
-<svg xmlns="http://www.w3.org/2000/svg" xmlns:xhtml="http://www.w3.org/1999/xhtml" width="1600.0" height="1000.0" viewBox="0 0 1600.0 1000.0">
-<defs><marker id="arrow" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto"><path d="M0,0 L10,4 L0,8 z" fill="#526579"/></marker></defs>
-<rect width="1600.0" height="1000.0" fill="#ffffff"/>
-<path d="M170,420.1 C228.9,402.808 266.1,293.292 325,276" fill="none" stroke="#526579" stroke-width="1.4"/>
-<path d="M170,440.35 C228.9,436.228 266.1,410.122 325,406" fill="none" stroke="#526579" stroke-width="1.4"/>
-<path d="M170,460.6 C228.9,469.648 266.1,526.952 325,536" fill="none" stroke="#526579" stroke-width="1.4"/>
-<path d="M170,480.85 C228.9,503.068 266.1,643.782 325,666" fill="none" stroke="#526579" stroke-width="1.4"/>
-<path d="M1430,420.1 C1371.1,402.808 1333.9,293.292 1275,276" fill="none" stroke="#526579" stroke-width="1.4"/>
-<path d="M1430,440.35 C1371.1,436.228 1333.9,410.122 1275,406" fill="none" stroke="#526579" stroke-width="1.4"/>
-<path d="M1430,460.6 C1371.1,469.648 1333.9,526.952 1275,536" fill="none" stroke="#526579" stroke-width="1.4"/>
-<path d="M1430,480.85 C1371.1,503.068 1333.9,643.782 1275,666" fill="none" stroke="#526579" stroke-width="1.4"/>
-<rect x="35" y="20" width="1530" height="46" rx="2" fill="none" stroke="none" stroke-width="1.5" opacity="1"/>
-<foreignObject x="44" y="22" width="1512" height="42"><xhtml:div xmlns:xhtml="http://www.w3.org/1999/xhtml" style="box-sizing:border-box;width:100%;height:100%;padding:9px;display:flex;flex-direction:column;justify-content:center;align-items:flex-start;overflow:hidden;text-align:left;font:700 23.0px Arial,sans-serif;line-height:1.25;color:#17324D;word-break:normal">01  UML use-case diagram</xhtml:div></foreignObject>
-<rect x="40" y="72" width="1520" height="46" rx="12" fill="#F8FAFC" stroke="#CBD5E1" stroke-width="1" opacity="1"/>
-<foreignObject x="40" y="74" width="1502" height="42"><xhtml:div xmlns:xhtml="http://www.w3.org/1999/xhtml" style="box-sizing:border-box;width:100%;height:100%;padding:5px;display:flex;flex-direction:column;justify-content:center;align-items:center;overflow:hidden;text-align:center;font:400 12.0px Arial,sans-serif;line-height:1.25;color:#536579;word-break:normal">Actor goals and interactions are grounded in the current local UI/API. The actors represent roles; no user-account system is implied.</xhtml:div></foreignObject>
-<rect x="250" y="145" width="1100" height="735" rx="12" fill="none" stroke="#CBD5E1" stroke-width="1.4" opacity="1"/>
-<foreignObject x="259" y="147" width="1082" height="731"><xhtml:div xmlns:xhtml="http://www.w3.org/1999/xhtml" style="box-sizing:border-box;width:100%;height:100%;padding:9px;display:flex;flex-direction:column;justify-content:flex-start;align-items:flex-start;overflow:hidden;text-align:left;font:700 15.0px Arial,sans-serif;line-height:1.25;color:#536579;word-break:normal">ASENT local analysis system</xhtml:div></foreignObject>
-<circle cx="117.5" cy="425.5" r="16" fill="none" stroke="#17324D" stroke-width="3"/><path d="M117.5,441.5 v42 M91.5,460.5 h52 M117.5,483.5 l-24,35 M117.5,483.5 l24,35" fill="none" stroke="#17324D" stroke-width="3"/>
-<foreignObject x="65" y="492" width="105" height="28"><xhtml:div style="font:600 13.0px Arial,sans-serif;text-align:center;color:#17324D">Developer</xhtml:div></foreignObject>
-<circle cx="1482.5" cy="425.5" r="16" fill="none" stroke="#17324D" stroke-width="3"/><path d="M1482.5,441.5 v42 M1456.5,460.5 h52 M1482.5,483.5 l-24,35 M1482.5,483.5 l24,35" fill="none" stroke="#17324D" stroke-width="3"/>
-<foreignObject x="1430" y="492" width="105" height="28"><xhtml:div style="font:600 13.0px Arial,sans-serif;text-align:center;color:#17324D">Reviewer</xhtml:div></foreignObject>
-<rect x="325" y="175" width="400" height="35" rx="2" fill="none" stroke="none" stroke-width="1.5" opacity="1"/>
-<foreignObject x="334" y="177" width="382" height="31"><xhtml:div xmlns:xhtml="http://www.w3.org/1999/xhtml" style="box-sizing:border-box;width:100%;height:100%;padding:9px;display:flex;flex-direction:column;justify-content:center;align-items:flex-start;overflow:hidden;text-align:left;font:700 15.0px Arial,sans-serif;line-height:1.25;color:#17324D;word-break:normal">Prepare and run analysis</xhtml:div></foreignObject>
-<rect x="850" y="175" width="400" height="35" rx="2" fill="none" stroke="none" stroke-width="1.5" opacity="1"/>
-<foreignObject x="859" y="177" width="382" height="31"><xhtml:div xmlns:xhtml="http://www.w3.org/1999/xhtml" style="box-sizing:border-box;width:100%;height:100%;padding:9px;display:flex;flex-direction:column;justify-content:center;align-items:flex-start;overflow:hidden;text-align:left;font:700 15.0px Arial,sans-serif;line-height:1.25;color:#17324D;word-break:normal">Review results</xhtml:div></foreignObject>
-<ellipse cx="527.5" cy="276" rx="202.5" ry="41" fill="#E8F1FA" stroke="#4776A8" stroke-width="1.6" opacity="1"/>
-<foreignObject x="325" y="237" width="387" height="78"><xhtml:div xmlns:xhtml="http://www.w3.org/1999/xhtml" style="box-sizing:border-box;width:100%;height:100%;padding:5px;display:flex;flex-direction:column;justify-content:center;align-items:center;overflow:hidden;text-align:center;font:400 13.0px Arial,sans-serif;line-height:1.25;color:#203247;word-break:normal">Provide project context<br/>(SRS, plan, policy, workspace)</xhtml:div></foreignObject>
-<ellipse cx="527.5" cy="406" rx="202.5" ry="41" fill="#E8F1FA" stroke="#4776A8" stroke-width="1.6" opacity="1"/>
-<foreignObject x="325" y="367" width="387" height="78"><xhtml:div xmlns:xhtml="http://www.w3.org/1999/xhtml" style="box-sizing:border-box;width:100%;height:100%;padding:5px;display:flex;flex-direction:column;justify-content:center;align-items:center;overflow:hidden;text-align:center;font:400 13.0px Arial,sans-serif;line-height:1.25;color:#203247;word-break:normal">Start assurance run<br/>(manual, watch, replay)</xhtml:div></foreignObject>
-<ellipse cx="527.5" cy="536" rx="202.5" ry="41" fill="#E8F1FA" stroke="#4776A8" stroke-width="1.6" opacity="1"/>
-<foreignObject x="325" y="497" width="387" height="78"><xhtml:div xmlns:xhtml="http://www.w3.org/1999/xhtml" style="box-sizing:border-box;width:100%;height:100%;padding:5px;display:flex;flex-direction:column;justify-content:center;align-items:center;overflow:hidden;text-align:center;font:400 13.0px Arial,sans-serif;line-height:1.25;color:#203247;word-break:normal">Submit dependency request<br/>or workspace event</xhtml:div></foreignObject>
-<ellipse cx="527.5" cy="666" rx="202.5" ry="41" fill="#E8F1FA" stroke="#4776A8" stroke-width="1.6" opacity="1"/>
-<foreignObject x="325" y="627" width="387" height="78"><xhtml:div xmlns:xhtml="http://www.w3.org/1999/xhtml" style="box-sizing:border-box;width:100%;height:100%;padding:5px;display:flex;flex-direction:column;justify-content:center;align-items:center;overflow:hidden;text-align:center;font:400 13.0px Arial,sans-serif;line-height:1.25;color:#203247;word-break:normal">Request rerun or supported<br/>scenario revision</xhtml:div></foreignObject>
-<ellipse cx="1072.5" cy="276" rx="202.5" ry="41" fill="#F0EAFB" stroke="#7560A8" stroke-width="1.6" opacity="1"/>
-<foreignObject x="870" y="237" width="387" height="78"><xhtml:div xmlns:xhtml="http://www.w3.org/1999/xhtml" style="box-sizing:border-box;width:100%;height:100%;padding:5px;display:flex;flex-direction:column;justify-content:center;align-items:center;overflow:hidden;text-align:center;font:400 13.0px Arial,sans-serif;line-height:1.25;color:#203247;word-break:normal">Inspect module statuses<br/>and reason traces</xhtml:div></foreignObject>
-<ellipse cx="1072.5" cy="406" rx="202.5" ry="41" fill="#F0EAFB" stroke="#7560A8" stroke-width="1.6" opacity="1"/>
-<foreignObject x="870" y="367" width="387" height="78"><xhtml:div xmlns:xhtml="http://www.w3.org/1999/xhtml" style="box-sizing:border-box;width:100%;height:100%;padding:5px;display:flex;flex-direction:column;justify-content:center;align-items:center;overflow:hidden;text-align:center;font:400 13.0px Arial,sans-serif;line-height:1.25;color:#203247;word-break:normal">Inspect evidence, integrity<br/>and candidate/input bindings</xhtml:div></foreignObject>
-<ellipse cx="1072.5" cy="536" rx="202.5" ry="41" fill="#F0EAFB" stroke="#7560A8" stroke-width="1.6" opacity="1"/>
-<foreignObject x="870" y="497" width="387" height="78"><xhtml:div xmlns:xhtml="http://www.w3.org/1999/xhtml" style="box-sizing:border-box;width:100%;height:100%;padding:5px;display:flex;flex-direction:column;justify-content:center;align-items:center;overflow:hidden;text-align:center;font:400 13.0px Arial,sans-serif;line-height:1.25;color:#203247;word-break:normal">View final decision<br/>and run report</xhtml:div></foreignObject>
-<ellipse cx="1072.5" cy="666" rx="202.5" ry="41" fill="#F0EAFB" stroke="#7560A8" stroke-width="1.6" opacity="1"/>
-<foreignObject x="870" y="627" width="387" height="78"><xhtml:div xmlns:xhtml="http://www.w3.org/1999/xhtml" style="box-sizing:border-box;width:100%;height:100%;padding:5px;display:flex;flex-direction:column;justify-content:center;align-items:center;overflow:hidden;text-align:center;font:400 13.0px Arial,sans-serif;line-height:1.25;color:#203247;word-break:normal">Open or download run report<br/>and evidence details</xhtml:div></foreignObject>
-<rect x="325" y="785" width="950" height="55" rx="12" fill="#F8FAFC" stroke="#CBD5E1" stroke-width="1" opacity="1"/>
-<foreignObject x="325" y="787" width="932" height="51"><xhtml:div xmlns:xhtml="http://www.w3.org/1999/xhtml" style="box-sizing:border-box;width:100%;height:100%;padding:5px;display:flex;flex-direction:column;justify-content:center;align-items:center;overflow:hidden;text-align:center;font:400 11.0px Arial,sans-serif;line-height:1.25;color:#536579;word-break:normal">Representative routes: /api/runs, /api/runs/{id}/evidence, /events, /report, /rerun and /revise; module-specific routes are also present.</xhtml:div></foreignObject>
+<svg xmlns="http://www.w3.org/2000/svg" width="1320" height="670" viewBox="0 0 1320 670">
+<defs><marker id="arrow" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto"><path d="M0,0 L10,4 L0,8 Z" fill="#536b80"/></marker><style>
+text{font-family:Arial,sans-serif;fill:#20364d}.title{font-size:27px;font-weight:700}.group{font-size:21px;font-weight:700}.body{font-size:16px}.small{font-size:14px}.actor{font-size:18px;font-weight:600}.boundary{fill:#fff;stroke:#91a6b8;stroke-width:2}.package{fill:#f7f9fb;stroke:#a8b8c6;stroke-width:1.5}.uc{fill:#edf4fb;stroke:#4e7fae;stroke-width:2}.rev{fill:#f1edfa;stroke:#8065ae;stroke-width:2}.assoc{fill:none;stroke:#536b80;stroke-width:2}.inc{fill:none;stroke:#536b80;stroke-width:2;stroke-dasharray:7 6;marker-end:url(#arrow)}
+</style></defs>
+<text x="660" y="40" text-anchor="middle" class="title">ASENT | implemented local-prototype use cases</text>
+<rect x="210" y="65" width="900" height="500" rx="14" class="boundary"/>
+<text x="235" y="98" class="group">ASENT local assurance application</text>
+<rect x="245" y="120" width="380" height="385" rx="12" class="package"/>
+<rect x="645" y="120" width="430" height="385" rx="12" class="package"/>
+<text x="435" y="153" text-anchor="middle" class="group">Prepare and run</text>
+<text x="860" y="153" text-anchor="middle" class="group">Review results</text>
+<!-- developer actor and association bus -->
+<circle cx="105" cy="263" r="17" fill="#fff" stroke="#27445d" stroke-width="3"/><path d="M105 280 V333 M78 300 H132 M105 333 L80 365 M105 333 L130 365" fill="none" stroke="#27445d" stroke-width="3"/>
+<text x="105" y="393" text-anchor="middle" class="actor">Developer</text>
+<path d="M132 300 H190 M190 190 V458 M190 190 H310 M190 256 H310 M190 322 H310 M190 388 H310 M190 454 H310" class="assoc"/>
+<!-- preparation use cases -->
+<ellipse cx="465" cy="190" rx="155" ry="27" class="uc"/><text x="465" y="196" text-anchor="middle" class="body">Provide project context</text>
+<ellipse cx="465" cy="256" rx="155" ry="27" class="uc"/><text x="465" y="251" text-anchor="middle" class="body"><tspan x="465">Start manual, watch,</tspan><tspan x="465" dy="19">or replay run</tspan></text>
+<ellipse cx="465" cy="322" rx="155" ry="27" class="uc"/><text x="465" y="317" text-anchor="middle" class="body"><tspan x="465">Analyze applicable</tspan><tspan x="465" dy="19">security surfaces</tspan></text>
+<ellipse cx="465" cy="388" rx="155" ry="27" class="uc"/><text x="465" y="383" text-anchor="middle" class="body"><tspan x="465">Submit dependency request</tspan><tspan x="465" dy="19">or workspace event</tspan></text>
+<ellipse cx="465" cy="454" rx="155" ry="27" class="uc"/><text x="465" y="449" text-anchor="middle" class="body"><tspan x="465">Request rerun or</tspan><tspan x="465" dy="19">supported scenario revision</tspan></text>
+<path d="M465 283 V294" class="inc"/><text x="477" y="295" class="small">«include»</text>
+<!-- reviewer actor and association bus -->
+<path d="M1188 300 H1130 M1130 190 V454 M1130 190 H1005 M1130 278 H1005 M1130 366 H1005 M1130 454 H1005" class="assoc"/>
+<circle cx="1215" cy="263" r="17" fill="#fff" stroke="#27445d" stroke-width="3"/><path d="M1215 280 V333 M1188 300 H1242 M1215 333 L1190 365 M1215 333 L1240 365" fill="none" stroke="#27445d" stroke-width="3"/>
+<text x="1215" y="393" text-anchor="middle" class="actor">Reviewer</text>
+<!-- review use cases -->
+<ellipse cx="825" cy="190" rx="180" ry="31" class="rev"/><text x="825" y="185" text-anchor="middle" class="body"><tspan x="825">Inspect module statuses</tspan><tspan x="825" dy="19">and reason traces</tspan></text>
+<ellipse cx="825" cy="278" rx="180" ry="31" class="rev"/><text x="825" y="273" text-anchor="middle" class="body"><tspan x="825">Inspect evidence integrity</tspan><tspan x="825" dy="19">and candidate/input bindings</tspan></text>
+<ellipse cx="825" cy="366" rx="180" ry="31" class="rev"/><text x="825" y="361" text-anchor="middle" class="body"><tspan x="825">View shared decision</tspan><tspan x="825" dy="19">and run report</tspan></text>
+<ellipse cx="825" cy="454" rx="180" ry="31" class="rev"/><text x="825" y="449" text-anchor="middle" class="body"><tspan x="825">Open or download</tspan><tspan x="825" dy="19">run evidence</tspan></text>
+<rect x="245" y="525" width="830" height="58" rx="9" fill="#f4f7fa" stroke="#c5d2df" stroke-width="1.5"/>
+<text x="660" y="549" text-anchor="middle" class="small"><tspan x="660">Representative routes: /api/runs, /api/runs/{id}/evidence, /events, /report, /rerun and /revise.</tspan><tspan x="660" dy="18">Actor labels describe prototype tasks; they do not imply accounts, permissions, or role-based access control.</tspan></text>
 </svg>

@@ -1,0 +1,42 @@
+!theme plain
+skinparam backgroundColor #FFFFFF
+skinparam defaultFontName Arial
+skinparam defaultFontSize 15
+skinparam defaultFontColor #20364D
+skinparam shadowing false
+skinparam roundcorner 7
+skinparam ArrowColor #536B80
+skinparam ArrowThickness 1.25
+skinparam packageStyle rectangle
+skinparam packageBorderColor #9AAABA
+skinparam packageBackgroundColor #F4F7FA
+skinparam componentStyle uml2
+skinparam actorBorderColor #27445D
+skinparam actorFontColor #20364D
+skinparam usecaseBorderColor #536B80
+skinparam usecaseBackgroundColor #F2F6FA
+skinparam usecaseFontColor #20364D
+skinparam noteBorderColor #C4A45B
+skinparam noteBackgroundColor #FFF7E5
+skinparam noteFontColor #4C442F
+skinparam activity {
+  BackgroundColor #F2F6FA
+  BorderColor #536B80
+  FontColor #20364D
+  DiamondBackgroundColor #E8EFF5
+  DiamondBorderColor #536B80
+  StartColor #25465F
+  EndColor #25465F
+}
+skinparam sequence {
+  LifeLineBorderColor #9AAABA
+  LifeLineBackgroundColor #F7F9FB
+  ParticipantBorderColor #536B80
+  ParticipantBackgroundColor #EFF4F8
+  ParticipantFontColor #20364D
+  ActorBorderColor #27445D
+  ActorFontColor #20364D
+  GroupBorderColor #9AAABA
+  GroupBackgroundColor #F4F7FA
+  ReferenceBorderColor #9AAABA
+}
