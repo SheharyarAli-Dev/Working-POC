@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1320" height="670" viewBox="0 0 1320 670">
+<defs><marker id="arrow" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto"><path d="M0,0 L10,4 L0,8 Z" fill="#536b80"/></marker><style>
+text{font-family:Arial,sans-serif;fill:#20364d}.title{font-size:27px;font-weight:700}.group{font-size:21px;font-weight:700}.body{font-size:16px}.small{font-size:14px}.actor{font-size:18px;font-weight:600}.boundary{fill:#fff;stroke:#91a6b8;stroke-width:2}.package{fill:#f7f9fb;stroke:#a8b8c6;stroke-width:1.5}.uc{fill:#edf4fb;stroke:#4e7fae;stroke-width:2}.rev{fill:#f1edfa;stroke:#8065ae;stroke-width:2}.assoc{fill:none;stroke:#536b80;stroke-width:2}.inc{fill:none;stroke:#536b80;stroke-width:2;stroke-dasharray:7 6;marker-end:url(#arrow)}
+</style></defs>
+<text x="660" y="40" text-anchor="middle" class="title">ASENT | implemented local-prototype use cases</text>
+<rect x="210" y="65" width="900" height="500" rx="14" class="boundary"/>
+<text x="235" y="98" class="group">ASENT local assurance application</text>
+<rect x="245" y="120" width="380" height="385" rx="12" class="package"/>
+<rect x="645" y="120" width="430" height="385" rx="12" class="package"/>
+<text x="435" y="153" text-anchor="middle" class="group">Prepare and run</text>
+<text x="860" y="153" text-anchor="middle" class="group">Review results</text>
+<!-- developer actor and association bus -->
+<circle cx="105" cy="263" r="17" fill="#fff" stroke="#27445d" stroke-width="3"/><path d="M105 280 V333 M78 300 H132 M105 333 L80 365 M105 333 L130 365" fill="none" stroke="#27445d" stroke-width="3"/>
+<text x="105" y="393" text-anchor="middle" class="actor">Developer</text>
+<path d="M132 300 H190 M190 190 V458 M190 190 H310 M190 256 H310 M190 322 H310 M190 388 H310 M190 454 H310" class="assoc"/>
+<!-- preparation use cases -->
+<ellipse cx="465" cy="190" rx="155" ry="27" class="uc"/><text x="465" y="196" text-anchor="middle" class="body">Provide project context</text>
+<ellipse cx="465" cy="256" rx="155" ry="27" class="uc"/><text x="465" y="251" text-anchor="middle" class="body"><tspan x="465">Start manual, watch,</tspan><tspan x="465" dy="19">or replay run</tspan></text>
+<ellipse cx="465" cy="322" rx="155" ry="27" class="uc"/><text x="465" y="317" text-anchor="middle" class="body"><tspan x="465">Analyze applicable</tspan><tspan x="465" dy="19">security surfaces</tspan></text>
+<ellipse cx="465" cy="388" rx="155" ry="27" class="uc"/><text x="465" y="383" text-anchor="middle" class="body"><tspan x="465">Submit dependency request</tspan><tspan x="465" dy="19">or workspace event</tspan></text>
+<ellipse cx="465" cy="454" rx="155" ry="27" class="uc"/><text x="465" y="449" text-anchor="middle" class="body"><tspan x="465">Request rerun or</tspan><tspan x="465" dy="19">supported scenario revision</tspan></text>
+<path d="M465 283 V294" class="inc"/><text x="477" y="295" class="small">«include»</text>
+<!-- reviewer actor and association bus -->
+<path d="M1188 300 H1130 M1130 190 V454 M1130 190 H1005 M1130 278 H1005 M1130 366 H1005 M1130 454 H1005" class="assoc"/>
+<circle cx="1215" cy="263" r="17" fill="#fff" stroke="#27445d" stroke-width="3"/><path d="M1215 280 V333 M1188 300 H1242 M1215 333 L1190 365 M1215 333 L1240 365" fill="none" stroke="#27445d" stroke-width="3"/>
+<text x="1215" y="393" text-anchor="middle" class="actor">Reviewer</text>
+<!-- review use cases -->
+<ellipse cx="825" cy="190" rx="180" ry="31" class="rev"/><text x="825" y="185" text-anchor="middle" class="body"><tspan x="825">Inspect module statuses</tspan><tspan x="825" dy="19">and reason traces</tspan></text>
+<ellipse cx="825" cy="278" rx="180" ry="31" class="rev"/><text x="825" y="273" text-anchor="middle" class="body"><tspan x="825">Inspect evidence integrity</tspan><tspan x="825" dy="19">and candidate/input bindings</tspan></text>
+<ellipse cx="825" cy="366" rx="180" ry="31" class="rev"/><text x="825" y="361" text-anchor="middle" class="body"><tspan x="825">View shared decision</tspan><tspan x="825" dy="19">and run report</tspan></text>
+<ellipse cx="825" cy="454" rx="180" ry="31" class="rev"/><text x="825" y="449" text-anchor="middle" class="body"><tspan x="825">Open or download</tspan><tspan x="825" dy="19">run evidence</tspan></text>
+<rect x="245" y="525" width="830" height="58" rx="9" fill="#f4f7fa" stroke="#c5d2df" stroke-width="1.5"/>
+<text x="660" y="549" text-anchor="middle" class="small"><tspan x="660">Representative routes: /api/runs, /api/runs/{id}/evidence, /events, /report, /rerun and /revise.</tspan><tspan x="660" dy="18">Actor labels describe prototype tasks; they do not imply accounts, permissions, or role-based access control.</tspan></text>
+</svg>

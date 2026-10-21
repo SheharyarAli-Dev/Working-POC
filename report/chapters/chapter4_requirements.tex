@@ -4,15 +4,15 @@ This chapter states the project requirements that can be checked against the cur
 \end{sloppypar}
 
 \section{User Interactions / Use Cases}
-The reviewer supplies a baseline, a candidate Terraform snapshot, and the registered obligation; starts a SABLE run through the standalone or shared workflow; and inspects the verdict, reasons, and evidence. In the integrated workflow, the shared orchestrator stores SABLE evidence and reports the final gate decision.
+The developer provides project context and a candidate workspace, then starts, watches, or replays an assurance run. Supported dependency and workspace events can trigger analysis; users can request a rerun or supported scenario revision. Reviewers inspect applicable module statuses, reasons, candidate-bound evidence, and the shared decision. SABLE also retains its standalone interface.
 
 \section{Use Case Diagram}
-The figure is page 01, ``Use-case diagram ? implemented ASENT interfaces,'' from the editable diagrams.net source \texttt{ASENT\_All\_Diagrams.drawio}. It names user goals supported by the local interfaces and does not imply user accounts or cloud deployment.
+The figure uses the editable SVG source \path{report/sources/diagrams/asent-use-cases.svg}. It groups the implemented developer and reviewer tasks around the local assurance workflow; actor names do not imply user accounts or access-control roles.
 \begin{landscape}
 \begin{figure}[p]
 \centering
-\includegraphics[width=0.97\linewidth,height=0.84\textheight,keepaspectratio]{figures/asent/asent-use-cases.png}
-\caption{Implemented ASENT use cases derived from the current local UI and API routes.}
+\includegraphics[width=0.97\linewidth,height=0.84\textheight,keepaspectratio]{figures/asent/asent-use-cases.pdf}
+\caption{ASENT use cases grounded in the local UI and API: context, run initiation, applicable analysis, dependency/workspace events, reruns, and evidence review.}
 \label{fig:asent-use-cases}
 \end{figure}
 \end{landscape}

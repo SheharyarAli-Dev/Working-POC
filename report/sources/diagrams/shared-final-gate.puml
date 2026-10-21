@@ -1,0 +1,46 @@
+@startuml
+!include style.puml
+title Shared gate | evidence binding, status mapping, and decision precedence
+
+start
+:For each applicable module, select last non-stale row in supplied order\n(storage order is rowid, not timestamp);
+if (Row exists with a string status?) then (yes)
+  if (integrity_valid exactly true
+and snapshot + input hash match?) then (yes)
+    if (Trustworthy blocking status
+or explicit blocking flag?) then (yes)
+      :Record a blocker;
+    else (no)
+      if (Status acceptable, including restricted CAVR only\nwhen restriction_enforced?) then (yes)
+        :Record module accepted;
+      else (no)
+        :Add REVIEW reason;
+      endif
+    endif
+  else (no)
+    :Add REVIEW reason;
+  endif
+else (no)
+  :Add REVIEW reason;
+endif
+:After evaluating applicable modules;
+:Accept: CAVR VERIFIED, SATRA ACCEPT, SABLE PRESERVED;\nCAVR RESTRICTED needs restriction_enforced. Block: CAVR REJECTED,\nSATRA REJECT, SABLE REGRESSED, or explicit blocking flag;
+if (Any trustworthy blocker?) then (yes)
+  :BLOCK\n(blockers take precedence over review reasons);
+  stop
+else (no)
+  if (Any review reason?) then (yes)
+    :REVIEW;
+    stop
+  else (no)
+    if (Applicable set empty?) then (yes)
+      :REVIEW\n(no applicable module);
+      stop
+    else (no)
+      :ACCEPT;
+      stop
+    endif
+  endif
+endif
+
+@enduml
