@@ -79,12 +79,15 @@ The editable diagrams.net source page 08 separates the registered obligation, ba
 The parser's normalized resource model carries Terraform address, type, attributes, module context, and graph references. Correspondence returns ranked hypotheses and conflict reasons. Authorization results contain known/holds values, expected and unexpected resources, missing actions, widening, misbinding, and outside-model evidence. The orchestrator evidence includes run identity, analyzer, candidate snapshot, input hash, status, stale state, and integrity result. The gate uses these fields to decide whether evidence is current and trustworthy.
 
 The following diagrams add the CAVR records and the repository's persisted data structures to the SABLE domain model above.
+\begin{landscape}
 \begin{figure}[p]
 \centering
-\includegraphics[width=0.98\textwidth,height=0.78\textheight,keepaspectratio]{figures/diagrams/cavr-domain.png}
+\includegraphics[width=0.98\linewidth,height=0.80\textheight,keepaspectratio]{figures/diagrams/cavr-domain.png}
 \caption{CAVR request and package-verdict domain model, including policy, lockfile, dependency tree, contract, advisories, scan results, and evidence records.}
 \label{fig:cavr-domain-model}
 \end{figure}
+\end{landscape}
+\clearpage
 
 \begin{landscape}
 \begin{figure}[p]
@@ -117,6 +120,7 @@ The full schema is followed by three enlarged detail crops, split at whitespace 
 \label{fig:asent-erd-detail-c}
 \end{figure}
 
+\clearpage
 \section{Process / Behavior Design}
 The sequence in Figure~\ref{fig:sable-current-process} is fail-closed at decision boundaries: a missing, empty, or unverified baseline cannot establish continuity; no unique supported successor means no projected safe result; unsupported policy meaning cannot prove the obligation; SABLE \texttt{NOT\_APPLICABLE} and stale, mismatched, or integrity-invalid evidence cannot establish acceptance. The shared gate requires \texttt{integrity\_valid} to be exactly true and checks candidate-snapshot and module-input-hash bindings. Tests exercise these conditions and map unknown or not-applicable SABLE evidence to final \texttt{REVIEW}.
 
