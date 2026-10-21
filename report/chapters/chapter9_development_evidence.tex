@@ -1,12 +1,14 @@
 \chapter{Project Management and Development Evidence}
 
-This chapter records implementation, repository, testing, tool-use, and risk evidence available for the current SABLE branch. The team's cross-checked module contribution statement is recorded separately from repository evidence; this chapter does not attribute work to individuals based only on commit presence.
+This chapter records development evidence for all three ASENT analyzers and their shared workflow. CAVR addresses dependency and package trust, SATRA-RV evaluates supported application-code security changes, and SABLE checks bounded Terraform/IAM security obligations. The orchestrator runs applicable analyzers against the same candidate snapshot, binds their evidence to that snapshot, and combines their results in the shared final gate. The modules cover different security surfaces; they are not a serial chain. Team-confirmed ownership is reported separately from repository provenance.
 
 \section{Work Completed}
 
-The current SABLE contribution includes a local Terraform/HCL analysis pipeline, a bounded IAM/S3 authorization evaluator, successor correspondence, explicit outcomes of \texttt{PRESERVED}, \texttt{REGRESSED}, and \texttt{UNKNOWN}, baseline comparisons B0--B4, authored scenarios, and integration with the shared evidence/final-gate path. Automated tests cover expected results, unsupported and ambiguous inputs, stale evidence, input-hash mismatch, and evidence integrity. The unresolved-role-binding correction is commit \texttt{58b0a3d}; later baseline and evidence-gate corrections are in source commit \texttt{84f91a9}. Its shared-assurance CI passed 48 focused tests. PR \#5 was tested at exact head \texttt{554b6d5}, with all 18 checks successful, and merged normally as \texttt{ffe8aa9}.
+The completed prototype brings together three module implementations. CAVR intercepts supported Python package requests and checks policy, artifact integrity, dependency metadata, advisories, and package capabilities before returning a bounded verdict. SATRA-RV compares supported application-code changes against trusted security contracts and tests, validates selected counterfactuals, and reports whether evidence supports a change. SABLE parses a bounded Terraform/HCL subset and evaluates whether a registered IAM/S3 obligation remains satisfied after a structural refactor. Each module reports its own evidence and limits; the shared workflow binds applicable results to one candidate snapshot and computes the aggregate decision. Detailed module designs and test records appear in Chapters 6--8.
 
-The initial SABLE changes were published on the team's \texttt{sable} branch. The integrated source includes commit \texttt{84f91a9}; PR~\#5 passed all 18 checks on exact head \texttt{554b6d5} and merged to \texttt{master} as \texttt{ffe8aa9}. The merge contains CAVR, SATRA-RV, SABLE, and shared-workflow changes together. No branch protection or ruleset was enabled at the last repository check.
+The SABLE implementation adds Terraform/HCL normalization, bounded IAM/S3 authorization, successor correspondence, and explicit outcomes of \texttt{PRESERVED}, \texttt{REGRESSED}, and \texttt{UNKNOWN}. Its scenarios and automated tests cover preserved, regressed, unsupported, ambiguous, stale, and integrity-invalid evidence. The unresolved-role-binding correction is commit \texttt{58b0a3d}; later baseline and evidence-gate corrections are in source commit \texttt{84f91a9}. Its shared-assurance CI passed 48 focused tests. PR \#5 was tested at exact head \texttt{554b6d5}, with all 18 checks successful, and merged normally as \texttt{ffe8aa9}.
+
+PR~\#5 integrated CAVR, SATRA-RV, SABLE, and shared-workflow changes. All 18 checks passed on exact head \texttt{554b6d5}, and the PR merged normally to \texttt{master} as \texttt{ffe8aa9}. This repository record supports the integrated implementation; module-specific tests and limits are reported in their respective chapters. The initial SABLE changes were published on the team's \texttt{sable} branch, including source commit \texttt{84f91a9}. No branch protection or ruleset was enabled at the last repository check.
 
 \subsection{Rendered Application Evidence}
 The integrated capture below comes from the shared ASENT Run Workflow, not from the dedicated SABLE page. It records run \texttt{104074afe883} for the \texttt{sable\_regressed} storage-refactor scenario. The displayed module outcomes are CAVR \texttt{VERIFIED}, SABLE \texttt{REGRESSED}, and SATRA \texttt{INCONCLUSIVE}, with an overall final decision of \texttt{BLOCK}. The trace shows a known obligation that does not hold and a candidate policy target changed through the storage module. Since SATRA is also inconclusive, the screenshot is not evidence that SABLE was the sole cause of the overall gate result.
@@ -176,7 +178,7 @@ These statements define current evidence and research limits; they are not a lis
 
 \section{Individual Responsibilities}
 
-The published SABLE branch contains the Terraform infrastructure-security module and the related shared evidence/final-gate integration described in the implementation chapter. The team confirms that CAVR, SATRA-RV, and SABLE contributions were divided and cross-checked by the respective members. Repository history provides technical provenance but is not treated as the sole record of individual contribution.
+Primary implementation responsibility was divided across the three modules: Maryam Fatima for CAVR, Syed Sheharyar Ali for SATRA-RV, and Muhammad Ali Sajjad for SABLE. The team confirms that contributions were cross-checked. The shared orchestrator connects those distinct analyzers to a common candidate snapshot and final gate. The selected commit records and workflow summaries below provide technical provenance for each area; they do not, by themselves, establish the full extent or unaided authorship of an individual's work.
 
 \section{Contribution of Each Team Member}
 
@@ -186,18 +188,36 @@ The team reports that module contributions were divided and cross-checked by the
 \toprule
 \textbf{Area} & \textbf{Evidence-supported contribution and status}\\
 \midrule
-CAVR -- Maryam Fatima & The team confirms her contribution to the CAVR module; package-artifact verification, dependency analysis, and bounded execution evidence are documented in the CAVR chapters.\\
-SATRA-RV -- Syed Sheharyar Ali (23I-0097) & The team confirms his contribution to SATRA-RV; security-contract analysis, test selection, and repair-validation evidence are documented in the SATRA chapters.\\
+CAVR -- Maryam Fatima & The team confirms her primary CAVR responsibility. The module captures supported pip/requirements requests, gates them by policy, verifies PyPI artifact hashes and dependency metadata, checks advisories, and evaluates package capabilities. The selected commit record is \texttt{c5c0ef4}; the Core CI screenshot shows a successful workflow summary with CAVR tests among its visible jobs.\\
+SATRA-RV -- Syed Sheharyar Ali (23I-0097) & The team confirms his primary SATRA-RV responsibility. The module localizes supported application-code changes, checks trusted contracts and tests against baseline and candidate, validates bounded counterfactuals, and reports repair evidence with explicit limits. The selected commit record is \texttt{a4e8406}; the SATRA CI screenshot shows successful required SATRA and integration jobs.\\
 SABLE -- Muhammad Ali Sajjad (23I-0110) & The team confirms his contribution to SABLE; Terraform/HCL normalization, bounded IAM/S3 authorization, successor matching, scenario tests, and shared-gate evidence integration are documented in the SABLE chapters. Git history for SABLE files records commits \texttt{adda287}, \texttt{7794336}, and \texttt{7a965b8}; the published milestone is \texttt{9a4dc3d}. Focused CI passed on the published milestone.\\
-Shared workflow gate & Evidence freshness/integrity and final-decision behavior are covered by the shared-gate test selection executed with SABLE. Verified by focused tests.\\
+Shared workflow gate & The orchestrator routes applicable analyzers over one candidate snapshot, checks evidence freshness and integrity, and derives the final decision. Its integration is included in the merged PR~\#5 record and the shared-workflow evidence; the aggregate decision remains distinct from each module verdict.\\
 \bottomrule
 \end{longtable}
 
-The repository evidence supports SABLE and shared-gate technical provenance. The team-reported member allocation for CAVR and SATRA-RV is recorded as a team confirmation, separate from the integrated screenshot, which shows module statuses but does not establish ownership or full correctness.
+The table combines team-confirmed primary responsibility with selected repository evidence for each module. The integrated screenshot shows all three module statuses and the aggregate gate for one run; it does not establish individual ownership or complete correctness. Workflow screenshots show successful run summaries and visible jobs only, not hidden logs or universal feature coverage.
 
 \subsection{Selected Implementation Commit Records}
 
-The following repository screenshots show selected implementation commits and their changed-file context. They support source-control provenance; they do not establish the full extent of an individual's work, prove that the displayed changes passed tests, or establish unaided authorship. The CAVR commit page records Claude Opus 5.5 as a co-author.
+The following repository screenshots show selected implementation commits for CAVR, SATRA-RV, and SABLE, in that order, with their changed-file context. They support source-control provenance; they do not establish the full extent of an individual's work, prove that the displayed changes passed tests, or establish unaided authorship. The CAVR commit page records Claude Opus 5.5 as a co-author.
+
+\clearpage
+\begin{landscape}
+\begin{figure}[p]
+\centering
+\includegraphics[width=0.97\linewidth,height=0.90\textheight,keepaspectratio]{figures/contributions/cavr-pipeline-c5c0ef4.png}
+\caption{CAVR pipeline implementation record (commit \texttt{c5c0ef4}). The changed-file context includes the CAVR backend pipeline and tests. GitHub attributes this commit to Maryam Fatima and lists Claude Opus 5.5 as co-author; this is provenance evidence, not an independent test result.}
+\end{figure}
+\end{landscape}
+
+\clearpage
+\begin{landscape}
+\begin{figure}[p]
+\centering
+\includegraphics[width=0.97\linewidth,height=0.90\textheight,keepaspectratio]{figures/contributions/satra-live-pipeline-a4e8406.png}
+\caption{SATRA-RV live-pipeline implementation record (commit \texttt{a4e8406}). The page shows changes spanning the SATRA API, live pipeline, frontend component, and test files. Commit history provides provenance and changed-file context, not proof of the full contribution or test outcome.}
+\end{figure}
+\end{landscape}
 
 \clearpage
 \begin{landscape}
@@ -209,11 +229,16 @@ The following repository screenshots show selected implementation commits and th
 \end{landscape}
 
 \clearpage
+
+\subsection{Selected GitHub Actions Run Summaries}
+
+The following GitHub Actions pages show successful run summaries and the jobs visible in each workflow graph. They document the displayed CI outcomes for those runs; a summary screenshot does not establish the contents of hidden job logs or prove every product feature.
+
 \begin{landscape}
 \begin{figure}[p]
 \centering
-\includegraphics[width=0.97\linewidth,height=0.90\textheight,keepaspectratio]{figures/contributions/cavr-pipeline-c5c0ef4.png}
-\caption{CAVR pipeline implementation record (commit \texttt{c5c0ef4}). The changed-file context includes the CAVR backend pipeline and tests. GitHub attributes this commit to Maryam Fatima and lists Claude Opus 5.5 as co-author; the screenshot is provenance evidence, not an independent test result.}
+\includegraphics[width=0.97\linewidth,height=0.90\textheight,keepaspectratio]{figures/contributions/actions-core-ci-38618710036.png}
+\caption{Core CI summary for the ``CAVR orchestrator wiring'' pull request run (run \texttt{38618710036}). GitHub shows a successful workflow summary with the visible lint, integration, frontend, and module-test jobs completed.}
 \end{figure}
 \end{landscape}
 
@@ -221,8 +246,26 @@ The following repository screenshots show selected implementation commits and th
 \begin{landscape}
 \begin{figure}[p]
 \centering
-\includegraphics[width=0.97\linewidth,height=0.90\textheight,keepaspectratio]{figures/contributions/satra-live-pipeline-a4e8406.png}
-\caption{SATRA-RV live-pipeline implementation record (commit \texttt{a4e8406}). The page shows the author account and changes spanning the SATRA API, live pipeline, frontend component, and test files. Commit history provides provenance and changed-file context, not proof of the full contribution or test outcome.}
+\includegraphics[width=0.97\linewidth,height=0.90\textheight,keepaspectratio]{figures/contributions/actions-satra-ci-38618709902.png}
+\caption{SATRA CI summary for the ``CAVR orchestrator wiring'' pull request run (run \texttt{38618709902}). The displayed summary reports success for the required SATRA test-suite and full-suite integration jobs.}
+\end{figure}
+\end{landscape}
+
+\clearpage
+\begin{landscape}
+\begin{figure}[p]
+\centering
+\includegraphics[width=0.97\linewidth,height=0.90\textheight,keepaspectratio]{figures/contributions/actions-sable-assurance-38618709870.png}
+\caption{SABLE shared-assurance workflow summary (run \texttt{38618709870}). The page displays a successful run and a completed \texttt{sable-shared} job.}
+\end{figure}
+\end{landscape}
+
+\clearpage
+\begin{landscape}
+\begin{figure}[p]
+\centering
+\includegraphics[width=0.97\linewidth,height=0.90\textheight,keepaspectratio]{figures/contributions/actions-report-38629594370.png}
+\caption{Report workflow summary for ``Report: design diagrams for system, CAVR, SATRA-RV and SABLE'' (run \texttt{38629594370}). The displayed summary reports success for the FYP-1 mid-report PDF build and shows the workflow artifact.}
 \end{figure}
 \end{landscape}
 
