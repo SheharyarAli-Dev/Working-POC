@@ -1,0 +1,30 @@
+%%{init: {"theme":"base","themeVariables":{"fontFamily":"Helvetica","fontSize":"14px","primaryColor":"#ffffff","primaryBorderColor":"#222222","lineColor":"#333333"}}}%%
+stateDiagram-v2
+  direction TB
+  [*] --> RulesLoaded : run started
+  RulesLoaded --> UNKNOWN : rules missing
+  RulesLoaded --> Parsed : baseline + candidate HCL
+  Parsed --> UNKNOWN : baseline empty / parse errors
+  Parsed --> BaselineVerified : obligation holds on baseline
+  Parsed --> UNKNOWN : baseline does not hold
+  BaselineVerified --> SuccessorChosen : unique successor + principal
+  BaselineVerified --> UNKNOWN : ambiguous / conflicting
+  SuccessorChosen --> Projected : obligation evaluated on successor
+  Projected --> PRESERVED : known and holds
+  Projected --> REGRESSED : known and fails
+  Projected --> UNKNOWN : outside the model
+  PRESERVED --> EvidenceStored
+  REGRESSED --> EvidenceStored
+  UNKNOWN --> EvidenceStored
+  EvidenceStored --> [*]
+  state "Rules loaded<br/>(threat repository)" as RulesLoaded
+  state "Baseline verified" as BaselineVerified
+  state "Successor chosen<br/>(score + margin)" as SuccessorChosen
+  state "Projected authorization" as Projected
+  state "Evidence stored<br/>→ final gate" as EvidenceStored
+  classDef ok fill:#e7f6ec,stroke:#1a7f37,stroke-width:2px
+  classDef bad fill:#fdecec,stroke:#b42318,stroke-width:2px
+  classDef unk fill:#fff6e0,stroke:#b54708,stroke-width:2px
+  class PRESERVED ok
+  class REGRESSED bad
+  class UNKNOWN unk

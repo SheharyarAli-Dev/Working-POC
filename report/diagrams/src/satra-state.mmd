@@ -1,0 +1,39 @@
+%%{init: {"theme":"base","themeVariables":{"fontFamily":"Helvetica","fontSize":"14px","primaryColor":"#ffffff","primaryBorderColor":"#222222","lineColor":"#333333"}}}%%
+stateDiagram-v2
+  direction TB
+  [*] --> Fetched : commit selected
+  Fetched --> Localized : AST diff → regions
+  Localized --> Contracted : trusted manifest valid
+  Localized --> Evaluated : no contract
+  Contracted --> Executed : selected tests in sandbox
+  Executed --> OracleJudged : counterfactual mutant run
+  OracleJudged --> AdaptiveTests : contract exists
+  AdaptiveTests --> Evaluated : generated tests validated
+  OracleJudged --> Evaluated
+  Evaluated --> ACCEPTED : all 7 gates pass
+  Evaluated --> REJECTED : obligation or oracle fails
+  Evaluated --> INCONCLUSIVE : evidence missing
+  REJECTED --> Repairing : findings exist
+  Repairing --> ACCEPTED : re-verified in sandbox
+  Repairing --> REJECTED : not re-verified
+  ACCEPTED --> RecommitReady
+  RecommitReady --> Pushed : human approves
+  Pushed --> [*]
+  RecommitReady --> [*] : not approved
+  REJECTED --> [*]
+  INCONCLUSIVE --> [*]
+  state "Localized<br/>(changed functions ↔ routes, guards)" as Localized
+  state "Contracted<br/>(security contracts)" as Contracted
+  state "Executed<br/>(baseline, candidate, repeat)" as Executed
+  state "Oracle judged<br/>(does the test catch the mutant?)" as OracleJudged
+  state "Adaptive tests<br/>(Ollama, optional, untrusted until validated)" as AdaptiveTests
+  state "Gates evaluated<br/>(DecisionEngine)" as Evaluated
+  state "Repairing<br/>(bounded, deterministic)" as Repairing
+  state "Recommit ready" as RecommitReady
+  state "Pushed + audit trail" as Pushed
+  classDef ok fill:#e7f6ec,stroke:#1a7f37,stroke-width:2px
+  classDef bad fill:#fdecec,stroke:#b42318,stroke-width:2px
+  classDef unk fill:#fff6e0,stroke:#b54708,stroke-width:2px
+  class ACCEPTED ok
+  class REJECTED bad
+  class INCONCLUSIVE unk

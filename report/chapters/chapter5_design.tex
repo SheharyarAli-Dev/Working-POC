@@ -23,13 +23,13 @@ The SABLE behavior in Figure~\ref{fig:sable-current-process} is page 07 of the e
 \end{figure}
 \end{landscape}
 
-The shared final gate is a separate operation from the module verdict. Figure~\ref{fig:asent-shared-final-gate} is generated from the editable PlantUML source \path{report/sources/diagrams/shared-final-gate.puml}. It reflects the report-branch implementation: select the last non-stale evidence row in returned storage order, validate integrity and candidate/input binding before interpreting its status, then apply the common decision precedence. A preserved SABLE result alone therefore does not imply an overall \texttt{ACCEPT}.
+The shared final gate is a separate operation from the module verdict. Figure~\ref{fig:asent-shared-final-gate} is page 09 of the same editable source and shows how applicable CAVR, SATRA-RV, and SABLE statuses are combined only after evidence integrity, candidate snapshot, and input hashes are checked. A preserved SABLE result alone therefore does not imply an overall \texttt{ACCEPT}.
 
 \begin{landscape}
 \begin{figure}[p]
 \centering
-\includegraphics[width=0.97\linewidth,height=0.84\textheight,keepaspectratio]{figures/asent/shared-final-gate.pdf}
-\caption{Shared final-gate behavior. The gate selects the last non-stale row in supplied order, requires valid integrity and matching candidate/input bindings before classifying status, and gives trustworthy blockers precedence over review reasons.}
+\includegraphics[width=0.97\linewidth,height=0.84\textheight,keepaspectratio]{figures/asent/shared-final-gate.png}
+\caption{Shared final-gate outcomes from page 09 of the editable diagrams.net source. A trustworthy blocking status yields \texttt{BLOCK}; incomplete, stale, mismatched, invalid, or inconclusive evidence requires \texttt{REVIEW}; \texttt{ACCEPT} requires all applicable evidence to be acceptable.}
 \label{fig:asent-shared-final-gate}
 \end{figure}
 \end{landscape}
@@ -78,5 +78,95 @@ The editable diagrams.net source page 08 separates the registered obligation, ba
 \section{Data Design}
 The parser's normalized resource model carries Terraform address, type, attributes, module context, and graph references. Correspondence returns ranked hypotheses and conflict reasons. Authorization results contain known/holds values, expected and unexpected resources, missing actions, widening, misbinding, and outside-model evidence. The orchestrator evidence includes run identity, analyzer, candidate snapshot, input hash, status, stale state, and integrity result. The gate uses these fields to decide whether evidence is current and trustworthy.
 
+The following diagrams add the CAVR records and the repository's persisted data structures to the SABLE domain model above.
+\begin{figure}[p]
+\centering
+\includegraphics[width=0.98\textwidth,height=0.78\textheight,keepaspectratio]{figures/diagrams/cavr-domain.png}
+\caption{CAVR request and package-verdict domain model, including policy, lockfile, dependency tree, contract, advisories, scan results, and evidence records.}
+\label{fig:cavr-domain-model}
+\end{figure}
+
+\begin{landscape}
+\begin{figure}[p]
+\centering
+\includegraphics[width=0.98\linewidth,height=0.78\textheight,keepaspectratio]{figures/diagrams/erd.png}
+\caption{Entity relationships across the shared, CAVR, SABLE, and threat-repository SQLite stores. Dashed connections in the source diagram denote logical associations rather than declared foreign keys.}
+\label{fig:asent-erd}
+\end{figure}
+\end{landscape}
+
+The full schema is followed by three enlarged detail crops, split at whitespace between table groups, so table and column labels remain readable at report scale.
+\begin{figure}[p]
+\centering
+\includegraphics[height=0.70\textheight,keepaspectratio]{figures/diagrams/erd-detail-a.png}
+\caption{ERD detail: left table group, enlarged from the full schema.}
+\label{fig:asent-erd-detail-a}
+\end{figure}
+
+\begin{figure}[p]
+\centering
+\includegraphics[height=0.70\textheight,keepaspectratio]{figures/diagrams/erd-detail-b.png}
+\caption{ERD detail: middle table group, enlarged from the full schema.}
+\label{fig:asent-erd-detail-b}
+\end{figure}
+
+\begin{figure}[p]
+\centering
+\includegraphics[height=0.70\textheight,keepaspectratio]{figures/diagrams/erd-detail-c.png}
+\caption{ERD detail: right table group, enlarged from the full schema.}
+\label{fig:asent-erd-detail-c}
+\end{figure}
+
 \section{Process / Behavior Design}
 The sequence in Figure~\ref{fig:sable-current-process} is fail-closed at decision boundaries: a missing, empty, or unverified baseline cannot establish continuity; no unique supported successor means no projected safe result; unsupported policy meaning cannot prove the obligation; SABLE \texttt{NOT\_APPLICABLE} and stale, mismatched, or integrity-invalid evidence cannot establish acceptance. The shared gate requires \texttt{integrity\_valid} to be exactly true and checks candidate-snapshot and module-input-hash bindings. Tests exercise these conditions and map unknown or not-applicable SABLE evidence to final \texttt{REVIEW}.
+
+\subsection{Integrated workflow and module-level behavior}
+\begin{landscape}
+\begin{figure}[p]
+\centering
+\includegraphics[width=0.98\linewidth,height=0.8\textheight,keepaspectratio]{figures/diagrams/system-sequence.png}
+\caption{End-to-end ASENT run sequence from the dashboard and API through applicable analyzers, evidence storage, and the shared final gate.}
+\label{fig:asent-system-sequence}
+\end{figure}
+\end{landscape}
+
+\subsection{CAVR dependency assurance}
+\begin{figure}[p]
+\centering
+\includegraphics[height=0.82\textheight,keepaspectratio]{figures/diagrams/cavr-activity.png}
+\caption{CAVR request activity from capture and policy checks through artifact and dependency analysis to a logged verdict. The dashed follow-on is identified as planned in the diagram.}
+\label{fig:cavr-activity}
+\end{figure}
+
+\begin{landscape}
+\begin{figure}[p]
+\centering
+\includegraphics[width=0.98\linewidth,height=0.8\textheight,keepaspectratio]{figures/diagrams/cavr-sequence.png}
+\caption{Standalone \texttt{cavr install} request sequence and its verification collaborators. This module-specific route is distinct from CAVR's analyzer invocation in the shared workflow.}
+\label{fig:cavr-sequence}
+\end{figure}
+\end{landscape}
+
+\begin{figure}[p]
+\centering
+\includegraphics[height=0.84\textheight,keepaspectratio]{figures/diagrams/cavr-state.png}
+\caption{CAVR request lifecycle and the verified-install condition represented by the source diagram.}
+\label{fig:cavr-state}
+\end{figure}
+
+\subsection{SABLE Terraform/IAM assurance}
+\begin{landscape}
+\begin{figure}[p]
+\centering
+\includegraphics[width=0.98\linewidth,height=0.8\textheight,keepaspectratio]{figures/diagrams/sable-sequence.png}
+\caption{SABLE baseline verification, candidate parsing, successor correspondence, and authorization projection. The supported analysis boundary is the Terraform/HCL and IAM/S3 subset described in this report.}
+\label{fig:sable-sequence}
+\end{figure}
+\end{landscape}
+
+\begin{figure}[p]
+\centering
+\includegraphics[height=0.84\textheight,keepaspectratio]{figures/diagrams/sable-state.png}
+\caption{SABLE analysis states. Insufficient or unsupported evidence leads to \texttt{UNKNOWN}; successful module evidence is still subject to the shared final gate.}
+\label{fig:sable-state}
+\end{figure}

@@ -1,0 +1,37 @@
+%%{init: {"theme":"base","themeVariables":{"fontFamily":"Helvetica","fontSize":"14px","primaryColor":"#ffffff","primaryBorderColor":"#222222","lineColor":"#333333","actorBkg":"#ffffff","actorBorder":"#222222","noteBkgColor":"#f5f5f5","noteBorderColor":"#999999"},"sequence":{"mirrorActors":false,"wrap":true,"width":150}}}%%
+sequenceDiagram
+  autonumber
+  actor R as Developer / reviewer
+  participant S as Orchestrator or<br/>SABLE API
+  participant A as SABLE analyzer<br/>(sable/analyzer.py)
+  participant K as Threat repository<br/>(sable_rules)
+  participant H as HCL parser<br/>(hcl_parser.py)
+  participant E as Policy semantics<br/>(policy_semantics.py)
+  participant CO as Correspondence<br/>(correspondence.py)
+  participant G as Evidence + final gate
+
+  R->>S: run with baseline + candidate Terraform
+  S->>A: analyze(context)
+  A->>K: load SABLE rules
+  alt rules missing or disabled
+    A-->>S: UNKNOWN
+  else rules present
+    A->>H: parse baseline/infra and candidate/infra
+    H-->>A: resources, references, moves, parse errors
+    A->>E: does the baseline satisfy the obligation?
+    alt baseline missing, not parsed or not holding
+      A-->>S: UNKNOWN (unverified baseline)
+    else baseline verified
+      A->>CO: rank successor candidates of the protected asset
+      CO-->>A: hypotheses + conflicts, choose (score, margin)
+      alt no unique successor or principal unresolved
+        A-->>S: UNKNOWN
+      else successor chosen
+        A->>E: evaluate obligation on the successor
+        E-->>A: known? holds?
+        A-->>S: PRESERVED / REGRESSED (UNKNOWN if not known)
+      end
+    end
+  end
+  S->>G: store evidence (candidate snapshot, input hash)
+  G-->>R: module result + shared gate decision
