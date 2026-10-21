@@ -1,0 +1,46 @@
+%%{init: {"theme":"base","themeVariables":{"fontFamily":"Helvetica","fontSize":"14px","primaryColor":"#ffffff","primaryBorderColor":"#222222","lineColor":"#333333"}}}%%
+stateDiagram-v2
+  direction TB
+  [*] --> Captured : pip install / requirements edit
+  Captured --> UNRESOLVED : cannot capture
+  Captured --> Gated : check policy + lockfile
+  Gated --> BLOCK : not permitted
+  Gated --> UNRESOLVED : policy missing / invalid
+  Gated --> Resolved : permitted, wheels downloaded + hashed
+  Resolved --> REJECTED : hash mismatch
+  Resolved --> Contracted : tree OK
+  Contracted --> CacheChecked : 8-field key lookup
+  Resolved --> AdvisoriesChecked : tree incomplete
+  CacheChecked --> AdvisoriesChecked : OSV asked (every run)
+  AdvisoriesChecked --> REJECTED : version affected
+  AdvisoriesChecked --> UNRESOLVED : something unknown
+  AdvisoriesChecked --> VERIFIED : cache HIT
+  AdvisoriesChecked --> Scanned : cache MISS
+  Scanned --> VERIFIED : no denied sink reachable
+  Scanned --> UNRESOLVED : not scannable / sink reachable
+  BLOCK --> Logged
+  REJECTED --> Logged
+  UNRESOLVED --> Logged
+  VERIFIED --> Logged
+  Logged --> Installed : VERIFIED and --install
+  Logged --> [*] : otherwise nothing installed
+  Installed --> [*]
+  UNRESOLVED --> DeepAnalysis : SINK_REACHABLE escalation (M2)
+  state "C1 Captured" as Captured
+  state "C2 Gated" as Gated
+  state "C3 Resolved<br/>(wheel + tree, SHA-256)" as Resolved
+  state "C4 Contracted" as Contracted
+  state "Cache checked" as CacheChecked
+  state "Advisories checked<br/>(OSV)" as AdvisoriesChecked
+  state "Scanned<br/>(AST + reachability)" as Scanned
+  state "Logged<br/>(verdict_log; dashboard:<br/>evidence chain + certificate)" as Logged
+  state "Installed<br/>(verified tree only)" as Installed
+  state "M2 deep analysis<br/>(planned)" as DeepAnalysis
+  classDef ok fill:#e7f6ec,stroke:#1a7f37,stroke-width:2px
+  classDef bad fill:#fdecec,stroke:#b42318,stroke-width:2px
+  classDef unk fill:#fff6e0,stroke:#b54708,stroke-width:2px
+  classDef planned fill:#ffffff,stroke:#777777,stroke-dasharray:6 4,color:#555555
+  class VERIFIED ok
+  class BLOCK,REJECTED bad
+  class UNRESOLVED unk
+  class DeepAnalysis planned

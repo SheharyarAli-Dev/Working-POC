@@ -1,0 +1,40 @@
+%%{init: {"theme":"base","themeVariables":{"fontFamily":"Helvetica","fontSize":"14px","primaryColor":"#ffffff","primaryBorderColor":"#222222","lineColor":"#333333"},"flowchart":{"wrappingWidth":330,"nodeSpacing":28,"rankSpacing":36}}}%%
+flowchart TD
+  S((Start)) --> A["<b>1 · C1 Capture</b><br/>pip command or requirements.txt edit → structured record<br/><i>capture.py · manifest_parser.py</i>"]
+  A --> D0{Captured?}
+  D0 -- no --> U0(["<b>UNRESOLVED</b><br/>CAPTURE_FAILED / REQUEST_INVALID"])
+  D0 -- yes --> B["<b>2 · C2 Requirement gate</b><br/>project policy + dependencies.lock.json<br/><i>requirement_gate.py</i>"]
+  B --> D1{Gate result}
+  D1 -- BLOCK --> V_BLOCK(["<b>BLOCK</b><br/>NOT_ON_ALLOWLIST, DENYLIST,<br/>NOT_PINNED, NOT_IN_LOCKFILE …<br/>nothing downloaded"])
+  D1 -- "policy missing / invalid" --> U1(["<b>UNRESOLVED</b>"])
+  D1 -- PERMITTED --> C["<b>3–4 · C3 Artifact + tree</b><br/>download every wheel from PyPI, SHA-256 of the bytes<br/>vs registry digest; Requires-Dist tree + subtree digest<br/><i>pypi_client.py · dep_tree.py</i>"]
+  C --> D2{Tree result}
+  D2 -- "hash mismatch" --> V_HASH(["<b>REJECTED</b><br/>HASH_MISMATCH (file kept as evidence)"])
+  D2 -- OK --> K["<b>5 · C4 Capability contract</b><br/>from the project's real imports and call sites + policy<br/><i>capability_contract.py · context_extractor.py</i>"]
+  K --> E["<b>6 · Verdict cache lookup</b><br/>8-field key: ecosystem, name, version, artifact SHA-256,<br/>subtree digest, contract digest, policy ver., analyzer ver.<br/><i>verdict_cache.py</i>"]
+  D2 -- "incomplete (e.g. REGISTRY_UNAVAILABLE)" --> O
+  E --> O["<b>7 · OSV advisories</b><br/>every package of the tree, on every run (never cached)<br/><i>advisories.py</i>"]
+  O --> D3{Version affected?}
+  D3 -- yes --> V_VULN(["<b>REJECTED</b><br/>KNOWN_VULNERABILITY"])
+  D3 -- no --> D4{Tree, contract and<br/>advisories all known?}
+  D4 -- no --> U2(["<b>UNRESOLVED</b><br/>e.g. REGISTRY_UNAVAILABLE,<br/>ADVISORIES_UNAVAILABLE"])
+  D4 -- yes --> D5{Cache HIT?}
+  D5 -- yes --> R["Reuse the stored analysis"]
+  D5 -- no --> F["<b>8 · AST scan + sink judgement</b><br/>static scan of every wheel; denied sinks checked<br/>against project call-site reachability<br/><i>ast_scan.py · reachability.py</i>"]
+  F --> D6{Result}
+  D6 -- "code not scannable" --> U3(["<b>UNRESOLVED</b><br/>COMPILED_CODE_NOT_SCANNED,<br/>PTH_EXECUTES_CODE …"])
+  D6 -- "denied sink reachable" --> U4(["<b>UNRESOLVED</b><br/>SINK_REACHABLE<br/>escalation: deep analysis (M2)"])
+  D6 -- "no denied sink reachable" --> ST["store analysis in cache"]
+  ST --> V_OK
+  R --> V_OK(["<b>9 · VERIFIED</b><br/>ALL_CHECKS_PASSED"])
+  V_OK & V_BLOCK & V_HASH & V_VULN & U0 & U1 & U2 & U3 & U4 --> L["one row in <b>verdict_log</b> (metrics);<br/>dashboard path also writes the hash-chained<br/>evidence + certificate <i>(api.py · assurance.py)</i>"]
+  L --> END((End))
+  U4 -. "M2 (planned)" .-> M2["<b>Deep analysis</b><br/>sandbox · counterfactual runs · causal graph<br/>· minimal repair · re-verification"]
+  classDef ok fill:#e7f6ec,stroke:#1a7f37,stroke-width:2px;
+  classDef bad fill:#fdecec,stroke:#b42318,stroke-width:2px;
+  classDef unk fill:#fff6e0,stroke:#b54708,stroke-width:2px;
+  classDef planned fill:#ffffff,stroke:#777777,stroke-dasharray:6 4,color:#555555;
+  class V_OK ok
+  class V_BLOCK,V_HASH,V_VULN bad
+  class U0,U1,U2,U3,U4 unk
+  class M2 planned

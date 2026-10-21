@@ -1,0 +1,58 @@
+digraph UC {
+  rankdir=LR; nodesep=0.22; ranksep=1.1; splines=true;
+  graph [fontname="Helvetica", fontsize=12];
+  node [fontname="Helvetica", fontsize=11];
+  edge [arrowhead=none, color="#333333"];
+  node [shape=none, image="actor.png", imagescale=height, width=1.9, height=1.0, fixedsize=true, labelloc=b];
+  dev   [label="Developer"];
+  agent [label="AI coding agent"];
+  rev   [label="Reviewer / supervisor"];
+  node [shape=box, image="", style="rounded", fixedsize=false, width=1.2, height=0.5, labelloc=c];
+  pypi [label="«system»\nPyPI registry"];
+  osv  [label="«system»\nOSV database"];
+  git  [label="«system»\nGit repository"];
+  node [shape=ellipse, style="filled", fillcolor="#ffffff", width=2.5, height=0.55];
+  subgraph cluster_sys { label="ASENT"; fontsize=14; style="rounded"; color="#555555";
+    subgraph cluster_shared { label="Shared workflow"; style="rounded,dashed"; color="#999999";
+      ctx  [label="Provide project context\n(SRS, plan, policy, workspace)"];
+      run  [label="Start assurance run\n(manual, watch, replay)"];
+      rerun[label="Request rerun /\nscenario revision"];
+      dec  [label="View final decision\nACCEPT / REVIEW / BLOCK"];
+      evd  [label="Inspect module evidence\nand bindings"];
+      rep  [label="Download run report"];
+    }
+    subgraph cluster_cavr { label="CAVR · dependencies"; style="rounded,dashed"; color="#999999";
+      inst [label="Install via\ncavr install wrapper"];
+      vdep [label="Verify dependency request"];
+      cert [label="Inspect CAVR verdict\nand certificate"];
+      deep [label="Deep sandbox analysis\nand repair (M2, planned)", style="dashed", color="#777777", fontcolor="#555555"];
+    }
+    subgraph cluster_satra { label="SATRA-RV · application code"; style="rounded,dashed"; color="#999999";
+      fetch [label="Fetch candidate commits"];
+      satra [label="Run SATRA-RV analysis"];
+      recom [label="Approve repair recommit"];
+    }
+    subgraph cluster_sable { label="SABLE · Terraform / IAM"; style="rounded,dashed"; color="#999999";
+      sable [label="Run SABLE obligation check"];
+      audit [label="Audit a SABLE run"];
+    }
+    subgraph cluster_threat { label="Threat repository (shared knowledge)"; style="rounded,dashed"; color="#999999";
+      know [label="Manage threat knowledge\n(import, OSV import, enable/disable)"];
+    }
+  }
+  {rank=min; dev; agent;}
+  {rank=max; rev; pypi; osv; git;}
+  dev -> ctx; dev -> run; dev -> rerun; dev -> fetch; dev -> satra; dev -> sable;
+  agent -> run; agent -> inst;
+  dec -> rev; evd -> rev; rep -> rev; cert -> rev; recom -> rev; audit -> rev; know -> rev;
+  edge [style=dashed, arrowhead=open, fontsize=9, fontcolor="#444444"];
+  inst -> vdep [label="«include»"];
+  run -> vdep [label="«include»", constraint=false];
+  run -> satra [label="«include»", constraint=false];
+  run -> sable [label="«include»", constraint=false];
+  vdep -> deep [label="«extend»", dir=back, arrowtail=open, arrowhead=none];
+  edge [style=solid, arrowhead=none, label=""];
+  fetch -> git; recom -> git; vdep -> osv; vdep -> pypi;
+  edge [style=invis];
+  vdep -> cert; fetch -> satra; satra -> recom; sable -> audit; ctx -> dec; run -> evd; rerun -> rep; ctx -> know;
+}

@@ -14,6 +14,24 @@ Figure~\ref{fig:satra-assurance-flow} is the report rendering of page 06, ``SATR
 \label{fig:satra-assurance-flow}
 \end{figure}
 
+\subsection{Dedicated live-pipeline sequence and states}
+The next two diagrams describe SATRA's commit-ingestion live pipeline, including its recommit approval path. This is a module-specific interface and process; the shared ASENT analyzer and final-gate route are shown separately in Chapter~5.
+\begin{landscape}
+\begin{figure}[p]
+\centering
+\includegraphics[width=0.98\linewidth,height=0.8\textheight,keepaspectratio]{figures/diagrams/satra-sequence.png}
+\caption{SATRA live-pipeline sequence from commit ingestion through trusted tests, counterfactual evaluation, decision, and optional repair approval.}
+\label{fig:satra-sequence}
+\end{figure}
+\end{landscape}
+
+\begin{figure}[p]
+\centering
+\includegraphics[height=0.86\textheight,keepaspectratio]{figures/diagrams/satra-state.png}
+\caption{SATRA live-pipeline states. The diagram distinguishes rejected and inconclusive runs from an accepted result and shows the human approval step for a recommit.}
+\label{fig:satra-state}
+\end{figure}
+
 \subsection{Implemented Features and Components}
 \begin{longtable}{p{0.26\textwidth}p{0.65\textwidth}}
 \caption{Implemented Features and Components -- supporting table 1}\\
