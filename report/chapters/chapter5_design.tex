@@ -78,7 +78,7 @@ The editable diagrams.net source page 08 separates the registered obligation, ba
 \section{Data Design}
 The parser's normalized resource model carries Terraform address, type, attributes, module context, and graph references. Correspondence returns ranked hypotheses and conflict reasons. Authorization results contain known/holds values, expected and unexpected resources, missing actions, widening, misbinding, and outside-model evidence. The orchestrator evidence includes run identity, analyzer, candidate snapshot, input hash, status, stale state, and integrity result. The gate uses these fields to decide whether evidence is current and trustworthy.
 
-The following diagrams add the CAVR records and the repository's persisted data structures to the SABLE domain model above.
+The following diagrams add the CAVR records and the repository's persisted data structures to the SABLE domain model above. The ERD is shown first as a vector overview, then as four larger vector detail views rendered from the same editable Mermaid schema and grouped by data store.
 \begin{landscape}
 \begin{figure}[p]
 \centering
@@ -92,33 +92,13 @@ The following diagrams add the CAVR records and the repository's persisted data 
 \begin{landscape}
 \begin{figure}[p]
 \centering
-\includegraphics[width=0.98\linewidth,height=0.78\textheight,keepaspectratio]{figures/diagrams/erd.png}
-\caption{Entity relationships across the shared, CAVR, SABLE, and threat-repository SQLite stores. Dashed connections in the source diagram denote logical associations rather than declared foreign keys.}
+\includegraphics[width=0.98\linewidth,height=0.78\textheight,keepaspectratio]{figures/diagrams/erd.pdf}
+\caption{Vector overview of the entity relationships across the shared, CAVR, SABLE, and threat-repository SQLite stores. Dashed connections denote logical associations rather than declared foreign keys; the following vector detail views show the table fields at larger scale.}
 \label{fig:asent-erd}
 \end{figure}
 \end{landscape}
 
-The full schema is followed by three enlarged detail crops, split at whitespace between table groups, so table and column labels remain readable at report scale.
-\begin{figure}[p]
-\centering
-\includegraphics[height=0.70\textheight,keepaspectratio]{figures/diagrams/erd-detail-a.png}
-\caption{ERD detail: left table group, enlarged from the full schema.}
-\label{fig:asent-erd-detail-a}
-\end{figure}
-
-\begin{figure}[p]
-\centering
-\includegraphics[height=0.70\textheight,keepaspectratio]{figures/diagrams/erd-detail-b.png}
-\caption{ERD detail: middle table group, enlarged from the full schema.}
-\label{fig:asent-erd-detail-b}
-\end{figure}
-
-\begin{figure}[p]
-\centering
-\includegraphics[height=0.70\textheight,keepaspectratio]{figures/diagrams/erd-detail-c.png}
-\caption{ERD detail: right table group, enlarged from the full schema.}
-\label{fig:asent-erd-detail-c}
-\end{figure}
+\input{diagrams/erd-details.tex}
 
 \clearpage
 \section{Process / Behavior Design}

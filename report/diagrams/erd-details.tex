@@ -1,0 +1,210 @@
+% Larger, print-readable detail views of the editable Mermaid ERD in src/erd.mmd.
+% Logical links are dashed because the SQLite stores do not declare these FKs.
+
+\begin{landscape}
+\begin{figure}[p]
+\centering
+\begin{tikzpicture}[x=1cm,y=1cm,font=\small,
+  erdlink/.style={-{Stealth[length=2mm]},dashed,gray!75},
+  erdlabel/.style={font=\footnotesize,fill=white,inner sep=1.5pt}]
+  \node[font=\large\bfseries] at (0,1.8) {Shared run and evidence store};
+  \node (runs) at (-7,0) {\begin{tabular}{|l|l|p{3.2cm}|}\hline
+    \multicolumn{3}{|c|}{\textbf{RUNS}}\\\hline
+    TEXT & id & PK; run id\\\hline
+    TEXT & body & RunContext JSON\\\hline
+  \end{tabular}};
+  \node (cache) at (0,0) {\begin{tabular}{|l|l|p{2.2cm}|}\hline
+    \multicolumn{3}{|c|}{\textbf{CACHE}}\\\hline
+    TEXT & key & PK\\\hline
+    TEXT & body & \\\hline
+  \end{tabular}};
+  \node (experiments) at (7,0) {\begin{tabular}{|l|l|p{2.2cm}|}\hline
+    \multicolumn{3}{|c|}{\textbf{EXPERIMENTS}}\\\hline
+    TEXT & id & PK\\\hline
+    TEXT & body & \\\hline
+  \end{tabular}};
+  \node (evidence) at (-5,-7) {\begin{tabular}{|l|l|p{3.2cm}|}\hline
+    \multicolumn{3}{|c|}{\textbf{EVIDENCE}}\\\hline
+    TEXT & id & PK\\\hline
+    TEXT & run\_id & \texttt{-> RUNS.id}\\\hline
+    TEXT & module & cavr / satra / sable\\\hline
+    TEXT & body & Evidence JSON\\\hline
+    TEXT & content\_hash & \\\hline
+    INTEGER & stale & \\\hline
+  \end{tabular}};
+  \node (events) at (5,-7) {\begin{tabular}{|l|l|p{3.2cm}|}\hline
+    \multicolumn{3}{|c|}{\textbf{EVENTS}}\\\hline
+    INTEGER & id & PK\\\hline
+    TEXT & run\_id & \texttt{-> RUNS.id}\\\hline
+    TEXT & kind & \\\hline
+    TEXT & body & \\\hline
+    TEXT & previous\_hash & hash chain\\\hline
+    TEXT & hash & \\\hline
+  \end{tabular}};
+  \draw[erdlink] (runs.south) to[bend right=12]  (evidence.north);
+  \draw[erdlink] (runs.south) to[bend left=12]  (events.north);
+\end{tikzpicture}
+\caption{ERD detail: shared run, evidence, event, cache, and experiment tables. Dashed relationships are logical links.}
+\label{fig:asent-erd-detail-shared}
+\end{figure}
+\end{landscape}
+
+\begin{landscape}
+\begin{figure}[p]
+\centering
+\begin{tikzpicture}[x=1cm,y=1cm,font=\small,
+  erdlink/.style={-{Stealth[length=2mm]},dashed,gray!75},
+  erdlabel/.style={font=\footnotesize,fill=white,inner sep=1.5pt}]
+  \node[font=\large\bfseries] at (0,3.0) {CAVR records and verdict cache};
+  \node (trusted) at (-8.5,-1) {\begin{tabular}{|l|l|p{3.0cm}|}\hline
+    \multicolumn{3}{|c|}{\textbf{CAVR\_TRUSTED\_PACKAGES}}\\\hline
+    TEXT & name & PK\\\hline
+    TEXT & version & PK\\\hline
+    TEXT & sha256 & \\\hline
+    TEXT & source & \\\hline
+    TEXT & status & \\\hline
+    TEXT & capabilities & \\\hline
+    TEXT & added\_at & \\\hline
+  \end{tabular}};
+  \node (quarantine) at (0,-1) {\begin{tabular}{|l|l|p{3.0cm}|}\hline
+    \multicolumn{3}{|c|}{\textbf{CAVR\_QUARANTINE\_RECORDS}}\\\hline
+    TEXT & run\_id & PK\\\hline
+    TEXT & package & \\\hline
+    TEXT & version & \\\hline
+    TEXT & sha256 & \\\hline
+    TEXT & status & \\\hline
+    TEXT & quarantined\_at & \\\hline
+    TEXT & file\_path & \\\hline
+    TEXT & decision & \\\hline
+  \end{tabular}};
+  \node (audit) at (8.5,-1) {\begin{tabular}{|l|l|p{2.8cm}|}\hline
+    \multicolumn{3}{|c|}{\textbf{CAVR\_AUDIT\_LOG}}\\\hline
+    INTEGER & id & PK\\\hline
+    TEXT & run\_id & \\\hline
+    TEXT & package & \\\hline
+    TEXT & action & \\\hline
+    TEXT & user & \\\hline
+    TEXT & reason & \\\hline
+    TEXT & timestamp & \\\hline
+  \end{tabular}};
+  \node (verdictcache) at (-4,-9) {\begin{tabular}{|l|l|p{3.4cm}|}\hline
+    \multicolumn{3}{|c|}{\textbf{CAVR\_VERDICT\_CACHE}}\\\hline
+    TEXT & cache\_key & PK; digest of 8 fields\\\hline
+    TEXT & ecosystem & \\\hline
+    TEXT & name & \\\hline
+    TEXT & version & \\\hline
+    TEXT & artifact\_sha256 & \\\hline
+    TEXT & subtree\_digest & \\\hline
+    TEXT & contract\_digest & \\\hline
+    TEXT & policy\_version & \\\hline
+    TEXT & analyzer\_version & \\\hline
+    TEXT & status & VERIFIED / REJECTED only\\\hline
+    TEXT & verdict\_json & stored analysis\\\hline
+    TEXT & stored\_at & \\\hline
+    TEXT & integrity & \\\hline
+  \end{tabular}};
+  \node (verdictlog) at (5,-9) {\begin{tabular}{|l|l|p{3.2cm}|}\hline
+    \multicolumn{3}{|c|}{\textbf{CAVR\_VERDICT\_LOG}}\\\hline
+    INTEGER & id & PK\\\hline
+    TEXT & recorded\_at & \\\hline
+    TEXT & source & \\\hline
+    TEXT & requested & \\\hline
+    TEXT & status & \\\hline
+    TEXT & stage & \\\hline
+    TEXT & rule & \\\hline
+    REAL & fast\_gate\_ms & \\\hline
+    INTEGER & cache\_hit & \\\hline
+    INTEGER & escalated & \\\hline
+    TEXT & cache\_lookup & HIT / MISS / NOT\_REACHED\\\hline
+  \end{tabular}};
+  \draw[erdlink] (quarantine.east) --  (audit.west);
+  \draw[<->,dashed,gray!75] (verdictcache.east) --  (verdictlog.west);
+\end{tikzpicture}
+\caption{ERD detail: CAVR trusted-package, quarantine, audit, verdict-cache, and verdict-log records. Dashed links are logical associations.}
+\label{fig:asent-erd-detail-cavr}
+\end{figure}
+\end{landscape}
+
+\begin{landscape}
+\begin{figure}[p]
+\centering
+\begin{tikzpicture}[x=1cm,y=1cm,font=\small,
+  erdlink/.style={-{Stealth[length=2mm]},dashed,gray!75},
+  erdlabel/.style={font=\footnotesize,fill=white,inner sep=1.5pt}]
+  \node[font=\large\bfseries] at (0,3.0) {SABLE obligation and run records};
+  \node (obligations) at (0,0) {\begin{tabular}{|l|l|p{3.0cm}|}\hline
+    \multicolumn{3}{|c|}{\textbf{SABLE\_OBLIGATIONS}}\\\hline
+    TEXT & obligation\_id & PK\\\hline
+    TEXT & principal & \\\hline
+    TEXT & actions & \\\hline
+    TEXT & protected\_asset & \\\hline
+    TEXT & resource\_scope & \\\hline
+    TEXT & authority\_source & \\\hline
+    TEXT & baseline\_evidence & \\\hline
+    TEXT & created\_at & \\\hline
+  \end{tabular}};
+  \node (runs) at (0,-5) {\begin{tabular}{|l|l|p{3.2cm}|}\hline
+    \multicolumn{3}{|c|}{\textbf{SABLE\_RUNS}}\\\hline
+    TEXT & run\_id & PK\\\hline
+    TEXT & scenario\_id & \\\hline
+    TEXT & obligation\_id & \texttt{-> OBLIGATIONS}\\\hline
+    TEXT & verdict & \\\hline
+    TEXT & decision\_hash & \\\hline
+    TEXT & created\_at & \\\hline
+    TEXT & completed\_at & \\\hline
+    TEXT & evidence\_json & \\\hline
+    TEXT & proof\_json & \\\hline
+  \end{tabular}};
+  \node (audit) at (0,-10.2) {\begin{tabular}{|l|l|p{3.0cm}|}\hline
+    \multicolumn{3}{|c|}{\textbf{SABLE\_AUDIT\_LOG}}\\\hline
+    INTEGER & id & PK\\\hline
+    TEXT & run\_id & \texttt{-> SABLE\_RUNS}\\\hline
+    TEXT & action & \\\hline
+    TEXT & user & \\\hline
+    TEXT & reason & \\\hline
+    TEXT & created\_at & \\\hline
+  \end{tabular}};
+  \draw[erdlink] (obligations.south) --  (runs.north);
+  \draw[erdlink] (runs.south) --  (audit.north);
+\end{tikzpicture}
+\caption{ERD detail: SABLE obligations, analyzed runs, and audit records. Dashed links are logical associations.}
+\label{fig:asent-erd-detail-sable}
+\end{figure}
+\end{landscape}
+
+\begin{landscape}
+\begin{figure}[p]
+\centering
+\begin{tikzpicture}[x=1cm,y=1cm,font=\small,
+  erdlink/.style={-{Stealth[length=2mm]},dashed,gray!75},
+  erdlabel/.style={font=\footnotesize,fill=white,inner sep=1.5pt}]
+  \node[font=\large\bfseries] at (0,3.5) {Threat-repository records and versions};
+  \node (records) at (0,-10) {\begin{tabular}{|l|l|p{2.8cm}|}\hline
+    \multicolumn{3}{|c|}{\textbf{THREAT\_RECORDS}}\\\hline
+    TEXT & id & PK\\\hline
+    TEXT & category & \\\hline
+    TEXT & body & \\\hline
+  \end{tabular}};
+  \node (versions) at (0,0) {\begin{tabular}{|l|l|p{3.0cm}|}\hline
+    \multicolumn{3}{|c|}{\textbf{THREAT\_VERSIONS}}\\\hline
+    INTEGER & revision & PK\\\hline
+    TEXT & version & \\\hline
+    TEXT & digest & \\\hline
+    TEXT & created\_at & \\\hline
+    TEXT & body & snapshot of all records\\\hline
+  \end{tabular}};
+  \node (changes) at (0,-5) {\begin{tabular}{|l|l|p{3.0cm}|}\hline
+    \multicolumn{3}{|c|}{\textbf{THREAT\_CHANGES}}\\\hline
+    INTEGER & id & PK\\\hline
+    TEXT & version & \texttt{-> THREAT\_VERSIONS.version}\\\hline
+    TEXT & changed\_ids & record ids\\\hline
+    TEXT & reason & \\\hline
+    TEXT & timestamp & \\\hline
+  \end{tabular}};
+  \draw[erdlink] (versions.south) --  (changes.north);
+  \draw[erdlink] (changes.south) --  (records.north);
+\end{tikzpicture}
+\caption{ERD detail: threat-repository records, snapshots, and changes. Dashed links are logical associations.}
+\label{fig:asent-erd-detail-threat}
+\end{figure}
+\end{landscape}
