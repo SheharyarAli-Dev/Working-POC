@@ -1,0 +1,53 @@
+@startuml
+title ASENT module assurance use cases
+left to right direction
+skinparam shadowing false
+skinparam packageStyle rectangle
+skinparam actorStyle stickman
+skinparam defaultFontName Arial
+skinparam defaultFontSize 19
+skinparam usecase {
+  BackgroundColor #F5F8FC
+  BorderColor #34506B
+  ArrowColor #536B82
+}
+actor Developer as Dev
+actor Reviewer as Reviewer
+actor "Git repository" as Git
+actor "Package registry" as Registry
+actor "OSV advisory service" as OSV
+actor "Ollama test generator" as Ollama
+rectangle "ASENT module assurance" {
+  package "CAVR — Dependency assurance" {
+    usecase "Analyze applicable dependency\nartifacts and exact lock" as CAVR
+    usecase "Intercept pip install request\nbefore installation" as Intercept
+    usecase "Check policy, artifact digest,\ncontract, and advisories" as CChecks
+    usecase "Inspect verdict and\nevidence certificate" as CProof
+  }
+  package "SATRA-RV — Application assurance" {
+    usecase "Run baseline / candidate\napplication validation" as SATRA
+    usecase "Check security oracle with\nownership counterfactual" as Oracle
+    usecase "Generate and validate\noptional test proposals" as GenTests
+  }
+  package "SABLE — Terraform / IAM assurance" {
+    usecase "Verify baseline obligation,\nresource successor, and access" as SABLE
+    usecase "Audit standalone\nSABLE run" as SAudit
+  }
+}
+Dev -- Intercept
+Dev -- SABLE
+Reviewer -- CProof
+Git -- SATRA
+Registry -- Intercept
+OSV -- CChecks
+Ollama -- GenTests
+CAVR ..> CChecks : <<include>>
+Intercept ..> CChecks : <<include>>
+CProof ..> CAVR : <<extend>>
+SATRA ..> Oracle : <<include>>
+GenTests ..> SATRA : <<extend>>
+note right of SABLE
+Bounded local Terraform/HCL S3/IAM analysis;
+unsupported semantics remain UNKNOWN. No live AWS claim.
+end note
+@enduml

@@ -1,0 +1,52 @@
+@startuml
+title SABLE — Baseline-to-Candidate Obligation Analysis
+autonumber
+skinparam shadowing false
+skinparam defaultFontName Arial
+actor Developer
+participant "SABLE Analyzer" as SABLE
+participant "HCL Parser / Extractor" as HCL
+participant "Registered Obligation" as BASE
+participant "Candidate Correspondence" as CORR
+participant "Authorization Projection" as AUTH
+database "Evidence Store" as STORE
+Developer -> SABLE : compare baseline and candidate IaC
+SABLE -> HCL : parse baseline and candidate Terraform/HCL
+HCL --> SABLE : resource graphs, moved blocks, parse status
+SABLE -> BASE : load protected asset, principal, required actions
+BASE --> SABLE : registered obligation / required-rule status
+alt no trusted baseline resources
+  SABLE -> STORE : record NOT_APPLICABLE (no continuity claim)
+else required rules missing or parse / authority incomplete
+  SABLE -> STORE : record UNKNOWN with reason
+else baseline boundary available
+  SABLE -> AUTH : verify baseline authorization satisfies obligation
+  AUTH --> SABLE : verified / unverified baseline access
+  alt baseline obligation not independently verified
+    SABLE -> STORE : record UNKNOWN (baseline is not trusted)
+  else baseline obligation verified
+    SABLE -> CORR : identify protected resource successor
+    CORR --> SABLE : ranked candidates, conflicts, confidence
+    SABLE -> CORR : resolve moved principal only if unique
+    CORR --> SABLE : candidate asset and principal / unresolved
+    alt correspondence ambiguous or principal unresolved
+      SABLE -> STORE : record UNKNOWN with correspondence reason
+    else unique correspondence established
+      SABLE -> AUTH : project candidate authorization for required actions
+      AUTH --> SABLE : known / outside-model / holds / widening
+      alt candidate semantics outside supported model
+        SABLE -> STORE : record UNKNOWN with model boundary
+      else obligation holds
+        SABLE -> STORE : record PRESERVED evidence
+      else obligation regressed
+        SABLE -> STORE : record REGRESSED evidence
+      end
+    end
+  end
+end
+SABLE --> Developer : findings + obligation trace
+note over HCL,AUTH
+Bounded local Terraform/HCL semantics for supported S3 and IAM
+constructs; no deployed AWS state or universal Terraform coverage.
+end note
+@enduml

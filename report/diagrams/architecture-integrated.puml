@@ -1,0 +1,49 @@
+@startuml
+title ASENT — Integrated Assurance Architecture
+top to bottom direction
+skinparam componentStyle uml2
+skinparam shadowing false
+skinparam defaultFontName Arial
+skinparam defaultFontSize 18
+skinparam defaultFontSize 16
+actor Developer
+actor Reviewer
+component "Web UI\nReact" as UI
+component "API\nFastAPI" as API
+component "Run Orchestrator" as ORCH
+component "Candidate Context\n& Workspace" as CTX
+component "CAVR\nIntegrated dependency analyzer" as CAVR
+component "SATRA-RV\nApp and test validator" as SATRA
+component "SABLE\nTerraform / IAM analyzer" as SABLE
+database "Evidence Store\nSQLite + artifacts" as STORE
+component "Evidence Binder\n(snapshot + input hashes)" as BIND
+component "Shared Final Gate" as GATE
+component "Decision + Findings" as RESULT
+Developer --> UI : submit candidate
+UI --> API : request assurance
+API --> ORCH : create run
+ORCH --> CTX : freeze snapshot / resolve inputs
+CTX --> ORCH : candidate identity
+ORCH --> CAVR : if dependency scope applies
+ORCH --> SATRA : if app scope applies
+ORCH --> SABLE : if IaC scope applies
+CAVR --> STORE : result and evidence
+SATRA --> STORE : result and evidence
+SABLE --> STORE : result and evidence
+STORE --> BIND : select valid evidence
+BIND --> GATE : integrity + snapshot/input binding
+GATE --> RESULT : ACCEPT / REVIEW / BLOCK
+RESULT --> UI : outcome
+Reviewer --> UI : inspect evidence
+component "Standalone SABLE API / UI" as STAND
+STAND --> SABLE : direct module workflow
+note bottom of SABLE
+Bounded local Terraform/HCL S3 and IAM semantics;
+not live AWS validation or universal Terraform support.
+end note
+note bottom of CAVR
+The standalone pip interception API is a separate request path;
+it gates requests and does not install or execute package code.
+See the dedicated CAVR request sequence.
+end note
+@enduml

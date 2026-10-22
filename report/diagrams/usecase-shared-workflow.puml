@@ -1,0 +1,45 @@
+@startuml
+title ASENT shared assurance workflow use cases
+left to right direction
+skinparam shadowing false
+skinparam packageStyle rectangle
+skinparam actorStyle stickman
+skinparam defaultFontName Arial
+skinparam defaultFontSize 16
+skinparam usecase {
+  BackgroundColor #F5F8FC
+  BorderColor #34506B
+  ArrowColor #536B82
+}
+actor Developer as Dev
+actor "AI coding agent" as Agent
+actor "Git repository" as Git
+actor Reviewer as Reviewer
+rectangle "ASENT shared candidate workflow" {
+  usecase "Provide project context\nand candidate workspace" as Context
+  usecase "Start run\n(manual / watch / replay)" as Start
+  usecase "Freeze candidate snapshot\nand resolve applicable surfaces" as Freeze
+  usecase "Reuse evidence when\nmodule inputs match" as Reuse
+  usecase "Evaluate shared final gate" as Gate
+  usecase "View ACCEPT / REVIEW / BLOCK\nand reasons" as Decision
+  usecase "Inspect evidence, integrity,\nand snapshot/input bindings" as Inspect
+  usecase "Request rerun or\nscenario revision" as Rerun
+  usecase "Download run report" as Report
+  usecase "Manage threat knowledge\n(import / enable / disable)" as Threats
+}
+Dev -- Context
+Dev -- Start
+Dev -- Rerun
+Dev -- Threats
+Agent -- Start
+Git -- Context
+Reviewer -- Decision
+Reviewer -- Inspect
+Reviewer -- Report
+Start ..> Freeze : <<include>>
+Start ..> Gate : <<include>>
+Reuse ..> Freeze : <<extend>>
+Gate ..> Decision : <<include>>
+Inspect ..> Decision : <<extend>>
+Report ..> Decision : <<extend>>
+@enduml

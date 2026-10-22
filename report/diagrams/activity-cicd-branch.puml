@@ -1,0 +1,43 @@
+@startuml
+title ASENT — Repository CI/CD Activity (SABLE Branch)
+skinparam shadowing false
+skinparam defaultFontName Arial
+start
+:GitHub event;
+fork
+if (CI trigger matches?) then (yes)
+  :Install locked Python dependencies;
+  fork
+    :Lint and high severity Bandit scan;
+  fork again
+    :Module test matrix;
+  fork again
+    :Full integration test suite;
+  fork again
+    :Frontend checks and render tests;
+  end fork
+  :Upload JUnit reports;
+endif
+fork again
+if (SABLE shared workflow trigger?) then (yes)
+  :Run focused SABLE and shared-gate tests;
+endif
+fork again
+if (CD trigger matches master, v* tag, or manual dispatch?) then (yes)
+  :Build and publish container image to GHCR;
+  :Smoke test published image;
+  if (v* tag?) then (yes)
+    :Build frontend release bundle;
+    :Create GitHub Release with source and frontend archives;
+  endif
+endif
+end fork
+:Report matching workflow outcomes;
+stop
+note right
+Workflow definitions represented here are ci.yml,
+sable-shared.yml, and cd.yml on the current SABLE branch.
+The report PDF workflow belongs to a separate report worktree
+and is intentionally outside this branch-scoped view.
+end note
+@enduml

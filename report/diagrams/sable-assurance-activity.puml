@@ -1,0 +1,53 @@
+@startuml
+title SABLE baseline-to-candidate obligation activity
+skinparam shadowing false
+skinparam defaultFontName Arial
+skinparam defaultFontSize 22
+skinparam defaultFontSize 16
+skinparam activity {
+  FontSize 20
+  DiamondFontSize 18
+  BackgroundColor #F5F8FC
+  BorderColor #34506B
+  DiamondBackgroundColor #FFF2D8
+  DiamondBorderColor #B7791F
+  ArrowColor #536B82
+}
+start
+:Load trusted baseline, candidate Terraform/HCL,\nand registered principal, asset, and actions;
+if (Baseline has resources?) then (yes)
+  if (Parsing and obligation inputs are complete?) then (yes)
+    :Verify registered obligation against baseline access;
+    if (Baseline obligation independently holds?) then (yes)
+      :Parse candidate resources and references;
+      :Rank candidate resource successors using\nsupported identity and continuity signals;
+      if (One supported successor and principal binding?) then (yes)
+        :Project required actions and resource scope\nonto the selected successor;
+        if (Authorization result is fully known?) then (yes)
+          if (Obligation still holds?) then (yes)
+            :Record PRESERVED evidence;
+          else (no)
+            :Record REGRESSED evidence;
+          endif
+        else (no)
+          :Record UNKNOWN with model-boundary reason;
+        endif
+      else (no)
+        :Record UNKNOWN with correspondence reason;
+      endif
+    else (no)
+      :Record UNKNOWN; baseline is not trusted;
+    endif
+  else (no)
+    :Record UNKNOWN; parsing or obligation is incomplete;
+  endif
+else (no)
+  :Record NOT_APPLICABLE; no continuity claim;
+endif
+stop
+note right
+Bounded local Terraform/HCL S3 and IAM analysis.
+Unsupported semantics remain UNKNOWN; no Terraform apply,
+live AWS query, or universal Terraform claim is implied.
+end note
+@enduml

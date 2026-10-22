@@ -7,16 +7,22 @@ This chapter states the project requirements that can be checked against the cur
 The developer supplies the project context and starts assurance through the shared workflow or a module-specific interface. The orchestrator selects applicable analyses and binds their results to the candidate; a reviewer inspects module evidence and the shared decision. CAVR, SATRA-RV, and SABLE address dependency, application-code, and Terraform/IAM security respectively.
 
 \section{Use Case Diagram}
-The diagram below is the team's use-case figure. It distinguishes shared workflow activities from CAVR, SATRA-RV, SABLE, and threat-repository interactions.
+The UML use-case models separate the shared workflow from module-specific assurance. External actors use standard stick-figure notation, and the focused views keep actor associations legible while retaining the module boundaries and use-case detail.
 \begin{landscape}
 \begin{figure}[p]
 \centering
-\includegraphics[width=0.98\linewidth,height=0.82\textheight,keepaspectratio]{figures/diagrams/usecase.png}
-\caption{ASENT use cases across the shared workflow and the three security modules. The dashed deep-analysis oval is marked as planned in the source diagram.}
+\includegraphics[width=0.98\linewidth,height=0.82\textheight,keepaspectratio]{figures/diagrams/usecase-shared-workflow.png}
+\caption{ASENT shared-workflow use cases for developers, coding agents, repositories, and reviewers.}
 \label{fig:asent-usecase}
 \end{figure}
+\begin{figure}[p]
+\centering
+\includegraphics[width=0.98\linewidth,height=0.82\textheight,keepaspectratio]{figures/diagrams/usecase-module-assurance.png}
+\caption{CAVR, SATRA-RV, and SABLE module use cases and their external collaborators. Optional SATRA-RV test proposals extend application validation.}
+\label{fig:asent-module-usecase}
+\end{figure}
 \end{landscape}
-The figure shows module responsibilities within one assurance application. SABLE evaluates the supplied Terraform/HCL inputs; it does not apply infrastructure or query live AWS authorization.
+Together, the figures show module responsibilities within one assurance application. SABLE evaluates the supplied Terraform/HCL inputs; it does not apply infrastructure or query live AWS authorization.
 
 \section{Detailed Use Cases}
 \begin{enumerate}

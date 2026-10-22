@@ -1,0 +1,57 @@
+@startuml
+title SABLE — Obligation and Authorization Domain Model
+skinparam shadowing false
+skinparam classAttributeIconSize 0
+skinparam defaultFontName Arial
+class CandidateSnapshot {
+  snapshotId : Hash
+  sourceRevision : String
+}
+class TerraformResource {
+  address : String
+  type : String
+  attributes : Map
+}
+class SecurityObligation {
+  obligationId : String
+  kind : ObligationKind
+  scope : String
+  required : Boolean
+}
+class ResourceCorrespondence {
+  baselineAddress : String
+  candidateAddress : String
+  confidence : MatchState
+}
+class Principal {
+  identity : String
+  kind : PrincipalKind
+}
+class AuthorizationStatement {
+  actions : Set<String>
+  resources : Set<String>
+  effect : AllowOrDeny
+  conditions : Map
+}
+class AuthorizationProjection {
+  normalizedRules : Set
+  completeness : ProjectionState
+}
+class ObligationAssessment {
+  status : PRESERVED | REGRESSED | UNKNOWN
+  rationale : String
+}
+CandidateSnapshot "1" *-- "0..*" TerraformResource : contains
+TerraformResource "1" -- "0..*" SecurityObligation : entails
+TerraformResource "1" -- "0..1" ResourceCorrespondence : mapped by
+ResourceCorrespondence "1" --> "0..1" TerraformResource : candidate side
+AuthorizationStatement "0..*" --> "1" Principal : subject
+AuthorizationStatement "0..*" --> "0..*" TerraformResource : applies to
+AuthorizationStatement "0..*" --> "1" AuthorizationProjection : normalized into
+SecurityObligation "1" --> "0..1" ObligationAssessment : evaluated as
+AuthorizationProjection "1" --> "0..*" ObligationAssessment : informs
+note bottom
+Conceptual domain view of supported local S3/IAM Terraform/HCL analysis.
+Unknown is retained when parsing, matching, or projection is incomplete.
+end note
+@enduml

@@ -1,0 +1,63 @@
+@startuml
+title ASENT — Candidate-to-Decision Sequence
+autonumber
+skinparam shadowing false
+skinparam defaultFontName Arial
+actor Developer
+participant "Web UI" as UI
+participant "API / Orchestrator" as ORCH
+participant "Candidate Context" as CTX
+participant "CAVR" as CAVR
+participant "SATRA-RV" as SATRA
+participant "SABLE" as SABLE
+database "Evidence Store" as STORE
+participant "Evidence Binder" as BIND
+participant "Shared Gate" as GATE
+Developer -> UI : submit candidate and context
+UI -> ORCH : create assurance run
+ORCH -> CTX : freeze snapshot and resolve inputs
+CTX --> ORCH : snapshot ID + input hashes
+par Dependency analyzer path
+  opt dependency scope applies
+    ORCH -> STORE : find current CAVR evidence
+    alt eligible exact-bound evidence exists
+      STORE --> ORCH : reusable CAVR evidence
+    else missing or ineligible evidence
+      ORCH -> CAVR : analyze dependency artifacts
+      CAVR -> STORE : persist result and evidence
+    end
+  end
+else Application analyzer path
+  opt application scope applies
+    ORCH -> STORE : find current SATRA-RV evidence
+    alt eligible exact-bound evidence exists
+      STORE --> ORCH : reusable SATRA-RV evidence
+    else missing or ineligible evidence
+      ORCH -> SATRA : validate application and tests
+      SATRA -> STORE : persist result and evidence
+    end
+  end
+else Infrastructure analyzer path
+  opt infrastructure scope applies
+    ORCH -> STORE : find current SABLE evidence
+    alt eligible exact-bound evidence exists
+      STORE --> ORCH : reusable SABLE evidence
+    else missing or ineligible evidence
+      ORCH -> SABLE : analyze supported Terraform/HCL
+      SABLE -> STORE : persist result and evidence
+    end
+  end
+end
+ORCH -> BIND : collect produced and reused records
+BIND -> STORE : verify integrity and snapshot/input binding
+STORE --> BIND : evidence + integrity and binding state
+BIND -> GATE : evidence for frozen candidate
+GATE -> GATE : blockers take precedence over review reasons
+GATE --> ORCH : ACCEPT / REVIEW / BLOCK
+ORCH --> UI : decision, findings, provenance
+UI --> Developer : display result
+note over CAVR,SABLE
+Applicable analyzers run independently and may run in parallel;
+eligible bound evidence can satisfy each analyzer path.
+end note
+@enduml
