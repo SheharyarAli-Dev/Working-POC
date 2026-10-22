@@ -1,0 +1,56 @@
+@startuml
+title Shared evidence validation and final decision activity
+skinparam shadowing false
+skinparam defaultFontName Arial
+skinparam defaultFontSize 16
+skinparam defaultFontSize 16
+skinparam activity {
+  BackgroundColor #F5F8FC
+  BorderColor #34506B
+  DiamondBackgroundColor #FFF2D8
+  DiamondBorderColor #B7791F
+  ArrowColor #536B82
+}
+start
+:Read applicable module set and evidence rows;
+if (Any module applies?) then (yes)
+  repeat
+    :Select latest non-stale evidence for module;
+    if (Evidence exists and integrity is exactly true?) then (yes)
+      if (Candidate snapshot and module input hash match?) then (yes)
+        if (Trustworthy blocking status or flag?) then (yes)
+          :Record blocker;
+        else (no)
+          if (Module status is acceptable?) then (yes)
+            :Record acceptable evidence;
+          else (no)
+            :Record review reason;
+          endif
+        endif
+      else (no)
+        :Record binding review reason;
+      endif
+    else (no)
+      :Record missing, invalid, or untrusted evidence reason;
+    endif
+  repeat while (More applicable modules?) is (yes)
+  -> no;
+else (no)
+  :Record unsupported-scope review reason;
+endif
+if (Any trustworthy blocker?) then (yes)
+  :BLOCK;
+else (no)
+  if (Any review reason?) then (yes)
+    :REVIEW;
+  else (no)
+    :ACCEPT;
+  endif
+endif
+stop
+note right
+Binding and integrity are checked before module statuses
+contribute to the overall result. One module's acceptance
+does not override another module's blocker or review reason.
+end note
+@enduml

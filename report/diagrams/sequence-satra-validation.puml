@@ -1,0 +1,56 @@
+@startuml
+title SATRA-RV — Contract, Counterfactual, and Test Validation
+autonumber
+skinparam shadowing false
+skinparam defaultFontName Arial
+actor Developer
+participant "SATRA-RV Service" as SATRA
+participant "Candidate Workspace" as WS
+participant "Counterfactual Mutator" as MUT
+participant "Pytest Runner" as TEST
+participant "Test Validator" as VALID
+participant "Ollama Adapter" as GEN
+database "Evidence Store" as STORE
+Developer -> SATRA : validate supported application candidate
+SATRA -> WS : prepare baseline and candidate snapshots
+WS --> SATRA : InvoiceHub Python inputs
+SATRA -> TEST : run trusted baseline, trusted candidate, ordinary candidate tests
+TEST --> SATRA : execution results and security findings
+SATRA -> MUT : clone baseline; bypass invoice ownership guard
+MUT --> SATRA : counterfactual application
+SATRA -> TEST : run independent security oracle on mutant
+TEST --> SATRA : mutant result
+SATRA -> SATRA : establish counterfactual feasibility from baseline pass + assertion kill
+SATRA -> VALID : preflight candidate security test source
+VALID --> SATRA : syntax / safety / locality result
+alt candidate test passes preflight
+  SATRA -> TEST : run on secure baseline, counterfactual, and baseline repeat
+  TEST --> SATRA : three test outcomes
+  SATRA -> SATRA : diagnose oracle strength and repeatability
+else candidate test rejected by preflight
+  SATRA -> SATRA : classify security test integrity as rejected
+end
+opt generated proposals returned by Ollama
+  SATRA -> GEN : request contract-focused test candidates
+  GEN --> SATRA : candidate test sources + rule IDs
+  loop each generated proposal
+    SATRA -> VALID : preflight syntax, safety, locality, and rule identity
+    VALID --> SATRA : accepted / rejected
+    opt accepted proposal with matching contract rule
+      SATRA -> TEST : run on baseline, mutant, then baseline repeat
+      TEST --> SATRA : generated-test validation outcomes
+      SATRA -> SATRA : accept only if baseline passes twice and mutant is killed
+      SATRA -> TEST : run accepted proposal on candidate
+      TEST --> SATRA : candidate result
+    end
+  end
+end
+SATRA -> SATRA : classify ACCEPT / REJECT / INCONCLUSIVE
+SATRA -> STORE : persist decision, oracle, and execution evidence
+SATRA --> Developer : findings + reproducible test evidence
+note right of SATRA
+Counterfactual operator: replace can_access_invoice with return True.
+Scope is bounded to supported InvoiceHub authentication, ownership,
+admin, upload, and parameterized-login checks.
+end note
+@enduml

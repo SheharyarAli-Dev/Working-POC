@@ -1,0 +1,45 @@
+@startuml
+title CAVR — Dependency Assurance Sequence
+autonumber
+skinparam shadowing false
+skinparam defaultFontName Arial
+actor Developer
+participant "CAVR Service" as CAVR
+participant "Artifact Resolver" as RES
+participant "Contract / Policy" as POLICY
+participant "Capability & Threat Checks" as CHECK
+participant "Advisory Source" as ADV
+participant "Scanner / Fixture" as SCAN
+participant "Verdict Cache" as CACHE
+database "Evidence Store" as STORE
+Developer -> CAVR : assess candidate dependencies
+CAVR -> RES : resolve supported manifests and lock data
+RES --> CAVR : exact package artifacts + hashes
+CAVR -> POLICY : evaluate package allowlist and policy
+POLICY --> CAVR : permitted / rejected / unresolved
+loop each resolved package
+  CAVR -> CHECK : evaluate contract, capabilities, threats
+  CHECK --> CAVR : package signals
+  CAVR -> ADV : query enabled advisory source
+  ADV --> CAVR : advisory result / unavailable
+  CAVR -> CHECK : inspect source triggers and rule coverage
+  CHECK --> CAVR : static findings and coverage gaps
+  CAVR -> CACHE : lookup by artifact, lock, contract, policy, advisory, rules
+  alt eligible clean VERIFIED result
+    CACHE --> CAVR : cached evidence
+  else cache miss or prior non-clean outcome
+    CACHE --> CAVR : no reusable clean result
+    opt supported high-risk trigger on Python artifact
+      CAVR -> SCAN : run counterfactual fixture for supported Python artifact
+      SCAN --> CAVR : findings / inconclusive
+    end
+    CAVR -> STORE : persist package evidence; cache VERIFIED only
+  end
+end
+CAVR -> CAVR : aggregate per-package status
+note right of CAVR
+Per package precedence:
+REJECTED > UNRESOLVED > VERIFIED
+end note
+CAVR --> Developer : result + evidence provenance
+@enduml
