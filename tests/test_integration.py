@@ -45,11 +45,13 @@ def test_cavr_repair_invalidates_satra_then_reverifies(integration_runs):
     assert current(svc,r,'CAVR')['status']=='VERIFIED'
     assert current(svc,r,'SATRA')['candidate_snapshot']==r.candidate_snapshot
 
+@pytest.mark.usefixtures('advisory_clock')  # re-analyses against the dated advisory evidence
 def test_satra_repair_differential(integration_runs):
     svc,runs=integration_runs;r=runs['satra_weak'];svc.analyze(r.run_id,auto_repair=True);fresh=svc.store.run(r.run_id)
     assert fresh.final_decision=='ACCEPT',fresh.model_dump()
     assert current(svc,fresh,'SATRA')['details']['oracle']['accepted']
 
+@pytest.mark.usefixtures('advisory_clock')  # re-analyses against the dated advisory evidence
 def test_gateway_and_knowledge_revocation(integration_runs):
     svc,runs=integration_runs;r=runs['safe']
     assert svc.dependency_event(r.run_id,'pip install pypdf==6.19.0')['allowed']
