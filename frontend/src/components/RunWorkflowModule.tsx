@@ -208,7 +208,7 @@ export const RunWorkflowModule: React.FC = () => {
   const nodeCount = (graph: any) => Array.isArray(graph?.nodes) ? graph.nodes.length : null;
   const liveObligation = sableBaselineEvent?.data || sableEvidence?.details?.obligation || {};
   const liveProjection = sableProjectionEvent?.data || projection;
-  const visualSuccessor = liveProjection?.successor || sableDetails.successor || topSuccessors[0]?.data?.address || 'aws_s3_bucket.new_asset';
+  const visualSuccessor = liveProjection?.successor || sableDetails.successor || topSuccessors[0]?.data?.address || 'No unique successor established';
   const gateStatuses = finalGateEvent?.data?.statuses || {};
   const workflowStages = [
     { id: 'snapshot', title: 'Snapshot', short: 'Freeze candidate', done: hasEvent('workspace.snapshot'), active: loading || Boolean(currentRun && !hasEvent('workspace.snapshot')), result: snapshotEventForFlow ? `${snapshotEventForFlow.data?.files ?? '—'} files · SHA-256 ${String(snapshotEventForFlow.data?.hash || '').slice(0, 18)}…` : loading ? 'Requesting a fresh snapshot' : 'Waiting for a run', evidence: snapshotFileNames.join(' · ') || 'Changed paths appear from the backend snapshot event' },
@@ -344,7 +344,7 @@ export const RunWorkflowModule: React.FC = () => {
             <div><span>BOUNDARY REASONING · SABLE ENGINE</span><strong>Did the access boundary follow the asset?</strong></div>
             <span className={'workflow-live-verdict ' + (sableDecisionEvent?.data?.status || sableStatus).toLowerCase()}>{sableDecisionEvent?.data?.status || sableStatus}</span>
           </div>
-          <div className="workflow-graph-comparison"><div className="graph-comparison-heading"><strong>RESOURCE CORRESPONDENCE</strong><span>{visualSuccessor}</span></div><div className="workflow-graph-pair">{renderResourceGraph(baselineGraph, 'Trusted baseline')}{renderResourceGraph(candidateGraph, 'Candidate configuration', true)}</div><div className="graph-comparison-note">Nodes and reference edges are drawn from persisted SABLE evidence. Dashed green outline marks the selected successor.</div></div>
+          <div className="workflow-graph-comparison"><div className="graph-comparison-heading"><strong>RESOURCE CORRESPONDENCE</strong><span>{visualSuccessor}</span></div><div className="workflow-graph-pair">{renderResourceGraph(baselineGraph, 'Trusted baseline')}{renderResourceGraph(candidateGraph, 'Candidate configuration', true)}</div><div className="graph-comparison-note">Nodes and reference edges are drawn from persisted SABLE evidence. A dashed outline appears only when persisted evidence identifies a selected successor.</div></div>
           <div className="workflow-obligation-rail">
             <div><small>REGISTERED PRINCIPAL</small><code>{liveObligation.principal || 'Waiting for baseline'}</code></div><b>→</b>
             <div><small>PROTECTED ASSET</small><code>{liveObligation.protected_asset || 'Waiting for baseline'}</code></div><b>→</b>
@@ -368,6 +368,7 @@ export const RunWorkflowModule: React.FC = () => {
                 <div className="workflow-projected-target"><small>SELECTED SUCCESSOR</small><code>{liveProjection.successor || sableDetails.successor || 'Unresolved'}</code></div>
                 <div className="workflow-action-compare"><div><small>EXPECTED ACTIONS</small><code>{(liveProjection.expected_actions || []).join(' · ') || '—'}</code></div><div><small>OBSERVED ACTIONS</small><code>{(liveProjection.actual_actions || []).join(' · ') || '—'}</code></div></div>
                 <div className="workflow-projected-resource"><small>RESOURCE SCOPE</small><code>{liveProjection.expected_resource || 'Not established'}</code></div>
+                {Array.isArray(liveProjection.unexpected_resources) && liveProjection.unexpected_resources.length > 0 && <div className="workflow-projected-resource"><small style={{ color: '#b91c1c' }}>UNEXPECTED RESOURCE SCOPE</small><code style={{ color: '#991b1b' }}>{liveProjection.unexpected_resources.join(' · ')}</code></div>}
               </> : <div className="workflow-proof-wait">SABLE projects permissions only after a unique, evidence-supported successor is found.</div>}
             </div>
           </div>

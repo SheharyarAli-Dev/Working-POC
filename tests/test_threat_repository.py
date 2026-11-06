@@ -3,6 +3,7 @@ import pytest
 from backend.threat_repo.repository import ThreatRepository
 from backend.threat_repo.osv_importer import records
 from backend.threat_repo.package_records import affected,packages,vulnerabilities
+from backend.threat_repo.satra_rules import dictionary as satra_dictionary
 from backend.orchestrator.context_service import ContextService
 from backend.orchestrator.run_context import Evidence
 
@@ -52,3 +53,20 @@ def test_genuine_public_advisory_range(service):
     assert any(r['data'].get('advisory_id')=='PYSEC-2026-3005' for r in matches)
     assert not unknown
     node['version']='6.19.0';assert vulnerabilities(service.threats.snapshot(),node)==([],[])
+
+def test_satra_adapter_compiles_seeded_invoicehub_rules(service):
+    compiled,unsupported=satra_dictionary(service.threats.snapshot())
+    expected={'AUTHZ.IDOR.001','AUTHN.001','AUTHZ.ADMIN.001','INPUT.PDF.001'}
+    assert {rule['id'] for rule in compiled}==expected
+    assert not unsupported
+    assert all(rule['implementation']=='executable bounded InvoiceHub template' for rule in compiled)
+
+def test_satra_adapter_still_rejects_disabled_required_rule(service):
+    knowledge=service.threats.snapshot()
+    knowledge['records']=[
+        {**record,'enabled':False} if record['id']=='AUTHZ.IDOR.001' else record
+        for record in knowledge['records']
+    ]
+    compiled,unsupported=satra_dictionary(knowledge)
+    assert 'AUTHZ.IDOR.001' in unsupported
+    assert 'AUTHZ.IDOR.001' not in {rule['id'] for rule in compiled}

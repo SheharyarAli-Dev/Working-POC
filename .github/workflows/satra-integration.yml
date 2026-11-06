@@ -1,0 +1,30 @@
+name: SATRA integration
+
+permissions:
+  contents: read
+
+on:
+  push:
+    branches: [master, sable-mid-core, satra-feature, integration/sable-satra-cavr]
+  pull_request:
+    branches: [master, sable-mid-core, satra-feature, integration/sable-satra-cavr]
+
+jobs:
+  satra-integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: python -m pip install -r requirements.txt
+      - name: Build the isolated test runner
+        run: docker build -f docker/sandbox.Dockerfile -t asent-sandbox:local .
+      - name: Run SATRA repository and safe integration tests
+        run: >-
+          python -m pytest -q
+          tests/test_threat_repository.py
+          tests/test_modules.py::test_satra_scc_and_inconclusive
+          tests/test_modules.py::test_satra_docker_runner_matches_bind_mount_owner
+          tests/test_integration.py::test_safe_accepts_exact_clean_reconstruction

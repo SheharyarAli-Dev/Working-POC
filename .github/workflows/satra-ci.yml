@@ -116,6 +116,7 @@ jobs:
 
   full-suite:
     name: Full Suite Integration (Required)
+    needs: satra-suite
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

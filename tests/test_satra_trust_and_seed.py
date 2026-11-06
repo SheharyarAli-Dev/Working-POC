@@ -9,7 +9,7 @@ from backend.satra import trust
 
 TRUSTED_DIR = trust.TRUST_DIR
 SEED_SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "satra_seed_threat_repo.sh"
-from test_satra_gitkit import IDENTITY, git_do, record, start_repo
+from test_satra_gitkit import IDENTITY, git_do, record, start_repo, find_bash
 
 
 def clone_trusted(tmp_path):
@@ -62,8 +62,9 @@ def test_line_endings_do_not_change_fingerprint():
 
 @pytest.fixture(scope="module")
 def seeded(tmp_path_factory):
-    if shutil.which("bash") is None:
-        pytest.skip("bash unavailable")
+    bash = find_bash()
+    if not bash:
+        pytest.skip("Functional bash unavailable")
     root = tmp_path_factory.mktemp("seed")
     repo = start_repo(root, "target")
     record(repo, {"TestFile.py": "print('legacy')\n"}, message="legacy history")
@@ -71,7 +72,7 @@ def seeded(tmp_path_factory):
 
     environment = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
     environment.update(IDENTITY)
-    done = subprocess.run(["bash", str(SEED_SCRIPT), str(repo)], capture_output=True, text=True, env=environment)
+    done = subprocess.run([bash, str(SEED_SCRIPT), str(repo)], capture_output=True, text=True, env=environment)
     assert done.returncode == 0, done.stderr
     return repo
 
@@ -95,12 +96,13 @@ def test_seed_creates_all_branches(seeded):
 
 
 def test_seed_refuses_to_run_twice(seeded):
+    bash = find_bash() or "bash"
     import os
 
     environment = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
     environment.update(IDENTITY)
     git_do(seeded, "checkout", "-q", "main")
-    again = subprocess.run(["bash", str(SEED_SCRIPT), str(seeded)], capture_output=True, text=True, env=environment)
+    again = subprocess.run([bash, str(SEED_SCRIPT), str(seeded)], capture_output=True, text=True, env=environment)
     assert again.returncode != 0
 
 

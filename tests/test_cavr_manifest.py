@@ -19,12 +19,12 @@ def edit(tmp_path, before, after):
     """Snapshot a real file, rewrite it, snapshot again, and capture the edit."""
     path = tmp_path / "requirements.txt"
     if before is not None:
-        path.write_text(before)
+        path.write_text(before, newline="\n")
     first = snapshot_requirements(path)
     if after is None:
         path.unlink()
     else:
-        path.write_text(after)
+        path.write_text(after, newline="\n")
     return capture_requirements_edit(first, snapshot_requirements(path))
 
 

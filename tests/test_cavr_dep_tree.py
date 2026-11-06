@@ -211,7 +211,9 @@ def test_extra_that_arrives_after_the_node_was_first_seen_is_still_applied(world
 def test_real_pypdf_wheel_has_no_dependencies_on_this_interpreter(tmp_path):
     index = FakeIndex()
     index.add_pypdf()
-    lockfile = json.loads((REPO / "demo_project/InvoiceHub/dependencies.lock.json").read_text())
+    # This test exercises the captured 6.19.0 wheel; keep its lock fixture independent of the
+    # mutable InvoiceHub demo lock.
+    lockfile = lock("pypdf==6.19.0", pypdf=PYPDF_SHA256)
     tree = build_tree("pypdf", "6.19.0", lockfile, tmp_path / "quarantine", transport=index)
     assert outcome(tree) == ("OK", "TREE_BUILT")
     assert [(node["name"], node["version"], node["sha256"]) for node in tree["nodes"]] == [("pypdf", "6.19.0", PYPDF_SHA256)]

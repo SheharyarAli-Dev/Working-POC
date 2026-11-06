@@ -90,14 +90,16 @@ security = evaluate_authorization(projected, candidate_tf)
         <div className="sable-decision-guidance unknown">
           <strong>What evidence would resolve this:</strong>
           <ul>
-            {(candidateAuth?.outside_model?.length ?? 0) > 0 && (
-              <li>Remove unsupported constructs (Condition, NotAction) from the policy</li>
-            )}
+            {(candidateAuth?.outside_model?.length ?? 0) > 0 && candidateAuth?.outside_model?.map((item, index) => (
+              <li key={`unsupported-${index}`}>Review unsupported authorization construct: <code>{item}</code></li>
+            ))}
             {runState.conflicts.length > 0 && (
               <li>Resolve conflicting evidence: {runState.conflicts.join('; ')}</li>
             )}
-            <li>Add an explicit <code>moved {'{}'}</code> block to record the resource move</li>
-            <li>Ensure the protected asset has a stable, unique <code>Asset</code> tag</li>
+            {runState.correspondenceReason && <li>Correspondence analysis: {runState.correspondenceReason}</li>}
+            {runState.conflicts.length === 0 && (candidateAuth?.outside_model?.length ?? 0) === 0 && (
+              <li>Review the correspondence and authorization evidence above, then provide evidence that resolves the reported uncertainty.</li>
+            )}
           </ul>
           <p className="sable-small-note warning">UNKNOWN does not mean the change is safe.</p>
         </div>

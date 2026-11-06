@@ -66,9 +66,9 @@ export const VerificationTab: React.FC<Props> = ({ runState, explainSimply }) =>
 
       {explainSimply && (
         <div className="sable-explain-box">
-          <strong>In plain English:</strong> Available tools (like Terraform Validate and Checkov) were
-          run against the changed infrastructure. If a tool was not installed, SABLE used its own
-          built-in checks instead and clearly labels this.
+          <strong>In plain English:</strong> This tab reports whether optional local tools ran and their results.
+          If a tool is unavailable, it did not run. SABLE&apos;s separate bounded IAM/S3 authorization analysis
+          still determines the verdict; that analysis is not a substitute Terraform or Checkov scan.
         </div>
       )}
     </div>

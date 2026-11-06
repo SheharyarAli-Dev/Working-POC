@@ -20,7 +20,13 @@ class ReplayAdapter:
     def events(self):
         for line in self.path.read_text().splitlines():
             event=json.loads(line)
-            if event.get('kind') not in ('file.changed','dependency.intercepted','task.registered'):raise ValueError('Unsupported replay event')
+            if not isinstance(event, dict):raise ValueError('Replay event must be an object')
+            if not isinstance(event.get('kind'), str) or event['kind'] not in ('file.changed','dependency.intercepted','task.registered'):
+                raise ValueError('Unsupported replay event')
+            writes=event.get('writes',{})
+            if not isinstance(writes,dict):raise ValueError('Replay writes must be an object')
+            if any(not isinstance(name,str) or not isinstance(text,str) for name,text in writes.items()):
+                raise ValueError('Replay write paths and contents must be text')
             yield event
 
 def parse_dependency_command(command):

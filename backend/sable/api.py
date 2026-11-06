@@ -25,6 +25,7 @@ from backend.config import DATA, ROOT
 from backend.cavr.assurance import EvidenceChain, verify_chain
 from backend.integrations.tooling import availability
 from backend.sable.storage import SableStorage
+from backend.sable.fingerprints import bundle_sha256
 from backend.sable.hcl_parser import parse as hcl_parse
 from backend.sable.authorization import evaluate_authorization
 from backend.sable.correspondence import rank, choose
@@ -83,9 +84,8 @@ def publish_event(run_id: str, step_index: int, phase: str, substep: str,
 def dialog_baseline():
     obligations = storage.get_obligations()
     from backend.sable.fixtures.scenarios import BASELINE_INFRA
-    # Compute bundle SHA-256
-    baseline_content = "".join(BASELINE_INFRA.values()).encode("utf-8")
-    bundle_sha = hashlib.sha256(baseline_content).hexdigest()
+    # Bind the fingerprint to both each relative path and its complete contents.
+    bundle_sha = bundle_sha256(BASELINE_INFRA)
     return {
         "title": "Baseline: Trusted Terraform and Obligation",
         "subtitle": "The trusted Terraform and the security obligation to check against.",
@@ -311,14 +311,18 @@ async def create_run(body: RunRequest):
 
 @sable_router.post("/runs/{run_id}/verify-determinism")
 def verify_determinism(run_id: str):
-    proof = RUN_PROOFS.get(run_id)
+    persisted = storage.get_run(run_id)
+    proof = RUN_PROOFS.get(run_id) or (persisted or {}).get("proof")
     if not proof:
         raise HTTPException(404, "Proof not found for this run")
     orig_hash = proof.get("decision_hash")
     scenario_id = proof.get("scenario_id")
     scenario = RUN_DATA.get(run_id, {}).get("scenario") or SCENARIOS.get(scenario_id)
     if not scenario:
-        raise HTTPException(404, f"Scenario '{scenario_id}' not found for re-run")
+        raise HTTPException(
+            409,
+            f"Cannot rerun scenario '{scenario_id}': its Terraform input bundle was not persisted",
+        )
 
     obligation = proof.get("obligation") or storage.get_obligation("S3-APPROLE-CUSTOMERDATA") or OBLIGATION
     from backend.sable.benchmark import _run_sable_engine
@@ -357,23 +361,29 @@ def get_run(run_id: str):
 
 @sable_router.get("/proof/{run_id}")
 def get_proof(run_id: str):
-    if run_id not in RUN_PROOFS:
+    proof = RUN_PROOFS.get(run_id)
+    if proof is None:
+        persisted = storage.get_run(run_id)
+        proof = (persisted or {}).get("proof")
+    if not proof:
         raise HTTPException(404, "Proof not found")
-    return RUN_PROOFS[run_id]
+    return proof
 
 @sable_router.get("/evidence/{run_id}/verify")
 def verify_evidence(run_id: str):
     chain = RUN_CHAINS.get(run_id)
-    if not chain:
-        raise HTTPException(404, "No evidence ledger for this run")
-    return verify_chain(chain.records)
+    records = chain.records if chain else (storage.get_run(run_id) or {}).get("evidence_chain", [])
+    if not records:
+        raise HTTPException(404, "No persisted evidence ledger for this run")
+    return verify_chain(records)
 
 @sable_router.get("/evidence/{run_id}/records")
 def get_evidence_records(run_id: str):
     chain = RUN_CHAINS.get(run_id)
-    if not chain:
-        raise HTTPException(404, "No evidence ledger for this run")
-    return {"run_id": run_id, "records": chain.records}
+    records = chain.records if chain else (storage.get_run(run_id) or {}).get("evidence_chain", [])
+    if not records:
+        raise HTTPException(404, "No persisted evidence ledger for this run")
+    return {"run_id": run_id, "records": records}
 
 @sable_router.get("/evidence/{run_id}/sarif")
 def get_sarif(run_id: str):
@@ -514,10 +524,8 @@ async def execute_sable_pipeline(run_id: str, scenario: dict, obligation: dict):
     await asyncio.sleep(0.5)
 
     # ─── STEP 2: Capture baseline and candidate ───────────────────────────────
-    baseline_content = "".join(baseline_tf.values()).encode()
-    candidate_content = "".join(candidate_tf.values()).encode()
-    baseline_sha = hashlib.sha256(baseline_content).hexdigest()
-    candidate_sha = hashlib.sha256(candidate_content).hexdigest()
+    baseline_sha = bundle_sha256(baseline_tf)
+    candidate_sha = bundle_sha256(candidate_tf)
 
     # File-level diff
     import difflib
@@ -694,6 +702,7 @@ async def execute_sable_pipeline(run_id: str, scenario: dict, obligation: dict):
                           "widening": c_auth.widening,
                           "weakening": c_auth.weakening,
                           "misbinding": c_auth.misbinding,
+                          "unexpected_resources": c_auth.unexpected_resources,
                           "outside_model": c_auth.outside_model,
                           "grants": c_auth.grants
                       },
@@ -843,6 +852,8 @@ async def execute_sable_pipeline(run_id: str, scenario: dict, obligation: dict):
                           "widening": c_auth.widening,
                           "weakening": c_auth.weakening,
                           "misbinding": c_auth.misbinding,
+                          "unexpected_resources": c_auth.unexpected_resources,
+                          "reason": c_auth.reason,
                           "outside_model": c_auth.outside_model,
                       },
                       "reviewer_note": reviewer_note,
@@ -881,7 +892,10 @@ async def execute_sable_pipeline(run_id: str, scenario: dict, obligation: dict):
             "known": c_auth.known, "holds": c_auth.holds,
             "actual_actions": c_auth.actual_actions,
             "widening": c_auth.widening, "weakening": c_auth.weakening,
-            "misbinding": c_auth.misbinding
+            "misbinding": c_auth.misbinding,
+            "unexpected_resources": c_auth.unexpected_resources,
+            "outside_model": c_auth.outside_model,
+            "grants": c_auth.grants
         },
         "verdict": verdict,
         "wording": wording,
@@ -897,7 +911,7 @@ async def execute_sable_pipeline(run_id: str, scenario: dict, obligation: dict):
         },
         "tool_results": tool_results,
         "residual_uncertainty": c_auth.outside_model or [],
-        "reason": c_auth.reason if c_auth.known else why,
+        "reason": c_auth.reason,
     }
 
     proof = {
@@ -914,17 +928,14 @@ async def execute_sable_pipeline(run_id: str, scenario: dict, obligation: dict):
         "isolation_flags": "Local process — no container for static TF analysis. Checkov runs in --skip-download mode if available.",
         "llm_in_decision_path": "none",
         "determinism": "All weights and thresholds fixed in sable_config.json before any run.",
-        "evidence_chain_length": len(RUN_CHAINS[run_id].records) if run_id in RUN_CHAINS else 0,
+        "evidence_chain_length": 0,
         "logs": list(logs),
     }
 
-    RUN_PROOFS[run_id] = proof
     RUN_DATA[run_id] = evidence
 
     chain = RUN_CHAINS.get(run_id)
-    chain_records = chain.records if chain else []
-
-    storage.complete_run(run_id, verdict, decision_hash, evidence, proof)
+    chain_length = len(chain.records) + 1 if chain else 1
 
     publish_event(run_id, 7, "H", "Evidence",
                   "run.complete", "COMPLETED", {
@@ -935,11 +946,17 @@ async def execute_sable_pipeline(run_id: str, scenario: dict, obligation: dict):
                       "decision_hash": decision_hash,
                       "evidence": evidence,
                       "baselines": evidence["baselines"],
-                      "chain_length": len(chain_records),
+                      "chain_length": chain_length,
                       "message": f"Run complete. Verdict: {verdict}. Decision hash: {decision_hash[:12]}…",
                       "plain_explanation": _plain_verdict(verdict, failure_mode, target),
                       "logs": list(logs)
                   })
+    proof["evidence_chain_length"] = len(chain.records) if chain else 0
+    RUN_PROOFS[run_id] = proof
+    storage.complete_run(
+        run_id, verdict, decision_hash, evidence, proof,
+        chain.records if chain else [],
+    )
 
 
 def _finalize(run_id, verdict, obligation, bm, cm, target, b_auth, c_auth, hyp, tool_results,
@@ -967,7 +984,6 @@ def _finalize(run_id, verdict, obligation, bm, cm, target, b_auth, c_auth, hyp, 
     }
     RUN_PROOFS[run_id] = proof
     RUN_DATA[run_id] = evidence
-    storage.complete_run(run_id, verdict, decision_hash, evidence, proof)
     publish_event(run_id, 7, "H", "Evidence", "run.complete", "COMPLETED", {
         "step_index": 7, "verdict": verdict, "wording": wording,
         "asent_mapping": asent_mapping, "decision_hash": decision_hash, "evidence": evidence,
@@ -975,6 +991,12 @@ def _finalize(run_id, verdict, obligation, bm, cm, target, b_auth, c_auth, hyp, 
         "plain_explanation": _plain_verdict(verdict, None, target),
         "logs": list(logs)
     })
+    chain = RUN_CHAINS.get(run_id)
+    proof["evidence_chain_length"] = len(chain.records) if chain else 0
+    storage.complete_run(
+        run_id, verdict, decision_hash, evidence, proof,
+        chain.records if chain else [],
+    )
 
 
 def _reviewer_guidance(failure_mode: str | None, auth, target: str) -> str:

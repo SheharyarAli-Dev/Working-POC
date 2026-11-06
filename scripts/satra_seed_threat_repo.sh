@@ -28,9 +28,20 @@ cp -R "$seed/baseline/." .
 git add -A
 git commit -q -m "feat(invoice-api): secure baseline invoice API with its own tests"
 
+PYTHON_BIN="${PYTHON:-}"
+if [ -z "$PYTHON_BIN" ]; then
+  if command -v python3 >/dev/null 2>&1 && python3 -c "import sys" 2>/dev/null; then
+    PYTHON_BIN="python3"
+  elif command -v python >/dev/null 2>&1 && python -c "import sys" 2>/dev/null; then
+    PYTHON_BIN="python"
+  else
+    PYTHON_BIN="python3"
+  fi
+fi
+
 for name in "${scenarios[@]}"; do
   git checkout -q -b "scenario/$name" main
-  message="$(python3 "$seed/apply_scenario.py" "$name" .)"
+  message="$($PYTHON_BIN "$seed/apply_scenario.py" "$name" .)"
   git add -A
   git commit -q -m "$message"
   git checkout -q main

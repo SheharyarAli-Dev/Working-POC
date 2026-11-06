@@ -10,6 +10,20 @@ IDENTITY = {
 }
 
 
+def find_bash():
+    import shutil
+    if os.name == "nt":
+        git = shutil.which("git")
+        if git:
+            git_bash = Path(git).resolve().parents[1] / "bin" / "bash.exe"
+            if git_bash.is_file():
+                return str(git_bash)
+    found = shutil.which("bash")
+    if found and not found.lower().endswith(r"system32\bash.exe"):
+        return found
+    return None
+
+
 def git_do(repo, *arguments, feed=None):
     scrubbed = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
     scrubbed.update(IDENTITY)

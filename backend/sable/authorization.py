@@ -1,11 +1,11 @@
 """
 SABLE bounded IAM/S3 authorization evaluator.
 Implements the documented subset: Allow/Deny, action wildcards, ARN wildcard matching,
-bucket-level vs object-level scope, principal attachment, bucket policies.
+bucket-level vs object-level scope, and inline role-policy principal attachment.
+Linked bucket policies are identified as outside the evaluated model.
 
 Anything outside the supported subset returns 'outside model' pushing toward UNKNOWN.
-This is NOT policy_semantics.py — it supports all five IAM forms in the spec, not
-just inline role policies.
+The integrated policy_semantics evaluator uses a narrower inline-role subset.
 """
 from __future__ import annotations
 import fnmatch
@@ -62,13 +62,9 @@ def _action_set_covers(patterns: list[str], required_actions: list[str]) -> tupl
 
 def _widens_actions(patterns: list[str], required_actions: list[str]) -> list[str]:
     """Return patterns that grant more than the required actions (widening)."""
-    widening = []
-    for p in patterns:
-        if p == "*" or (p.endswith("*") and not any(_matches_action(p, a) for a in required_actions)):
-            widening.append(p)
-        elif p not in required_actions and not any(_matches_action(p, a) for a in required_actions):
-            widening.append(p)
-    return widening
+    # Matching one required action does not make a wildcard least-privilege: it may
+    # also match other actions that are outside the registered obligation.
+    return list(dict.fromkeys(pattern for pattern in patterns if pattern not in required_actions))
 
 
 # ─── ARN / resource matching ──────────────────────────────────────────────────
@@ -120,16 +116,12 @@ def _resource_matches_obligation(grant_resource: str, obligation_resource: str,
     if g == "*":
         return True, "wildcard * (widening)"
 
-    # Both may be ARN patterns
+    # The registered obligation here is object access, so a bucket ARN alone is
+    # insufficient for actions such as s3:GetObject and s3:PutObject.
     if bucket_name:
         literal_obj = f"arn:aws:s3:::{bucket_name}/*"
-        literal_bkt = f"arn:aws:s3:::{bucket_name}"
-        if g in (literal_obj, literal_bkt, f"arn:aws:s3:::{bucket_name}*"):
+        if g == literal_obj:
             return True, "literal ARN match"
-
-    # Wildcard matching on ARN
-    if fnmatch.fnmatch(o, g):
-        return True, "ARN pattern match"
 
     return False, f"resource {g!r} does not cover {o!r}"
 
@@ -208,6 +200,12 @@ def evaluate_authorization(
         if node["type"] == "aws_iam_role"
         for attribute in ("id", "name")
     }
+    known_bucket_bindings = {
+        f"{addr}.{attribute}"
+        for addr, node in resources.items()
+        if node["type"] == "aws_s3_bucket"
+        for attribute in ("id", "bucket")
+    }
 
     for addr, node in resources.items():
         rtype = node["type"]
@@ -246,6 +244,15 @@ def evaluate_authorization(
                 effect = st.get("Effect", "")
                 acts = _as_list(st.get("Action", []))
                 tgts = _as_list(st.get("Resource", []))
+                if (not acts or any(not isinstance(action, str) or not action.strip() for action in acts)):
+                    outside_model.append(f"{addr}: Action must be a non-empty string or list of strings")
+                    continue
+                if (not tgts or any(not isinstance(resource, str) or not resource.strip() for resource in tgts)):
+                    outside_model.append(f"{addr}: Resource must be a non-empty string or list of strings")
+                    continue
+                if effect not in ("Allow", "Deny"):
+                    outside_model.append(f"{addr}: unknown Effect '{effect}'")
+                    continue
                 stmt = PolicyStatement(effect=effect, actions=acts, resources=tgts, source_addr=addr)
                 if effect == "Allow":
                     grants.append(stmt)
@@ -256,28 +263,22 @@ def evaluate_authorization(
 
         # ── Bucket policy ──
         elif rtype == "aws_s3_bucket_policy":
-            bucket_ref = str(unwrap(attrs.get("bucket", "")))
+            raw_bucket_ref = unwrap(attrs.get("bucket", ""))
+            bucket_ref = raw_bucket_ref if isinstance(raw_bucket_ref, str) else ""
             bucket_linked = bucket_ref in (f"{asset_addr}.id", f"{asset_addr}.bucket", bucket or "__none__")
             if not bucket_linked:
+                # A dynamic binding could still target the protected asset; do not silently skip it.
+                if bucket_ref not in known_bucket_bindings and unresolved_role_binding(bucket_ref):
+                    outside_model.append(f"{addr}: bucket binding unresolved")
                 continue
-            doc = _decode_policy_doc(attrs.get("policy"))
-            if doc is None:
-                outside_model.append(f"{addr}: bucket policy expression unresolved")
-                continue
-            for st in _as_list(doc.get("Statement", [])):
-                if not isinstance(st, dict):
-                    continue
-                if any(k in st for k in ["Condition", "NotAction", "NotResource"]):
-                    outside_model.append(f"{addr}: unsupported bucket policy semantics")
-                    continue
-                effect = st.get("Effect", "")
-                acts = _as_list(st.get("Action", []))
-                tgts = _as_list(st.get("Resource", []))
-                stmt = PolicyStatement(effect=effect, actions=acts, resources=tgts, source_addr=addr)
-                if effect == "Allow":
-                    grants.append(stmt)
-                elif effect == "Deny":
-                    denies.append(stmt)
+            # Bucket policies participate in effective S3 access for arbitrary
+            # principals and compose with identity policies. This evaluator does
+            # not model Principal or cross-policy IAM evaluation, so treating a
+            # matching Action/Resource as a role grant can falsely certify
+            # least privilege (for example, Principal="*").
+            outside_model.append(
+                f"{addr}: bucket-policy principal and identity-policy composition are unsupported"
+            )
 
         # ── Other forms → outside model ──
         elif rtype in ("aws_iam_policy", "aws_iam_role_policy_attachment"):
@@ -297,6 +298,20 @@ def evaluate_authorization(
             outside_model=outside_model + ["Explicit Deny — cannot compute effective permissions without IAM policy evaluation order"]
         )
 
+    # Unsupported semantics must dominate an otherwise empty or partial grant set.
+    # Returning a known REGRESSED result here would overstate what malformed policy
+    # input lets us conclude; action/resource consumers below require strings.
+    if outside_model:
+        return AuthResult(
+            known=False, holds=False,
+            reason=f"Partially outside model: {outside_model[0]}; result uncertain",
+            grants=[{"policy": g.source_addr, "actions": g.actions, "resources": g.resources} for g in grants],
+            denies=[], actual_actions=list(dict.fromkeys(a for g in grants for a in g.actions)),
+            expected_resource=expected_res,
+            unexpected_resources=[], widening=[], weakening=[], misbinding=[],
+            outside_model=outside_model,
+        )
+
     # Compute effective allowed actions and resources
     all_allowed_actions: list[str] = []
     all_allowed_resources: list[str] = []
@@ -313,12 +328,17 @@ def evaluate_authorization(
     good_resource_grants = []
     bad_resources = []
     misbinding_resources = []
+    protected_bucket_resource = expected_res.removesuffix("/*")
+    literal_bucket_resource = f"arn:aws:s3:::{bucket}" if bucket else None
 
     for g in grants:
         for r in g.resources:
             matches, reason = _resource_matches_obligation(r, expected_res, bucket)
             if matches:
                 good_resource_grants.append(r)
+            elif r in (protected_bucket_resource, literal_bucket_resource):
+                # This is the protected bucket, but it does not cover its objects.
+                bad_resources.append(r)
             else:
                 # Misbinding: grants to a different concrete asset
                 if r.startswith("arn:aws:s3:::") or r.startswith("${aws_s3_bucket."):
@@ -327,13 +347,7 @@ def evaluate_authorization(
                     bad_resources.append(r)
 
     # ── Widening detection
-    widening_actions = []
-    for a in all_allowed_actions:
-        if not any(_matches_action(a, req) for req in required_actions):
-            # This action goes beyond what the obligation requires
-            widening_actions.append(a)
-    if "*" in all_allowed_actions or "s3:*" in all_allowed_actions:
-        widening_actions.insert(0, "wildcard action grant (s3:* or *)")
+    widening_actions = _widens_actions(all_allowed_actions, required_actions)
 
     widening_resources = []
     if "*" in all_allowed_resources:
@@ -346,7 +360,10 @@ def evaluate_authorization(
     resource_ok = bool(good_resource_grants) and not bad_resources
     actions_ok = covered and not widening_actions
 
-    holds = has_grant and resource_ok and actions_ok and not misbinding_resources and not outside_model
+    holds = (
+        has_grant and resource_ok and actions_ok and not misbinding_resources
+        and not widening_resources and not outside_model
+    )
 
     if not has_grant:
         reason = "No authorization grant found for this principal on this asset"
@@ -356,20 +373,10 @@ def evaluate_authorization(
         reason = f"Weakening: required actions not granted — {missing_actions}"
     elif widening_actions:
         reason = f"Widening: extra actions granted beyond obligation — {widening_actions[:3]}"
+    elif widening_resources:
+        reason = f"Widening: resource scope exceeds the protected asset — {widening_resources[:3]}"
     elif misbinding_resources:
         reason = f"Misbinding: grant targets a different asset — {misbinding_resources[:2]}"
-    elif outside_model:
-        reason = f"Partially outside model: {outside_model[0]}; result uncertain"
-        return AuthResult(
-            known=False, holds=False, reason=reason,
-            grants=[{"policy": g.source_addr, "actions": g.actions, "resources": g.resources} for g in grants],
-            denies=[],
-            actual_actions=all_allowed_actions,
-            expected_resource=expected_res,
-            unexpected_resources=bad_resources,
-            widening=widening, weakening=weakening, misbinding=misbinding_resources,
-            outside_model=outside_model
-        )
     else:
         reason = "Exact modeled least privilege holds (within supported IAM/S3 subset)"
 
@@ -381,7 +388,7 @@ def evaluate_authorization(
         denies=[],
         actual_actions=all_allowed_actions,
         expected_resource=expected_res,
-        unexpected_resources=bad_resources,
+        unexpected_resources=list(dict.fromkeys(bad_resources + widening_resources)),
         widening=widening,
         weakening=weakening,
         misbinding=misbinding_resources,

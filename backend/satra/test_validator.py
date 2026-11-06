@@ -274,4 +274,3 @@ def validate_generated_test(test_code, contract, baseline_result=None, mutant_re
             return {"valid": False, "failing_check": 7, "reason": "Generated test baseline run is not deterministic/repeatable", "checks": checks}
 
     return {"valid": True, "failing_check": None, "reason": "All validation checks passed", "checks": checks}
-

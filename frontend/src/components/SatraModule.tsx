@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { 
-  BookOpen, Cpu, ShieldAlert, CheckCircle2, XCircle, AlertTriangle, 
-  Terminal, ExternalLink, Copy, Check, Play, RefreshCw, Eye, 
-  Lock, ArrowRight, Download, Info, HelpCircle, GitCommit, GitPullRequest, 
+import {
+  BookOpen, Cpu, ShieldAlert, CheckCircle2, XCircle, AlertTriangle,
+  Terminal, ExternalLink, Copy, Check, Play, RefreshCw, Eye,
+  Lock, ArrowRight, Download, Info, HelpCircle, GitCommit, GitPullRequest,
   GitBranch, Code2, AlertOctagon, Layers, FileCode, CheckSquare, Sparkles,
   Loader2, AlertCircle
 } from 'lucide-react';
@@ -75,7 +75,7 @@ export const SatraModule: React.FC = () => {
       return next;
     });
   };
-  
+
   // Data loaded from backend
   const [dictionaryRules, setDictionaryRules] = useState<SecurityRule[]>([]);
   const [coverageMatrix, setCoverageMatrix] = useState<CoverageItem[]>([]);
@@ -93,7 +93,7 @@ export const SatraModule: React.FC = () => {
   const [diffData, setDiffData] = useState<string>('');
   const [securityRegions, setSecurityRegions] = useState<any[]>([]);
   const [contractData, setContractData] = useState<any>(null);
-  
+
   // Test cells, Ollama, and Findings
   const [dictCells, setDictCells] = useState<any[]>([]);
   const [ollamaSkippedMsg, setOllamaSkippedMsg] = useState<string | null>(null);
@@ -550,7 +550,7 @@ export const SatraModule: React.FC = () => {
           <h2 className="cavr-title">SATRA</h2>
           <p className="cavr-subtitle">
             Can this AI-written code change be trusted? (Security Assertion, Testing, Repair &amp; Verification).
-            Guards against agent test-oracle weakening, synthesizes counterfactual mutations, runs 
+            Guards against agent test-oracle weakening, synthesizes counterfactual mutations, runs
             differential sandbox tests, and automatically repairs security flaws before code merge.
           </p>
         </div>
@@ -560,7 +560,7 @@ export const SatraModule: React.FC = () => {
           <span className="toggle-label">
             <HelpCircle size={14} /> Explain simply
           </span>
-          <button 
+          <button
             className={`toggle-switch ${explainSimply ? 'on' : ''}`}
             onClick={() => setExplainSimply(!explainSimply)}
             title="Switch between plain english explanations and technical security details"
@@ -585,7 +585,7 @@ export const SatraModule: React.FC = () => {
             Trusted security tests used to check code changes
           </p>
           <div className="box-footer-row">
-            <button 
+            <button
               className={`box-cta-button ${showDictionaryBottomPanel ? 'active' : ''}`}
               onClick={toggleDictionaryBottom}
               id="click-to-view-dictionary-btn"
@@ -611,7 +611,7 @@ export const SatraModule: React.FC = () => {
             Plain-Language Pipeline Steps &amp; Ollama Status ({ollamaStatus.online ? 'ON' : 'OFF'})
           </p>
           <div className="box-footer-row">
-            <button 
+            <button
               className="box-cta-button"
               onClick={() => setShowActionDialog(true)}
               id="click-to-view-action-btn"
@@ -636,7 +636,7 @@ export const SatraModule: React.FC = () => {
             Isolated sandbox where tests and repairs run
           </p>
           <div className="box-footer-row">
-            <button 
+            <button
               className="box-cta-button"
               onClick={() => setShowEnvDialog(true)}
               id="click-here-env-btn"
@@ -668,8 +668,8 @@ export const SatraModule: React.FC = () => {
               <span style={{ fontSize: '11px', color: 'var(--ink-secondary)', fontWeight: 600 }}>
                 Scenario:
               </span>
-              <select 
-                value={selectedScenario} 
+              <select
+                value={selectedScenario}
                 onChange={(e) => setSelectedScenario(e.target.value)}
                 disabled={isRunning}
                 style={{
@@ -707,8 +707,8 @@ export const SatraModule: React.FC = () => {
             )}
 
             {proofData && (
-              <button 
-                className="btn-secondary" 
+              <button
+                className="btn-secondary"
                 onClick={() => setShowProofDrawer(true)}
                 style={{ padding: '7px 12px', fontSize: '11px' }}
               >
@@ -716,7 +716,7 @@ export const SatraModule: React.FC = () => {
               </button>
             )}
 
-            <button 
+            <button
               className="satra-fetch-btn"
               onClick={() => startSatraRun(selectedScenario)}
               disabled={isRunning}
@@ -746,13 +746,13 @@ export const SatraModule: React.FC = () => {
         )}
 
         {/* Live Step Status Bar */}
-        <div 
+        <div
           id="satra-live-status-bar"
-          style={{ 
-            background: isRunning ? '#f0fdf4' : '#f8fafc', 
-            border: `1px solid ${isRunning ? '#bbf7d0' : 'var(--border-light)'}`, 
-            borderRadius: 'var(--radius-sm)', 
-            padding: '12px 16px', 
+          style={{
+            background: isRunning ? '#f0fdf4' : '#f8fafc',
+            border: `1px solid ${isRunning ? '#bbf7d0' : 'var(--border-light)'}`,
+            borderRadius: 'var(--radius-sm)',
+            padding: '12px 16px',
             marginBottom: '20px',
             display: 'flex',
             alignItems: 'center',
@@ -828,8 +828,8 @@ export const SatraModule: React.FC = () => {
                 <Code2 size={14} color="#f59e0b" /> Diff &amp; Security Regions (AST Localizer)
               </span>
               <span style={{ fontSize: '10.5px', color: '#f59e0b', fontWeight: 600 }}>
-                {securityRegions.filter(r => r.touches_security).length > 0 
-                  ? '⚡ Security-sensitive lines highlighted (routes/auth/queries)' 
+                {securityRegions.filter(r => r.touches_security).length > 0
+                  ? '⚡ Security-sensitive lines highlighted (routes/auth/queries)'
                   : '✓ Safe helper code (unrelated lines greyed out)'}
               </span>
             </div>
@@ -845,10 +845,10 @@ export const SatraModule: React.FC = () => {
                   const isAdd = line.startsWith('+') && !line.startsWith('+++');
                   const isDel = line.startsWith('-') && !line.startsWith('---');
                   const isNeutral = !isAdd && !isDel;
-                  
+
                   return (
-                    <div 
-                      key={idx} 
+                    <div
+                      key={idx}
                       className={`satra-diff-row ${isSecurity ? 'security-touch' : (isAdd ? 'add' : (isDel ? 'del' : 'neutral'))}`}
                     >
                       <span style={{ width: 32, opacity: 0.4, userSelect: 'none' }}>{idx + 1}</span>
@@ -902,8 +902,8 @@ export const SatraModule: React.FC = () => {
 
             <div className="satra-dict-grid">
               {dictCells.map((cell) => (
-                <div 
-                  key={cell.rule_id} 
+                <div
+                  key={cell.rule_id}
                   className={`satra-dict-cell ${cell.status === 'PASS' ? 'pass' : (cell.status === 'FAIL' ? 'fail' : 'evaluating')}`}
                   title={`${cell.family} (${cell.cwe}): ${cell.detail}`}
                 >
@@ -972,8 +972,8 @@ export const SatraModule: React.FC = () => {
 
                 <div className="satra-checklist">
                   {checklistItems.map((item) => (
-                    <div 
-                      key={item.id} 
+                    <div
+                      key={item.id}
                       className={`satra-check-item ${item.passed ? 'passed' : 'failed'}`}
                     >
                       <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -998,8 +998,8 @@ export const SatraModule: React.FC = () => {
               Correlated Findings &amp; Diagnostics (M5/M8)
             </span>
             {findingsList.map((f) => (
-              <div 
-                key={f.id} 
+              <div
+                key={f.id}
                 className={`satra-finding-card ${f.classification === 'New security defect' ? 'new-defect' : (f.classification === 'Test weakness' ? 'weakness' : 'gap')}`}
               >
                 <AlertTriangle size={18} color={f.classification === 'New security defect' ? '#ef4444' : '#f59e0b'} />
@@ -1040,12 +1040,12 @@ export const SatraModule: React.FC = () => {
                 <span style={{ fontSize: '12.5px', fontWeight: 700, color: 'var(--ink-primary)' }}>
                   Ollama Proposed Repair Patch
                 </span>
-                <span style={{ 
-                  background: '#fef3c7', 
-                  color: '#b45309', 
-                  fontSize: '9.5px', 
-                  fontWeight: 800, 
-                  padding: '2px 8px', 
+                <span style={{
+                  background: '#fef3c7',
+                  color: '#b45309',
+                  fontSize: '9.5px',
+                  fontWeight: 800,
+                  padding: '2px 8px',
                   borderRadius: '3px',
                   letterSpacing: '0.5px'
                 }}>
@@ -1148,7 +1148,7 @@ export const SatraModule: React.FC = () => {
             </div>
 
             {/* Live Terminal Log */}
-            <div 
+            <div
               ref={terminalEndRef}
               style={{
                 background: '#020617',
@@ -1302,8 +1302,8 @@ export const SatraModule: React.FC = () => {
                 </div>
                 <div className="satra-gates-grid">
                   {verificationGates.map((gate) => (
-                    <div 
-                      key={gate.id} 
+                    <div
+                      key={gate.id}
                       className={`satra-gate-item ${gate.passed ? 'passed' : 'failed'}`}
                     >
                       {gate.passed ? <CheckCircle2 size={15} color="#15803d" /> : <XCircle size={15} color="#b91c1c" />}
@@ -1318,7 +1318,7 @@ export const SatraModule: React.FC = () => {
 
         {/* 9. DECISION CARD */}
         {effectiveDecision && (
-          <div 
+          <div
             id="satra-decision-section"
             style={{
             background: effectiveDecision.decision === 'ACCEPTED' ? '#f0fdf4' : (effectiveDecision.decision === 'RETRY_AVAILABLE' ? '#fffbeb' : '#fef2f2'),
@@ -1350,7 +1350,7 @@ export const SatraModule: React.FC = () => {
               </div>
 
               {effectiveDecision.can_retry && (
-                <button 
+                <button
                   className="btn-primary"
                   onClick={() => startSatraRun(selectedScenario, (effectiveDecision.retry_attempt || 1) + 1)}
                   style={{ background: '#b45309' }}
@@ -1366,15 +1366,15 @@ export const SatraModule: React.FC = () => {
             </p>
 
             {/* Honesty Line */}
-            <div style={{ 
-              fontSize: '11px', 
-              color: 'var(--ink-faded)', 
-              borderTop: '1px solid rgba(0,0,0,0.08)', 
+            <div style={{
+              fontSize: '11px',
+              color: 'var(--ink-faded)',
+              borderTop: '1px solid rgba(0,0,0,0.08)',
               paddingTop: '8px',
               fontStyle: 'italic'
             }}>
-              Honesty line: {effectiveDecision.decision === 'ACCEPTED' 
-                ? 'Evidence gate passed within the tested security model (never claims code is "proven secure").' 
+              Honesty line: {effectiveDecision.decision === 'ACCEPTED'
+                ? 'Evidence gate passed within the tested security model (never claims code is "proven secure").'
                 : 'Decision reached deterministically without LLM hallucination in gates.'}
             </div>
           </div>
@@ -1392,7 +1392,7 @@ export const SatraModule: React.FC = () => {
               </div>
 
               {!approvedRecommit ? (
-                <button 
+                <button
                   className="satra-approve-push-btn"
                   onClick={handleApproveRecommit}
                   disabled={isApproving}
@@ -1441,26 +1441,26 @@ export const SatraModule: React.FC = () => {
                   ✓ Successfully {approvedRecommit.pushed ? 'Pushed Branch to GitHub' : 'Created Verified Branch'} &amp; Generated Pull Request:
                 </div>
                 <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap', marginTop: '6px' }}>
-                  <a 
-                    href={approvedRecommit.pr_url} 
-                    target="_blank" 
+                  <a
+                    href={approvedRecommit.pr_url}
+                    target="_blank"
                     rel="noreferrer"
                     style={{ color: '#0284c7', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '4px' }}
                   >
                     View PR #{approvedRecommit.pr_number} <ExternalLink size={12} />
                   </a>
-                  <a 
-                    href={approvedRecommit.commit_url} 
-                    target="_blank" 
+                  <a
+                    href={approvedRecommit.commit_url}
+                    target="_blank"
                     rel="noreferrer"
                     style={{ color: '#0284c7', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '4px' }}
                   >
                     Commit {approvedRecommit.commit_sha} <ExternalLink size={12} />
                   </a>
                   {approvedRecommit.branch_url && (
-                    <a 
-                      href={approvedRecommit.branch_url} 
-                      target="_blank" 
+                    <a
+                      href={approvedRecommit.branch_url}
+                      target="_blank"
                       rel="noreferrer"
                       style={{ color: '#0284c7', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '4px' }}
                     >
@@ -1491,8 +1491,8 @@ export const SatraModule: React.FC = () => {
                   Independent obligations and counterfactual mutants originating from the immutable dictionary.
                 </p>
               </div>
-              <button 
-                className="btn-secondary" 
+              <button
+                className="btn-secondary"
                 onClick={() => setShowDictionaryBottomPanel(false)}
                 style={{ fontSize: '11px', display: 'flex', alignItems: 'center', gap: 6 }}
               >
@@ -1502,8 +1502,8 @@ export const SatraModule: React.FC = () => {
 
             <div>
               <p style={{ fontSize: '12px', color: 'var(--ink-secondary)', marginBottom: '16px' }}>
-                ASENT checks incoming code modifications against trusted security rules across 8 core 
-                vulnerability families. Tests originate from the immutable security dictionary rather than 
+                ASENT checks incoming code modifications against trusted security rules across 8 core
+                vulnerability families. Tests originate from the immutable security dictionary rather than
                 agent-modifiable test files, preventing circular trust and oracle-weakening attacks.
               </p>
 
@@ -1523,8 +1523,8 @@ export const SatraModule: React.FC = () => {
                 </thead>
                 <tbody>
                   {coverageMatrix.map((item) => (
-                    <tr 
-                      key={item.id} 
+                    <tr
+                      key={item.id}
                       onClick={() => {
                         const r = dictionaryRules.find(rule => rule.id === item.id);
                         if (r) setSelectedRuleDetail(r);
@@ -1560,14 +1560,14 @@ export const SatraModule: React.FC = () => {
                     </div>
 
                     <div style={{ display: 'flex', gap: '6px' }}>
-                      <button 
+                      <button
                         className={`box-cta-button ${ruleCodeTab === 'template' ? 'active' : ''}`}
                         onClick={() => setRuleCodeTab('template')}
                         style={{ background: ruleCodeTab === 'template' ? '#0284c7' : '#ffffff', color: ruleCodeTab === 'template' ? '#ffffff' : 'inherit' }}
                       >
                         Test Template
                       </button>
-                      <button 
+                      <button
                         className={`box-cta-button ${ruleCodeTab === 'broken' ? 'active' : ''}`}
                         onClick={() => setRuleCodeTab('broken')}
                         style={{ background: ruleCodeTab === 'broken' ? '#dc2626' : '#ffffff', color: ruleCodeTab === 'broken' ? '#ffffff' : 'inherit' }}
@@ -1797,7 +1797,7 @@ export const SatraModule: React.FC = () => {
               <div className="proof-section">
                 <div className="proof-label">
                   <span>EXACT DOCKER COMMAND EXECUTED (HOSTILE ISOLATION)</span>
-                  <button 
+                  <button
                     className="copy-btn"
                     onClick={() => copyToClipboard(proofData.docker_command, 'docker')}
                   >
@@ -1830,7 +1830,7 @@ export const SatraModule: React.FC = () => {
               <div className="proof-section">
                 <div className="proof-label">
                   <span>SARIF-STYLE ASSURANCE EVIDENCE JSON</span>
-                  <button 
+                  <button
                     className="copy-btn"
                     onClick={() => copyToClipboard(JSON.stringify(proofData.evidence_json, null, 2), 'evidence')}
                   >
@@ -1844,8 +1844,8 @@ export const SatraModule: React.FC = () => {
             </div>
 
             <div className="drawer-footer">
-              <a 
-                className="btn-primary" 
+              <a
+                className="btn-primary"
                 href={`data:text/json;charset=utf-8,${encodeURIComponent(JSON.stringify(proofData.evidence_json, null, 2))}`}
                 download={`ASENT_SATRA_${proofData.run_id}_evidence.json`}
                 style={{ textDecoration: 'none' }}

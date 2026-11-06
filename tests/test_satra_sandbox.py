@@ -1,6 +1,10 @@
 import subprocess
 import pytest
 import shutil
+import sys
+import tempfile
+from pathlib import Path
+from backend.config import ROOT
 
 
 @pytest.fixture(scope="module")
@@ -64,3 +68,82 @@ def test_sandbox_execution_timeout(docker_available):
     ]
     with pytest.raises(subprocess.TimeoutExpired):
         subprocess.run(cmd, text=True, capture_output=True, timeout=2)
+
+
+def test_runner_entry_permits_loopback_socket():
+    """Host fallback audit hook in runner_entry.py must permit loopback connections (needed for socketpair on Windows)."""
+    with tempfile.TemporaryDirectory() as d:
+        p = Path(d)
+        (p / 'pytest.ini').write_text('[pytest]\n')
+        (p / 'test_loop.py').write_text('''
+import socket, pytest
+
+def test_loopback_permitted():
+    s = socket.socket()
+    try:
+        s.connect(('127.0.0.1', 65432))
+    except (ConnectionRefusedError, OSError) as e:
+        assert 'Network unavailable' not in str(e)
+''')
+        res = subprocess.run([sys.executable, '-I', str(ROOT / 'backend/satra/runner_entry.py'), str(p), '-q', str(p / 'test_loop.py')], capture_output=True, text=True)
+        assert res.returncode == 0
+        assert '1 passed' in res.stdout
+
+
+def test_runner_entry_blocks_external_socket():
+    """Host fallback audit hook in runner_entry.py must forbid non-loopback network connections."""
+    with tempfile.TemporaryDirectory() as d:
+        p = Path(d)
+        (p / 'pytest.ini').write_text('[pytest]\n')
+        (p / 'test_ext.py').write_text('''
+import socket, pytest
+
+def test_external_blocked():
+    s = socket.socket()
+    with pytest.raises(PermissionError, match='Network unavailable'):
+        s.connect(('8.8.8.8', 53))
+''')
+        res = subprocess.run([sys.executable, '-I', str(ROOT / 'backend/satra/runner_entry.py'), str(p), '-q', str(p / 'test_ext.py')], capture_output=True, text=True)
+        assert res.returncode == 0
+        assert '1 passed' in res.stdout
+
+
+def test_runner_entry_blocks_subprocess():
+    """Host fallback audit hook in runner_entry.py must forbid child process creation."""
+    with tempfile.TemporaryDirectory() as d:
+        p = Path(d)
+        (p / 'pytest.ini').write_text('[pytest]\n')
+        (p / 'test_sub.py').write_text('''
+import subprocess, pytest
+
+def test_subproc_blocked():
+    with pytest.raises(PermissionError, match='Child process forbidden'):
+        subprocess.Popen(['echo', 'hi'])
+''')
+        res = subprocess.run([sys.executable, '-I', str(ROOT / 'backend/satra/runner_entry.py'), str(p), '-q', str(p / 'test_sub.py')], capture_output=True, text=True)
+        assert res.returncode == 0
+        assert '1 passed' in res.stdout
+
+
+def test_runner_entry_blocks_forbidden_local_services():
+    """Host fallback audit hook must forbid access to sensitive local service ports (e.g. Ollama 11434, Docker 2375)."""
+    with tempfile.TemporaryDirectory() as d:
+        p = Path(d)
+        (p / 'pytest.ini').write_text('[pytest]\n')
+        (p / 'test_local_svc.py').write_text('''
+import socket, pytest
+
+def test_forbidden_local_port():
+    s = socket.socket()
+    with pytest.raises(PermissionError, match='forbidden in built-in test mode'):
+        s.connect(('127.0.0.1', 11434))
+
+def test_privileged_local_port():
+    s = socket.socket()
+    with pytest.raises(PermissionError, match='forbidden in built-in test mode'):
+        s.connect(('127.0.0.1', 80))
+''')
+        res = subprocess.run([sys.executable, '-I', str(ROOT / 'backend/satra/runner_entry.py'), str(p), '-q', str(p / 'test_local_svc.py')], capture_output=True, text=True)
+        assert res.returncode == 0
+        assert '2 passed' in res.stdout
+
