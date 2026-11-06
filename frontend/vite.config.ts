@@ -10,12 +10,7 @@ export default defineConfig({
     host: '127.0.0.1',
     port: 5173,
     fs: {
-      strict: false,
-      allow: [
-        'C:/Users/Administrator/Desktop/Working POC',
-        'C:/Working_POC',
-        'E:/Working_POC',
-      ]
+      allow: ['..'],
     },
     proxy: {
       '/api': 'http://127.0.0.1:8000',

@@ -1,7 +1,8 @@
 """The single verify_request pipeline (plan step 11). Offline.
 
-What is real here: the pypdf 6.19.0 wheel and its recorded registry response, the recorded OSV
-answer for pypdf 6.19.0 (no advisories), the InvoiceHub demo project's source, every tmp-built
+What is real here: the pypdf 6.19.0 wheel and its recorded registry response, a historical captured
+OSV answer for pypdf 6.19.0 (fixed test input, not a current safety claim), the InvoiceHub demo
+project's source, every tmp-built
 wheel (a real zip, served with a digest computed from its bytes) and the SQLite cache file.
 What is synthetic and labelled so: advisories whose id starts with "SYNTH-".
 """

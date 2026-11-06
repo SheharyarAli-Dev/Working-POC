@@ -440,7 +440,12 @@ def test_symlink_to_a_file_outside_the_project_directory_is_not_read(tmp_path):
     project = tmp_path / "project"
     project.mkdir()
     (tmp_path / "secrets.txt").write_text("hunter2\n")
-    (project / "reqs.txt").symlink_to(tmp_path / "secrets.txt")
+    try:
+        (project / "reqs.txt").symlink_to(tmp_path / "secrets.txt")
+    except OSError as exc:
+        if getattr(exc, "winerror", None) == 1314:
+            pytest.skip("Creating symlinks on Windows requires Developer Mode or administrative privilege")
+        raise
     record = parse_pip_command("pip install -r reqs.txt", cwd=project)
     assert any("outside the project directory" in r for r in reasons(record, "unsupported"))
     assert "hunter2" not in repr(record) and record["files"] == []

@@ -1,3 +1,4 @@
+"""Freezes each candidate, runs applicable analyzers, and publishes bound evidence."""
 from __future__ import annotations
 import json
 import shutil
@@ -30,6 +31,7 @@ from backend.threat_repo.provenance import explanation
 
 class Service:
     def __init__(self,root=DATA):
+        # Set up persistence, isolated workspaces, event handling, and the shared threat repository.
         self.root=Path(root).resolve();self.store=Store(self.root);self.workspaces=WorkspaceManager(self.root/'workspaces')
         self.locks={};self.guard=threading.Lock();self.watchers={};self.stop=threading.Event()
         self.knowledge_guard=threading.RLock();self.threats=ThreatRepository(self.root/'threat-repository.sqlite3')
@@ -38,6 +40,7 @@ class Service:
             if body['lifecycle'] in ('ANALYZING','REPAIRING'):
                 r=RunContext(**body);r.lifecycle='INTERRUPTED';r.final_decision='REVIEW';r.reasons=['Backend restarted; rerun required'];self.store.save_run(r)
     def create(self,scenario='safe',source=None,srs=None,plan=None,policy=None,mode='manual',agent_metadata=None):
+        # Create a run from either the controlled demo case or a copied source repository.
         item=next((s for s in catalog() if s['id']==scenario),None)
         if not item:raise ValueError('Unknown scenario')
         if source:
@@ -56,10 +59,13 @@ class Service:
         self.store.experiment({'experiment_id':run.run_id,'scenario':scenario,'srs_hash':digest((candidate/'SRS.md').read_text()) if (candidate/'SRS.md').exists() else None,'agent_metadata':run.agent_metadata,'candidate_hash':run.candidate_snapshot,'baseline_commit':run.baseline_commit,'evidence_source':label,'ground_truth':item.get('ground_truth') if not source else None,'expected_module_applicability':ContextService(candidate,run.baseline_workspace,self.threats.snapshot()).applicability(),'package_hashes':[{k:n.get(k) for k in ('name','version','sha256','ecosystem')} for n in json.loads((candidate/'dependencies.lock.json').read_text()).get('packages',[])] if (candidate/'dependencies.lock.json').exists() else [],'recorded_trace':run.agent_metadata.get('recorded_trace')})
         return run
     def start(self,rid,auto_repair=False):
+        # Keep the API responsive while the run performs analysis in a background thread.
         thread=threading.Thread(target=self.analyze,args=(rid,auto_repair),daemon=True);thread.start();return thread
     def _module(self,module,context,run,bus,label='analysis'):
+        # Each analyzer gets routed inputs and emits a separately bound evidence record.
         started=time.perf_counter();out=self.root/'evidence'/run.run_id/(str(run.revision)+'-'+label+'-'+module)
         bus.emit('module.started',{'module':module,'candidate_snapshot':run.candidate_snapshot,'input_hash':context.input_hash(module)})
+        # Dispatch by module; failures become explicit uncertain statuses instead of disappearing.
         try:
             if module=='CAVR':status,details,uncertainty=cavr.analyze(context,self.store,out,bus.emit)
             elif module=='SATRA':status,details,uncertainty=satra.analyze(context,out,bus.emit)
@@ -69,14 +75,17 @@ class Service:
         details['knowledge']=explanation(context.knowledge,module)
         return Evidence(run_id=run.run_id,analyzer=module,threat_repo_version=context.knowledge['version'],threat_repo_digest=context.knowledge['digest'],threat_module_digest=context.knowledge['module_digests'][module],candidate_snapshot=run.candidate_snapshot,input_hash=context.input_hash(module),status=status,blocking=status in ('REJECTED','REJECT','REGRESSED'),residual_uncertainty=uncertainty,affected_files=[k for k in context.inputs(module) if not k.startswith('@')],evidence_refs=[str(out)],details=details,duration_ms=round((time.perf_counter()-started)*1000,2))
     def analyze(self,rid,auto_repair=False):
+        # Analyze one frozen candidate revision, then accept only evidence bound to that exact snapshot.
         with self.guard:lock=self.locks.setdefault(rid,threading.Lock())
         if not lock.acquire(blocking=False):return
         try:
             run=self.store.run(rid);bus=EvidenceBus(self.store,run)
+            # Retry a bounded number of times if the candidate or threat rules change mid-analysis.
             for attempt in range(3):
                 run.revision+=1;run.lifecycle='ANALYZING';run.final_decision='REVIEW';run.clean_commit=None;run.clean_workspace=None;run.error=None
                 run.reasons=['Candidate frozen; waiting for current evidence'];self.store.save_run(run)
                 bus.emit('final_gate.changed',{'decision':'REVIEW','reasons':run.reasons})
+                # Freeze before dispatch so parallel analyzers inspect the same candidate revision.
                 frozen,sha=self.workspaces.freeze(run);run.candidate_snapshot=sha;context=ContextService(frozen,run.baseline_workspace,self.threats.snapshot())
                 run.threat_repo_version=context.knowledge['version'];run.threat_repo_digest=context.knowledge['digest']
                 run.srs_digest=digest(context.srs);run.approved_plan_digest=digest(context.plan);run.policy_digest=digest(context.policy)
@@ -84,6 +93,7 @@ class Service:
                 delta=diff(run.candidate_workspace,run.baseline_commit)
                 bus.emit('workspace.snapshot',{'hash':sha,'revision':run.revision,'files':len(context.manifest),'baseline_commit':run.baseline_commit,'git_diff':delta[:40000]})
                 bus.emit('file.changed',{'paths':paths,'routing':run.changed_surfaces})
+                # Reuse evidence only when its integrity and module input hash still match this run.
                 invalid=invalidate_changed(self.store,run,context,bus.emit)
                 previous=self.store.evidence(rid);todo=[]
                 for m in run.applicable:
@@ -97,9 +107,11 @@ class Service:
                         todo.append(m)
                         if m in invalid:bus.emit('module.rerun',{'module':m,'reason':'Relevant inputs changed'})
                 self.store.save_run(run)
+                # Applicable modules inspect the same frozen context and may run concurrently.
                 with ThreadPoolExecutor(max_workers=3) as pool:
                     futures={pool.submit(self._module,m,context,run,bus):m for m in todo}
                     for f in as_completed(futures):bus.publish(f.result());self.store.save_run(run)
+                # A live edit after freezing invalidates these results; capture and analyze again.
                 if snapshot(run.candidate_workspace)!=sha:
                     bus.emit('workspace.concurrent_change',{'reason':'Live candidate changed during analysis; capture again'})
                     if attempt<2:continue

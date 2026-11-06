@@ -34,7 +34,7 @@ def project(tmp_path, files):
     for path, text in files.items():
         target = root / path
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(text)
+        target.write_text(text, newline="\n")
     return root
 
 
@@ -356,7 +356,7 @@ def test_project_sources_adapter_serves_every_file_and_checks_its_hash(tmp_path)
     sources = ProjectSources(context)
     assert sorted(sources.manifest) == ["app/app/pdf.py", "app/tools/x.py"]
     assert sources.read("app/app/pdf.py") == GUARDED.encode()
-    (root / "app" / "pdf.py").write_text(GUARDED + "# changed after it was hashed\n")
+    (root / "app" / "pdf.py").write_text(GUARDED + "# changed after it was hashed\n", newline="\n")
     with pytest.raises(ValueError):
         sources.read("app/app/pdf.py")
     with pytest.raises(KeyError):
@@ -368,7 +368,7 @@ def test_file_changed_after_the_context_was_read_refuses_the_proof(tmp_path):
     context = extract_project_context(root)
     nodes = [node(PYPDF_WHEEL, "pypdf", "6.19.0")]
     contract = infer_capability_contract(nodes[0]["metadata"], context, POLICY)
-    (root / "app" / "pdf.py").write_text(GUARDED + "\n\ndef quick(path):\n    return PdfReader(path)\n")
+    (root / "app" / "pdf.py").write_text(GUARDED + "\n\ndef quick(path):\n    return PdfReader(path)\n", newline="\n")
     result = judge_sinks(nodes, [pypdf_scan()], contract, context)
     assert result["proofs"][0]["accepted"] is False and outcome(result) == ("UNRESOLVED", "SINK_REACHABLE")
 

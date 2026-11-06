@@ -81,7 +81,12 @@ class DecisionEngine:
 
         # Gate 7: Repeatability
         rep_res = context_dict.get("repeat_execution", {})
-        g7_ok = rep_res.get("available") and rep_res.get("exit_code") == 0
+        g7_ok = (
+            rep_res.get("available")
+            and rep_res.get("exit_code") == 0
+            and rep_res.get("passed", 1) > 0
+            and rep_res.get("failed", 0) == 0
+        )
         results["gate7_repeatability"] = {
             "passed": bool(g7_ok),
             "detail": "Deterministic repeated test execution confirmed" if g7_ok else "Non-deterministic or failed repeat run"
@@ -90,6 +95,18 @@ class DecisionEngine:
         all_passed = all(r["passed"] for r in results.values())
         blocked = not results["gate1_allowlist_validity"]["passed"] or not results["gate2_trusted_manifest_integrity"]["passed"]
         weakened = oracle.get("diagnosis") == "ORACLE_WEAKENED"
+
+        # Explicitly verify candidate execution if provided: must have executed and passed tests
+        cand_res = context_dict.get("candidate_execution")
+        if cand_res is not None:
+            cand_ok = bool(
+                cand_res.get("available")
+                and cand_res.get("exit_code") == 0
+                and cand_res.get("passed", 0) > 0
+                and cand_res.get("failed", 0) == 0
+            )
+            if not cand_ok:
+                all_passed = False
 
         if weakened or blocked:
             final_verdict = "BLOCK"

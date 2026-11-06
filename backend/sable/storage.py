@@ -43,7 +43,8 @@ CREATE TABLE IF NOT EXISTS runs (
     created_at      TEXT NOT NULL,
     completed_at    TEXT,
     evidence_json   TEXT,
-    proof_json      TEXT
+    proof_json      TEXT,
+    evidence_chain_json TEXT
 );
 
 CREATE TABLE IF NOT EXISTS audit_log (
@@ -55,6 +56,9 @@ CREATE TABLE IF NOT EXISTS audit_log (
     created_at      TEXT NOT NULL
 );
 """)
+            run_columns = {row[1] for row in c.execute("PRAGMA table_info(runs)")}
+            if "evidence_chain_json" not in run_columns:
+                c.execute("ALTER TABLE runs ADD COLUMN evidence_chain_json TEXT")
         # Seed the default obligation
         self._seed_obligation()
 
@@ -115,13 +119,13 @@ VALUES (?, ?, ?, ?)
 """, (run_id, scenario_id, obligation_id, datetime.datetime.utcnow().isoformat()))
 
     def complete_run(self, run_id: str, verdict: str, decision_hash: str,
-                     evidence: dict, proof: dict):
+                     evidence: dict, proof: dict, evidence_chain: list[dict] | None = None):
         with self._conn() as c:
             c.execute("""
-UPDATE runs SET verdict=?, decision_hash=?, completed_at=?, evidence_json=?, proof_json=?
+UPDATE runs SET verdict=?, decision_hash=?, completed_at=?, evidence_json=?, proof_json=?, evidence_chain_json=?
 WHERE run_id=?
 """, (verdict, decision_hash, datetime.datetime.utcnow().isoformat(),
-      json.dumps(evidence), json.dumps(proof), run_id))
+      json.dumps(evidence), json.dumps(proof), json.dumps(evidence_chain or []), run_id))
 
     def get_run(self, run_id: str) -> dict | None:
         with self._conn() as c:
@@ -129,12 +133,14 @@ WHERE run_id=?
         if not row:
             return None
         cols = ["run_id", "scenario_id", "obligation_id", "verdict", "decision_hash",
-                "created_at", "completed_at", "evidence_json", "proof_json"]
+                "created_at", "completed_at", "evidence_json", "proof_json", "evidence_chain_json"]
         d = dict(zip(cols, row))
         if d["evidence_json"]:
             d["evidence"] = json.loads(d["evidence_json"])
         if d["proof_json"]:
             d["proof"] = json.loads(d["proof_json"])
+        if d["evidence_chain_json"]:
+            d["evidence_chain"] = json.loads(d["evidence_chain_json"])
         return d
 
     def get_runs(self) -> list[dict]:

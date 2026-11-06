@@ -219,12 +219,13 @@ def trusted_suite(worktree_dir, output_dir, target_families=None):
         if target_families is not None and stem not in target_families:
             # Safely pruned by AST route-slicing
             families[stem] = {
-                "verdict": "SATISFIED",
+                "verdict": "NOT_RUN",
+                "status": "PRUNED",
                 "reason": "PRUNED (No AST code intersection in candidate PR)",
                 "tests": [],
                 "passed": 0,
                 "failed": 0,
-                "sandboxed": True,
+                "sandboxed": False,
                 "pruned": True,
             }
             continue
@@ -232,19 +233,49 @@ def trusted_suite(worktree_dir, output_dir, target_families=None):
         rel = "trusted_tests/" + test_file.name
         families[stem] = run_contract_test(worktree_dir, rel, Path(output_dir) / stem, timeout=60)
 
-    passed = sum(f.get("passed", 0) for f in families.values())
-    failed = sum(f.get("failed", 0) for f in families.values())
-    errors = sum(1 for f in families.values() for t in f.get("tests", []) if t["status"] == "ERROR")
+    executed_families = [f for f in families.values() if not f.get("pruned")]
+    has_executed = len(executed_families) > 0
+    passed = sum(f.get("passed", 0) for f in executed_families)
+    failed = sum(f.get("failed", 0) for f in executed_families)
+    errors = sum(1 for f in executed_families for t in f.get("tests", []) if t["status"] == "ERROR")
     inconclusive = [n for n, f in families.items() if f["verdict"] == "INCONCLUSIVE"]
-    available = bool(families) and not inconclusive
+
+    if not has_executed:
+        available = False
+        exit_code = 1
+        reason = "No test families executed; unexecuted tests cannot provide verification"
+        backend = "none"
+    else:
+        all_executed_passed = (
+            all(f["verdict"] == "SATISFIED" for f in executed_families)
+            and failed == 0
+            and errors == 0
+            and passed > 0
+        )
+        available = bool(families) and not inconclusive
+        exit_code = 0 if (available and all_executed_passed) else 1
+        reason = "inconclusive families: %s" % ", ".join(inconclusive) if inconclusive else None
+        backend = "docker" if all(f.get("sandboxed") for f in executed_families) else "host"
+
     return {
         "available": available,
-        "exit_code": 0 if available and not failed else 1,
+        "exit_code": exit_code,
         "passed": passed,
         "failed": failed,
         "errors": errors,
         "skipped": sum(1 for f in families.values() if f.get("pruned")),
-        "families": {n: {"verdict": f["verdict"], "reason": f["reason"], "pruned": f.get("pruned", False)} for n, f in families.items()},
-        "reason": "inconclusive families: %s" % ", ".join(inconclusive) if inconclusive else None,
-        "backend": "docker" if all(f.get("sandboxed") for f in families.values()) else "host",
+        "families": {
+            n: {
+                "verdict": f["verdict"],
+                "status": f.get("status", f["verdict"]),
+                "reason": f["reason"],
+                "pruned": f.get("pruned", False),
+                "sandboxed": f.get("sandboxed", False),
+                "passed": f.get("passed", 0),
+                "failed": f.get("failed", 0),
+            }
+            for n, f in families.items()
+        },
+        "reason": reason,
+        "backend": backend,
     }

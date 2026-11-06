@@ -167,38 +167,34 @@ def _compute_metrics(results: list[dict], gt: dict[str, str]) -> dict:
                    if r["verdict"] == "REGRESSED" and gt.get(r["scenario_id"]) == "REGRESSED")
     false_reg = sum(1 for r in results
                     if r["verdict"] == "REGRESSED" and gt.get(r["scenario_id"]) == "PRESERVED")
-    correct_correspondence = sum(1 for r in results
-                                  if r.get("successor_correct") is True)
     unknown_pred = sum(1 for r in results if r["verdict"] == "UNKNOWN")
     unknown_correct = sum(1 for r in results
                            if r["verdict"] == "UNKNOWN" and gt.get(r["scenario_id"]) == "UNKNOWN")
 
-    # Evidence completeness: decisions with traceable baseline+successor+obligation+signals+policy
-    evidence_complete = sum(1 for r in results if r.get("evidence_complete", False))
-
     false_safe_rate = false_safe / n_regressed if n_regressed else 0.0
     regression_recall = recalled / n_regressed if n_regressed else 0.0
     false_reg_rate = false_reg / n_preserved if n_preserved else 0.0
-    correspondence_acc = correct_correspondence / total if total else 0.0
     unknown_precision = unknown_correct / unknown_pred if unknown_pred else 0.0
-    evidence_completeness = evidence_complete / total if total else 0.0
+    correct_count = sum(1 for r in results if r.get("correct") is True)
 
     return {
         "n": total,
         "n_preserved": n_preserved,
         "n_regressed": n_regressed,
         "n_unknown_gt": n_unknown_gt,
+        "verdict_accuracy": round(correct_count / total, 3),
+        "verdict_correct_count": correct_count,
         "false_safe_rate": round(false_safe_rate, 3),
         "false_safe_count": false_safe,
         "regression_recall": round(regression_recall, 3),
         "recall_count": recalled,
         "false_regression_rate": round(false_reg_rate, 3),
         "false_regression_count": false_reg,
-        "correspondence_accuracy": round(correspondence_acc, 3),
+        "correspondence_accuracy": None,
         "unknown_precision": round(unknown_precision, 3),
         "unknown_count": unknown_pred,
-        "evidence_completeness": round(evidence_completeness, 3),
-        "small_sample_note": "Warning: benchmark is synthetic and authored in-house. All rates have wide confidence intervals at n<=32."
+        "evidence_completeness": None,
+        "small_sample_note": f"Synthetic, authored-in-house evaluation set (n={total}); descriptive results do not establish generality.",
     }
 
 
@@ -213,7 +209,7 @@ def _compute_kill_tests(sable_metrics: dict, b4_metrics: dict, b0_metrics: dict,
     k1_recall_delta = b4_metrics.get("regression_recall", 0) - sable_metrics.get("regression_recall", 0)
     k1_threshold_fsr = th.get("K1_false_safe_rate_delta_max", 0.05)
     k1_threshold_recall = th.get("K1_recall_delta_min", 0.0)
-    k1_pass = k1_fsr_delta <= k1_threshold_fsr and k1_recall_delta <= 0.10
+    k1_pass = False
 
     # K2: Address evidence suffices — does B2 solve hard cases?
     hard_cases = [s_id for s_id, s in SCENARIOS.items() if s["is_hard_case"]]
@@ -239,7 +235,8 @@ def _compute_kill_tests(sable_metrics: dict, b4_metrics: dict, b0_metrics: dict,
     # K5: Security predicate is trivial — does B0 resolve everything?
     b0_fsr = b0_metrics.get("false_safe_rate", 1.0)
     k5_threshold = th.get("K5_b0_false_safe_rate_max", 0.15)
-    k5_pass = b0_fsr > k5_threshold  # B0 should NOT be near-perfect (otherwise SABLE adds nothing)
+    b0_regression_recall = b0_metrics.get("regression_recall", 0)
+    k5_pass = b0_fsr > k5_threshold or b0_regression_recall < 1.0
 
     # K6: Feasibility — runtime within window?
     k6_threshold = th.get("K6_runtime_seconds_max", 60)
@@ -255,7 +252,7 @@ def _compute_kill_tests(sable_metrics: dict, b4_metrics: dict, b0_metrics: dict,
             "consequence": consequence if not pass_ else "No contribution claim withdrawn."
         }
 
-    return {
+    results = {
         "K1": kresult("K1", k1_pass,
                        {"fsr_delta": round(k1_fsr_delta, 3), "recall_delta": round(k1_recall_delta, 3)},
                        f"fsr_delta ≤ {k1_threshold_fsr}",
@@ -281,6 +278,19 @@ def _compute_kill_tests(sable_metrics: dict, b4_metrics: dict, b0_metrics: dict,
                        f"runtime ≤ {k6_threshold}s",
                        "Runtime infeasible for practical use."),
     }
+    results["K1"]["status"] = "UNMEASURED"
+    results["K1"]["measured"]["comparable_evidence_quality"] = False
+    results["K1"]["measured"]["independent_b4"] = False
+    results["K1"]["consequence"] = (
+        "Cannot adjudicate equivalence: evidence quality is unmeasured and B4 reuses SABLE's core code."
+    )
+    results["K6"]["status"] = "UNMEASURED"
+    results["K6"]["consequence"] = (
+        "The measured wall time covers the entire batch and ablations, not per-case overhead beyond an independent B4."
+    )
+    results["K5"]["measured"]["b0_regression_recall"] = round(b0_regression_recall, 3)
+    results["K5"]["threshold"] = f"B0 false_safe_rate > {k5_threshold} OR regression_recall < 1.0"
+    return results
 
 
 ABLATION_FLAGS = {
@@ -353,8 +363,6 @@ def run_benchmark(emit: Callable | None = None) -> dict:
                 "verdict": result["verdict"],
                 "gt": gt_label,
                 "correct": result["verdict"] == gt_label,
-                "evidence_complete": True,  # all runs have full evidence chain
-                "successor_correct": result.get("details", {}).get("successor") is not None or sys_name == "SABLE",
             })
 
         # Run ablations
@@ -366,8 +374,6 @@ def run_benchmark(emit: Callable | None = None) -> dict:
                 "verdict": abl_result["verdict"],
                 "gt": gt_label,
                 "correct": abl_result["verdict"] == gt_label,
-                "evidence_complete": True,
-                "successor_correct": False,
             })
 
     runtime_s = time.time() - start
@@ -443,5 +449,6 @@ def run_benchmark(emit: Callable | None = None) -> dict:
         "b4_reduced_strength": b4_reduced,
         "b4_reduced_strength_note": "Reduced-strength baseline: Checkov/Trivy unavailable. Results use built-in approximations." if b4_reduced else None,
         "green_light_note": "Green numbers mean the problem is testable, not that a SABLE advantage has been observed.",
-        "small_sample_note": "All rates computed on n≤32 synthetic, authored scenarios. Wide confidence intervals apply.",
+        "evaluation_limits_note": "Scenario labels contain verdicts only, not independently reviewed intended successors. Correspondence accuracy and evidence completeness are unmeasured. B4 reuses SABLE correspondence and authorization functions and is not independent. K1 and K6 are unmeasured: evidence comparability and per-case overhead beyond an independent B4 are not recorded.",
+        "small_sample_note": f"Synthetic, authored-in-house evaluation set (n={total}); descriptive results do not establish generality.",
     }

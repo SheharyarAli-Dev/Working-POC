@@ -170,7 +170,12 @@ def test_symbolic_links_are_not_followed_and_make_the_context_unresolved(tmp_pat
     root = project(tmp_path, {"a.py": "import pypdf\n"})
     outside = tmp_path / "outside.py"
     outside.write_text("import secret_module\n")
-    os.symlink(outside, root / "link.py")
+    try:
+        os.symlink(outside, root / "link.py")
+    except OSError as exc:
+        if getattr(exc, "winerror", None) == 1314:
+            pytest.skip("Creating symlinks on Windows requires Developer Mode or administrative privilege")
+        raise
     context = extract_project_context(root)
     assert outcome(context) == ("UNRESOLVED", "SOURCE_NOT_READ")
     assert [i["module"] for i in context["imports"]] == ["pypdf"]
@@ -182,7 +187,12 @@ def test_symlinked_directory_is_not_followed(tmp_path):
     other = tmp_path / "other"
     other.mkdir()
     (other / "b.py").write_text("import secret_module\n")
-    os.symlink(other, root / "linked", target_is_directory=True)
+    try:
+        os.symlink(other, root / "linked", target_is_directory=True)
+    except OSError as exc:
+        if getattr(exc, "winerror", None) == 1314:
+            pytest.skip("Creating symlinks on Windows requires Developer Mode or administrative privilege")
+        raise
     context = extract_project_context(root)
     assert outcome(context) == ("UNRESOLVED", "SOURCE_NOT_READ")
     assert context["imports"] == [] and context["not_read"] == [{"file": "linked", "reason": "symbolic link"}]
@@ -191,8 +201,10 @@ def test_symlinked_directory_is_not_followed(tmp_path):
 def test_directory_that_cannot_be_listed_makes_the_context_unresolved(tmp_path):
     """Review BLOCKER 6: `os.walk` skips a directory it may not read without saying so."""
     root = project(tmp_path, {"a.py": "import pypdf\n", "locked/b.py": "import pypdf\npypdf.PdfReader(1)\n"})
-    if os.geteuid() == 0:
+    if getattr(os, "geteuid", None) and os.geteuid() == 0:
         pytest.skip("root can read every directory")
+    if os.name == "nt":
+        pytest.skip("Windows NTFS directory permissions are not governed by POSIX os.chmod mode bits")
     os.chmod(root / "locked", 0)
     try:
         context = extract_project_context(root)
@@ -207,8 +219,10 @@ def test_directory_that_cannot_be_listed_makes_the_context_unresolved(tmp_path):
 def test_directory_that_cannot_be_searched_is_reported_once_whatever_its_mode(tmp_path, mode):
     """CI defect (Python 3.12): the `pyvenv.cfg` check raised PermissionError out of the walk."""
     root = project(tmp_path, {"a.py": "import pypdf\n", "locked/b.py": "import pypdf\n", "locked/deep/c.py": "import pypdf\n"})
-    if os.geteuid() == 0:
+    if getattr(os, "geteuid", None) and os.geteuid() == 0:
         pytest.skip("root can read every directory")
+    if os.name == "nt":
+        pytest.skip("Windows NTFS directory permissions are not governed by POSIX os.chmod mode bits")
     os.chmod(root / "locked", mode)
     try:
         context = extract_project_context(root)
@@ -256,8 +270,10 @@ def test_symlink_check_that_fails_is_not_read(tmp_path, monkeypatch):
 
 def test_project_directory_that_may_not_be_examined_is_not_called_missing(tmp_path):
     root = project(tmp_path / "closed", {"a.py": "import pypdf\n"})
-    if os.geteuid() == 0:
+    if getattr(os, "geteuid", None) and os.geteuid() == 0:
         pytest.skip("root can read every directory")
+    if os.name == "nt":
+        pytest.skip("Windows NTFS directory permissions are not governed by POSIX os.chmod mode bits")
     os.chmod(tmp_path / "closed", 0)
     try:
         context = extract_project_context(root)

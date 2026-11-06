@@ -5,7 +5,7 @@ import {
   ArrowRight, ChevronDown, ChevronRight, Copy, Check, Upload, FileCheck
 } from 'lucide-react';
 
-import { SableRunState, INITIAL_STATE, STEP_NAMES, STEP_PHASES, STEP_SUBSTEPS, VERDICT_COLORS, VERDICT_BG } from './sable/types';
+import { SableRunState, INITIAL_STATE, STEP_NAMES, STEP_PHASES, STEP_SUBSTEPS, VERDICT_COLORS, VERDICT_BG, TerraformFileEntry, terraformFileMap } from './sable/types';
 import { OverviewTab } from './sable/tabs/Overview';
 import { SpecificationTab } from './sable/tabs/Specification';
 import { TerraformDiffTab } from './sable/tabs/TerraformDiff';
@@ -64,8 +64,11 @@ export const SableModule: React.FC = () => {
   const [showEnvDialog, setShowEnvDialog] = useState(false);
   const [showActionDialog, setShowActionDialog] = useState(false);
   const [showUploadDialog, setShowUploadDialog] = useState(false);
-  const [uploadBaselineText, setUploadBaselineText] = useState('');
-  const [uploadCandidateText, setUploadCandidateText] = useState('');
+  const [uploadBaselineFiles, setUploadBaselineFiles] = useState<TerraformFileEntry[]>([{ path: 'main.tf', content: '' }]);
+  const [uploadCandidateFiles, setUploadCandidateFiles] = useState<TerraformFileEntry[]>([{ path: 'main.tf', content: '' }]);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [requestError, setRequestError] = useState<string | null>(null);
+  const [scenarioLoadError, setScenarioLoadError] = useState<string | null>(null);
   const [baselineCopied, setBaselineCopied] = useState(false);
   const [baselineDialogData, setBaselineDialogData] = useState<any>(null);
   const [envDialogData, setEnvDialogData] = useState<any>(null);
@@ -77,7 +80,15 @@ export const SableModule: React.FC = () => {
 
   // Load scenarios
   useEffect(() => {
-    fetch('/api/sable/scenarios').then(r => r.json()).then(setScenarios).catch(() => {});
+    let active = true;
+    fetch('/api/sable/scenarios')
+      .then(async response => {
+        if (!response.ok) throw new Error(`Scenario service returned HTTP ${response.status}`);
+        return response.json();
+      })
+      .then(data => { if (active) setScenarios(data); })
+      .catch(error => { if (active) setScenarioLoadError(error instanceof Error ? error.message : 'Could not load SABLE scenarios.'); });
+    return () => { active = false; };
   }, []);
 
   // Load dialog data
@@ -102,6 +113,7 @@ export const SableModule: React.FC = () => {
 
   const runScenario = async () => {
     if (isRunning) return;
+    setRequestError(null);
     setIsRunning(true);
     setRunState({ ...INITIAL_STATE, scenarioId: selectedScenario });
     setActiveEvidenceTab('overview');
@@ -122,8 +134,8 @@ export const SableModule: React.FC = () => {
       });
 
       if (!res.ok) {
-        setIsRunning(false);
-        return;
+        const body = await res.json().catch(() => null);
+        throw new Error(body?.detail || `SABLE could not start (HTTP ${res.status}).`);
       }
 
       const { run_id, stream_url } = await res.json();
@@ -145,10 +157,12 @@ export const SableModule: React.FC = () => {
       es.onerror = () => {
         es.close();
         setIsRunning(false);
+        setRequestError(`The SABLE event stream ended before completion for run ${run_id}. The decision has not been inferred; inspect the run or retry.`);
       };
 
-    } catch {
+    } catch (error) {
       setIsRunning(false);
+      setRequestError(error instanceof Error ? error.message : 'SABLE could not start the analysis.');
     }
   };
 
@@ -196,6 +210,7 @@ export const SableModule: React.FC = () => {
           next.candidateSha = payload.candidate_sha256;
           next.diffLines = payload.diff_lines ?? [];
           next.diff = payload.diff ?? '';
+          next.candidateFiles = payload.candidate_files ?? [];
           next.baselineResources = payload.baseline_files ?? [];
           unlockTab('diff');
           break;
@@ -231,6 +246,7 @@ export const SableModule: React.FC = () => {
           next.verdict = 'UNKNOWN';
           next.correspondenceReason = payload.reason;
           next.conflicts = payload.hypotheses ? [] : prev.conflicts;
+          unlockTab('projection');
           break;
 
         case 'projection.complete':
@@ -270,6 +286,7 @@ export const SableModule: React.FC = () => {
           next.baselines = payload.baselines ?? {};
           setIsRunning(false);
           eventSourceRef.current?.close();
+          unlockTab('decision');
           unlockTab('evidence');
           // Fetch proof
           fetch(`/api/sable/proof/${runId}`).then(r => r.json()).then(d => {
@@ -293,6 +310,7 @@ export const SableModule: React.FC = () => {
 
   const handleRerunCustom = async (customCandidateTf: Record<string, string>) => {
     if (isRunning) return;
+    setRequestError(null);
     setIsRunning(true);
     setRunState({ ...INITIAL_STATE, scenarioId: selectedScenario });
     setActiveEvidenceTab('diff');
@@ -317,8 +335,8 @@ export const SableModule: React.FC = () => {
       });
 
       if (!res.ok) {
-        setIsRunning(false);
-        return;
+        const body = await res.json().catch(() => null);
+        throw new Error(body?.detail || `SABLE could not start the candidate analysis (HTTP ${res.status}).`);
       }
 
       const { run_id, stream_url } = await res.json();
@@ -337,16 +355,25 @@ export const SableModule: React.FC = () => {
       es.onerror = () => {
         es.close();
         setIsRunning(false);
+        setRequestError(`The SABLE event stream ended before completion for run ${run_id}. The decision has not been inferred; inspect the run or retry.`);
       };
-    } catch {
+    } catch (error) {
       setIsRunning(false);
+      setRequestError(error instanceof Error ? error.message : 'SABLE could not start the candidate analysis.');
     }
   };
 
   const handleUploadRun = async () => {
-    if (isRunning || !uploadBaselineText || !uploadCandidateText) return;
+    if (isRunning) return;
+    const baseline = terraformFileMap(uploadBaselineFiles);
+    const candidate = terraformFileMap(uploadCandidateFiles);
+    if (baseline.error || candidate.error || !baseline.files || !candidate.files) {
+      setUploadError(baseline.error ?? candidate.error ?? 'Provide complete baseline and candidate Terraform file maps.');
+      return;
+    }
+    setUploadError(null);
+    setRequestError(null);
     setIsRunning(true);
-    setShowUploadDialog(false);
     setRunState({ ...INITIAL_STATE, scenarioId: 'custom_upload' });
     setActiveEvidenceTab('overview');
     setUnlockedTabs(new Set(['overview', 'specification', 'benchmark', 'ablations']));
@@ -365,17 +392,18 @@ export const SableModule: React.FC = () => {
         body: JSON.stringify({
           scenario_id: 'custom_upload',
           obligation_id: 'S3-APPROLE-CUSTOMERDATA',
-          baseline_files: { "main.tf": uploadBaselineText },
-          candidate_files: { "main.tf": uploadCandidateText }
+          baseline_files: baseline.files,
+          candidate_files: candidate.files
         })
       });
 
       if (!res.ok) {
-        setIsRunning(false);
-        return;
+        const body = await res.json().catch(() => null);
+        throw new Error(body?.detail || `SABLE rejected the custom bundle (HTTP ${res.status}).`);
       }
 
       const { run_id, stream_url } = await res.json();
+      setShowUploadDialog(false);
       setRunState(prev => ({ ...prev, runId: run_id }));
 
       const es = new EventSource(stream_url);
@@ -391,9 +419,11 @@ export const SableModule: React.FC = () => {
       es.onerror = () => {
         es.close();
         setIsRunning(false);
+        setRequestError(`The SABLE event stream ended before completion for run ${run_id}. The decision has not been inferred; inspect the run or retry.`);
       };
-    } catch {
+    } catch (error) {
       setIsRunning(false);
+      setUploadError(error instanceof Error ? error.message : 'SABLE could not start the custom bundle analysis.');
     }
   };
 
@@ -414,6 +444,24 @@ export const SableModule: React.FC = () => {
       setIsVerifyingDeterminism(false);
     }
   };
+
+  const renderBundleFiles = (label: string, files: TerraformFileEntry[], setFiles: React.Dispatch<React.SetStateAction<TerraformFileEntry[]>>) => (
+    <section style={{ marginBottom: '1rem' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+        <strong style={{ fontSize: '0.85rem' }}>{label}</strong>
+        <button type="button" className="sable-btn sable-btn-secondary" onClick={() => setFiles(current => [...current, { path: '', content: '' }])}>Add file</button>
+      </div>
+      {files.map((file, index) => (
+        <div key={`${index}-${file.path}`} style={{ border: '1px solid #e2e8f0', borderRadius: 6, padding: 8, marginBottom: 8 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+            <input aria-label={`${label} relative path ${index + 1}`} placeholder="main.tf or modules/storage/main.tf" value={file.path} onChange={e => setFiles(current => current.map((item, i) => i === index ? { ...item, path: e.target.value } : item))} style={{ flex: 1 }} />
+            {files.length > 1 && <button type="button" className="sable-btn sable-btn-secondary" onClick={() => setFiles(current => current.filter((_, i) => i !== index))}>Remove</button>}
+          </div>
+          <textarea aria-label={`${label} source ${index + 1}`} placeholder="Paste the complete contents of this .tf file" value={file.content} onChange={e => setFiles(current => current.map((item, i) => i === index ? { ...item, content: e.target.value } : item))} style={{ width: '100%', height: 120, fontFamily: 'monospace', fontSize: '0.8rem', padding: 8, border: '1px solid #cbd5e1', borderRadius: 4 }} />
+        </div>
+      ))}
+    </section>
+  );
 
   const lifecycleStage = runState.stepIndex >= 0 ? STEP_TO_LIFECYCLE[runState.stepIndex] ?? 0 : -1;
 
@@ -596,7 +644,7 @@ export const SableModule: React.FC = () => {
             <button
               className="sable-btn sable-btn-secondary"
               style={{ padding: '8px 12px', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '6px' }}
-              onClick={() => setShowUploadDialog(true)}
+              onClick={() => { setUploadError(null); setShowUploadDialog(true); }}
               title="Upload custom baseline and candidate Terraform bundles"
             >
               <Upload size={14}/> Upload bundle
@@ -604,7 +652,7 @@ export const SableModule: React.FC = () => {
             <button
               className="sable-run-btn"
               onClick={runScenario}
-              disabled={isRunning}
+              disabled={isRunning || scenarios.length === 0}
             >
               {isRunning
                 ? <><RefreshCw size={14} className="spin"/> Running…</>
@@ -612,6 +660,9 @@ export const SableModule: React.FC = () => {
             </button>
           </div>
         </div>
+
+        {scenarioLoadError && <div role="alert" className="sable-diff-warn">Could not load SABLE scenarios: {scenarioLoadError}. You can still submit a complete custom baseline and candidate bundle.</div>}
+        {requestError && <div role="alert" className="sable-diff-warn">{requestError}</div>}
 
         {/* Target Scenario / Banner Row */}
         <div className="interception-prompt-card" style={{ marginBottom: '24px' }}>
@@ -1079,46 +1130,25 @@ export const SableModule: React.FC = () => {
         </div>
       )}
 
-      {/* Upload Bundle Dialog */}
+      {/* Custom Terraform bundle input */}
       {showUploadDialog && (
         <div className="cavr-dialog-overlay" onClick={() => setShowUploadDialog(false)}>
-          <div className="cavr-dialog" onClick={e => e.stopPropagation()} style={{ maxWidth: 680 }}>
+          <div className="cavr-dialog" onClick={e => e.stopPropagation()} style={{ maxWidth: 900 }}>
             <div className="cavr-dialog-header">
               <div>
-                <div className="cavr-dialog-title">Upload Custom Terraform Bundles</div>
-                <div className="cavr-dialog-subtitle">Test SABLE least-privilege boundary preservation on your own Terraform code</div>
+                <div className="cavr-dialog-title">Provide Custom Terraform Bundles</div>
+                <div className="cavr-dialog-subtitle">Enter every .tf file, preserving relative paths for local modules. The baseline is checked against SABLE's registered S3/IAM obligation.</div>
               </div>
-              <button className="cavr-dialog-close" onClick={() => setShowUploadDialog(false)}>✕</button>
+              <button className="cavr-dialog-close" aria-label="Close bundle input" onClick={() => setShowUploadDialog(false)}>×</button>
             </div>
             <div className="cavr-dialog-body">
-              <div style={{ marginBottom: '1rem' }}>
-                <strong style={{ fontSize: '0.85rem' }}>Baseline Terraform (Trusted)</strong>
-                <textarea
-                  placeholder='resource "aws_s3_bucket" "customer_data" { ... }'
-                  value={uploadBaselineText}
-                  onChange={e => setUploadBaselineText(e.target.value)}
-                  style={{ width: '100%', height: 120, fontFamily: 'monospace', fontSize: '0.8rem', padding: 8, marginTop: 4, border: '1px solid #cbd5e1', borderRadius: 4 }}
-                />
-              </div>
-              <div style={{ marginBottom: '1.25rem' }}>
-                <strong style={{ fontSize: '0.85rem' }}>Candidate Terraform (Refactored)</strong>
-                <textarea
-                  placeholder='module "storage" { source = "./modules/s3" ... }'
-                  value={uploadCandidateText}
-                  onChange={e => setUploadCandidateText(e.target.value)}
-                  style={{ width: '100%', height: 120, fontFamily: 'monospace', fontSize: '0.8rem', padding: 8, marginTop: 4, border: '1px solid #cbd5e1', borderRadius: 4 }}
-                />
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
-                <button className="sable-btn sable-btn-secondary" onClick={() => setShowUploadDialog(false)}>
-                  Cancel
-                </button>
-                <button
-                  className="sable-btn sable-btn-primary"
-                  onClick={handleUploadRun}
-                  disabled={!uploadBaselineText || !uploadCandidateText}
-                >
-                  <Play size={13}/> Run Analysis on Custom Bundle
+              {renderBundleFiles('Baseline Terraform (Trusted)', uploadBaselineFiles, setUploadBaselineFiles)}
+              {renderBundleFiles('Candidate Terraform (Refactored)', uploadCandidateFiles, setUploadCandidateFiles)}
+              {uploadError && <div role="alert" className="sable-diff-warn" style={{ marginBottom: 12 }}>{uploadError}</div>}
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+                <button className="sable-btn sable-btn-secondary" onClick={() => setShowUploadDialog(false)}>Cancel</button>
+                <button className="sable-btn sable-btn-primary" onClick={handleUploadRun} disabled={isRunning}>
+                  {isRunning ? <><RefreshCw size={13} className="spin"/> Analyzing?</> : <><Play size={13}/> Run Analysis on Custom Bundle</>}
                 </button>
               </div>
             </div>

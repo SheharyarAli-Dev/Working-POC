@@ -34,7 +34,9 @@ OLLAMA_SYSTEM = (
 def _suite_label(res):
     if not res.get("available"):
         return "UNAVAILABLE (%s)" % res.get("reason", "no result")
-    verdict = "PASS" if res.get("exit_code") == 0 else "FAIL"
+    if res.get("passed", 0) == 0 and res.get("failed", 0) == 0:
+        return "NOT_RUN (0 executed, %d pruned)" % res.get("skipped", 0)
+    verdict = "PASS" if (res.get("exit_code") == 0 and res.get("passed", 0) > 0) else "FAIL"
     return "%s (%d passed, %d failed, %d errors)" % (verdict, res.get("passed", 0), res.get("failed", 0), res.get("errors", 0))
 
 
@@ -224,6 +226,7 @@ async def run_live_pipeline(run_id, commit_sha, publish, store_evidence, store_p
             "ast_localized": bool(regions), "regions": regions,
             "contract": {"rule_id": rule_id} if rule_id else None,
             "baseline_execution": cand_res if handle["root_commit"] else base_res,
+            "candidate_execution": cand_res,
             "oracle": oracle, "repeat_execution": repeat_res})
         decision = VERDICT_TO_UI[evaluation["final_verdict"]]
         reason = oracle["reason"] if decision != "ACCEPTED" else "All 7 gates passed on executed evidence"

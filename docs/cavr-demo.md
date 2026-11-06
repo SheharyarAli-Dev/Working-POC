@@ -31,23 +31,27 @@ Use two terminals, both in the repository root.
 ### Step 1 (first, on every machine): build the dashboard
 
 ```bash
-cd /home/dell/Working-POC
+cd "$(git rev-parse --show-toplevel)" # run from anywhere inside the repository clone
 npm --prefix frontend run build
 ```
 
 `frontend/dist` is a local build and is not in git. Without this step the app serves an old
 bundle (or none), and the page does not match the API: no six chips, no timeline from the proof.
-The command ends with `✓ built in ...`. It also rewrites `frontend/tsconfig.tsbuildinfo`, which is
-tracked: run `git restore frontend/tsconfig.tsbuildinfo` if you do not want it in `git status`.
+The command ends with `✓ built in ...`. It may rewrite the tracked `frontend/tsconfig.tsbuildinfo`.
+Inspect that file's diff afterward and preserve any pre-existing edits; do not restore it blindly.
 
 ### Step 2, terminal A: demo data directory and helpers
 
 ```bash
-cd /home/dell/Working-POC
+cd "$(git rev-parse --show-toplevel)" # run from anywhere inside the repository clone
 
 # A separate data directory for the demo: its own verdict cache, verdict log and quarantine.
-export ASENT_DATA=$PWD/runtime-demo
-rm -rf runtime-demo            # start empty, so case 1 is a cache miss
+if [ -e runtime-demo ]; then
+  echo 'runtime-demo already exists; preserve it and choose a new empty demo directory.'
+  exit 1
+fi
+mkdir runtime-demo
+export ASENT_DATA="$PWD/runtime-demo"
 
 # Run one chip by its id, and print what the page shows for the run.
 run_scenario() {
@@ -88,8 +92,8 @@ cavr() {
 ### Step 3, terminal B: start the app
 
 ```bash
-cd /home/dell/Working-POC
-ASENT_DATA=$PWD/runtime-demo .venv/bin/python -m uvicorn backend.main:app --host 127.0.0.1 --port 8000
+cd "$(git rev-parse --show-toplevel)" # run from anywhere inside the repository clone
+ASENT_DATA="$PWD/runtime-demo" .venv/bin/python -m uvicorn backend.main:app --host 127.0.0.1 --port 8000
 ```
 
 Leave it running. `ASENT_DATA` must be the same directory as in terminal A.
@@ -643,10 +647,8 @@ the expected exit codes.
 
 ## After the demo
 
-```bash
-# Terminal B: Ctrl+C
-rm -rf runtime-demo                           # the demo's cache, log and quarantined wheels
-git restore frontend/tsconfig.tsbuildinfo     # rewritten by the build
-```
+Stop terminal B with Ctrl+C. Keep `runtime-demo` for inspection, or remove it only after verifying
+that exact path contains only this demo's data. Do not remove a general project directory or
+restore `frontend/tsconfig.tsbuildinfo` over edits you did not create.
 
 Nothing was installed by any command in this script.

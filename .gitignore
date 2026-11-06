@@ -16,3 +16,17 @@ ASENT_ANTIGRAVITY_LIVE_HANDOFF_ADDENDUM.md
 .satra_workspace/
 artifacts/satra/
 .venv-satra/
+
+# Session scratch directories and generated binary artifacts
+.dormant-focused-*/
+.full-suite-hostgit-tmp-*/
+.satra-live-test-*/
+.satra-tmp/
+artifacts/*.whl
+scenarios/replay/*/baseline-recorded/
+scenarios/replay/*/events-recorded.jsonl
+NEXT_CODEX_HANDOFF_*.md
+docs/implementation-verification-*.md
+
+# Advisory cache files (runtime-generated)
+advisories/*.json

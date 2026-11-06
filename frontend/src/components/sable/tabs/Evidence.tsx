@@ -9,12 +9,24 @@ export const EvidenceTab: React.FC<Props> = ({ runState, explainSimply }) => {
   const [chainStatus, setChainStatus] = React.useState<any>(null);
   const [rerunStatus, setRerunStatus] = React.useState<string | null>(null);
   const [copied, setCopied] = React.useState(false);
+  const [chainError, setChainError] = React.useState<string | null>(null);
+  const [verifyingChain, setVerifyingChain] = React.useState(false);
 
   const verifyChain = async () => {
     if (!runId) return;
-    const r = await fetch(`/api/sable/evidence/${runId}/verify`);
-    const d = await r.json();
-    setChainStatus(d);
+    setVerifyingChain(true);
+    setChainError(null);
+    try {
+      const r = await fetch(`/api/sable/evidence/${runId}/verify`);
+      const d = await r.json();
+      if (!r.ok) throw new Error(d?.detail ?? `Evidence verification failed (HTTP ${r.status}).`);
+      setChainStatus(d);
+    } catch (error) {
+      setChainStatus(null);
+      setChainError(error instanceof Error ? error.message : 'Evidence verification failed.');
+    } finally {
+      setVerifyingChain(false);
+    }
   };
 
   const downloadJson = () => {
@@ -69,8 +81,8 @@ export const EvidenceTab: React.FC<Props> = ({ runState, explainSimply }) => {
       <div className="sable-evidence-chain">
         <div className="sable-card-label">EVIDENCE HASH CHAIN</div>
         <div className="sable-chain-actions">
-          <button className="sable-btn sable-btn-secondary" onClick={verifyChain}>
-            <RefreshCw size={12}/> Verify chain
+          <button className="sable-btn sable-btn-secondary" onClick={verifyChain} disabled={verifyingChain}>
+            <RefreshCw size={12}/> {verifyingChain ? 'Verifying…' : 'Verify chain'}
           </button>
           {proofData && (
             <span className="sable-chain-info">
@@ -85,6 +97,8 @@ export const EvidenceTab: React.FC<Props> = ({ runState, explainSimply }) => {
               : <><XCircle size={14}/> Chain broken at seq {chainStatus.broken_link_seq}: {chainStatus.error}</>}
           </div>
         )}
+        {chainError && <div role="alert" className="sable-diff-warn">{chainError}</div>}
+        <p className="sable-small-note">The chain checks record ordering and SHA-256 consistency. It does not prove deployed AWS state or prevent an operator with database access from rebuilding the ledger.</p>
       </div>
 
       {/* Evidence record */}

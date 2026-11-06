@@ -1,4 +1,5 @@
 """Execute pytest in a disposable copy. Arbitrary code requires a container."""
+import hashlib
 import json
 import os
 import shutil
@@ -14,9 +15,9 @@ from backend.integrations.tooling import availability
 
 
 def _lf_digest(data: bytes) -> str:
-    """Hash with CRLF normalized to LF — matches git text-mode checkout on any OS."""
-    import hashlib
+    """Hash pinned Python source using the manifest's LF-normalized contract."""
     return hashlib.sha256(data.replace(b'\r\n', b'\n')).hexdigest()
+
 
 def permitted_builtin(root):
     index=ROOT/'scenarios/laboratory_hashes.json'
@@ -25,9 +26,15 @@ def permitted_builtin(root):
     if any(f.endswith(('.so','.pyd','.dll','.dylib','.pyw','.pth','.zip','.egg')) for f in names):return False
     for name in ('pytest.ini','fixtures/invoice.pdf'):
         reference=ROOT/'demo_project/InvoiceHub'/name;candidate=Path(root)/name
-        if not candidate.is_file() or _lf_digest(candidate.read_bytes())!=_lf_digest(reference.read_bytes()):return False
+        if not candidate.is_file() or digest(candidate.read_bytes())!=digest(reference.read_bytes()):return False
     return all(_lf_digest((Path(root)/f).read_bytes()) in allowed for f in names if f.endswith('.py'))
 
+
+def container_user_args(engine):
+    # Preserve host ownership for bind-mounted Docker workspaces without changing sandbox controls.
+    if engine == 'docker' and os.name == 'posix':
+        return ['--user', f'{os.getuid()}:{os.getgid()}']
+    return []
 
 def run_pytest(root,output,selected='all',trusted=False):
     start=time.perf_counter();output=Path(output);output.mkdir(parents=True,exist_ok=True)
@@ -44,11 +51,15 @@ def run_pytest(root,output,selected='all',trusted=False):
         args=['-q','-o','addopts=','-c',str(work/'pytest.ini'),'--junitxml='+str(work/'results.xml'),*targets]
         if engine:
             args=['-q','-o','addopts=','-c','/work/pytest.ini','--junitxml=/work/results.xml',*targets]
-            user_flag=['-u',f"{os.getuid()}:{os.getgid()}"] if hasattr(os,'getuid') else []
-            cmd=[engine,'run','--rm',*user_flag,'--network','none','--read-only','--cap-drop','ALL','--security-opt','no-new-privileges','--memory','512m','--cpus','1','--pids-limit','64','--tmpfs','/tmp:rw,nosuid,size=64m','-v',str(work)+':/work:rw','-w','/work','-e','PYTEST_DISABLE_PLUGIN_AUTOLOAD=1','asent-sandbox:local','python','-m','pytest',*args]
+            cmd=[engine,'run','--rm',*container_user_args(engine),'--network','none','--read-only','--cap-drop','ALL','--security-opt','no-new-privileges','--memory','512m','--cpus','1','--pids-limit','64','--tmpfs','/tmp:rw,nosuid,size=64m','-v',str(work)+':/work:rw','-w','/work','-e','PYTEST_DISABLE_PLUGIN_AUTOLOAD=1','asent-sandbox:local','python','-m','pytest',*args]
         else:
             cmd=[sys.executable,'-I',str(ROOT/'backend/satra/runner_entry.py'),str(work),*args]
         env={'PATH':os.environ.get('PATH','/usr/bin:/bin'),'HOME':str(work),'LANG':'C.UTF-8','PYTEST_DISABLE_PLUGIN_AUTOLOAD':'1','PYTHONDONTWRITEBYTECODE':'1'}
+        if os.name == 'nt':
+            # Windows Python needs SystemRoot to initialize the Winsock provider used by TestClient.
+            system_root = os.environ.get('SYSTEMROOT') or os.environ.get('SystemRoot')
+            if system_root:
+                env['SYSTEMROOT'] = system_root
         try:
             result=subprocess.run(cmd,cwd=work,env=env,text=True,capture_output=True,timeout=40)
             (output/'stdout.log').write_text(result.stdout);(output/'stderr.log').write_text(result.stderr)

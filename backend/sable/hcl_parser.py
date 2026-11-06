@@ -1,4 +1,4 @@
-"""Bounded local-module HCL normalization. Unsupported expressions stay unknown."""
+"""Parses supported Terraform resources and local modules into a graph; unsupported forms stay unknown."""
 import json
 import re
 from pathlib import Path
@@ -6,18 +6,22 @@ import hcl2
 from hcl2.utils import SerializationOptions
 
 def load_hcl(text):
+    # Normalize HCL strings and blocks into a predictable Python structure for static analysis.
     return hcl2.loads(text,serialization_options=SerializationOptions(strip_string_quotes=True,explicit_blocks=False))
 import networkx as nx
 
 REF=re.compile(r'(?:module\.\w+\.)*(?:aws_[\w]+\.[\w]+)(?:\.[\w]+)?')
 
 def unwrap(v):
+    # Remove the parser's interpolation wrapper when it encloses a simple expression.
     if isinstance(v,str) and v.startswith('${') and v.endswith('}'):return v[2:-1]
     return v
 
 def parse(root):
+    # Build a bounded static graph from .tf files; unsupported constructs are recorded as errors.
     root=Path(root).resolve();resources={};moves=[];outputs={};errors=[];visited=set()
     def visit(folder,prefix='',depth=0):
+        # Limit recursion and reject repeated folders so module cycles cannot expand indefinitely.
         if depth>5 or folder in visited:errors.append('Recursive/deep module unsupported');return
         visited.add(folder)
         for f in sorted(folder.glob('*.tf')):
@@ -33,6 +37,7 @@ def parse(root):
                 for name,attrs in block.items():outputs[prefix+name]=unwrap(attrs.get('value'))
             for block in data.get('module',[]):
                 for name,attrs in block.items():
+                    # This slice expands only fixed local modules; dynamic instances need a Terraform plan.
                     src=attrs.get('source','')
                     if not isinstance(src,str) or not src.startswith('./'):errors.append('Only local modules supported: '+name);continue
                     dest=(folder/src).resolve()
@@ -42,6 +47,7 @@ def parse(root):
     visit(root)
     # Resolve module exports to qualified resource references before graph/policy analysis.
     def resolve(value,scope='',seen=None):
+        # Resolve module outputs recursively while tracking visited outputs to avoid cycles.
         seen=seen or set()
         if not isinstance(value,str):return value
         def substitute(match):
@@ -62,6 +68,7 @@ def parse(root):
         return resolve(value,scope)
     for node in resources.values():node['attributes']=walk(node['attributes'],node['module'])
     outputs={k:resolve(v) for k,v in outputs.items()}
+    # Edges point from a resource to resources referenced by its attributes.
     graph=nx.DiGraph()
     for addr,node in resources.items():graph.add_node(addr,type=node['type'])
     for addr,node in resources.items():

@@ -1,3 +1,4 @@
+"""Builds the candidate context, module inputs, and hashes used by the shared workflow."""
 import ast
 import json
 from pathlib import Path
@@ -8,6 +9,7 @@ from backend.threat_repo.versioning import MODULE_CATEGORIES,module_digest
 
 class ContextService:
     def __init__(self,path,baseline,knowledge=None):
+        # Cache a manifest and load the documents and rule snapshot used throughout one analysis.
         self.path=Path(path);self.baseline=Path(baseline)
         self.manifest=manifest(path)
         self.srs=self.read('SRS.md')
@@ -16,8 +18,10 @@ class ContextService:
         records=seeds() if knowledge is None else knowledge['records']
         self.knowledge=knowledge or {'version':'BUNDLED-SEED','digest':digest(records),'records':records,'module_digests':{m:module_digest(records,m) for m in MODULE_CATEGORIES}}
     def read(self,p):
+        # Missing optional project documents are represented as empty content.
         f=self.path/p;return f.read_text() if f.is_file() else ''
     def inputs(self,module):
+        # Bind evidence to relevant candidate files plus that module's baseline and rule versions.
         selected={k:v for k,v in self.manifest.items() if module in route([k])}
         # Baseline is an authority input for differential and lineage analyses.
         base=manifest(self.baseline)
@@ -26,12 +30,14 @@ class ContextService:
         return selected
     def input_hash(self,module):return digest(self.inputs(module))
     def applicability(self):
+        # Run only analyzers whose supported input surfaces exist in this candidate.
         out=[]
         if any(k in self.manifest for k in ['dependencies.lock.json','requirements.txt','package.json','pyproject.toml']):out.append('CAVR')
         if any(k.endswith('.py') and not k.startswith('tests/') for k in self.manifest):out.append('SATRA')
         if any(k.endswith('.tf') for k in self.manifest):out.append('SABLE')
         return out
     def dependency_context(self):
+        # Collect bounded AST-level imports and call sites for CAVR dependency attribution.
         imports=[];calls=[];errors=[];attributions=[]
         lock=json.loads(self.read('dependencies.lock.json') or '{"packages":[]}')
         package_names={p['name'].lower().replace('_','-'):p for p in lock.get('packages',[])}
