@@ -14,14 +14,22 @@ closed (REVIEW) whenever config or evidence is missing, and runs in Docker and i
 
 ## Decisions taken (from Q&A, 2026-11-07)
 
-1. **CAVR engine in gate mode:** use the M1 `pipeline.verify_request` on head's pinned requirements.
-   The demo fixtures keep the legacy lock analyzer through `cavr.mode: "lockfile"`. Step 14 of the
-   CAVR plan (delegation, options A–D) stays Maryam's open decision and is not forced by this plan.
+1. **CAVR engine in gate mode (revised 2026-11-07):** every gate run on a real repository uses the M1
+   `pipeline.verify_request`: live PyPI artifact SHA-256 vs registry digest, dependency tree from
+   Requires-Dist, live OSV, capability contract from the project's call sites, 8-field verdict cache.
+   Mapping to the gate: VERIFIED → pass, REJECTED or BLOCK → block, UNRESOLVED (or anything else) → review.
+   The old lockfile analyzer (`cavr/analyzer.py`) stays only for the built-in demo scenarios, chosen by
+   the run's mode (`scenario` runs), never by `.asent/` config, so a real repository cannot select it.
+   Existing tests keep using it unchanged. Step 14 of the CAVR plan (delegation, options A–D) stays
+   Maryam's open decision and is not forced by this plan.
 2. **CI runtime:** run on the runner itself. The workflow checks out ASENT at a pinned SHA, installs
    `requirements.lock.txt`, builds `asent-sandbox:local` and runs the gate. The Docker image also ships
    the CLI, for local use or a CI that has no container engine (sandboxed parts then return REVIEW).
-3. **Disabled module whose files exist:** allowed only with a non-empty `reason`. The decision covers
-   the enabled modules, and the report says "<MODULE> not assessed: <reason>".
+3. **Disabled module whose files exist (revised 2026-11-07):** allowed only with a non-empty `reason`.
+   It appears in `asent-summary.md` and `asent-report.json` as **"not assessed (disabled by base config)"**
+   with its reason, never as passed; the decision is taken over the enabled modules only. A module that
+   applies (its inputs exist in head) but has a missing section, or a missing/invalid config file,
+   gives REVIEW.
 4. **Scope:** approving the plan counts as permission to touch orchestrator/satra/sable/integrations/main.
    Each change outside CAVR is its own commit, marked `[owner review: <module>]` in its message body.
 
@@ -73,7 +81,7 @@ module's `input_hash` as `@config`.
   sable/obligations.json {"obligations":[{id, principal, protected_asset, actions, scope, minimum_score, margin}]}
   README.md              written by `asent init`
 ```
-`config.json` modules: `CAVR {enabled, mode: pipeline|lockfile, policy, requirements_files, verify: all|changed,
+`config.json` modules: `CAVR {enabled, policy, requirements_files, verify: all|changed,
 import_aliases, source_dirs, counterfactual_input}`, `SATRA {enabled, contract, trusted_tests, pytest_ini, source_dirs,
 project_security_tests}`, `SABLE {enabled, terraform_dirs, obligations}`. `enabled:false` requires `reason`.
 
@@ -91,6 +99,9 @@ Limits: no symlinks in `.asent/`, ≤ 200 files, ≤ 1 MiB. Config file paths st
   shallow clone without the commit; not a git repo; symlinks or over-budget snapshot; no container
   engine for external code; network or OSV unavailable; no applicable module; any internal exception;
   report not writable.
+- A module whose inputs exist but which has **no section** in base `config.json` → REVIEW
+  ("<MODULE>: applies but is not configured in base .asent/config.json"). Disabled modules are listed
+  as "not assessed (disabled by base config)" and are never counted or shown as passed.
 - Exit 0 only when the decision is ACCEPT **and** both output files were written. BLOCK = 1.
   argparse usage errors already exit 2, which matches.
 - The gate never runs repair, never pushes, never runs `apply_scenario`, never uses host-fallback
@@ -127,7 +138,7 @@ Limits: no symlinks in `.asent/`, ≤ 200 files, ≤ 1 MiB. Config file paths st
 `tests/test_cavr_frontend.py` (no Node.js / `frontend/node_modules`), 7 in `tests/test_cavr_live.py`
 (`CAVR_LIVE` not set), 4 in `tests/test_satra_sandbox.py` (Docker not available on this machine).
 Because Docker is absent locally, gate tests for container-dependent paths must inject tool availability;
-the real container path is checked in CI and in the recorded PR run (step 9).
+the real container path is checked in CI and in the recorded PR run (step 10).
 
 ## Steps (tests written first in each step; full `.venv/bin/python -m pytest -q` before each commit;
 report notes appended per CLAUDE.md; review result in one line)
@@ -140,7 +151,8 @@ report notes appended per CLAUDE.md; review result in one line)
 bad JSON; unknown key; wrong schema_version; `..`/absolute path; symlink inside `.asent/`; > 200 files / > 1 MiB;
 disabled without reason; enabled module whose file is missing; `_starter` → invalid; invalid CAVR policy
 (reuses `requirement_gate.policy_problems`); valid full config; digest stable across runs and changing on a
-one-byte edit; committed schema == generated. *Done:* every invalid case gives `valid=False` with a named problem.
+one-byte edit; committed schema == generated; disabled with a reason is valid; a `mode` key under CAVR is
+rejected as unknown (a real repo cannot pick the lockfile analyzer). *Done:* every invalid case gives `valid=False` with a named problem.
 
 **2 — `asent init`.** `backend/project_config/starter.py`; `init` subcommand in `backend/cli.py` (local, no HTTP).
 Detects surfaces (requirements files, `.py` outside tests, `.tf` dirs), writes starter files with `_starter: true`
@@ -161,19 +173,25 @@ Catalog entries get `"project"`. Add `demo_project/InvoiceHub/.asent/` and the r
 mirroring their policy.json (SATRA trusted tests copied, plus a byte-equality test against
 `backend/satra/trusted_*.py`). Tests `tests/test_orchestrator_config.py`: a config edit invalidates evidence;
 a disabled module is listed as not assessed; a config problem → REVIEW; BLOCK beats a config REVIEW; no module →
-REVIEW. *Done:* `tests/test_integration.py` and `tests/test_modules.py` pass unchanged. Any test whose outcome
+REVIEW; a disabled module whose inputs exist is in `run.not_assessed` with "not assessed (disabled by base
+config)" and is not in `applicable`; a module whose inputs exist but has no section → REVIEW; an enabled module
+whose config file is invalid → REVIEW; every module disabled → REVIEW (no applicable module); a gate-mode run
+never dispatches CAVR to the lockfile analyzer. *Done:* `tests/test_integration.py` and `tests/test_modules.py` pass unchanged. Any test whose outcome
 changes because authority moved from the candidate to `.asent/` is reported to Maryam and not edited quietly.
 
 **5 — CAVR gate adapter** (Maryam's module). `backend/cavr/gate_adapter.py::analyze_pipeline(context, store, outdir, emit)`
 has the same return shape as `analyzer.analyze`. `verify: all` → `pip install -r <file>` on head;
 `changed` → `{"requirements_edit": {before, after}}` via `manifest_parser.capture_requirements_edit`.
-Mapping: pipeline BLOCK→REJECTED, UNRESOLVED→UNRESOLVED. `analyzer.analyze` dispatches on `cavr.mode`.
+Mapping (module status for `final_gate`): VERIFIED→VERIFIED (pass), REJECTED→REJECTED and BLOCK→REJECTED
+(block; the pipeline's own status, stage and rule are kept in `details.pipeline`), UNRESOLVED or any unknown
+status→UNRESOLVED (review). `analyzer.analyze` dispatches on the run mode: gate → adapter, demo scenario → lockfile.
 `read_artifact(…, allow_builtin)`. `counterfactual_input` comes from config. The pipeline always gets an
 explicit `project_dir`. Tests `tests/test_cavr_gate_adapter.py`, using the recorded real-wheel transport
 helpers from `tests/test_cavr_support.py`: approved pin → VERIFIED; denied package → REJECTED with no download;
 unpinned → UNRESOLVED; tampered bytes → REJECTED/UNRESOLVED per the pipeline rule; network off → UNRESOLVED;
 only `pyproject.toml` present → UNRESOLVED "unsupported manifest"; `changed` with no edit → VERIFIED at the gate
-stage; the adapter never resolves to `SAMPLE_PROJECT_DIR`; a lockfile-mode artifact under ASENT ROOT is refused
+stage; an unknown pipeline status → UNRESOLVED; the 8 cache-key fields are in `details`; the adapter never
+resolves to `SAMPLE_PROJECT_DIR`; a lockfile-mode artifact under ASENT ROOT is refused
 when `allow_builtin=False`.
 
 **6 — SATRA from config** `[owner review: satra, threat_repo]`. Contract from `contract.json`;
@@ -193,11 +211,22 @@ Tests `tests/test_sable_config.py`: two obligations, one regressed; empty list �
 call it in-process; the HTTP client only opens for server commands. Tests `tests/test_gate_cli.py` on real temp
 repos: no `.asent` → 2; invalid → 2; starter → 2; head edits `.asent` → 2; unknown ref → 2 with a report still
 written; not a repo → 2; denied package added in head → 1; SABLE regression (fixture infra) → 1; CAVR-only ACCEPT
-with SATRA/SABLE disabled with reasons → 0 and both listed as not assessed; SATRA enabled with no engine → 2;
+with SATRA/SABLE disabled with reasons → 0, and both appear in the summary table and the report as "not
+assessed (disabled by base config)" with their reasons, never as pass; `.tf` files present and no SABLE section
+→ 2; SABLE enabled with an invalid `obligations.json` → 2; SATRA enabled with no engine → 2;
 symlink in head → 2; hook not executed; injected internal exception → 2 + report; unwritable output dir → 2;
 report SHAs equal `git rev-parse`; summary contains the decision and one row per module.
 
-**9 — Docker + GitHub Actions.** `Dockerfile`: install the `scripts/asent` wrapper (`exec python -m backend.cli "$@"`)
+**9 — CAVR verdicts through the gate** (Maryam's module + gate). Tests `tests/test_gate_cavr_verdicts.py`, one per
+pipeline verdict, each a real temp repo with base `.asent/` (CAVR only, SATRA/SABLE disabled with reasons) and a head
+that edits `requirements.txt`, run through `cli.main(["gate", …])`; PyPI/OSV answers come from the recorded real
+responses used by `tests/test_cavr_support.py` (real wheel bytes and digests, nothing fabricated):
+VERIFIED (approved pin, clean advisories) → ACCEPT, exit 0; REJECTED (pin with a recorded OSV advisory for that
+version) → BLOCK, exit 1; BLOCK (package in `denied_packages`, nothing downloaded) → BLOCK, exit 1; UNRESOLVED
+(network off transport) → REVIEW, exit 2. Each test also checks that the report carries the pipeline status, stage,
+rule and the 8 cache-key fields, and that the summary row matches. Optional live variant behind `CAVR_LIVE=1`.
+
+**10 — Docker + GitHub Actions.** `Dockerfile`: install the `scripts/asent` wrapper (`exec python -m backend.cli "$@"`)
 into `/usr/local/bin`, keep the server CMD; `cd.yml` smoke adds `docker run IMAGE asent gate --help`.
 `.github/workflows/asent-gate.yml`: `on: workflow_call` (inputs `asent-repository`, `asent-ref` (SHA),
 `review-fails` default true), `permissions: contents: read`, checks out the target at `fetch-depth: 0`,
@@ -207,7 +236,7 @@ installs ASENT, builds the sandbox image, runs the gate with the PR base/head SH
 (PyYAML): workflow keys, no `pull_request_target`, read-only permissions, `asent gate` invoked with base/head
 SHAs, Dockerfile installs the wrapper. Real run: one PR on a scratch repo, with its actual result in report notes.
 
-**10 — Guard + docs.** `tests/test_gate_no_hardcoded_paths.py`: the gate-path modules (gate/*, project_config/*,
+**11 — Guard + docs.** `tests/test_gate_no_hardcoded_paths.py`: the gate-path modules (gate/*, project_config/*,
 orchestrator service/workspace_manager/context_service/final_gate, cavr analyzer/gate_adapter/pipeline,
 satra analyzer/pytest_runner/security_contract, sable analyzer) contain none of `demo_project`,
 `sample_project`, `SAMPLE_PROJECT_DIR`, `scenarios/`, `fixtures/invoice.pdf`, `import DEMO`, except a
@@ -219,6 +248,9 @@ written allowlist with a reason per entry (demo repair, builtin host fallback). 
 - `.venv/bin/python -m pytest -q`: every test that passed at step 0 still passes, plus all new tests.
 - `asent init` + manual review + `asent gate` on a fresh temp repo gives each exit code 0/1/2 in the cases above,
   each time with `asent-report.json` and `asent-summary.md` written.
+- Each CAVR pipeline verdict reaches the gate with its mapped exit code (step 9): VERIFIED 0, REJECTED 1, BLOCK 1,
+  UNRESOLVED 2. A disabled-but-present module is shown only as "not assessed (disabled by base config)"; an
+  applicable module with missing/invalid config gives REVIEW.
 - The guard test passes. The demo scenarios run through `.asent/` with unchanged catalog outcomes.
 - `docker run IMAGE asent gate --help` works. One real PR run of `asent-gate.yml` is recorded with its actual result.
 
