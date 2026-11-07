@@ -1,20 +1,28 @@
 """Creates isolated baseline/candidate workspaces and freezes verified candidate snapshots."""
 import shutil
 from pathlib import Path
-from backend.config import DEMO
+from backend.project_config.frozen import freeze
 from backend.orchestrator.hashing import copy_tree,snapshot,files
 from backend.integrations.git_adapter import git,init_repo
 
 class WorkspaceManager:
     def __init__(self,root):self.root=Path(root).resolve();self.root.mkdir(parents=True,exist_ok=True)
-    def create(self,run,source=None):
+    def create(self,run,source,candidate_source=None,require_config=False):
         # Keep an immutable baseline copy and a separate Git worktree for candidate changes.
+        # `candidate_source` (gate runs) replaces the candidate's files with the head commit's.
+        if source is None:raise ValueError('A source directory is required')
         home=self.root/run.run_id;home.mkdir(parents=True)
-        base=copy_tree(source or DEMO,home/'baseline')
+        base=copy_tree(source,home/'baseline')
         # Never inherit hooks, Git config, credentials, or symlinks from an external repository.
         commit=init_repo(base)
         candidate=home/'candidate'
         git(base,'worktree','add','-b','candidate-'+run.run_id,str(candidate),commit)
+        if candidate_source is not None:
+            for p in files(candidate):(candidate/p).unlink()
+            copy_tree(candidate_source,candidate)
+        # The base .asent/ (never part of a snapshot) is frozen beside the baseline as the run's authority.
+        config=freeze(source,home,require_config)
+        if config is not None:run.config_digest=config.digest;run.config_source=str(Path(source)/'.asent');run.config_problems=list(config.problems)
         run.baseline_commit=commit;run.baseline_workspace=str(base);run.candidate_workspace=str(candidate)
         return candidate
     def freeze(self,run):

@@ -3009,3 +3009,82 @@ All in `tests/test_project_config.py`; result of `.venv/bin/python -m pytest -q 
 
 1. **Why not just `git archive`?** It obeys the repository's `.gitattributes`; `export-ignore` would let the change under review hide a file from ASENT. We read the blobs directly, so ASENT sees exactly what was committed.
 2. **Could gating a malicious repository run its code on the host?** Not in this step: no checkout, no hooks (`core.hooksPath=/dev/null`, no global config), and git only reads objects.
+
+## Step 4 — orchestrator takes its authority from a frozen base `.asent/` (2026-11-07)
+
+### Ch 6 Implementation
+
+- `backend/project_config/frozen.py` (new): `freeze(source, home, required)` copies the source's `.asent/` to `<run>/asent/` after `load` found it safe (or writes `<run>/asent.status.json` with the problems); `frozen_config(baseline)` finds it again from `<run>/baseline`; `policy_from_config` maps a valid config onto the policy keys the analyzers read (`dependencies`, `ownership`, `infrastructure`); `NOT_ASSESSED = "not assessed (disabled by base config)"`.
+- `backend/orchestrator/context_service.py` `[owner review: orchestrator]`: config from `frozen_config`; policy from config, `policy.json` only when a plain server run has no `.asent/`; `@config` in `inputs()`; `surfaces()`, `applicability()` = surfaces ∩ enabled (nothing for an invalid config), `coverage()`, `config_reasons()`; import aliases and source dirs from config; the hardcoded `invoice-pdf-*` alias map is replaced by a generic rule (a LOCAL `.py` artifact is imported by its own path).
+- `backend/orchestrator/final_gate.py`: `decide(..., extra_reasons=())`; extra reasons lower ACCEPT to REVIEW and are listed after the blocking ones under BLOCK.
+- `backend/orchestrator/workspace_manager.py`: `create(run, source, candidate_source=None, require_config=False)`; no `DEMO` fallback (source required); head files replace the candidate's for gate runs; the base config is frozen.
+- `backend/orchestrator/service.py`: scenario runs start from `scenarios.scenario_project(item)`; new `create_gate_run(base, head, gate)`; `analyze` records `coverage`, passes config reasons and "ASENT configuration changed in this change; requires maintainer review" to `decide`, and never repairs a gate run; report has `config` and `coverage`; evidence folder created with `parents=True`.
+- `backend/orchestrator/run_context.py`: `mode` adds `gate`; fields `config_digest`, `config_source`, `config_problems`, `config_changed_in_head`, `coverage`, `gate`; generic default title.
+- `backend/orchestrator/scenarios.py`: `scenario_project(item)` (demo layer).
+- `backend/integrations/git_adapter.py`: `init_repo` commits with `--allow-empty`.
+- `demo_project/InvoiceHub/.asent/` (new): config, CAVR policy (M1 format + legacy `dependencies`), SATRA contract, trusted tests (byte copies), SABLE obligations, README.
+
+### Design decisions
+
+- **Config found from the run directory, not passed in:** existing tests rebuild `ContextService(candidate, baseline, knowledge)` and compare input hashes with the run's; finding the frozen copy beside the baseline gives every context of a run the same config without changing any caller.
+- **Frozen copy, verified:** the copy is re-loaded and its digest compared with the checked source; a mismatch (source changed during the copy) is UNSAFE. Alternative (read the source each time) rejected: the authority could change during an analysis.
+- **Legacy `policy.json` only for plain server runs without `.asent/`:** keeps the dashboard working for existing local repositories; gate runs always freeze (missing -> `ASENT_CONFIG_MISSING`), so they never read the candidate's policy.
+- **Invalid config runs no analyzer:** nothing is decided on an authority that cannot be read; REVIEW with every problem as a reason.
+- **Absent section with inputs present -> REVIEW, disabled -> not assessed:** as decided by Maryam (decision 3 revised).
+- **Generic LOCAL import rule instead of the alias map:** the lock already says where a LOCAL source lives, so its import name follows from the file; registry packages use `cavr.import_aliases`.
+
+### Requirements covered
+
+| ID | Title | What this covers | Acceptance check |
+|---|---|---|---|
+| FR-6 | Fail-Closed Security Policy | Invalid, missing (gate) or unconfigured-but-applicable config gives REVIEW; a head config change cannot raise the decision | `test_invalid_config_in_a_server_run_is_review_without_analysis`, `test_disabled_modules_are_never_passed_and_absent_module_gives_review`, `test_gate_run_flags_a_head_config_change`, `test_gate_run_without_base_config_never_falls_back_to_policy_json` |
+| none listed | Evidence bound to the authority (dev-env plan) | A config edit invalidates evidence of every module | `test_config_edit_changes_every_module_input_hash` |
+
+### Ch 7 Test cases
+
+`tests/test_orchestrator_config.py`: 19 passed. `tests/test_gate_git_export.py`: 19 passed (one added). Full suite: 1606 passed, 30 skipped, 0 failed.
+
+| Test ID | Purpose | Input | Expected | Result |
+|---|---|---|---|---|
+| `test_demo_fixture_config_is_valid_and_mirrors_its_legacy_policy` | Demo on `.asent/` | fixture `.asent/` | valid; mapped keys equal `policy.json` | pass |
+| `test_demo_fixture_trusted_tests_are_the_bundled_satra_tests` | No drift | 3 copies | byte-equal | pass |
+| `test_demo_scenario_run_freezes_the_fixture_config` | Freezing | `create("safe")` | run digest = fixture digest; no `.asent` in candidate; all assessed | pass |
+| `test_config_edit_changes_every_module_input_hash` | Binding | edit frozen README | 3 input hashes change | pass |
+| `test_project_without_asent_keeps_the_legacy_policy_in_server_runs` | Compatibility | project with only `policy.json` | config None, legacy policy, no `@config` | pass |
+| `test_workspace_manager_requires_a_source` | No DEMO fallback | source None | ValueError | pass |
+| `test_extra_reasons_turn_accept_into_review`, `test_block_beats_a_config_review`, `test_no_applicable_module_with_extra_reasons_is_review` | Final gate | VERIFIED / REJECTED / nothing + extra reason | REVIEW / BLOCK / REVIEW | pass |
+| `test_disabled_and_absent_modules_in_coverage` | Coverage | CAVR on, SABLE off with `.tf`, SATRA absent with `.py` | applicable [CAVR]; SABLE `NOT_ASSESSED` + reason; SATRA reason | pass |
+| `test_disabled_modules_are_never_passed_and_absent_module_gives_review` | Decision 3 | same project, analysed | REVIEW; no SABLE/SATRA evidence; report coverage label | pass |
+| `test_every_module_disabled_is_review` | Edge | all disabled | REVIEW, applicable [] | pass |
+| `test_invalid_config_in_a_server_run_is_review_without_analysis` | Failure | `{broken` | REVIEW, reason `ASENT config: ASENT_CONFIG_JSON…`, no evidence | pass |
+| `test_enabled_module_with_invalid_file_is_review` | Failure | SABLE on, empty obligations | REVIEW with `ASENT_CONFIG_OBLIGATIONS` | pass |
+| `test_symlinked_asent_in_source_is_not_copied_and_is_review` | Attack | `.asent` symlink | UNSAFE, nothing copied | pass |
+| `test_gate_run_uses_base_config_and_head_files` | Gate run | base/head exports | candidate = head, baseline = base, base reason | pass |
+| `test_gate_run_flags_a_head_config_change` | Gate run | head edits `.asent/` | REVIEW with the change reason; base still wins | pass |
+| `test_gate_run_without_base_config_never_falls_back_to_policy_json` | Gate run | base with `policy.json` only | MISSING, policy {}, REVIEW, no evidence | pass |
+| `test_gate_run_is_never_repaired` | Gate run | `auto_repair=True` | no `repair.*` events | pass |
+| `test_baseline_of_an_empty_tree_can_be_committed` | Edge | empty baseline | commit created | pass |
+
+### Defects found and fixed
+
+- Pre-existing: a run where no module applied ended as ERROR ("Run could not complete") because `evidence/` did not exist when `assurance.json` was written; now created with `parents=True` (found by `test_invalid_config_in_a_server_run_is_review_without_analysis`).
+- `init_repo` failed for a base whose only content is `.asent/` (nothing to commit); now `--allow-empty` (found by `test_gate_run_flags_a_head_config_change`).
+- Removing the hardcoded alias map broke `tests/test_cavr_targeted.py::test_safe_adapter_import_attribution_and_unrelated_import` (context without config); fixed with the generic LOCAL-artifact rule, test unchanged.
+- Review: 0 passes of cavr-reviewer (not requested), 1 self-review pass, 0 MINOR open.
+
+### Known limitations / deferred
+
+- SRS.md and plan.md are still read from the candidate; SATRA's contract moves to `.asent/` in step 6.
+- The replay baseline (`scenarios/replay/weak-oracle/baseline`) has no `.asent/` yet: it is a recorded replay whose snapshot digest is pinned; it keeps the legacy `policy.json` path.
+- `main.py` still reads the demo project for `/api/project` and the showcase mount (demo layer only).
+- Analyzers still read the legacy policy shape; SABLE uses only the first obligation until step 7.
+
+### Tool disclosure (Ch 8.7)
+
+- **Generated by Claude Code:** all code, the demo `.asent/`, the tests, these notes. **Reviewed by Maryam / orchestrator owner:** not yet. **Verified by:** tests written first; full suite run twice (first run found the alias regression).
+
+### Supervisor Q&A prep
+
+1. **Can a pull request disable a module to get ACCEPT?** No: the authority is the base `.asent/`, frozen when the run is created; a head change to `.asent/` adds a reason that keeps the decision at REVIEW.
+2. **Why is a disabled module not a failure?** The project owner said, in reviewed base config with a reason, that it does not apply; the report says "not assessed (disabled by base config)" so nobody reads it as passed.
+3. **Did moving the demos to `.asent/` change any demo outcome?** No: the mapped policy equals the old `policy.json` keys (tested) and all 1606 tests pass, including every scenario expectation.

@@ -14,7 +14,7 @@ def git(path,*args,decode_errors='strict'):
 
 def init_repo(path):
     git(path,'init');git(path,'checkout','-b','baseline');git(path,'config','user.name','ASENT Local');git(path,'config','user.email','asent@localhost')
-    git(path,'add','--all');git(path,'commit','-m','Trusted baseline')
+    git(path,'add','--all');git(path,'commit','--allow-empty','-m','Trusted baseline')
     return git(path,'rev-parse','HEAD')
 
 def diff(path,baseline):

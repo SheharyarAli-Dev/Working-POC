@@ -9,9 +9,9 @@ def now(): return datetime.now(timezone.utc).isoformat()
 class RunContext(BaseModel):
     run_id: str=Field(default_factory=lambda:uuid4().hex[:12])
     created_at: str=Field(default_factory=now)
-    title: str='InvoiceHub assurance run'
+    title: str='ASENT assurance run'
     scenario: str='safe'
-    mode: Literal['manual','watch','replay','research']='manual'
+    mode: Literal['manual','watch','replay','research','gate']='manual'
     evidence_source: str='NORMAL SAFE CASE'
     agent_metadata: dict[str,Any]=Field(default_factory=dict)
     srs_digest: str=''
@@ -33,6 +33,13 @@ class RunContext(BaseModel):
     clean_commit: str | None=None
     clean_workspace: str | None=None
     error: str | None=None
+    # Base .asent/ config frozen at creation (None: plain server run without one).
+    config_digest: str | None=None
+    config_source: str=''
+    config_problems: list[str]=Field(default_factory=list)
+    config_changed_in_head: bool=False
+    coverage: dict[str,Any]=Field(default_factory=dict)
+    gate: dict[str,Any]=Field(default_factory=dict)
 
 class Evidence(BaseModel):
     evidence_id: str=Field(default_factory=lambda:uuid4().hex)

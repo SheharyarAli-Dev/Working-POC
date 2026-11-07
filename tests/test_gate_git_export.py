@@ -175,3 +175,9 @@ def test_baseline_commit_message_is_generic(tmp_path):
     (tmp_path / "w/a.txt").write_text("a")
     git_adapter.init_repo(tmp_path / "w")
     assert run(tmp_path / "w", "log", "-1", "--format=%s") == "Trusted baseline"
+
+
+def test_baseline_of_an_empty_tree_can_be_committed(tmp_path):
+    # A base commit with nothing but .asent/ (excluded from snapshots) gives an empty baseline.
+    (tmp_path / "w").mkdir()
+    assert len(git_adapter.init_repo(tmp_path / "w")) == 40

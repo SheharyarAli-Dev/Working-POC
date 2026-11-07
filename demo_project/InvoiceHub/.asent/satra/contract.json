@@ -1,0 +1,28 @@
+{
+  "rule_id": "AUTHZ.IDOR.001",
+  "version": 1,
+  "route": "GET /invoices/{invoice_id}",
+  "expected_status": 403,
+  "authority_sources": [
+    "SRS.md#FR-03",
+    "policy.json#ownership",
+    "trusted baseline app/main.py"
+  ],
+  "preconditions": [
+    "authenticated normal user",
+    "existing invoice owned by another user"
+  ],
+  "scope": [
+    "app/main.py",
+    "app/security.py"
+  ],
+  "counterfactual": {
+    "operator": "RETURN_TRUE",
+    "target": "app/security.py::can_access_invoice"
+  },
+  "subject": "authenticated normal user",
+  "action": "GET invoice",
+  "resource": "invoice owned by another user",
+  "state_effect": "none",
+  "description": "Demo fixture: mirrors demo_project/InvoiceHub/policy.json#ownership"
+}
