@@ -14,6 +14,11 @@ from backend.integrations.ollama_adapter import generate_tests
 
 
 def analyze(context,outdir,emit):
+    # Gate runs take contract, trusted tests and counterfactual from the base .asent/ config;
+    # the built-in demo scenarios keep this InvoiceHub path.
+    if getattr(context,'gate',False):
+        from backend.satra.gate_mode import analyze_configured
+        return analyze_configured(context,outdir,emit)
     outdir=Path(outdir);outdir.mkdir(parents=True,exist_ok=True)
     rules,unsupported=dictionary(context.knowledge)
     details=localize(context.baseline,context.path);details['dictionary']=rules;details['contract']=build(context)

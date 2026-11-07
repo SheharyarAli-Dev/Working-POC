@@ -3154,3 +3154,69 @@ All in `tests/test_project_config.py`; result of `.venv/bin/python -m pytest -q 
 
 1. **What does CAVR check on a real pull request?** Every pin in the configured requirements files: refused or unpinned packages are blocked before download; the wheel's SHA-256 is compared with PyPI's digest; the dependency tree comes from Requires-Dist; OSV ranges; the capability contract from the project's call sites; AST sink scan; all under the 8-field cache key.
 2. **Why is a project with a pyproject.toml sometimes UNRESOLVED?** When it declares dependencies there; CAVR M1 only reads requirements files, and passing the others unseen would be a false VERIFIED.
+
+## Step 6 — SATRA in gate runs from the base config (2026-11-07)
+
+### Ch 6 Implementation
+
+- `backend/satra/gate_mode.py` (new) `[owner review: satra]`: `analyze_configured(context, outdir, emit)`, the return shape of `satra.analyzer.analyze`.
+- `backend/satra/analyzer.py`: `analyze` dispatches to it when `context.gate`; demo runs keep the InvoiceHub path unchanged.
+- `backend/satra/pytest_runner.py`: `run_pytest(..., trusted_tests_dir, external, targets, pytest_ini)`; `external=True` never runs on the host, even for hash-known files; trusted tests copied to `asent_assurance/`; `-c` only when an ini exists. Legacy calls build exactly the old command.
+- `backend/satra/counterfactuals.py`: `mutate_return_true(root, "file::function")` (top-level functions and methods; False and file unchanged when missing / unparsable).
+- `backend/satra/static_adapters.py`: `scan(root, dirs=None)`; `None` keeps `app/`.
+- Algorithm: contract rule must be an enabled threat-repository rule -> trusted tests on base and head (container, no network) -> project `tests/` on head if present -> RETURN_TRUE mutant of the base must be killed by the trusted tests -> optional oracle check of `project_security_tests` with `judge` -> decision table in the module docstring.
+
+### Design decisions
+
+- **Gate runs only (demo path unchanged):** `tests/test_modules.py::test_satra_scc_and_inconclusive` expects the demo contract to vanish when the candidate SRS loses its security wording. In a gate run that behaviour is the weakness: the candidate's SRS must not switch SATRA off (`test_candidate_srs_cannot_switch_satra_off_in_a_gate_run`). Same split as CAVR (decision 1).
+- **Required knowledge = the contract's rule:** the four InvoiceHub templates are not the project's tests; requiring the contract `rule_id` to be enabled keeps "disabling knowledge cannot waive a test".
+- **Mutant not killed -> INCONCLUSIVE, not ACCEPT:** trusted tests that pass on the RETURN_TRUE mutant prove nothing about the contract.
+- **Oracle check optional, but reported:** many projects have no single security test file; when none is configured, the uncertainty list says so.
+- **Preflight unchanged:** project security tests may import only `pytest` (fixtures come from `conftest.py`), the rule the demo already uses for tests under review.
+- **No Ollama in gate runs:** CI has no local model; adaptive generation is reported as not used.
+
+### Requirements covered
+
+| ID | Title | What this covers | Acceptance check |
+|---|---|---|---|
+| FR-6 | Fail-Closed Security Policy | No engine, missing target, blind trusted tests, disabled rule -> INCONCLUSIVE | `test_without_a_container_engine_it_is_inconclusive`, `test_missing_counterfactual_target_is_inconclusive`, `test_trusted_tests_that_miss_the_mutant_are_inconclusive`, `test_disabled_contract_rule_is_inconclusive` |
+| none listed | SATRA independent oracle on external projects (dev-env plan) | Trusted tests from base; regression and weak oracle rejected | `test_regressed_head_is_rejected`, `test_weak_project_security_test_is_rejected`, `test_trusted_tests_come_from_base_even_when_head_edits_them` |
+
+### Ch 7 Test cases
+
+`tests/test_satra_config.py`: 16 passed. `tests/test_satra_*.py`, `tests/test_modules.py`, `tests/test_integration.py`, `tests/test_hash_verification_line_endings.py`, `tests/test_api_replay.py`: 179 passed, 4 skipped (Docker not available).
+
+| Test ID | Purpose | Input | Expected | Result |
+|---|---|---|---|---|
+| `test_secure_change_is_accepted_and_the_mutant_is_killed` | ACCEPT | secure base and head | ACCEPT, mutant failed ≥1 test, oracle "not checked" listed | pass |
+| `test_regressed_head_is_rejected` | REJECT | head `return True` | REJECT APPLICATION_REGRESSION | pass |
+| `test_weak_project_security_test_is_rejected`, `test_strong_project_security_test_is_accepted` | Oracle | weak / strong project test | REJECT / ACCEPT | pass |
+| `test_failing_ordinary_project_tests_are_rejected` | Project tests | `assert False` in tests/ | REJECT | pass |
+| `test_without_a_container_engine_it_is_inconclusive` | No engine | no Docker, `permitted_builtin` forced True | INCONCLUSIVE "Docker/Podman" | pass |
+| `test_missing_counterfactual_target_is_inconclusive` | Failure | target `not_there` | INCONCLUSIVE | pass |
+| `test_trusted_tests_that_miss_the_mutant_are_inconclusive` | Blind tests | only an "allowed" test | INCONCLUSIVE "do not detect" | pass |
+| `test_disabled_contract_rule_is_inconclusive` | Knowledge | AUTHZ.IDOR.001 disabled | INCONCLUSIVE, missing_rules | pass |
+| `test_trusted_tests_come_from_base_even_when_head_edits_them` | Attack | head replaces trusted test with `assert True` and breaks code | REJECT | pass |
+| `test_candidate_srs_cannot_switch_satra_off_in_a_gate_run` | Attack | SRS without security words | REJECT (not INCONCLUSIVE) | pass |
+| `test_external_code_never_runs_on_the_host` | Isolation | `external=True`, no engine | unavailable | pass |
+| `test_mutate_top_level_function_and_method`, `test_mutate_fails_closed` (3) | Operator | function + method / missing file, function, syntax error | both return True / False, file unchanged | pass |
+
+Container path: Docker is not installed here; `container_on_host` runs the exact command built for the container on the host with `/work` mapped (asserts `--network none` is in it). A real container run is part of step 10.
+
+### Defects found and fixed
+
+- A test removed the protected function to make the target missing, which also broke the trusted tests' import; rewritten to point the contract at a missing function. Review: 0 passes of cavr-reviewer (not requested), 1 self-review pass, 0 MINOR open.
+
+### Known limitations / deferred
+
+- One operator (RETURN_TRUE); contract semantics such as `route`/`expected_status` are recorded, not executed: the trusted tests carry them.
+- Real container execution is not verified on this machine (step 10 CI run).
+
+### Tool disclosure (Ch 8.7)
+
+- **Generated by Claude Code:** all of the above. **Reviewed by Maryam / SATRA owner:** not yet. **Verified by:** tests written first; existing SATRA suites green.
+
+### Supervisor Q&A prep
+
+1. **What does SATRA need from a project?** A contract (`.asent/satra/contract.json`), trusted tests that encode it, and a function whose `return True` mutant those tests must catch. None of these is inferred.
+2. **Why INCONCLUSIVE when the mutant survives?** Then the trusted tests would also pass broken code; their pass on the candidate means nothing.
