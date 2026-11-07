@@ -37,3 +37,4 @@ Record review outcomes in ONE line per step (number of passes, verdict, open MIN
 
 ## Study Q&A
 When Maryam asks an "explain" or "why" question about CAVR, also append the question and a short plain-language answer (with file/function names and one example) to docs/report-notes/cavr-study-qa.md under a heading for the current batch. Keep each answer under 15 lines.
+- After adding or changing any SATRA test, run `python scripts/satra_test_inventory.py` and commit docs/satra/test-inventory.md in the same commit.
