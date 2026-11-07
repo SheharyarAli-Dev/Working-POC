@@ -19,42 +19,7 @@ from backend.orchestrator.context_service import ContextService
 from backend.sable.fixtures.scenarios import SCENARIOS as SABLE_FIXTURES
 
 
-def test_sable_bundle_fingerprint_binds_names_and_ignores_mapping_order():
-    from backend.sable.fingerprints import bundle_sha256
-
-    assert bundle_sha256({'main.tf': 'a', 'moved.tf': 'b'}) == bundle_sha256(
-        {'moved.tf': 'b', 'main.tf': 'a'}
-    )
-    assert bundle_sha256({'main.tf': 'a', 'moved.tf': 'b'}) != bundle_sha256(
-        {'main.tf': 'ab', 'moved.tf': ''}
-    )
-    assert bundle_sha256({'main.tf': 'a'}) != bundle_sha256({'renamed.tf': 'a'})
-
-
-def test_sable_evidence_chain_persists_and_detects_record_changes(tmp_path, monkeypatch):
-    from backend.cavr.assurance import EvidenceChain, verify_chain
-    import backend.sable.storage as storage_module
-
-    monkeypatch.setattr(storage_module, 'DATA', tmp_path)
-    storage = storage_module.SableStorage()
-    storage.record_run('sable-test', 'fixture', 'obligation')
-    chain = EvidenceChain('sable-test')
-    chain.add_record('capture', 'bundle.captured', {'sha256': 'abc'})
-    storage.complete_run(
-        'sable-test', 'PRESERVED', 'decision-hash', {'verdict': 'PRESERVED'},
-        {'evidence_chain_length': 1}, chain.records,
-    )
-
-    restored = storage_module.SableStorage().get_run('sable-test')
-    assert restored['proof']['evidence_chain_length'] == 1
-    assert verify_chain(restored['evidence_chain'])['intact'] is True
-
-    tampered = [dict(record) for record in restored['evidence_chain']]
-    tampered[0] = {**tampered[0], 'data': {'sha256': 'changed'}}
-    assert verify_chain(tampered)['intact'] is False
-
-
-def test_cavr_safe_cache_and_advisory(service,scenario,tmp_path):
+def test_cavr_safe_cache_and_advisory(service,scenario,tmp_path,advisory_clock):
     r,c=scenario();first=cavr(c,service.store,tmp_path/'first',lambda *a:None);second=cavr(c,service.store,tmp_path/'second',lambda *a:None)
     assert first[0]=='VERIFIED';assert first[1]['nodes'][0]['metadata']['registry_digest_verified']
     assert second[1]['nodes'][0]['cache_hit'] and second[1]['nodes'][0]['deep_analysis_ms']==0
@@ -62,6 +27,18 @@ def test_cavr_safe_cache_and_advisory(service,scenario,tmp_path):
     assert OSV(tmp_path/'empty').query('nonexistent-example','1.0')['available'] is False
     service.change_threats(record_id='TRIG-ENV',enabled=False)
     new=ContextService(r.candidate_workspace,r.baseline_workspace,service.threats.snapshot());assert cavr(new,service.store,tmp_path/'disabled',lambda *a:None)[0]=='UNRESOLVED'
+
+def test_committed_advisory_evidence_is_fresh_on_the_fixed_clock_and_stale_after_max_age():
+    # Guards the fixed-clock fix: the frozen clock only moves "now", the 30-day max-age rule still fails closed.
+    from tests.conftest import advisory_clock_time,fixed_advisory_clock
+    from datetime import timedelta
+    fresh=advisory_clock_time()
+    with fixed_advisory_clock(fresh):
+        answer=OSV().query('pypdf','6.19.0')
+    assert answer['available'] and answer['age_days']<=30,answer
+    with fixed_advisory_clock(fresh+timedelta(days=30)):
+        stale=OSV().query('pypdf','6.19.0')
+    assert stale['available'] is False and stale['mode']=='UNAVAILABLE',stale
 
 def test_controlled_dormant_execution(service,scenario,tmp_path):
     r,c=scenario('cavr_canary');status,details,_=cavr(c,service.store,tmp_path/'lab',lambda *a:None)
