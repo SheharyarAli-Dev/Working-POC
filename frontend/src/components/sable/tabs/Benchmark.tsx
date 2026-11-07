@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Play, RefreshCw, AlertTriangle, CheckCircle2, XCircle, BarChart3, Grid } from 'lucide-react';
+import { executeSableBenchmark } from '../benchmarkStream';
 
 interface BenchmarkResult {
   total_scenarios: number;
@@ -15,6 +16,7 @@ interface BenchmarkResult {
   green_light_note: string;
   small_sample_note: string;
   ground_truth_hidden_note: string;
+  evaluation_limits_note: string;
 }
 
 const SYSTEMS = ['SABLE', 'B0', 'B1', 'B2', 'B3', 'B4'];
@@ -39,6 +41,7 @@ export const BenchmarkTab: React.FC = () => {
   const [running, setRunning] = useState(false);
   const [progress, setProgress] = useState<{ scenario: string; pct: number } | null>(null);
   const [activeMetricView, setActiveMetricView] = useState<'table' | 'bars'>('bars');
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     fetch('/api/sable/benchmark/result')
@@ -52,43 +55,24 @@ export const BenchmarkTab: React.FC = () => {
     setRunning(true);
     setProgress({ scenario: 'Starting benchmark…', pct: 0 });
     setResult(null);
+    setError(null);
 
     try {
-      const res = await fetch('/api/sable/benchmark/run', { method: 'POST' });
-      const reader = res.body?.getReader();
-      const decoder = new TextDecoder();
-
-      if (!reader) { setRunning(false); return; }
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        const text = decoder.decode(value);
-        for (const line of text.split('\n')) {
-          if (!line.startsWith('data:')) continue;
-          try {
-            const ev = JSON.parse(line.slice(5).trim());
-            if (ev.type === 'benchmark.progress') {
-              setProgress({ scenario: ev.payload.scenario, pct: ev.payload.pct });
-            } else if (ev.type === 'benchmark.complete') {
-              setResult(ev.payload);
-            }
-          } catch { /* ignore */ }
-        }
-      }
-    } catch {
-      /* ignore */
+      const result = await executeSableBenchmark(setProgress);
+      setResult(result);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Benchmark failed.');
     } finally {
       setRunning(false);
     }
   };
 
   const METRICS = [
+    { key: 'verdict_accuracy', label: 'Verdict accuracy', lowerBetter: false, desc: 'Fraction of scenarios matching the labeled PRESERVED/REGRESSED/UNKNOWN outcome' },
     { key: 'false_safe_rate', label: 'False-safe rate (FSR)', lowerBetter: true, desc: 'True regressions incorrectly marked as PRESERVED (critical safety violation)' },
     { key: 'regression_recall', label: 'Regression recall', lowerBetter: false, desc: 'Fraction of actual regressions correctly flagged' },
     { key: 'false_regression_rate', label: 'False-regression rate', lowerBetter: true, desc: 'Legitimate refactors incorrectly flagged as REGRESSED' },
     { key: 'unknown_precision', label: 'UNKNOWN precision', lowerBetter: false, desc: 'Fraction of UNKNOWN predictions that were genuinely ambiguous/lacked ground' },
-    { key: 'evidence_completeness', label: 'Evidence completeness', lowerBetter: false, desc: 'Fraction of decisions with traceable baseline, successor, signals & policy evidence' },
   ];
 
   return (
@@ -112,9 +96,11 @@ export const BenchmarkTab: React.FC = () => {
         </div>
       )}
 
+      {error && <div role="alert" className="sable-diff-warn">{error}</div>}
+
       {!result && !running && (
         <div className="sable-tab-empty" style={{ minHeight: 140 }}>
-          <p>Click "Run Benchmark" to evaluate all 32 scenarios across B0–B4 and SABLE.</p>
+          <p>Click "Run Benchmark" to evaluate the configured scenario set across B0–B4 and SABLE.</p>
           <p className="sable-small-note">Ground truth hidden from SABLE during evaluation.</p>
         </div>
       )}
@@ -140,6 +126,10 @@ export const BenchmarkTab: React.FC = () => {
           </div>
           <div className="sable-benchmark-note">
             <span>🔒 {result.ground_truth_hidden_note}</span>
+          </div>
+          <div className="sable-benchmark-note">
+            <AlertTriangle size={13} color="#d97706"/>
+            <span>{result.evaluation_limits_note}</span>
           </div>
 
           {/* Toggle between Grouped Bar Chart and Table */}
@@ -262,7 +252,7 @@ export const BenchmarkTab: React.FC = () => {
             padding: '12px',
             margin: '1rem 0'
           }}>
-            <strong style={{ color: '#1e40af' }}>B4 vs SABLE gap (the only claimed contribution gap):</strong>{' '}
+            <strong style={{ color: '#1e40af' }}>Observed B4 vs SABLE comparison:</strong>{' '}
             {(() => {
               const sableFsr = result.metrics?.SABLE?.false_safe_rate ?? 0;
               const b4Fsr = result.metrics?.B4?.false_safe_rate ?? 0;
@@ -273,6 +263,7 @@ export const BenchmarkTab: React.FC = () => {
                 <span>
                   False-safe rate delta: <strong>{delta > 0 ? `+${delta.toFixed(1)}pp` : `${delta.toFixed(1)}pp`}</strong> (B4: {(b4Fsr*100).toFixed(1)}% vs SABLE: {(sableFsr*100).toFixed(1)}%).
                   Recall: SABLE {recallSable.toFixed(1)}% vs B4 {recallB4.toFixed(1)}%.
+                  {' '}This B4 implementation reuses SABLE's correspondence and authorization code, so it is not an independent strongest-baseline result.
                 </span>
               );
             })()}

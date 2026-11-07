@@ -182,6 +182,15 @@ class World:
         shutil.copytree(INVOICEHUB / "app", self.project / "app")
         for name in ("requirements.txt", "dependencies.lock.json"):
             shutil.copy(INVOICEHUB / name, self.project / name)
+        # Pipeline tests use a fixed historical artifact/OSV fixture. Keep its manifest stable
+        # even when the live InvoiceHub demo dependency is intentionally refreshed.
+        lock_path = self.project / "dependencies.lock.json"
+        lockfile = json.loads(lock_path.read_text(encoding="utf-8"))
+        pypdf = next(node for node in lockfile["packages"] if node["name"] == "pypdf")
+        pypdf.update(version="6.19.0", sha256=PYPDF_SHA256,
+                     artifact="artifacts/pypdf-6.19.0-py3-none-any.whl")
+        lock_path.write_text(json.dumps(lockfile), encoding="utf-8")
+        (self.project / "requirements.txt").write_text("pypdf==6.19.0\n", encoding="utf-8")
         self.index = FakeIndex()
         self.index.add_pypdf()
         self.store = CavrStorage(tmp_path / "cavr.sqlite3")

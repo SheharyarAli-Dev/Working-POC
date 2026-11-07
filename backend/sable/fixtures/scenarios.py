@@ -1,5 +1,5 @@
 """
-SABLE Scenario Fixtures — 32 scenarios covering all required families.
+SABLE scenario fixtures — covering the modeled transformation families.
 
 Each scenario contains:
   - id, name, family, is_hard_case, notes

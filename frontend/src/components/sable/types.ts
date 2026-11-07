@@ -11,6 +11,28 @@ export interface SableObligation {
   authority_source: string;
 }
 
+export interface TerraformFileEntry {
+  path: string;
+  content: string;
+}
+
+export function terraformFileMap(entries: TerraformFileEntry[]): { files?: Record<string, string>; error?: string } {
+  if (entries.length === 0) return { error: 'Add at least one Terraform file.' };
+  const files: Record<string, string> = {};
+  for (const entry of entries) {
+    const path = entry.path.trim().replace(/\\/g, '/');
+    const parts = path.split('/');
+    if (!path || path.startsWith('/') || /^[A-Za-z]:/.test(path) ||
+        parts.some(part => !part || part === '.' || part === '..') || !path.endsWith('.tf')) {
+      return { error: `Use a relative .tf path without . or .. segments: ${entry.path || '(blank path)'}` };
+    }
+    if (Object.prototype.hasOwnProperty.call(files, path)) return { error: `Duplicate Terraform path: ${path}` };
+    if (!entry.content.trim()) return { error: `Terraform source is empty: ${path}` };
+    files[path] = entry.content;
+  }
+  return { files };
+}
+
 export interface SableHypothesis {
   address: string;
   score: number;
@@ -28,6 +50,7 @@ export interface SableAuthResult {
   widening: string[];
   weakening: string[];
   misbinding: string[];
+  unexpected_resources: string[];
   outside_model: string[];
   grants: Array<{ policy: string; actions: string[]; resources: string[] }>;
 }
@@ -54,6 +77,7 @@ export interface SableRunState {
   candidateSha: string | null;
   diff: string | null;
   diffLines: string[];
+  candidateFiles: string[];
   baselineResources: string[];
   candidateResources: string[];
   baselineGraph: { nodes: any[]; edges: any[] } | null;
@@ -96,6 +120,7 @@ export const INITIAL_STATE: SableRunState = {
   candidateSha: null,
   diff: null,
   diffLines: [],
+  candidateFiles: [],
   baselineResources: [],
   candidateResources: [],
   baselineGraph: null,

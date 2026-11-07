@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { SableRunState } from '../types';
+import React, { useState } from 'react';
+import { SableRunState, TerraformFileEntry, terraformFileMap } from '../types';
 import { AlertTriangle, GitCompare, Edit3, Play, RefreshCw, Check } from 'lucide-react';
 
 interface Props {
@@ -10,17 +10,9 @@ interface Props {
 
 export const TerraformDiffTab: React.FC<Props> = ({ runState, explainSimply, onRerunCustom }) => {
   const [editMode, setEditMode] = useState(false);
-  const [customCode, setCustomCode] = useState<string>('');
+  const [customFiles, setCustomFiles] = useState<TerraformFileEntry[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
-
-  useEffect(() => {
-    // If candidate text is in candidateResources or diff, initialize customCode
-    const candidateLines = (runState.diffLines.length > 0 ? runState.diffLines : (runState.diff ?? '').split('\n'))
-      .filter(l => !l.startsWith('-') || l.startsWith('---'))
-      .map(l => l.startsWith('+') ? l.slice(1) : l)
-      .join('\n');
-    setCustomCode(candidateLines || '# main.tf\nresource "aws_s3_bucket" "customer_data_v2" {\n  bucket = "customer-data-prod-v2"\n}\n');
-  }, [runState.diff, runState.diffLines]);
+  const [editorError, setEditorError] = useState<string | null>(null);
 
   if (!runState.diff && runState.diffLines.length === 0) {
     return (
@@ -35,9 +27,15 @@ export const TerraformDiffTab: React.FC<Props> = ({ runState, explainSimply, onR
 
   const handleRunAgain = async () => {
     if (!onRerunCustom) return;
+    const parsed = terraformFileMap(customFiles);
+    if (parsed.error || !parsed.files) {
+      setEditorError(parsed.error ?? 'Enter the complete candidate Terraform bundle.');
+      return;
+    }
+    setEditorError(null);
     setIsSubmitting(true);
     try {
-      await onRerunCustom({ "main.tf": customCode });
+      await onRerunCustom(parsed.files);
       setEditMode(false);
     } finally {
       setIsSubmitting(false);
@@ -56,15 +54,25 @@ export const TerraformDiffTab: React.FC<Props> = ({ runState, explainSimply, onR
             <span>Baseline SHA: <code>{runState.baselineSha?.slice(0, 12) ?? '–'}…</code></span>
             <span>Candidate SHA: <code>{runState.candidateSha?.slice(0, 12) ?? '–'}…</code></span>
           </div>
-          <button
+          {runState.scenarioId !== 'custom_upload' && <button
             className={`sable-btn ${editMode ? 'sable-btn-primary' : 'sable-btn-secondary'}`}
             style={{ fontSize: '0.75rem', padding: '5px 10px' }}
-            onClick={() => setEditMode(m => !m)}
+            onClick={() => {
+              setEditorError(null);
+              if (!editMode) setCustomFiles(runState.candidateFiles.map(path => ({ path, content: '' })));
+              setEditMode(m => !m);
+            }}
           >
-            <Edit3 size={12}/> {editMode ? 'Hide Editor' : 'Edit Candidate'}
-          </button>
+            <Edit3 size={12}/> {editMode ? 'Hide Editor' : 'Replace Candidate Bundle'}
+          </button>}
         </div>
       </div>
+
+      {runState.scenarioId === 'custom_upload' && (
+        <div className="sable-small-note" style={{ marginBottom: 12 }}>
+          This run used a custom baseline. To change it, use <strong>Upload bundle</strong> and submit both complete file maps; the diff stream does not return source contents for editing.
+        </div>
+      )}
 
       {runState.unsupportedConstructs?.length > 0 && (
         <div className="sable-diff-warn">
@@ -74,48 +82,33 @@ export const TerraformDiffTab: React.FC<Props> = ({ runState, explainSimply, onR
         </div>
       )}
 
-      {/* Optional Candidate In-Browser Editor */}
+      {/* The standalone event stream exposes a diff and filenames, not complete source. */}
       {editMode && (
-        <div style={{
-          background: '#ffffff',
-          border: '1px solid #cbd5e1',
-          borderRadius: '8px',
-          padding: '14px',
-          marginBottom: '1rem',
-          boxShadow: '0 2px 4px rgba(0,0,0,0.04)'
-        }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-            <div>
-              <strong style={{ fontSize: '0.85rem', color: '#1e293b' }}>In-Browser Candidate Editor</strong>
-              <span className="sable-small-note" style={{ display: 'block' }}>
-                Modify candidate Terraform below and click "Run again" to test SABLE boundary preservation on your custom edit.
-              </span>
+        <div style={{ background: '#ffffff', border: '1px solid #cbd5e1', borderRadius: '8px', padding: '14px', marginBottom: '1rem', boxShadow: '0 2px 4px rgba(0,0,0,0.04)' }}>
+          <div style={{ marginBottom: 12 }}>
+            <strong style={{ fontSize: '0.85rem', color: '#1e293b' }}>Complete Candidate File Map</strong>
+            <span className="sable-small-note" style={{ display: 'block' }}>
+              Paste the complete candidate contents below. Submitting replaces the whole candidate file map and keeps this scenario's baseline. The diff above is not editable source.
+            </span>
+          </div>
+          {customFiles.map((file, index) => (
+            <div key={`${index}-${file.path}`} style={{ marginBottom: 12 }}>
+              <div style={{ display: 'flex', gap: 8, marginBottom: 5 }}>
+                <label style={{ flex: 1, fontSize: 12 }}>Relative .tf path
+                  <input value={file.path} onChange={e => setCustomFiles(current => current.map((item, i) => i === index ? { ...item, path: e.target.value } : item))} style={{ display: 'block', width: '100%' }} />
+                </label>
+                {customFiles.length > 1 && <button type="button" className="sable-btn sable-btn-secondary" onClick={() => setCustomFiles(current => current.filter((_, i) => i !== index))}>Remove file</button>}
+              </div>
+              <textarea value={file.content} onChange={e => setCustomFiles(current => current.map((item, i) => i === index ? { ...item, content: e.target.value } : item))} placeholder={`Paste the complete contents of ${file.path || 'this Terraform file'}`} style={{ width: '100%', height: 180, fontFamily: 'monospace', fontSize: '0.8rem', padding: 10, border: '1px solid #cbd5e1', borderRadius: 4, background: '#f8fafc', color: '#0f172a', resize: 'vertical' }} />
             </div>
-            <button
-              className="sable-btn sable-btn-primary"
-              style={{ fontSize: '0.8rem', padding: '6px 12px' }}
-              onClick={handleRunAgain}
-              disabled={isSubmitting}
-            >
-              {isSubmitting ? <><RefreshCw size={13} className="spin"/> Running…</> : <><Play size={13}/> Run again</>}
+          ))}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
+            <button type="button" className="sable-btn sable-btn-secondary" onClick={() => setCustomFiles(current => [...current, { path: '', content: '' }])}>Add Terraform file</button>
+            <button className="sable-btn sable-btn-primary" onClick={handleRunAgain} disabled={isSubmitting || customFiles.length === 0 || customFiles.some(file => !file.content.trim())}>
+              {isSubmitting ? <><RefreshCw size={13} className="spin"/> Running...</> : <><Play size={13}/> Run again</>}
             </button>
           </div>
-          <textarea
-            value={customCode}
-            onChange={e => setCustomCode(e.target.value)}
-            style={{
-              width: '100%',
-              height: '180px',
-              fontFamily: 'monospace',
-              fontSize: '0.8rem',
-              padding: '10px',
-              border: '1px solid #cbd5e1',
-              borderRadius: '4px',
-              background: '#f8fafc',
-              color: '#0f172a',
-              resize: 'vertical'
-            }}
-          />
+          {editorError && <div role="alert" className="sable-diff-warn" style={{ marginTop: 10 }}>{editorError}</div>}
         </div>
       )}
 

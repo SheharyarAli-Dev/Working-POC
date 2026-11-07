@@ -1,7 +1,7 @@
 import pytest
 from pathlib import Path
 from backend.satra import counterfactuals, test_validator
-from test_satra_gitkit import git_do, make_settings, start_repo, record, IDENTITY
+from test_satra_gitkit import git_do, make_settings, start_repo, record, IDENTITY, find_bash
 import subprocess, os
 
 
@@ -27,13 +27,16 @@ def test_static_integrity_catches_broadened_assertion():
 
 
 def test_judge_on_scenario_branches(tmp_path):
+    bash = find_bash()
+    if not bash:
+        pytest.skip("Functional bash unavailable")
     seed_script = Path(__file__).resolve().parents[1] / "scripts" / "satra_seed_threat_repo.sh"
     repo = start_repo(tmp_path, "target")
     record(repo, {"TestFile.py": "print('init')\n"}, message="init")
 
     env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
     env.update(IDENTITY)
-    subprocess.run(["bash", str(seed_script), str(repo)], capture_output=True, text=True, env=env, check=True)
+    subprocess.run([bash, str(seed_script), str(repo)], capture_output=True, text=True, env=env, check=True)
 
     git_do(repo, "checkout", "-q", "main")
     main_dir = tmp_path / "main_dir"

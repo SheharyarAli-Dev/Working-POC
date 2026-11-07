@@ -67,10 +67,11 @@ export const OverviewTab: React.FC<Props> = ({ runState, explainSimply }) => {
         <div className="sable-overview-card">
           <div className="sable-card-label">AUTHORIZATION</div>
           <div className="sable-kv-list">
-            <div className="sable-kv"><span>Known</span><span>{candidateAuth?.known ? 'Yes' : 'No'}</span></div>
-            <div className="sable-kv"><span>Holds</span><span style={{ color: candidateAuth?.holds ? '#16a34a' : '#dc2626' }}>{candidateAuth?.holds ? 'Yes' : 'No'}</span></div>
-            <div className="sable-kv"><span>Widening</span><span style={{ color: (candidateAuth?.widening?.length ?? 0) > 0 ? '#dc2626' : '#16a34a' }}>{candidateAuth?.widening?.join(', ') || 'None'}</span></div>
-            <div className="sable-kv"><span>Weakening</span><span style={{ color: (candidateAuth?.weakening?.length ?? 0) > 0 ? '#dc2626' : '#16a34a' }}>{candidateAuth?.weakening?.join(', ') || 'None'}</span></div>
+            <div className="sable-kv"><span>Known</span><span>{candidateAuth ? candidateAuth.known ? 'Yes' : 'No — insufficient evidence' : 'Not evaluated'}</span></div>
+            <div className="sable-kv"><span>Holds</span><span style={{ color: !candidateAuth || !candidateAuth.known ? '#d97706' : candidateAuth.holds ? '#16a34a' : '#dc2626' }}>{!candidateAuth ? 'Not evaluated' : !candidateAuth.known ? 'Unknown' : candidateAuth.holds ? 'Yes' : 'No'}</span></div>
+            <div className="sable-kv"><span>Widening</span><span style={{ color: (candidateAuth?.widening?.length ?? 0) > 0 ? '#dc2626' : candidateAuth?.known ? '#16a34a' : '#d97706' }}>{candidateAuth?.widening?.length ? candidateAuth.widening.join(', ') : candidateAuth?.known ? 'None' : 'Not established'}</span></div>
+            <div className="sable-kv"><span>Weakening</span><span style={{ color: (candidateAuth?.weakening?.length ?? 0) > 0 ? '#dc2626' : candidateAuth?.known ? '#16a34a' : '#d97706' }}>{candidateAuth?.weakening?.length ? candidateAuth.weakening.join(', ') : candidateAuth?.known ? 'None' : 'Not established'}</span></div>
+            {candidateAuth?.reason && <div className="sable-kv"><span>Reason</span><span className="sable-kv-val-text">{candidateAuth.reason}</span></div>}
           </div>
         </div>
 

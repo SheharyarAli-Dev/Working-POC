@@ -391,8 +391,10 @@ def test_real_project_lockfile_format_is_understood(tmp_path):
     from backend.config import ROOT
     policy = write(tmp_path / "policy.json", {"approved_requirements": ["pypdf>=6,<7"], "denied_packages": []})
     lock = ROOT / "demo_project" / "InvoiceHub" / "dependencies.lock.json"
-    assert gate_from_files("pypdf==6.19.0", policy, lock)["result"] == "PERMITTED"
-    assert gate_from_files("pypdf==6.18.0", policy, lock)["rule"] == "NOT_IN_LOCKFILE"
+    locked = next(item["version"] for item in json.loads(lock.read_text())["packages"] if item["name"] == "pypdf")
+    assert gate_from_files(f"pypdf=={locked}", policy, lock)["result"] == "PERMITTED"
+    absent = "6.18.0" if locked != "6.18.0" else "6.18.1"
+    assert gate_from_files(f"pypdf=={absent}", policy, lock)["rule"] == "NOT_IN_LOCKFILE"
 
 
 # --- the dashboard entry point (backend/cavr/api.py) ------------------------------------

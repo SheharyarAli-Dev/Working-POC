@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { createRoot } from 'react-dom/client';
 import './styles.css';
 import { BackgroundGrid } from './components/BackgroundGrid';
@@ -28,7 +28,7 @@ class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { has
         <div style={{ padding: '24px', background: '#fef2f2', border: '1px solid #fca5a5', borderRadius: '8px', color: '#b91c1c', margin: '20px 0' }}>
           <h3 style={{ margin: '0 0 8px 0', fontSize: '16px', fontWeight: 700 }}>Module Rendering Notice</h3>
           <p style={{ margin: '0 0 12px 0', fontSize: '13px' }}>{this.state.error?.message || 'An unexpected error occurred while rendering the module.'}</p>
-          <button 
+          <button
             onClick={() => this.setState({ hasError: false, error: null })}
             style={{ padding: '6px 14px', background: '#b91c1c', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 600 }}
           >
@@ -42,8 +42,15 @@ class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { has
 }
 
 function App() {
-  const [activeTab, setActiveTab] = useState<TabType>('CAVR');
+  const openSableDirectly = new URLSearchParams(window.location.search).get('module')?.toLowerCase() === 'sable';
+  const [activeTab, setActiveTab] = useState<TabType>(openSableDirectly ? 'SABLE' : 'CAVR');
   const phase02Ref = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (openSableDirectly) {
+      phase02Ref.current?.scrollIntoView({ behavior: 'auto', block: 'start' });
+    }
+  }, [openSableDirectly]);
 
   const scrollToPhase2 = () => {
     if (phase02Ref.current) {

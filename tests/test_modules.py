@@ -8,6 +8,7 @@ from backend.cavr.repair import rank_repairs
 from backend.sable.analyzer import analyze as sable
 from backend.sable.authorization import evaluate_authorization
 from backend.sable.policy_semantics import evaluate as evaluate_policy_semantics
+from backend.sable.baselines import _load_models
 from backend.sable.hcl_parser import parse as parse_hcl
 from backend.satra.analyzer import analyze as satra
 from backend.satra.security_contract import build
@@ -213,6 +214,56 @@ def test_empty_role_binding_is_unknown_in_both_evaluators(role_binding):
     assert not standalone.known and not standalone.holds
     assert any('role binding unresolved' in message for message in shared['unknown'])
     assert any('role binding unresolved' in message for message in standalone.outside_model)
+@pytest.mark.parametrize('binding', [
+    'var.protected_bucket',
+    '${local.protected_bucket}',
+    None,
+    ['aws_s3_bucket.data.id'],
+    'aws_s3_bucket.other.arn',
+])
+def test_sable_standalone_evaluator_fails_closed_on_unresolved_bucket_policy_binding(binding):
+    model={"resources": {
+        "aws_iam_role.app": {"type": "aws_iam_role", "attributes": {"name": "app-role"}},
+        "aws_s3_bucket.data": {"type": "aws_s3_bucket", "attributes": {"bucket": "customer-data"}},
+        "aws_iam_role_policy.valid": {"type": "aws_iam_role_policy", "attributes": {
+            "role": "aws_iam_role.app.id", "policy": {"Statement": [{"Effect": "Allow",
+                "Action": ["s3:GetObject", "s3:PutObject"], "Resource": ["arn:aws:s3:::customer-data/*"]}]}}},
+        "aws_s3_bucket_policy.dynamic": {"type": "aws_s3_bucket_policy", "attributes": {
+            "bucket": binding, "policy": {"Statement": [{"Effect": "Allow",
+                "Action": "s3:*", "Resource": "*"}]}}},
+    }}
+    result=evaluate_authorization(model, 'aws_iam_role.app', 'aws_s3_bucket.data',
+                                  ['s3:GetObject','s3:PutObject'])
+    assert not result.known
+    assert not result.holds
+    assert any('aws_s3_bucket_policy.dynamic: bucket binding unresolved' in item
+               for item in result.outside_model)
+
+    # A reference to a different declared bucket is statically unrelated and remains ignorable.
+    model['resources']['aws_s3_bucket.other']={"type": "aws_s3_bucket", "attributes": {"bucket": "logs"}}
+    model['resources']['aws_s3_bucket_policy.dynamic']['attributes']['bucket']='aws_s3_bucket.other.id'
+    unrelated=evaluate_authorization(model, 'aws_iam_role.app', 'aws_s3_bucket.data',
+                                     ['s3:GetObject','s3:PutObject'])
+    assert unrelated.known and unrelated.holds
+
+def test_sable_standalone_evaluator_does_not_treat_bucket_policy_as_role_grant():
+    model={"resources": {
+        "aws_iam_role.app": {"type": "aws_iam_role", "attributes": {"name": "app-role"}},
+        "aws_s3_bucket.data": {"type": "aws_s3_bucket", "attributes": {"bucket": "customer-data"}},
+        "aws_iam_role_policy.valid": {"type": "aws_iam_role_policy", "attributes": {
+            "role": "aws_iam_role.app.id", "policy": {"Statement": [{"Effect": "Allow",
+                "Action": ["s3:GetObject", "s3:PutObject"], "Resource": ["arn:aws:s3:::customer-data/*"]}]}}},
+        "aws_s3_bucket_policy.public": {"type": "aws_s3_bucket_policy", "attributes": {
+            "bucket": "aws_s3_bucket.data.id", "policy": {"Statement": [{"Effect": "Allow",
+                "Principal": "*", "Action": ["s3:GetObject", "s3:PutObject"],
+                "Resource": ["arn:aws:s3:::customer-data/*"]}]}}},
+    }}
+    result=evaluate_authorization(model, 'aws_iam_role.app', 'aws_s3_bucket.data',
+                                  ['s3:GetObject','s3:PutObject'])
+    assert not result.known
+    assert not result.holds
+    assert any('bucket-policy principal and identity-policy composition are unsupported' in item
+               for item in result.outside_model)
 
 def test_sable_explicitly_unrelated_role_binding_is_ignored(scenario):
     _,c=scenario('sable_preserved')
@@ -267,7 +318,9 @@ def test_sable_unverified_baseline_and_empty_baseline(scenario):
     ('move_into_module','PRESERVED'),
     ('ambiguous_resolved_by_moved','PRESERVED'),
     ('policy_rewrite_wrong_target','REGRESSED'),
+    ('resource_wildened','REGRESSED'),
     ('privilege_weakened_action','REGRESSED'),
+    ('extra_get_action_wildcard','REGRESSED'),
     ('replacement_wrong_bucket','UNKNOWN'),
     ('ambiguous_set_three_candidates','UNKNOWN'),
 ])
@@ -304,12 +357,64 @@ def test_sable_refactor_and_correspondence_cases(tmp_path,scenario,case,wanted):
     else:
         assert details['successor'] is None
 
+def test_sable_standalone_evaluator_rejects_action_wildcard_widening():
+    fixture=SABLE_FIXTURES['extra_get_action_wildcard']
+    _,candidate,_=_load_models(fixture['baseline_tf'],fixture['candidate_tf'])
+    obligation=fixture['obligation']
+    result=evaluate_authorization(candidate,obligation['principal'],obligation['protected_asset'],obligation['actions'])
+    assert result.known
+    assert not result.holds
+    assert 's3:Get*' in result.widening
+
+def test_sable_standalone_evaluator_rejects_wildcard_resource_widening():
+    fixture=SABLE_FIXTURES['resource_wildened']
+    _,candidate,_=_load_models(fixture['baseline_tf'],fixture['candidate_tf'])
+    obligation=fixture['obligation']
+    result=evaluate_authorization(candidate,obligation['principal'],obligation['protected_asset'],obligation['actions'])
+    assert result.known
+    assert not result.holds
+    assert any(item.startswith('Resource: *') for item in result.widening)
+    assert any(item.startswith('Resource: *') for item in result.unexpected_resources)
+    assert 'Widening' in result.reason
+
+def test_sable_standalone_evaluator_requires_object_arn_for_object_actions():
+    model={"resources": {
+        "aws_iam_role.app": {"type": "aws_iam_role", "attributes": {"name": "app-role"}},
+        "aws_s3_bucket.data": {"type": "aws_s3_bucket", "attributes": {"bucket": "customer-data"}},
+        "aws_iam_role_policy.app": {"type": "aws_iam_role_policy", "attributes": {
+            "role": "aws_iam_role.app.id", "policy": {"Statement": [{"Effect": "Allow",
+                "Action": ["s3:GetObject", "s3:PutObject"], "Resource": ["arn:aws:s3:::customer-data"]}]}}},
+    }}
+    result=evaluate_authorization(model,'aws_iam_role.app','aws_s3_bucket.data',
+                                  ['s3:GetObject','s3:PutObject'])
+    assert result.known
+    assert not result.holds
+    assert not result.misbinding
+    assert result.unexpected_resources==['arn:aws:s3:::customer-data']
+
+def test_sable_benchmark_does_not_claim_unmeasured_correspondence_or_evidence_quality():
+    from backend.sable.benchmark import _compute_metrics
+
+    measured=_compute_metrics([{'scenario_id':'r','verdict':'REGRESSED','correct':True}],
+                              {'r':'REGRESSED'})
+    assert measured['n']==1
+    assert measured['verdict_accuracy']==1.0
+    assert measured['correspondence_accuracy'] is None
+    assert measured['evidence_completeness'] is None
+
 def test_satra_scc_and_inconclusive(scenario,service,tmp_path):
     r,c=scenario();assert build(c)['expected_status']==403
     c.srs='No security requirements';assert build(c) is None
     assert satra(c,tmp_path/'satra',lambda *a:None)[0]=='INCONCLUSIVE'
     service.change_threats(record_id='AUTHZ.IDOR.001',enabled=False)
     c=ContextService(r.candidate_workspace,r.baseline_workspace,service.threats.snapshot());assert satra(c,tmp_path/'disabled',lambda *a:None)[0]=='INCONCLUSIVE'
+
+def test_satra_docker_runner_matches_bind_mount_owner():
+    import os
+    from backend.satra.pytest_runner import container_user_args
+    expected=['--user',f'{os.getuid()}:{os.getgid()}'] if os.name=='posix' else []
+    assert container_user_args('docker')==expected
+    assert container_user_args('podman')==[]
 
 def test_oracle_validation_rejects_errors():
     assert preflight('def test_x():\n assert True')[0] is False

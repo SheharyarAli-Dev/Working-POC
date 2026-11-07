@@ -42,7 +42,7 @@ def context_for(tmp_path, files, packages=None):
     for path, text in {**files, "dependencies.lock.json": json.dumps(lock)}.items():
         target = root / path
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(text)
+        target.write_bytes(text.encode("utf-8"))
     return ContextService(root, root)
 
 
@@ -57,13 +57,15 @@ def chain_of(record):
 
 def test_cross_module_scenario_reaches_pypdf_through_the_vendored_lab_file(scenario):
     run, context = scenario("cross_module")
+    lock = json.loads((context.path / "dependencies.lock.json").read_text())
+    pypdf_version = next(item["version"] for item in lock["packages"] if item["name"] == "pypdf")
     assert not [a for a in context.dependency_context()["dependency_attributions"] if a["package"] == "pypdf"]
     found = use_through_local_artifacts(context)
     assert [chain_of(r) for r in found] == [
         ("vendor/invoice_pdf_lab.py", ("app/pdf_adapter.py", 1), ("app/main.py", 87), ("vendor/invoice_pdf_lab.py", 10, "apply_configuration")),
         ("vendor/invoice_pdf_lab.py", ("app/pdf_adapter.py", 1), ("app/main.py", 87), ("vendor/invoice_pdf_lab.py", 11, "PdfReader"))]
     assert {(r["package"], r["version"], r["purpose"], r["through"]["local_package"]) for r in found} == {
-        ("pypdf", "6.19.0", "PDF text extraction", "invoice-pdf-lab")}
+        ("pypdf", pypdf_version, "PDF text extraction", "invoice-pdf-lab")}
     assert found[0]["through"]["sha256"] == hashlib.sha256((context.path / "vendor/invoice_pdf_lab.py").read_bytes()).hexdigest()
     for name in ("pypdf", "invoice-pdf-lab"):
         contract = infer(context, {"name": name})

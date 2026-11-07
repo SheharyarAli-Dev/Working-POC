@@ -159,4 +159,3 @@ def test_pytest_runner_lf_digest_cross_platform_invariance():
 
     # Both must produce identical hash digests
     assert _lf_digest(crlf_bytes) == _lf_digest(lf_bytes)
-

@@ -1,3 +1,4 @@
+"""Applies named, controlled module changes inside an isolated run candidate."""
 import json
 import shutil
 from pathlib import Path
@@ -5,9 +6,12 @@ from backend.config import ROOT
 from backend.orchestrator.hashing import digest,copy_tree
 from backend.satra.counterfactuals import mutate_ownership
 
-def catalog():return json.loads((ROOT/'scenarios/catalog.json').read_text())
+def catalog():
+    # The catalog supplies scenario names, labels, and expected outcomes for controlled runs.
+    return json.loads((ROOT/'scenarios/catalog.json').read_text())
 
 def apply_scenario(path,scenario):
+    # Fixtures mutate only the isolated candidate workspace created for this run.
     path=Path(path)
     if scenario=='satra_weak':(path/'tests/test_security.py').write_text((ROOT/'scenarios/satra/weak_test.py').read_text())
     elif scenario=='satra_bypass':mutate_ownership(path)
@@ -28,6 +32,7 @@ def apply_scenario(path,scenario):
 
 
 def replace_lab(root):
+    # Model a reviewed local replacement and update its lock entry and dependency edge together.
     root=Path(root);lock=json.loads((root/'dependencies.lock.json').read_text())
     if not any(n['name']=='invoice-pdf-lab' for n in lock['packages']):return []
     src=ROOT/'scenarios/cavr_controlled/invoice_pdf_safe.py';vendor=root/'vendor';vendor.mkdir(exist_ok=True)

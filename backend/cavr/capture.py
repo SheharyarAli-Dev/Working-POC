@@ -30,6 +30,7 @@ the record keeps (`redact`), because the record is printed, logged and shown on 
 from __future__ import annotations
 
 import hashlib
+import os
 import re
 import shlex
 from pathlib import Path
@@ -86,12 +87,26 @@ UNSUPPORTED_OPTIONS = {
 }
 
 
+def _split_command(command: str) -> list[str]:
+    """Split a command line into arguments, respecting quotes and Windows backslashes."""
+    if os.name == "nt":
+        tokens = shlex.split(command, posix=False)
+        cleaned = []
+        for t in tokens:
+            if len(t) >= 2 and ((t.startswith('"') and t.endswith('"')) or (t.startswith("'") and t.endswith("'"))):
+                cleaned.append(t[1:-1])
+            else:
+                cleaned.append(t)
+        return cleaned
+    return shlex.split(command)
+
+
 def parse_pip_command(command, cwd=".") -> dict:
     """Capture one pip command. `command` is a string or a list of tokens; `cwd` is where it ran."""
     record = new_record("pip_command")
     if isinstance(command, str):
         try:
-            argv = shlex.split(command)
+            argv = _split_command(command)
         except ValueError as exc:
             record["command"] = [redact(command)]
             _note(record, "errors", command, f"cannot split the command: {exc}", "command")
@@ -187,7 +202,7 @@ def parse_requirements_text(text: str, source: str = "requirements.txt") -> list
         words = line.split()
         first_option = next((i for i, word in enumerate(words) if word.startswith("-")), len(words))
         try:
-            items = _split_options(shlex.split(" ".join(words[first_option:])))
+            items = _split_options(_split_command(" ".join(words[first_option:])))
         except ValueError as exc:
             entries.append(other("error", f"malformed line: {exc}"))
             continue

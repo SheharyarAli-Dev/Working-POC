@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Play, RefreshCw, AlertTriangle, CheckCircle2, XCircle, Sliders, ShieldAlert } from 'lucide-react';
+import { executeSableBenchmark } from '../benchmarkStream';
 
 interface AblationsKillTestsProps {
   onRunBenchmark?: () => void;
@@ -36,6 +37,7 @@ export const AblationsKillTestsTab: React.FC<AblationsKillTestsProps> = () => {
   const [result, setResult] = useState<any>(null);
   const [running, setRunning] = useState(false);
   const [progress, setProgress] = useState<{ scenario: string; pct: number } | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     fetch('/api/sable/benchmark/result')
@@ -49,32 +51,13 @@ export const AblationsKillTestsTab: React.FC<AblationsKillTestsProps> = () => {
     setRunning(true);
     setProgress({ scenario: 'Initializing benchmark engine…', pct: 0 });
     setResult(null);
+    setError(null);
 
     try {
-      const res = await fetch('/api/sable/benchmark/run', { method: 'POST' });
-      const reader = res.body?.getReader();
-      const decoder = new TextDecoder();
-
-      if (!reader) { setRunning(false); return; }
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        const text = decoder.decode(value);
-        for (const line of text.split('\n')) {
-          if (!line.startsWith('data:')) continue;
-          try {
-            const ev = JSON.parse(line.slice(5).trim());
-            if (ev.type === 'benchmark.progress') {
-              setProgress({ scenario: ev.payload.scenario, pct: ev.payload.pct });
-            } else if (ev.type === 'benchmark.complete') {
-              setResult(ev.payload);
-            }
-          } catch { /* ignore parse errors */ }
-        }
-      }
-    } catch {
-      /* ignore */
+      const result = await executeSableBenchmark(setProgress);
+      setResult(result);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Benchmark failed.');
     } finally {
       setRunning(false);
     }
@@ -111,6 +94,8 @@ export const AblationsKillTestsTab: React.FC<AblationsKillTestsProps> = () => {
           <span>{progress.pct.toFixed(0)}% — {progress.scenario}</span>
         </div>
       )}
+
+      {error && <div role="alert" className="sable-diff-warn">{error}</div>}
 
       {!result && !running && (
         <div className="sable-tab-empty" style={{ minHeight: 140 }}>
@@ -197,6 +182,7 @@ export const AblationsKillTestsTab: React.FC<AblationsKillTestsProps> = () => {
             {Object.entries(killTests).map(([kid, kt]: [string, any]) => {
               const isPass = kt.status === 'PASS';
               const isFail = kt.status === 'FAIL';
+              const statusLabel = kt.status === 'UNMEASURED' ? 'UNMEASURED' : kt.status === 'PASS' || kt.status === 'FAIL' || kt.status === 'INCONCLUSIVE' ? kt.status : 'NOT RUN';
 
               return (
                 <div key={kid} className={`sable-kt-card ${kt.status.toLowerCase()}`}>
@@ -216,8 +202,12 @@ export const AblationsKillTestsTab: React.FC<AblationsKillTestsProps> = () => {
                       <span className="sable-badge-pass"><CheckCircle2 size={12}/> PASS</span>
                     ) : isFail ? (
                       <span className="sable-badge-fail"><XCircle size={12}/> FAIL</span>
-                    ) : (
+                    ) : kt.status === 'UNMEASURED' ? (
+                      <span className="sable-badge sable-badge-approx"><AlertTriangle size={12}/> UNMEASURED</span>
+                    ) : kt.status === 'INCONCLUSIVE' ? (
                       <span className="sable-badge-inc"><AlertTriangle size={12}/> INCONCLUSIVE</span>
+                    ) : (
+                      <span className="sable-badge sable-badge-approx"><AlertTriangle size={12}/> {statusLabel}</span>
                     )}
                   </div>
 
