@@ -1,0 +1,126 @@
+# ASENT gate, reusable. A target repository calls it from its own pull-request workflow
+# (copyable template: docs/gate/asent-pr.yml; usage: docs/asent-gate.md).
+#
+# It checks out the target repository (full history, so the base commit exists), checks out ASENT at
+# a pinned commit, builds the sandbox image ASENT runs tests and packages in, and runs
+#   asent gate --repository target --base <PR base SHA> --head <PR head SHA>
+# The authority is the target's .asent/ folder at the BASE commit. Exit codes: 0 ACCEPT, 1 BLOCK,
+# 2 REVIEW. BLOCK always fails the job; REVIEW fails it unless review-fails is false.
+#
+# Safe to run on pull requests from forks: triggered by `pull_request` (never the privileged base-branch trigger),
+# read-only token, no credentials kept in the checkouts, and event data reaches shell scripts only
+# through environment variables.
+name: ASENT gate (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      asent-repository:
+        description: "owner/name of the ASENT repository"
+        type: string
+        required: true
+      asent-ref:
+        description: "ASENT commit SHA to run (pin a full SHA, not a branch)"
+        type: string
+        required: true
+      review-fails:
+        description: "fail the job when the decision is REVIEW (exit 2)"
+        type: boolean
+        default: true
+      base:
+        description: "base commit; default: the pull request's base SHA"
+        type: string
+        default: ""
+      head:
+        description: "head commit; default: the pull request's head SHA"
+        type: string
+        default: ""
+      python-version:
+        type: string
+        default: "3.12"
+    outputs:
+      decision:
+        description: "ACCEPT, BLOCK or REVIEW"
+        value: ${{ jobs.gate.outputs.decision }}
+      exit-code:
+        description: "0 ACCEPT, 1 BLOCK, 2 REVIEW"
+        value: ${{ jobs.gate.outputs.exit-code }}
+
+permissions:
+  contents: read
+
+jobs:
+  gate:
+    name: ASENT gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      decision: ${{ steps.gate.outputs.decision }}
+      exit-code: ${{ steps.gate.outputs.exit_code }}
+    steps:
+      - name: Check out the repository under review
+        uses: actions/checkout@v4
+        with:
+          path: target
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Check out ASENT at the pinned commit
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.asent-repository }}
+          ref: ${{ inputs.asent-ref }}
+          path: asent
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ inputs.python-version }}
+          cache: pip
+          cache-dependency-path: asent/requirements.lock.txt
+      - name: Install ASENT
+        run: python -m pip install -r asent/requirements.lock.txt
+      - name: Build the ASENT sandbox image (tests and packages run only inside it)
+        run: docker build -t asent-sandbox:local -f asent/docker/sandbox.Dockerfile asent
+      - name: Run the gate
+        id: gate
+        env:
+          BASE_SHA: ${{ inputs.base || github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ inputs.head || github.event.pull_request.head.sha }}
+          ASENT_PYTHON: python
+        run: |
+          if [ -z "$BASE_SHA" ] || [ -z "$HEAD_SHA" ]; then
+            echo "No base/head commit: run on pull_request or pass inputs base and head." >&2
+          fi
+          set +e
+          asent/scripts/asent gate --repository target --base "$BASE_SHA" --head "$HEAD_SHA" --output-dir asent-out
+          code=$?
+          set -e
+          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
+          case "$code" in
+            0) echo "decision=ACCEPT" >> "$GITHUB_OUTPUT" ;;
+            1) echo "decision=BLOCK" >> "$GITHUB_OUTPUT" ;;
+            *) echo "decision=REVIEW" >> "$GITHUB_OUTPUT" ;;
+          esac
+          if [ -f asent-out/asent-summary.md ]; then
+            cat asent-out/asent-summary.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "ASENT wrote no summary (exit $code)." >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Upload the ASENT report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: asent-gate-report
+          path: asent-out/
+          if-no-files-found: warn
+      - name: Apply the decision
+        env:
+          CODE: ${{ steps.gate.outputs.exit_code }}
+          REVIEW_FAILS: ${{ inputs.review-fails }}
+        run: |
+          case "$CODE" in
+            "0") echo "ASENT: ACCEPT" ;;
+            "1") echo "::error::ASENT: BLOCK (see the job summary and the asent-gate-report artifact)"; exit 1 ;;
+            "2") if [ "$REVIEW_FAILS" = "true" ]; then echo "::error::ASENT: REVIEW needed"; exit 1; fi
+                 echo "::warning::ASENT: REVIEW needed (review-fails is false)" ;;
+            *)   echo "::error::ASENT: no decision (exit '$CODE')"; exit 1 ;;
+          esac

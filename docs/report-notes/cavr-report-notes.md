@@ -3389,3 +3389,64 @@ Container path: Docker is not installed here; `container_on_host` runs the exact
 
 1. **Show that each CAVR verdict reaches CI correctly.** `tests/test_gate_cavr_verdicts.py`: four real repositories, four verdicts, exit codes 0/1/1/2, the pipeline's own stage and rule in the report.
 2. **Is the demo dependency safe?** On the recorded data yes; on live OSV (2026-11-07) pypdf 6.19.0 is affected by 18 advisories, and the gate blocks it.
+
+## Step 10 — CLI in the Docker image and a reusable GitHub Actions workflow (2026-11-07)
+
+### Ch 6 Implementation
+
+- `scripts/asent` (new, 0755): POSIX wrapper; `ASENT_HOME` (default the checkout above the script), `ASENT_PYTHON` (default `python3`); `exec python -m backend.cli "$@"`.
+- `Dockerfile`: installs the wrapper as `/usr/local/bin/asent`, `ENV ASENT_HOME=/app ASENT_PYTHON=python`; the server `CMD` is unchanged.
+- `.github/workflows/cd.yml`: image smoke test also runs `asent gate --help`.
+- `.github/workflows/asent-gate.yml` (new): `on: workflow_call` (inputs `asent-repository`, `asent-ref`, `review-fails`, optional `base`/`head`, `python-version`; outputs `decision`, `exit-code`); read-only permissions; target checkout with `fetch-depth: 0`; ASENT checkout at the pinned ref; `pip install -r requirements.lock.txt`; `docker build` of `asent-sandbox:local`; `asent gate` with the PR base/head SHAs (through env); summary to `$GITHUB_STEP_SUMMARY`; report artifact (`if: always()`); BLOCK fails, REVIEW fails unless `review-fails: false`.
+- `docs/gate/asent-pr.yml` (new): the copyable caller (`on: pull_request`).
+
+### Design decisions
+
+- **Runner-native, image ships the CLI too:** decided by Maryam (decision 2). Inside the image without a container engine, SATRA and CAVR deep paths are INCONCLUSIVE/UNRESOLVED -> REVIEW; documented in `docs/asent-gate.md`.
+- **Fork-safe workflow:** `pull_request` only, `contents: read`, `persist-credentials: false`, no `${{ }}` inside `run:` (tested), so a crafted branch name cannot inject shell code.
+- **Pinned ASENT ref as an input:** the gate code that decides must itself be a fixed, reviewable commit.
+- **Docker image run with `--user $(id -u):$(id -g)`:** git refuses repositories owned by another user (`safe.directory`), and the gate deliberately ignores global/system git config; matching the owner avoids a permanent REVIEW.
+
+### Requirements covered
+
+| ID | Title | What this covers | Acceptance check |
+|---|---|---|---|
+| none listed | Gate on any repository's pull requests (dev-env plan) | Reusable workflow and caller | `test_reusable_workflow_interface`, `test_gate_step_uses_the_pull_request_shas_and_maps_exit_codes`, `test_caller_example_runs_on_pull_requests` |
+| FR-6 | Fail-Closed Security Policy | REVIEW fails the job by default; missing exit code fails | `test_gate_step_uses_the_pull_request_shas_and_maps_exit_codes` |
+
+### Ch 7 Test cases
+
+`tests/test_gate_packaging.py`: 10 passed.
+
+| Test ID | Purpose | Input | Expected | Result |
+|---|---|---|---|---|
+| `test_reusable_workflow_interface` | Interface | asent-gate.yml | required inputs, boolean review-fails default true, outputs | pass |
+| `test_workflow_permissions_are_read_only` | Least privilege | both files | `contents: read` only | pass |
+| `test_no_pull_request_target_anywhere` | Fork safety | both files (text) | absent | pass |
+| `test_no_untrusted_expressions_inside_shell_scripts` | Injection | every `run:` | no `${{` | pass |
+| `test_checkouts_have_full_history_and_no_persisted_credentials` | Checkout | both checkouts | fetch-depth 0; pinned ASENT; no credentials | pass |
+| `test_gate_step_uses_the_pull_request_shas_and_maps_exit_codes` | Gate step | workflow | PR SHAs via env, sandbox build, artifact always, 1/2 mapping | pass |
+| `test_caller_example_runs_on_pull_requests` | Template | asent-pr.yml | pull_request, calls the reusable workflow | pass |
+| `test_dockerfile_installs_the_cli_and_keeps_the_server` | Image | Dockerfile | wrapper installed, ASENT_HOME, uvicorn CMD last | pass |
+| `test_cd_smoke_test_runs_the_gate_cli` | CD | cd.yml | `asent gate --help` | pass |
+| `test_wrapper_is_executable_and_runs_a_real_gate` | Wrapper | `scripts/asent gate` on a real repo | help exit 0; README-only project exit 2 with both files | pass |
+
+Not run here: `docker build` (Docker not installed), `actionlint` (not installed), and a real pull-request run of `asent-gate.yml` (would need a push; Maryam said not to push). These are the open items of the plan's done criterion.
+
+### Defects found and fixed
+
+- The workflow comment named the forbidden trigger and tripped the text check; reworded (the stricter text check was kept). Review: 0 passes of cavr-reviewer (not requested), 1 self-review pass, 0 MINOR open.
+
+### Known limitations / deferred
+
+- Actions are pinned by major version (`@v4`), as in the existing workflows; pinning by commit SHA is recommended for adopters (`docs/asent-gate.md`).
+- No PR comment is posted; results are in the job summary and the `asent-gate-report` artifact.
+
+### Tool disclosure (Ch 8.7)
+
+- **Generated by Claude Code:** wrapper, Dockerfile/CD lines, both workflow files, tests, notes. **Reviewed by Maryam:** not yet. **Verified by:** YAML parsed and checked by tests; wrapper executed for real; image and Actions run not verified (see above).
+
+### Supervisor Q&A prep
+
+1. **Is it safe to run on pull requests from strangers?** The workflow has a read-only token, keeps no credentials, never uses `pull_request_target`, and repository code runs only inside the `--network none` sandbox container.
+2. **How does another team adopt it?** `asent init`, review and merge `.asent/`, copy `docs/gate/asent-pr.yml` with a pinned ASENT SHA.
