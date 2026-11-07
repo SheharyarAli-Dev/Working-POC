@@ -2949,3 +2949,63 @@ All in `tests/test_project_config.py`; result of `.venv/bin/python -m pytest -q 
 
 1. **Can `asent init` make a project pass the gate?** No: its output carries `_starter` and loads as invalid, so the decision is REVIEW until a person edits and accepts it.
 2. **Why not generate a SATRA contract from the routes?** The contract is the authority the test is judged against; deriving it from the code under test would make the code its own oracle.
+
+## Step 3 — git ref resolution and exact commit export (2026-11-07)
+
+### Ch 6 Implementation
+
+- `backend/integrations/git_adapter.py` `[owner review: integrations]`: new `resolve_commit(repository, ref)`, `export_commit(repository, sha, dest)`, helpers `_git_env`, `_git_raw`, constants `EXPORT_MAX_FILES`/`EXPORT_MAX_BYTES` (same budget as `orchestrator.hashing.files`); `init_repo` commit message is now "Trusted baseline".
+- Algorithm of `export_commit`: `git ls-tree -r -l -z --full-tree <sha>` lists every entry with mode and size; a symlink (120000), submodule (160000), non-UTF-8 or unsafe path, or a tree over budget raises ValueError before anything is read; the blobs are read in one `git cat-file --batch`, each header is checked (sha, type, size), and the bytes are written as they are, with the exec bit from mode 100755.
+- `resolve_commit`: the directory must be the top level of a repository (`--show-toplevel`, discovery above it disabled with `GIT_CEILING_DIRECTORIES`); refs that are empty, start with `-` or contain `:` are refused; `rev-parse --verify --end-of-options REF^{commit}`.
+
+### Design decisions
+
+- **`ls-tree` + `cat-file`, not `git archive` (changed from the plan):** `archive` applies the tree's own `.gitattributes`, so a pull request could add `export-ignore` to hide a file from every analyzer, or `export-subst` to rewrite one. Reading blobs gives exactly the committed bytes. `checkout` was also rejected: it runs eol conversion, filters and hooks.
+- **Symlinks and submodules refused:** their content is not analysed, so analysing the rest and accepting would be a pass on unseen code; ValueError -> REVIEW.
+- **Ref looks like an option -> refused**, plus `--end-of-options`: a ref such as `--output=/tmp/x` must never reach git as an option.
+- **Top-level check:** a plain directory inside some other repository must not silently resolve to that outer repository.
+
+### Requirements covered
+
+| ID | Title | What this covers | Acceptance check |
+|---|---|---|---|
+| FR-6 | Fail-Closed Security Policy | Unknown refs, symlinks, submodules, unsafe/over-budget trees are errors, never a partial export | `test_unknown_or_unsafe_ref` (5), `test_symlink_in_commit_is_refused`, `test_submodule_is_refused`, `test_budget_is_checked_before_reading` |
+| none listed | Evidence binding to real commits (dev-env plan) | The analysed files are the committed bytes | `test_export_is_byte_exact_and_keeps_the_exec_bit`, `test_repository_attributes_cannot_hide_or_rewrite_files` |
+
+### Ch 7 Test cases
+
+`tests/test_gate_git_export.py`: 18 passed. `tests/test_integration.py` + `tests/test_shared.py` (use `init_repo`): 57 passed.
+
+| Test ID | Purpose | Input | Expected | Result |
+|---|---|---|---|---|
+| `test_resolve_branch_tag_and_sha` | Refs | branch, tag, short sha, `HEAD~1` | full SHAs | pass |
+| `test_unknown_or_unsafe_ref` (5) | Failure | unknown, empty, `--output=…`, `HEAD:a.txt`, 40 zeros | ValueError | pass |
+| `test_not_a_repository` | Failure | plain dir, missing dir | ValueError | pass |
+| `test_export_is_byte_exact_and_keeps_the_exec_bit` | Exactness | CRLF text, 256-byte binary, empty file, `.asent/`, exec script | identical bytes, exec bit only on the script | pass |
+| `test_export_of_an_older_commit_ignores_the_worktree` | Exactness | old sha, newer commit, uncommitted file | only the old file | pass |
+| `test_repository_attributes_cannot_hide_or_rewrite_files` | Attack | `export-ignore`, `export-subst`, `eol=crlf` | files present and unchanged | pass |
+| `test_hooks_are_not_run` | Attack | four hooks writing a marker | no marker | pass |
+| `test_symlink_in_commit_is_refused`, `test_submodule_is_refused` | Unsupported | committed symlink / submodule | ValueError | pass |
+| `test_budget_is_checked_before_reading` | Budget | limits lowered to 9 bytes / 1 file | ValueError "budget" | pass |
+| `test_destination_must_be_new` | Edge | non-empty destination | ValueError | pass |
+| `test_base_equal_to_head`, `test_empty_tree` | Edge | same sha twice / empty commit | equal trees / empty dir | pass |
+| `test_baseline_commit_message_is_generic` | Inventory fix | `init_repo` | "Trusted baseline" | pass |
+
+### Defects found and fixed
+
+- Design defect in the plan (export through `git archive`) found while writing the attribute test; replaced before implementation. Review: 0 passes of cavr-reviewer (not requested), 1 self-review pass, 0 MINOR open.
+
+### Known limitations / deferred
+
+- Git LFS files are exported as pointer files (no filters run); submodules make the gate REVIEW.
+- A bare repository is not supported (`--repository` must be a work tree).
+- In a container where the repository belongs to another user, git's `safe.directory` check may refuse it; the runner-native workflow (step 10) does not hit this.
+
+### Tool disclosure (Ch 8.7)
+
+- **Generated by Claude Code:** the two functions, the tests, these notes. **Reviewed by Maryam / integrations owner:** not yet. **Verified by:** tests on real repositories written before the code.
+
+### Supervisor Q&A prep
+
+1. **Why not just `git archive`?** It obeys the repository's `.gitattributes`; `export-ignore` would let the change under review hide a file from ASENT. We read the blobs directly, so ASENT sees exactly what was committed.
+2. **Could gating a malicious repository run its code on the host?** Not in this step: no checkout, no hooks (`core.hooksPath=/dev/null`, no global config), and git only reads objects.
