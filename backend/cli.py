@@ -1,4 +1,9 @@
-"""Local CLI for the same HTTP gateway used by the dashboard."""
+"""ASENT command line.
+
+Local commands (no server): `init` writes a starter .asent/ for a project.
+Server commands (`run`, `watch`, `dependency`, `replay`, `research`, `report`, `capabilities`) call the
+same HTTP gateway the dashboard uses.
+"""
 import argparse
 import json
 import os
@@ -9,8 +14,19 @@ from pathlib import Path
 import httpx
 from backend.integrations.research_loader import load as load_research
 
-def main():
-    parser=argparse.ArgumentParser(prog='asent',description='ASENT local assurance gateway (start scripts/start.sh first)')
+LOCAL_COMMANDS=('init',)
+
+def init_command(args):
+    from backend.project_config.starter import init_project
+    try:report=init_project(Path(args.repository),force=args.force)
+    except (FileExistsError,ValueError) as e:print(str(e),file=sys.stderr);return 2
+    for name in report['files']:print(name)
+    if report['not_copied']:print('Not approved (not an exact pin): '+', '.join(report['not_copied']))
+    print('Starter written. Review every file in .asent/, then remove "_starter" from .asent/config.json; until then every gate decision is REVIEW.')
+    return 0
+
+def main(argv=None):
+    parser=argparse.ArgumentParser(prog='asent',description='ASENT assurance gate. Local: init. Server commands need scripts/start.sh first.')
     parser.add_argument('--url',default=os.environ.get('ASENT_URL','http://127.0.0.1:8000'))
     sub=parser.add_subparsers(dest='action',required=True)
     for action in ('run','watch'):
@@ -20,7 +36,9 @@ def main():
     p=sub.add_parser('research');p.add_argument('manifest');p.add_argument('--opt-in',action='store_true');p.add_argument('--wait',action='store_true')
     p=sub.add_parser('report');p.add_argument('run');p.add_argument('--output')
     sub.add_parser('capabilities')
-    args=parser.parse_args()
+    p=sub.add_parser('init',help='write a starter .asent/ (refused by the gate until reviewed)');p.add_argument('--repository',default='.');p.add_argument('--force',action='store_true')
+    args=parser.parse_args(argv)
+    if args.action=='init':return init_command(args)
     with httpx.Client(base_url=args.url,timeout=180,trust_env=False) as client:
         def call(method,path,body=None):
             r=client.request(method,'/api'+path,json=body);r.raise_for_status();return r.json()
