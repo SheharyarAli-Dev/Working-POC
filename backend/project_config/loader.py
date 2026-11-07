@@ -215,6 +215,11 @@ def load(asent_dir) -> ConfigResult:
                 documents["sable_obligations"] = SableObligations.model_validate(obligations).model_dump()
             except ValidationError as exc:
                 problems.extend(_schema_problems("ASENT_CONFIG_OBLIGATIONS", sable.obligations, exc))
+            else:
+                for item in documents["sable_obligations"]["obligations"]:
+                    if item["terraform_dir"] is not None and item["terraform_dir"] not in sable.terraform_dirs:
+                        problems.append(f"ASENT_CONFIG_OBLIGATIONS: {sable.obligations}: obligation {item['id']!r} names terraform_dir "
+                                        f"{item['terraform_dir']!r}, which is not in terraform_dirs")
 
     return done(problems, config, documents)
 

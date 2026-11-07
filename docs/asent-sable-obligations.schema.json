@@ -46,6 +46,19 @@
           "minLength": 1,
           "title": "Scope",
           "type": "string"
+        },
+        "terraform_dir": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Terraform root of this obligation; default: the first of terraform_dirs",
+          "title": "Terraform Dir"
         }
       },
       "required": [

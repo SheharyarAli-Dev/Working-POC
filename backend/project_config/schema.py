@@ -165,6 +165,7 @@ class Obligation(_Model):
     scope: Text = "objects"
     minimum_score: int = Field(6, ge=0)
     margin: int = Field(3, ge=0)
+    terraform_dir: Optional[ProjectPath] = Field(None, description="Terraform root of this obligation; default: the first of terraform_dirs")
 
 
 class SableObligations(_Model):

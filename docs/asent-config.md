@@ -108,6 +108,9 @@ trusted tests must fail on that mutant). Optional text fields: `subject`, `actio
 ```
 
 At least one obligation; ids unique; `actions` non-empty; `minimum_score` and `margin` ≥ 0 (defaults 6 and 3).
+Optional `terraform_dir`: the Terraform root (one of `terraform_dirs`) the obligation is about; default the first.
+Each obligation must already hold on the base commit, otherwise it is UNKNOWN. The module result is the worst
+obligation (REGRESSED > UNKNOWN > PRESERVED); Terraform outside `terraform_dirs` makes it UNKNOWN.
 
 ## Rules that apply to every file
 
