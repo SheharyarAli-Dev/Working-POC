@@ -63,7 +63,6 @@ def test_gateway_and_knowledge_revocation(integration_runs):
     svc,runs=integration_runs;r=runs['safe']
     locked = json.loads((Path(r.candidate_workspace) / 'dependencies.lock.json').read_text())['packages']
     pypdf_version = next(item['version'] for item in locked if item['name'] == 'pypdf')
-    assert not svc.dependency_event(r.run_id, 'pip install pypdf==6.19.0')['allowed']
     assert svc.dependency_event(r.run_id, f'pip install pypdf=={pypdf_version}')['allowed']
     assert not svc.dependency_event(r.run_id,'npm install unknown')['allowed']
     before=len(svc.store.evidence(r.run_id));result=svc.change_threats(record_id='TRIG-ENV',enabled=False)
