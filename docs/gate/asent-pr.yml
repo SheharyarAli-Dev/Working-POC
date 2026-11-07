@@ -1,0 +1,19 @@
+# Copy to .github/workflows/asent.yml in the repository to be gated.
+# Before the first pull request: run `asent init`, review .asent/, remove "_starter", and merge it to the
+# default branch. The gate always uses .asent/ from the pull request's BASE commit.
+# Replace <ASENT_COMMIT_SHA> (both places) with a full commit SHA of the ASENT repository.
+name: ASENT gate
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  asent:
+    uses: SheharyarAli-Dev/Working-POC/.github/workflows/asent-gate.yml@<ASENT_COMMIT_SHA>
+    with:
+      asent-repository: SheharyarAli-Dev/Working-POC
+      asent-ref: <ASENT_COMMIT_SHA>
+      review-fails: true

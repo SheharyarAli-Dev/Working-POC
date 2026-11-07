@@ -10,6 +10,10 @@ def catalog():
     # The catalog supplies scenario names, labels, and expected outcomes for controlled runs.
     return json.loads((ROOT/'scenarios/catalog.json').read_text())
 
+def scenario_project(item):
+    # The fixture project a scenario starts from (demo layer only; gate runs never call this).
+    return ROOT/item.get('project','demo_project/InvoiceHub')
+
 def apply_scenario(path,scenario):
     # Fixtures mutate only the isolated candidate workspace created for this run.
     path=Path(path)

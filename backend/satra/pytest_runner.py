@@ -36,21 +36,34 @@ def container_user_args(engine):
         return ['--user', f'{os.getuid()}:{os.getgid()}']
     return []
 
-def run_pytest(root,output,selected='all',trusted=False):
+def run_pytest(root,output,selected='all',trusted=False,trusted_tests_dir=None,external=False,targets=None,pytest_ini=None):
+    # Gate runs pass external=True (never on the host, whatever the files), trusted_tests_dir (the
+    # base .asent/ tests), targets (explicit project test paths) and pytest_ini (the trusted ini).
     start=time.perf_counter();output=Path(output);output.mkdir(parents=True,exist_ok=True)
     caps=availability();engine=next((e for e in ('docker','podman') if caps[e]['available']),None)
-    if not engine and not permitted_builtin(root):return {'available':False,'exit_code':None,'reason':'External/modified code requires Docker/Podman; host execution is limited to hash-pinned bundled sources','tests':[]}
+    if not engine and (external or not permitted_builtin(root)):return {'available':False,'exit_code':None,'reason':'External/modified code requires Docker/Podman; host execution is limited to hash-pinned bundled sources','tests':[]}
     with tempfile.TemporaryDirectory(prefix='asent-pytest-') as d:
         work=copy_tree(root,Path(d)/'project')
-        if trusted:
+        generic=trusted_tests_dir is not None or targets is not None or pytest_ini is not None
+        if trusted and trusted_tests_dir is not None:
+            if (work/'asent_assurance').exists():return {'available':False,'exit_code':None,'reason':'project already has an asent_assurance directory','tests':[]}
+            copy_tree(trusted_tests_dir,work/'asent_assurance')
+            wanted='asent_assurance/test_'+selected+'.py'
+            targets=['asent_assurance'] if selected=='all' or not (work/wanted).is_file() else [wanted]
+        elif targets is not None:targets=list(targets)
+        elif trusted:
             testdir=work/'assurance';testdir.mkdir()
             shutil.copyfile(ROOT/'backend/satra/trusted_fixtures.py',testdir/'conftest.py')
             for name in ['security','functional']:shutil.copyfile(ROOT/f'backend/satra/trusted_{name}.py',testdir/f'test_{name}.py')
             targets=['assurance'] if selected=='all' else ['assurance/test_'+selected+'.py']
         else:targets=['tests'] if selected=='all' else ['tests/test_'+selected+'.py']
-        args=['-q','-o','addopts=','-c',str(work/'pytest.ini'),'--junitxml='+str(work/'results.xml'),*targets]
+        ini='pytest.ini'
+        if generic:
+            if pytest_ini is not None:shutil.copyfile(pytest_ini,work/'.asent-pytest.ini');ini='.asent-pytest.ini'
+            elif not (work/'pytest.ini').is_file():ini=None
+        args=['-q','-o','addopts=',*(['-c',str(work/ini)] if ini else []),'--junitxml='+str(work/'results.xml'),*targets]
         if engine:
-            args=['-q','-o','addopts=','-c','/work/pytest.ini','--junitxml=/work/results.xml',*targets]
+            args=['-q','-o','addopts=',*(['-c','/work/'+ini] if ini else []),'--junitxml=/work/results.xml',*targets]
             cmd=[engine,'run','--rm',*container_user_args(engine),'--network','none','--read-only','--cap-drop','ALL','--security-opt','no-new-privileges','--memory','512m','--cpus','1','--pids-limit','64','--tmpfs','/tmp:rw,nosuid,size=64m','-v',str(work)+':/work:rw','-w','/work','-e','PYTEST_DISABLE_PLUGIN_AUTOLOAD=1','asent-sandbox:local','python','-m','pytest',*args]
         else:
             cmd=[sys.executable,'-I',str(ROOT/'backend/satra/runner_entry.py'),str(work),*args]

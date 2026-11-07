@@ -1,0 +1,6 @@
+#!/bin/sh
+# ASENT command line. `asent gate --repository PATH --base REF --head REF` exits 0 ACCEPT, 1 BLOCK, 2 REVIEW.
+# ASENT_HOME: the ASENT checkout (default: the directory above this script; /app in the Docker image).
+# ASENT_PYTHON: the interpreter with requirements.lock.txt installed (default: python3).
+ASENT_HOME="${ASENT_HOME:-$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)}"
+PYTHONPATH="$ASENT_HOME${PYTHONPATH:+:$PYTHONPATH}" exec "${ASENT_PYTHON:-python3}" -m backend.cli "$@"

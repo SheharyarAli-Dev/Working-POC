@@ -1,0 +1,154 @@
+{
+  "$defs": {
+    "Counterfactual": {
+      "additionalProperties": false,
+      "properties": {
+        "operator": {
+          "const": "RETURN_TRUE",
+          "description": "replace the target function's body with `return True`",
+          "title": "Operator",
+          "type": "string"
+        },
+        "target": {
+          "title": "Target",
+          "type": "string"
+        }
+      },
+      "required": [
+        "operator",
+        "target"
+      ],
+      "title": "Counterfactual",
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`.asent/satra/contract.json`.",
+  "properties": {
+    "action": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Action"
+    },
+    "authority_sources": {
+      "description": "where the requirement comes from",
+      "items": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "minItems": 1,
+      "title": "Authority Sources",
+      "type": "array"
+    },
+    "counterfactual": {
+      "$ref": "#/$defs/Counterfactual"
+    },
+    "description": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Description"
+    },
+    "expected_status": {
+      "description": "status a denied request must get",
+      "maximum": 599,
+      "minimum": 100,
+      "title": "Expected Status",
+      "type": "integer"
+    },
+    "preconditions": {
+      "items": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "title": "Preconditions",
+      "type": "array"
+    },
+    "resource": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Resource"
+    },
+    "route": {
+      "description": "e.g. \"GET /invoices/{invoice_id}\"",
+      "minLength": 1,
+      "title": "Route",
+      "type": "string"
+    },
+    "rule_id": {
+      "minLength": 1,
+      "title": "Rule Id",
+      "type": "string"
+    },
+    "scope": {
+      "description": "files the contract is about",
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1,
+      "title": "Scope",
+      "type": "array"
+    },
+    "state_effect": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "State Effect"
+    },
+    "subject": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Subject"
+    },
+    "version": {
+      "default": 1,
+      "minimum": 1,
+      "title": "Version",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "rule_id",
+    "route",
+    "expected_status",
+    "authority_sources",
+    "scope",
+    "counterfactual"
+  ],
+  "title": "ASENT SATRA contract (.asent/satra/contract.json)",
+  "type": "object"
+}

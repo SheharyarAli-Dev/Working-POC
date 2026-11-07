@@ -2,7 +2,8 @@
 ACCEPTABLE={'CAVR':{'VERIFIED'},'SATRA':{'ACCEPT'},'SABLE':{'PRESERVED'}}
 BLOCKING={'CAVR':{'REJECTED'},'SATRA':{'REJECT'},'SABLE':{'REGRESSED'}}
 
-def decide(applicable,evidence,snapshot,input_hashes):
+def decide(applicable,evidence,snapshot,input_hashes,extra_reasons=()):
+    # extra_reasons (config problems, a head config change) can only lower the decision: REVIEW, or BLOCK if a module blocks.
     reasons=[];blocking=[];statuses={}
     for module in applicable:
         rows=[e for e in evidence if e.get('analyzer')==module and not e.get('stale')]
@@ -23,6 +24,7 @@ def decide(applicable,evidence,snapshot,input_hashes):
             continue
         elif status not in ACCEPTABLE.get(module,set()):
             reasons.append(f"{module}: {status}")
+    reasons.extend(extra_reasons)
     if blocking:return 'BLOCK',blocking+reasons,statuses
     if reasons:return 'REVIEW',reasons,statuses
     if not applicable:return 'REVIEW',['No supported security surfaces were established'],statuses

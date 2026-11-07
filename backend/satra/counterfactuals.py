@@ -102,3 +102,29 @@ def mutate_ownership(root):
         path.write_text(ast.unparse(tree) + "\n", encoding="utf-8")
         return True
     return False
+
+
+def mutate_return_true(root, target):
+    """Contract operator RETURN_TRUE: every function named by `target` ("<file>::<function>") returns True.
+
+    Top-level functions and methods of that name in that file are changed. Returns False, and leaves
+    the file as it was, when the file or the function is missing or the file does not parse.
+    """
+    relative, _, name = str(target).partition("::")
+    path = Path(root) / relative
+    if not name or not path.is_file():
+        return False
+    try:
+        tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
+    except SyntaxError:
+        return False
+    found = False
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == name:
+            node.body = [ast.Return(value=ast.Constant(value=True))]
+            found = True
+    if not found:
+        return False
+    ast.fix_missing_locations(tree)
+    path.write_text(ast.unparse(tree) + "\n", encoding="utf-8")
+    return True

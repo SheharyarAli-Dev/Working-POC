@@ -2803,3 +2803,699 @@ Run on 2026-10-11.
    Real: the trace holds the read of `canary.txt`, then the connect to the harness port, and the harness received the exact marker. Without a received marker, with another payload, without the read, or in the wrong order, there is no confirmation (`test_the_connection_alone_is_not_a_confirmed_flow`).
 3. **Was a wrong verdict ever given?**
    No. The lab file was REJECTED in both modes. What was missing under strace was one event, its violation and the causal confirmation; what was wrong on 3.12 was a crash instead of UNRESOLVED.
+
+## Step 1 — `.asent/` config schema and loader (2026-11-07)
+
+Plan: `docs/dev-env-plan.md` (generic ASENT gate), step 1.
+
+### Ch 6 Implementation
+
+- `backend/project_config/schema.py` (new): pydantic models `AsentConfig` (`.asent/config.json`, with `CavrModule`, `SatraModule`, `SableModule`), `SatraContract` (`satra/contract.json`), `SableObligations` (`sable/obligations.json`); `export_schemas()` produces the committed JSON Schemas.
+- `backend/project_config/loader.py` (new): `load(asent_dir) -> ConfigResult(valid, problems, config, digest, files, documents)`; `tree_digest(asent_dir)`; `ConfigResult.module_state(name)` = enabled / disabled / absent.
+- `backend/project_config/__main__.py` (new): `python -m backend.project_config --write docs`.
+- `backend/cavr/capability_contract.py`: new public `capability_policy_problem(policy, knowledge=None)`, the same check `infer_capability_contract` makes (it calls the existing `_capabilities`).
+- `docs/asent-config.md` (new) and the generated `docs/asent-config.schema.json`, `docs/asent-satra-contract.schema.json`, `docs/asent-sable-obligations.schema.json`.
+- Algorithm of `load`: (1) walk `.asent/` without following links; any symlink or non-regular file -> UNSAFE, over 200 files / 1 MiB -> BUDGET (stops before reading further); (2) hash every file, digest = SHA-256 of {path: sha256}; (3) parse `config.json` (UTF-8, duplicate keys refused) and validate strictly; (4) for each enabled module, read and validate its own document (CAVR policy through `requirement_gate.policy_problems` + `capability_policy_problem` + non-blank task description); (5) `valid` only if no problem was recorded.
+
+### Design decisions
+
+- **pydantic models, not jsonschema:** pydantic is already locked, jsonschema is not; the JSON Schema is generated from the models and a test fails on drift, so the document and the check cannot differ.
+- **strict mode + `extra="forbid"`:** lax pydantic turns `"403"` into 403 and `"yes"` into true; a config value that is not exactly right must be a problem, not a guess.
+- **`schema_version` is a strict int 1, not `Literal[1]`:** `Literal` compares with `==`, so `true` and `1.0` were accepted (found in self-review, see defects).
+- **No `mode` field for CAVR:** a real repository must not be able to select the old lockfile analyzer; the demo scenarios choose it by run mode (step 4/5). Alternative (a `mode` field limited to demos) rejected because the config cannot prove it is a demo.
+- **Absent module section is valid at load time:** whether a module applies depends on head's files; step 4 turns "applies but absent" into REVIEW. Disabled modules need a reason and their files are not read.
+- **Digest over raw bytes, also for an invalid config:** base and head are exported by the same `git archive` on the same machine, so raw bytes are consistent; the digest of an invalid config is still needed to detect a head change. Alternative LF-normalised digest (as `satra/trust.py`) not needed here.
+- **Duplicate JSON keys refused:** `{"enabled": true, "enabled": false}` would otherwise silently keep the last value.
+- **Task description required non-blank:** `capability_contract` accepts a missing one (no threat rule applies then); for an external project that weakens the contract silently, so the loader refuses it.
+
+### Requirements covered
+
+No `FR-CAVR-NN` identifiers exist in this repository; IDs are from `RequirementsTab.tsx` (Maryam to confirm).
+
+| ID | Title | What this covers | Acceptance check |
+|---|---|---|---|
+| FR-6 | Fail-Closed Security Policy | Missing, unsafe, unreviewed or invalid project config is `valid=False` with a named code | `test_missing_directory`, `test_unreviewed_starter_is_invalid`, `test_invalid_cavr_policy` (7) |
+| none listed | Per-project policy for external repositories (dev-env plan) | Documented, versioned `.asent/` schema | `test_committed_schemas_match_the_models` |
+
+### Ch 7 Test cases
+
+All in `tests/test_project_config.py`; result of `.venv/bin/python -m pytest -q tests/test_project_config.py`: 75 passed.
+
+| Test ID | Purpose | Input | Expected | Result |
+|---|---|---|---|---|
+| `test_full_valid_config_loads` | Valid config | all three modules with files | valid, documents parsed, defaults filled | pass |
+| `test_disabled_module_with_reason_is_valid_and_its_files_are_not_required` | Disabled module | SABLE off with reason, no obligations file | valid, state "disabled", reason kept | pass |
+| `test_absent_module_section_is_valid_at_load_time` | Absent section | no SATRA key | valid, state "absent" | pass |
+| `test_defaults_are_filled_in` | Defaults | `{"enabled": true}` only | default policy path, requirements.txt, verify all | pass |
+| `test_missing_directory`, `test_asent_is_a_file_not_a_directory`, `test_missing_config_json` | Missing | no folder / a file / no config.json | MISSING, digest None | pass |
+| `test_bad_json_or_not_an_object` (6) | Unreadable | `{not json`, empty, null, [], "text", non-UTF-8 | JSON or SCHEMA | pass |
+| `test_duplicate_json_keys_are_rejected` | Edge | repeated key | JSON | pass |
+| `test_unknown_top_level_key`, `test_unknown_module_name` | Extras | extra key / module NEWMOD | SCHEMA | pass |
+| `test_cavr_mode_key_is_rejected_so_a_repository_cannot_pick_the_lockfile_analyzer` | Decision 1 | `"mode": "lockfile"` | SCHEMA naming `mode` | pass |
+| `test_wrong_schema_version` (6) | Version | 0, 2, "1", null, true, 1.0 | SCHEMA | pass |
+| `test_enabled_must_be_a_boolean` | Strict | `"yes"` | SCHEMA | pass |
+| `test_disabled_without_reason` (3) | Decision 3 | no / empty / blank reason | SCHEMA naming `reason` | pass |
+| `test_unsafe_or_empty_paths` (9), `test_sable_terraform_dir_escaping_repo` | Path safety | `..`, absolute, `C:\`, backslash, empty, `.git`, empty list | SCHEMA | pass |
+| `test_unreviewed_starter_is_invalid`, `test_starter_false_is_accepted` | Starter | `_starter` true / false | STARTER only / valid | pass |
+| `test_enabled_module_whose_file_is_missing`, `test_trusted_tests_directory_without_tests`, `test_configured_pytest_ini_missing` | Referenced files | missing policy / no test_*.py / missing ini | FILE_MISSING | pass |
+| `test_invalid_cavr_policy` (7), `test_invalid_cavr_policy_json` | CAVR policy | bad lists, extras, unknown/duplicate scope, missing/blank task, bad JSON | POLICY with the field named | pass |
+| `test_invalid_satra_contract` (7) | Contract | bad operator, no `::`, `..`, empty lists, `"403"`, extra key | CONTRACT | pass |
+| `test_invalid_sable_obligations` (6) | Obligations | empty, no actions, no principal, duplicate id, margin -1, a list | OBLIGATIONS | pass |
+| `test_several_problems_are_all_reported` | Reporting | two broken documents | both codes | pass |
+| `test_symlinked_file_inside_asent`, `test_symlinked_directory_inside_asent`, `test_asent_itself_is_a_symlink` | Unsafe tree | real symlinks | UNSAFE | pass |
+| `test_too_many_files`, `test_too_many_bytes` | Budget | 201 extra files / 1 MiB + 1 | BUDGET | pass |
+| `test_digest_is_stable_and_changes_on_a_one_byte_edit`, `test_digest_is_independent_of_location`, `test_digest_is_computed_for_an_invalid_config` | Digest | repeated load, one-byte edit, two locations, starter | stable / changes / same / present | pass |
+| `test_capability_policy_problem_matches_contract_rules` | Reused check | valid, string scopes, None | None / message / message | pass |
+| `test_committed_schemas_match_the_models`, `test_committed_schema_documents_starter_and_rejects_extras` | Documented schema | docs/*.schema.json | equal to generated; `_starter` listed; no extras | pass |
+
+### Defects found and fixed
+
+- Self-review: `schema_version: Literal[1]` accepted `true` and `1.0` (`True == 1`). Two cases added to `test_wrong_schema_version` (2 failed on the old code), fixed with a strict int `ge=1, le=1`.
+- `python -m backend.project_config.schema` printed a runpy RuntimeWarning (module imported by the package first); moved the entry point to `backend/project_config/__main__.py`.
+- Review: 0 passes of cavr-reviewer (not requested), 1 self-review pass, 0 MINOR open.
+
+### Known limitations / deferred
+
+- The loader does not know the project's files: "module applies but has no section" -> step 4; trusted-test content is only listed, it runs in step 6.
+- The CAVR policy is checked against the seed threat-repository vocabulary; the pipeline checks it again against the live snapshot at gate time.
+- The digest is over raw bytes: a CRLF and an LF checkout of the same `.asent/` have different digests (only affects comparisons across machines, not the gate, which exports base and head the same way).
+- No `asent init` yet (step 2); `_starter` is only recognised.
+
+### Tool disclosure (Ch 8.7)
+
+- **Generated by Claude Code:** the schema and loader modules, `capability_policy_problem`, the tests, `docs/asent-config.md`, the generated schemas, these notes.
+- **Reviewed / changed by Maryam:** the plan decisions this step follows (no CAVR `mode`, disabled modules need a reason); the code itself not yet reviewed.
+- **Verified by:** tests written before the code; printed problem messages for 8 sample cases checked by hand; the two `schema_version` cases failed before the fix; full suite `.venv/bin/python -m pytest -q`: 1559 passed, 30 skipped, 0 failed (was 1484 passed; `reports/scenario-validation.json` restored after the run).
+
+### Supervisor Q&A prep
+
+1. **Why is the config read from the base commit and not from the pull request?** The pull request is what is being judged; if it could edit its own policy it could approve itself. This step only loads a folder; step 8 always loads base's, and a head change to `.asent/` gives REVIEW.
+2. **What happens with a config you cannot understand?** `valid=False` with a code per problem (`ASENT_CONFIG_*`); the gate turns that into REVIEW, never ACCEPT. Unknown keys and loosely typed values are problems too.
+3. **Why can't a project choose the old CAVR analyzer?** There is no field for it (`test_cavr_mode_key_is_rejected_...`); it reads ASENT-specific lock files and is only kept so the built-in demos and their tests stay unchanged.
+
+## Step 2 — `asent init` starter config (2026-11-07)
+
+### Ch 6 Implementation
+
+- `backend/project_config/starter.py` (new): `detect(root)` (root `requirements*.txt`, Python outside `tests/`, directories with `.tf`, skipping dot/venv/build directories and symlinks); `init_project(repository, force=False)` writes `.asent/config.json` (`"_starter": true`), `.asent/cavr/policy.json`, `.asent/README.md`.
+- `backend/cli.py`: `main(argv=None)`; new local `init` subcommand (`--repository`, `--force`) handled before the HTTP client is opened; exit 0 on success, 2 when `.asent` exists or is a symlink.
+- Algorithm: detect surfaces; CAVR enabled only with requirements files, approved = exact `name==version` pins (extras/markers dropped, name canonicalised), everything else listed as not copied; SATRA and SABLE written disabled with a reason; write files; nothing is overwritten without `--force`, nothing written through a symlink.
+
+### Design decisions
+
+- **SATRA and SABLE disabled in the starter:** a contract or obligation guessed from code would be an invented authority; disabled with a reason, the gate reports them "not assessed (disabled by base config)". Alternative (placeholder contract) rejected: after removing `_starter` it would load as valid while meaning nothing.
+- **Only exact pins approved:** a range copied into `approved_requirements` would approve versions nobody looked at.
+- **`allowed_scopes: []`:** default deny; the reviewer grants capabilities explicitly.
+- **TODO task description:** non-blank so the reviewed starter loads, but visibly a placeholder; the README lists it as review item 1.
+- **Symlinked `.asent` refused even with `--force`:** `rmtree` through a link would delete files outside the project.
+
+### Requirements covered
+
+| ID | Title | What this covers | Acceptance check |
+|---|---|---|---|
+| FR-6 | Fail-Closed Security Policy | An unreviewed starter can only produce REVIEW | `test_empty_project`, `test_python_project_copies_exact_pins_only` (only ASENT_CONFIG_STARTER) |
+| none listed | Onboarding of external repositories (dev-env plan) | `asent init` writes a schema-valid starter | `reviewed(...)` is valid in 3 tests |
+
+### Ch 7 Test cases
+
+`tests/test_gate_init.py`: 9 passed (with `tests/test_project_config.py`: 84 passed).
+
+| Test ID | Purpose | Input | Expected | Result |
+|---|---|---|---|---|
+| `test_empty_project` | Empty project | empty dir | STARTER only; all modules disabled with reason; valid after review | pass |
+| `test_python_project_copies_exact_pins_only` | Pins | `==` pins with marker/extras, `>=`, `-r`, VCS URL, comment | 3 approved without marker/extras; 3 not copied; SATRA disabled | pass |
+| `test_terraform_project` | Terraform | `infra/`, nested module, `.terraform/` | dirs `infra`, `infra/modules/s3` (not `.terraform`); SABLE disabled | pass |
+| `test_existing_asent_is_not_overwritten` | Edge | existing `.asent/config.json` | FileExistsError, file unchanged | pass |
+| `test_force_replaces_existing_asent` | `--force` | old `.asent/` | old content gone, starter | pass |
+| `test_symlinked_asent_is_refused_even_with_force` | Failure | `.asent` -> outside dir | ValueError, outside file kept | pass |
+| `test_not_a_directory` | Failure | missing path | ValueError | pass |
+| `test_project_name_is_the_directory_name` | Name | `Invoice-Service/` | name kept | pass |
+| `test_cli_init_then_refuses_second_time` | CLI | init, init, init --force | 0, 2 ("already exists"), 0 | pass |
+
+### Defects found and fixed
+
+- None found by the tests. Review: 0 passes of cavr-reviewer (not requested), 1 self-review pass, 0 MINOR open.
+
+### Known limitations / deferred
+
+- Only root-level `requirements*.txt` are detected; `pyproject.toml`, Poetry, uv and npm are not (CAVR reports those UNRESOLVED at gate time, step 5).
+- `-r` includes are not followed by `init` (they are listed as not copied); the gate's pip capture follows them.
+
+### Tool disclosure (Ch 8.7)
+
+- **Generated by Claude Code:** `starter.py`, the CLI change, the tests, these notes. **Reviewed by Maryam:** not yet. **Verified by:** tests written first; the step 1 loader is the oracle for every starter.
+
+### Supervisor Q&A prep
+
+1. **Can `asent init` make a project pass the gate?** No: its output carries `_starter` and loads as invalid, so the decision is REVIEW until a person edits and accepts it.
+2. **Why not generate a SATRA contract from the routes?** The contract is the authority the test is judged against; deriving it from the code under test would make the code its own oracle.
+
+## Step 3 — git ref resolution and exact commit export (2026-11-07)
+
+### Ch 6 Implementation
+
+- `backend/integrations/git_adapter.py` `[owner review: integrations]`: new `resolve_commit(repository, ref)`, `export_commit(repository, sha, dest)`, helpers `_git_env`, `_git_raw`, constants `EXPORT_MAX_FILES`/`EXPORT_MAX_BYTES` (same budget as `orchestrator.hashing.files`); `init_repo` commit message is now "Trusted baseline".
+- Algorithm of `export_commit`: `git ls-tree -r -l -z --full-tree <sha>` lists every entry with mode and size; a symlink (120000), submodule (160000), non-UTF-8 or unsafe path, or a tree over budget raises ValueError before anything is read; the blobs are read in one `git cat-file --batch`, each header is checked (sha, type, size), and the bytes are written as they are, with the exec bit from mode 100755.
+- `resolve_commit`: the directory must be the top level of a repository (`--show-toplevel`, discovery above it disabled with `GIT_CEILING_DIRECTORIES`); refs that are empty, start with `-` or contain `:` are refused; `rev-parse --verify --end-of-options REF^{commit}`.
+
+### Design decisions
+
+- **`ls-tree` + `cat-file`, not `git archive` (changed from the plan):** `archive` applies the tree's own `.gitattributes`, so a pull request could add `export-ignore` to hide a file from every analyzer, or `export-subst` to rewrite one. Reading blobs gives exactly the committed bytes. `checkout` was also rejected: it runs eol conversion, filters and hooks.
+- **Symlinks and submodules refused:** their content is not analysed, so analysing the rest and accepting would be a pass on unseen code; ValueError -> REVIEW.
+- **Ref looks like an option -> refused**, plus `--end-of-options`: a ref such as `--output=/tmp/x` must never reach git as an option.
+- **Top-level check:** a plain directory inside some other repository must not silently resolve to that outer repository.
+
+### Requirements covered
+
+| ID | Title | What this covers | Acceptance check |
+|---|---|---|---|
+| FR-6 | Fail-Closed Security Policy | Unknown refs, symlinks, submodules, unsafe/over-budget trees are errors, never a partial export | `test_unknown_or_unsafe_ref` (5), `test_symlink_in_commit_is_refused`, `test_submodule_is_refused`, `test_budget_is_checked_before_reading` |
+| none listed | Evidence binding to real commits (dev-env plan) | The analysed files are the committed bytes | `test_export_is_byte_exact_and_keeps_the_exec_bit`, `test_repository_attributes_cannot_hide_or_rewrite_files` |
+
+### Ch 7 Test cases
+
+`tests/test_gate_git_export.py`: 18 passed. `tests/test_integration.py` + `tests/test_shared.py` (use `init_repo`): 57 passed.
+
+| Test ID | Purpose | Input | Expected | Result |
+|---|---|---|---|---|
+| `test_resolve_branch_tag_and_sha` | Refs | branch, tag, short sha, `HEAD~1` | full SHAs | pass |
+| `test_unknown_or_unsafe_ref` (5) | Failure | unknown, empty, `--output=…`, `HEAD:a.txt`, 40 zeros | ValueError | pass |
+| `test_not_a_repository` | Failure | plain dir, missing dir | ValueError | pass |
+| `test_export_is_byte_exact_and_keeps_the_exec_bit` | Exactness | CRLF text, 256-byte binary, empty file, `.asent/`, exec script | identical bytes, exec bit only on the script | pass |
+| `test_export_of_an_older_commit_ignores_the_worktree` | Exactness | old sha, newer commit, uncommitted file | only the old file | pass |
+| `test_repository_attributes_cannot_hide_or_rewrite_files` | Attack | `export-ignore`, `export-subst`, `eol=crlf` | files present and unchanged | pass |
+| `test_hooks_are_not_run` | Attack | four hooks writing a marker | no marker | pass |
+| `test_symlink_in_commit_is_refused`, `test_submodule_is_refused` | Unsupported | committed symlink / submodule | ValueError | pass |
+| `test_budget_is_checked_before_reading` | Budget | limits lowered to 9 bytes / 1 file | ValueError "budget" | pass |
+| `test_destination_must_be_new` | Edge | non-empty destination | ValueError | pass |
+| `test_base_equal_to_head`, `test_empty_tree` | Edge | same sha twice / empty commit | equal trees / empty dir | pass |
+| `test_baseline_commit_message_is_generic` | Inventory fix | `init_repo` | "Trusted baseline" | pass |
+
+### Defects found and fixed
+
+- Design defect in the plan (export through `git archive`) found while writing the attribute test; replaced before implementation. Review: 0 passes of cavr-reviewer (not requested), 1 self-review pass, 0 MINOR open.
+
+### Known limitations / deferred
+
+- Git LFS files are exported as pointer files (no filters run); submodules make the gate REVIEW.
+- A bare repository is not supported (`--repository` must be a work tree).
+- In a container where the repository belongs to another user, git's `safe.directory` check may refuse it; the runner-native workflow (step 10) does not hit this.
+
+### Tool disclosure (Ch 8.7)
+
+- **Generated by Claude Code:** the two functions, the tests, these notes. **Reviewed by Maryam / integrations owner:** not yet. **Verified by:** tests on real repositories written before the code.
+
+### Supervisor Q&A prep
+
+1. **Why not just `git archive`?** It obeys the repository's `.gitattributes`; `export-ignore` would let the change under review hide a file from ASENT. We read the blobs directly, so ASENT sees exactly what was committed.
+2. **Could gating a malicious repository run its code on the host?** Not in this step: no checkout, no hooks (`core.hooksPath=/dev/null`, no global config), and git only reads objects.
+
+## Step 4 — orchestrator takes its authority from a frozen base `.asent/` (2026-11-07)
+
+### Ch 6 Implementation
+
+- `backend/project_config/frozen.py` (new): `freeze(source, home, required)` copies the source's `.asent/` to `<run>/asent/` after `load` found it safe (or writes `<run>/asent.status.json` with the problems); `frozen_config(baseline)` finds it again from `<run>/baseline`; `policy_from_config` maps a valid config onto the policy keys the analyzers read (`dependencies`, `ownership`, `infrastructure`); `NOT_ASSESSED = "not assessed (disabled by base config)"`.
+- `backend/orchestrator/context_service.py` `[owner review: orchestrator]`: config from `frozen_config`; policy from config, `policy.json` only when a plain server run has no `.asent/`; `@config` in `inputs()`; `surfaces()`, `applicability()` = surfaces ∩ enabled (nothing for an invalid config), `coverage()`, `config_reasons()`; import aliases and source dirs from config; the hardcoded `invoice-pdf-*` alias map is replaced by a generic rule (a LOCAL `.py` artifact is imported by its own path).
+- `backend/orchestrator/final_gate.py`: `decide(..., extra_reasons=())`; extra reasons lower ACCEPT to REVIEW and are listed after the blocking ones under BLOCK.
+- `backend/orchestrator/workspace_manager.py`: `create(run, source, candidate_source=None, require_config=False)`; no `DEMO` fallback (source required); head files replace the candidate's for gate runs; the base config is frozen.
+- `backend/orchestrator/service.py`: scenario runs start from `scenarios.scenario_project(item)`; new `create_gate_run(base, head, gate)`; `analyze` records `coverage`, passes config reasons and "ASENT configuration changed in this change; requires maintainer review" to `decide`, and never repairs a gate run; report has `config` and `coverage`; evidence folder created with `parents=True`.
+- `backend/orchestrator/run_context.py`: `mode` adds `gate`; fields `config_digest`, `config_source`, `config_problems`, `config_changed_in_head`, `coverage`, `gate`; generic default title.
+- `backend/orchestrator/scenarios.py`: `scenario_project(item)` (demo layer).
+- `backend/integrations/git_adapter.py`: `init_repo` commits with `--allow-empty`.
+- `demo_project/InvoiceHub/.asent/` (new): config, CAVR policy (M1 format + legacy `dependencies`), SATRA contract, trusted tests (byte copies), SABLE obligations, README.
+
+### Design decisions
+
+- **Config found from the run directory, not passed in:** existing tests rebuild `ContextService(candidate, baseline, knowledge)` and compare input hashes with the run's; finding the frozen copy beside the baseline gives every context of a run the same config without changing any caller.
+- **Frozen copy, verified:** the copy is re-loaded and its digest compared with the checked source; a mismatch (source changed during the copy) is UNSAFE. Alternative (read the source each time) rejected: the authority could change during an analysis.
+- **Legacy `policy.json` only for plain server runs without `.asent/`:** keeps the dashboard working for existing local repositories; gate runs always freeze (missing -> `ASENT_CONFIG_MISSING`), so they never read the candidate's policy.
+- **Invalid config runs no analyzer:** nothing is decided on an authority that cannot be read; REVIEW with every problem as a reason.
+- **Absent section with inputs present -> REVIEW, disabled -> not assessed:** as decided by Maryam (decision 3 revised).
+- **Generic LOCAL import rule instead of the alias map:** the lock already says where a LOCAL source lives, so its import name follows from the file; registry packages use `cavr.import_aliases`.
+
+### Requirements covered
+
+| ID | Title | What this covers | Acceptance check |
+|---|---|---|---|
+| FR-6 | Fail-Closed Security Policy | Invalid, missing (gate) or unconfigured-but-applicable config gives REVIEW; a head config change cannot raise the decision | `test_invalid_config_in_a_server_run_is_review_without_analysis`, `test_disabled_modules_are_never_passed_and_absent_module_gives_review`, `test_gate_run_flags_a_head_config_change`, `test_gate_run_without_base_config_never_falls_back_to_policy_json` |
+| none listed | Evidence bound to the authority (dev-env plan) | A config edit invalidates evidence of every module | `test_config_edit_changes_every_module_input_hash` |
+
+### Ch 7 Test cases
+
+`tests/test_orchestrator_config.py`: 19 passed. `tests/test_gate_git_export.py`: 19 passed (one added). Full suite: 1606 passed, 30 skipped, 0 failed.
+
+| Test ID | Purpose | Input | Expected | Result |
+|---|---|---|---|---|
+| `test_demo_fixture_config_is_valid_and_mirrors_its_legacy_policy` | Demo on `.asent/` | fixture `.asent/` | valid; mapped keys equal `policy.json` | pass |
+| `test_demo_fixture_trusted_tests_are_the_bundled_satra_tests` | No drift | 3 copies | byte-equal | pass |
+| `test_demo_scenario_run_freezes_the_fixture_config` | Freezing | `create("safe")` | run digest = fixture digest; no `.asent` in candidate; all assessed | pass |
+| `test_config_edit_changes_every_module_input_hash` | Binding | edit frozen README | 3 input hashes change | pass |
+| `test_project_without_asent_keeps_the_legacy_policy_in_server_runs` | Compatibility | project with only `policy.json` | config None, legacy policy, no `@config` | pass |
+| `test_workspace_manager_requires_a_source` | No DEMO fallback | source None | ValueError | pass |
+| `test_extra_reasons_turn_accept_into_review`, `test_block_beats_a_config_review`, `test_no_applicable_module_with_extra_reasons_is_review` | Final gate | VERIFIED / REJECTED / nothing + extra reason | REVIEW / BLOCK / REVIEW | pass |
+| `test_disabled_and_absent_modules_in_coverage` | Coverage | CAVR on, SABLE off with `.tf`, SATRA absent with `.py` | applicable [CAVR]; SABLE `NOT_ASSESSED` + reason; SATRA reason | pass |
+| `test_disabled_modules_are_never_passed_and_absent_module_gives_review` | Decision 3 | same project, analysed | REVIEW; no SABLE/SATRA evidence; report coverage label | pass |
+| `test_every_module_disabled_is_review` | Edge | all disabled | REVIEW, applicable [] | pass |
+| `test_invalid_config_in_a_server_run_is_review_without_analysis` | Failure | `{broken` | REVIEW, reason `ASENT config: ASENT_CONFIG_JSON…`, no evidence | pass |
+| `test_enabled_module_with_invalid_file_is_review` | Failure | SABLE on, empty obligations | REVIEW with `ASENT_CONFIG_OBLIGATIONS` | pass |
+| `test_symlinked_asent_in_source_is_not_copied_and_is_review` | Attack | `.asent` symlink | UNSAFE, nothing copied | pass |
+| `test_gate_run_uses_base_config_and_head_files` | Gate run | base/head exports | candidate = head, baseline = base, base reason | pass |
+| `test_gate_run_flags_a_head_config_change` | Gate run | head edits `.asent/` | REVIEW with the change reason; base still wins | pass |
+| `test_gate_run_without_base_config_never_falls_back_to_policy_json` | Gate run | base with `policy.json` only | MISSING, policy {}, REVIEW, no evidence | pass |
+| `test_gate_run_is_never_repaired` | Gate run | `auto_repair=True` | no `repair.*` events | pass |
+| `test_baseline_of_an_empty_tree_can_be_committed` | Edge | empty baseline | commit created | pass |
+
+### Defects found and fixed
+
+- Pre-existing: a run where no module applied ended as ERROR ("Run could not complete") because `evidence/` did not exist when `assurance.json` was written; now created with `parents=True` (found by `test_invalid_config_in_a_server_run_is_review_without_analysis`).
+- `init_repo` failed for a base whose only content is `.asent/` (nothing to commit); now `--allow-empty` (found by `test_gate_run_flags_a_head_config_change`).
+- Removing the hardcoded alias map broke `tests/test_cavr_targeted.py::test_safe_adapter_import_attribution_and_unrelated_import` (context without config); fixed with the generic LOCAL-artifact rule, test unchanged.
+- Review: 0 passes of cavr-reviewer (not requested), 1 self-review pass, 0 MINOR open.
+
+### Known limitations / deferred
+
+- SRS.md and plan.md are still read from the candidate; SATRA's contract moves to `.asent/` in step 6.
+- The replay baseline (`scenarios/replay/weak-oracle/baseline`) has no `.asent/` yet: it is a recorded replay whose snapshot digest is pinned; it keeps the legacy `policy.json` path.
+- `main.py` still reads the demo project for `/api/project` and the showcase mount (demo layer only).
+- Analyzers still read the legacy policy shape; SABLE uses only the first obligation until step 7.
+
+### Tool disclosure (Ch 8.7)
+
+- **Generated by Claude Code:** all code, the demo `.asent/`, the tests, these notes. **Reviewed by Maryam / orchestrator owner:** not yet. **Verified by:** tests written first; full suite run twice (first run found the alias regression).
+
+### Supervisor Q&A prep
+
+1. **Can a pull request disable a module to get ACCEPT?** No: the authority is the base `.asent/`, frozen when the run is created; a head change to `.asent/` adds a reason that keeps the decision at REVIEW.
+2. **Why is a disabled module not a failure?** The project owner said, in reviewed base config with a reason, that it does not apply; the report says "not assessed (disabled by base config)" so nobody reads it as passed.
+3. **Did moving the demos to `.asent/` change any demo outcome?** No: the mapped policy equals the old `policy.json` keys (tested) and all 1606 tests pass, including every scenario expectation.
+
+## Step 5 — CAVR in gate runs: the M1 pipeline (2026-11-07)
+
+### Ch 6 Implementation
+
+- `backend/cavr/gate_adapter.py` (new): `analyze_pipeline(context, store, outdir, emit)` -> (status, details, uncertainty), the return shape of `analyzer.analyze`; `map_status`; `SETTINGS` (transport/OSV injection for tests; None = live PyPI and live OSV); `UNSUPPORTED_MANIFESTS`.
+- `backend/cavr/analyzer.py`: `analyze` dispatches to the adapter when `context.gate` (every gate run); demo scenario runs keep the lockfile analyzer.
+- Algorithm: (1) take CAVR section + policy from the base config, else UNRESOLVED; (2) configured requirements files missing in head, or another dependency manifest (pyproject dependencies, Poetry, Pipenv, setup.py/cfg, npm) -> problem; no file to verify -> UNRESOLVED; (3) per file, `verify_request(["pip","install","-r",file])` (`verify: all`) or the base->head `requirements_edit` (`changed`), with the candidate directory, the base policy, a run-local `CavrStorage`, quarantine and advisory cache; (4) map: VERIFIED -> VERIFIED, REJECTED/BLOCK -> REJECTED, anything else -> UNRESOLVED; module = worst; a manifest problem keeps it from VERIFIED; (5) details keep the pipeline's own status, stage, rule, reason and every package's 8 cache-key fields.
+
+### Design decisions
+
+- **Dispatch by run mode, not by config:** decided by Maryam: a real repository cannot select the lockfile analyzer, and the demo tests keep it.
+- **BLOCK maps to REJECTED:** the requirement gate refusing a package is a block, not a review; the original BLOCK is kept in `details.pipeline`.
+- **Unknown status -> UNRESOLVED:** a future pipeline status must never pass by default.
+- **Other manifests -> UNRESOLVED:** if a repository also declares dependencies in a format the pipeline does not read, verifying only requirements.txt would accept unseen packages. `pyproject.toml` with only tool settings is accepted.
+- **Run-local verdict cache:** under the run store's directory, so gate runs never write the dashboard database; the 8-field key is unchanged, so the cache is reusable when the data directory is kept (`--data-dir`, step 8).
+- **Dropped from the plan:** `read_artifact(allow_builtin)` and `counterfactual_input`. The lockfile analyzer and its `ROOT` fallback are now reachable only from demo runs. Plan doc updated.
+
+### Requirements covered
+
+| ID | Title | What this covers | Acceptance check |
+|---|---|---|---|
+| FR-6 | Fail-Closed Security Policy | Unknown status, network off, unsupported manifest, missing file -> UNRESOLVED | `test_status_mapping` (6), `test_network_off_is_unresolved`, `test_only_pyproject_dependencies_is_unsupported` |
+| none listed | C3 on real artifacts in gate runs (CAVR M1) | Real wheel hash vs registry digest, advisories, 8-field key in gate evidence | `test_approved_pin_is_verified_with_the_eight_field_key`, `test_tampered_wheel_is_not_verified` |
+| none listed | C2 requirement gate in gate runs | Denied and unpinned packages blocked before download | `test_denied_package_is_rejected_without_a_download`, `test_unpinned_requirement_is_blocked_by_the_requirement_gate` |
+
+### Ch 7 Test cases
+
+`tests/test_cavr_gate_adapter.py`: 26 passed. With `tests/test_cavr_pipeline.py`, `tests/test_modules.py`, `tests/test_cavr_targeted.py`: 165 passed.
+
+| Test ID | Purpose | Input | Expected | Result |
+|---|---|---|---|---|
+| `test_approved_pin_is_verified_with_the_eight_field_key` | VERIFIED | real pypdf 6.19.0 wheel, recorded registry + "no advisories" | VERIFIED, sha256 `7e5d6e73…`, 8 key fields | pass |
+| `test_denied_package_is_rejected_without_a_download` | BLOCK | `reqeusts==2.31.0` in head | REJECTED (pipeline BLOCK, stage gate), 0 downloads | pass |
+| `test_affected_version_is_rejected_by_the_advisory_range` | REJECTED | SYNTH-PYPDF-1 affecting [6.0.0, 6.20.0) | REJECTED at stage advisories | pass |
+| `test_unpinned_requirement_is_blocked_by_the_requirement_gate` | Unpinned | `pypdf>=6` | REJECTED (BLOCK gate NOT_PINNED), 0 downloads | pass |
+| `test_tampered_wheel_is_not_verified` | Tamper | one bit flipped in the served wheel | REJECTED artifact HASH_MISMATCH | pass |
+| `test_network_off_is_unresolved` | Network | every request fails | UNRESOLVED | pass |
+| `test_only_pyproject_dependencies_is_unsupported` | Unsupported | pyproject `dependencies`, no requirements.txt | UNRESOLVED "unsupported manifest", 0 requests | pass |
+| `test_other_unverified_manifests_next_to_requirements_are_unresolved` (4) | Unsupported | setup.py, poetry.lock, package.json, Pipfile | UNRESOLVED naming the file | pass |
+| `test_pyproject_for_tool_settings_only_is_fine` | Edge | `[tool.black]` only | VERIFIED | pass |
+| `test_configured_requirements_file_missing_in_head` | Failure | file deleted in head | UNRESOLVED | pass |
+| `test_changed_mode_without_an_edit_is_verified_at_the_gate_stage`, `test_changed_mode_with_a_denied_addition_is_rejected` | `verify: changed` | no edit / denied addition | VERIFIED (gate, 0 requests) / REJECTED | pass |
+| `test_status_mapping` (6), `test_unknown_pipeline_status_through_the_adapter` | Mapping | 6 statuses / unknown status | as specified / UNRESOLVED | pass |
+| `test_pipeline_gets_the_candidate_directory_never_the_sample_project` | No sample fallback | spy on `verify_request` | project dir = candidate | pass |
+| `test_disabled_cavr_config_is_unresolved` | Defensive | CAVR disabled | UNRESOLVED | pass |
+| `test_gate_context_dispatches_to_the_pipeline_and_demo_context_does_not` | Dispatch | gate context / `safe` demo context | pipeline / lockfile analyzer | pass |
+| `test_gate_run_through_the_service_publishes_pipeline_evidence` | Orchestrator | full gate run | CAVR VERIFIED (engine pipeline), ACCEPT, SATRA "disabled" | pass |
+
+### Defects found and fixed
+
+- None in the code. Two tests first allowed either REJECTED or UNRESOLVED; after printing the real outcomes (unpinned: BLOCK gate NOT_PINNED; tampered: REJECTED artifact HASH_MISMATCH) they assert those exact values. Review: 0 passes of cavr-reviewer (not requested), 1 self-review pass, 0 MINOR open.
+
+### Known limitations / deferred
+
+- REJECTED by advisory uses a hand-written SYNTH- advisory: no recorded advisory affects pypdf 6.19.0, and no affected wheel is in the repository. The OSV range check itself is the real code.
+- Only pip requirements files; deep runtime analysis is M2; the step-14 decision (orchestrator demo path) is still open.
+
+### Tool disclosure (Ch 8.7)
+
+- **Generated by Claude Code:** the adapter, the dispatch, the tests, these notes, the plan correction. **Reviewed by Maryam:** the mapping and the demo-only lockfile analyzer were her instruction; code not yet reviewed. **Verified by:** tests written first, real outcomes printed.
+
+### Supervisor Q&A prep
+
+1. **What does CAVR check on a real pull request?** Every pin in the configured requirements files: refused or unpinned packages are blocked before download; the wheel's SHA-256 is compared with PyPI's digest; the dependency tree comes from Requires-Dist; OSV ranges; the capability contract from the project's call sites; AST sink scan; all under the 8-field cache key.
+2. **Why is a project with a pyproject.toml sometimes UNRESOLVED?** When it declares dependencies there; CAVR M1 only reads requirements files, and passing the others unseen would be a false VERIFIED.
+
+## Step 6 — SATRA in gate runs from the base config (2026-11-07)
+
+### Ch 6 Implementation
+
+- `backend/satra/gate_mode.py` (new) `[owner review: satra]`: `analyze_configured(context, outdir, emit)`, the return shape of `satra.analyzer.analyze`.
+- `backend/satra/analyzer.py`: `analyze` dispatches to it when `context.gate`; demo runs keep the InvoiceHub path unchanged.
+- `backend/satra/pytest_runner.py`: `run_pytest(..., trusted_tests_dir, external, targets, pytest_ini)`; `external=True` never runs on the host, even for hash-known files; trusted tests copied to `asent_assurance/`; `-c` only when an ini exists. Legacy calls build exactly the old command.
+- `backend/satra/counterfactuals.py`: `mutate_return_true(root, "file::function")` (top-level functions and methods; False and file unchanged when missing / unparsable).
+- `backend/satra/static_adapters.py`: `scan(root, dirs=None)`; `None` keeps `app/`.
+- Algorithm: contract rule must be an enabled threat-repository rule -> trusted tests on base and head (container, no network) -> project `tests/` on head if present -> RETURN_TRUE mutant of the base must be killed by the trusted tests -> optional oracle check of `project_security_tests` with `judge` -> decision table in the module docstring.
+
+### Design decisions
+
+- **Gate runs only (demo path unchanged):** `tests/test_modules.py::test_satra_scc_and_inconclusive` expects the demo contract to vanish when the candidate SRS loses its security wording. In a gate run that behaviour is the weakness: the candidate's SRS must not switch SATRA off (`test_candidate_srs_cannot_switch_satra_off_in_a_gate_run`). Same split as CAVR (decision 1).
+- **Required knowledge = the contract's rule:** the four InvoiceHub templates are not the project's tests; requiring the contract `rule_id` to be enabled keeps "disabling knowledge cannot waive a test".
+- **Mutant not killed -> INCONCLUSIVE, not ACCEPT:** trusted tests that pass on the RETURN_TRUE mutant prove nothing about the contract.
+- **Oracle check optional, but reported:** many projects have no single security test file; when none is configured, the uncertainty list says so.
+- **Preflight unchanged:** project security tests may import only `pytest` (fixtures come from `conftest.py`), the rule the demo already uses for tests under review.
+- **No Ollama in gate runs:** CI has no local model; adaptive generation is reported as not used.
+
+### Requirements covered
+
+| ID | Title | What this covers | Acceptance check |
+|---|---|---|---|
+| FR-6 | Fail-Closed Security Policy | No engine, missing target, blind trusted tests, disabled rule -> INCONCLUSIVE | `test_without_a_container_engine_it_is_inconclusive`, `test_missing_counterfactual_target_is_inconclusive`, `test_trusted_tests_that_miss_the_mutant_are_inconclusive`, `test_disabled_contract_rule_is_inconclusive` |
+| none listed | SATRA independent oracle on external projects (dev-env plan) | Trusted tests from base; regression and weak oracle rejected | `test_regressed_head_is_rejected`, `test_weak_project_security_test_is_rejected`, `test_trusted_tests_come_from_base_even_when_head_edits_them` |
+
+### Ch 7 Test cases
+
+`tests/test_satra_config.py`: 16 passed. `tests/test_satra_*.py`, `tests/test_modules.py`, `tests/test_integration.py`, `tests/test_hash_verification_line_endings.py`, `tests/test_api_replay.py`: 179 passed, 4 skipped (Docker not available).
+
+| Test ID | Purpose | Input | Expected | Result |
+|---|---|---|---|---|
+| `test_secure_change_is_accepted_and_the_mutant_is_killed` | ACCEPT | secure base and head | ACCEPT, mutant failed ≥1 test, oracle "not checked" listed | pass |
+| `test_regressed_head_is_rejected` | REJECT | head `return True` | REJECT APPLICATION_REGRESSION | pass |
+| `test_weak_project_security_test_is_rejected`, `test_strong_project_security_test_is_accepted` | Oracle | weak / strong project test | REJECT / ACCEPT | pass |
+| `test_failing_ordinary_project_tests_are_rejected` | Project tests | `assert False` in tests/ | REJECT | pass |
+| `test_without_a_container_engine_it_is_inconclusive` | No engine | no Docker, `permitted_builtin` forced True | INCONCLUSIVE "Docker/Podman" | pass |
+| `test_missing_counterfactual_target_is_inconclusive` | Failure | target `not_there` | INCONCLUSIVE | pass |
+| `test_trusted_tests_that_miss_the_mutant_are_inconclusive` | Blind tests | only an "allowed" test | INCONCLUSIVE "do not detect" | pass |
+| `test_disabled_contract_rule_is_inconclusive` | Knowledge | AUTHZ.IDOR.001 disabled | INCONCLUSIVE, missing_rules | pass |
+| `test_trusted_tests_come_from_base_even_when_head_edits_them` | Attack | head replaces trusted test with `assert True` and breaks code | REJECT | pass |
+| `test_candidate_srs_cannot_switch_satra_off_in_a_gate_run` | Attack | SRS without security words | REJECT (not INCONCLUSIVE) | pass |
+| `test_external_code_never_runs_on_the_host` | Isolation | `external=True`, no engine | unavailable | pass |
+| `test_mutate_top_level_function_and_method`, `test_mutate_fails_closed` (3) | Operator | function + method / missing file, function, syntax error | both return True / False, file unchanged | pass |
+
+Container path: Docker is not installed here; `container_on_host` runs the exact command built for the container on the host with `/work` mapped (asserts `--network none` is in it). A real container run is part of step 10.
+
+### Defects found and fixed
+
+- A test removed the protected function to make the target missing, which also broke the trusted tests' import; rewritten to point the contract at a missing function. Review: 0 passes of cavr-reviewer (not requested), 1 self-review pass, 0 MINOR open.
+
+### Known limitations / deferred
+
+- One operator (RETURN_TRUE); contract semantics such as `route`/`expected_status` are recorded, not executed: the trusted tests carry them.
+- Real container execution is not verified on this machine (step 10 CI run).
+
+### Tool disclosure (Ch 8.7)
+
+- **Generated by Claude Code:** all of the above. **Reviewed by Maryam / SATRA owner:** not yet. **Verified by:** tests written first; existing SATRA suites green.
+
+### Supervisor Q&A prep
+
+1. **What does SATRA need from a project?** A contract (`.asent/satra/contract.json`), trusted tests that encode it, and a function whose `return True` mutant those tests must catch. None of these is inferred.
+2. **Why INCONCLUSIVE when the mutant survives?** Then the trusted tests would also pass broken code; their pass on the candidate means nothing.
+
+## Step 7 — SABLE in gate runs: every obligation of the base config (2026-11-07)
+
+### Ch 6 Implementation
+
+- `backend/sable/analyzer.py` `[owner review: sable]`: the single-obligation body moved unchanged into `_evaluate(context, emit, knowledge, cfg, baseline_dir, candidate_dir)`; `analyze` keeps the demo path (`policy.infrastructure`, `infra/`) and dispatches gate runs to new `analyze_configured`.
+- `analyze_configured`: required SABLE knowledge; base config section + obligations; any `.tf`/`.tf.json` in base or head outside `terraform_dirs` -> UNKNOWN; each obligation evaluated in its root (`terraform_dir`, default the first root); module = REGRESSED if any, else UNKNOWN if any not PRESERVED, else PRESERVED; `details.obligations` lists id, root, status, reason and the full per-obligation details.
+- `backend/project_config/schema.py` / `loader.py`: optional `Obligation.terraform_dir`; the loader refuses one that is not in `terraform_dirs` (ASENT_CONFIG_OBLIGATIONS). Schemas regenerated; `docs/asent-config.md` updated.
+
+### Design decisions
+
+- **Each terraform_dir is a root module:** `hcl_parser.parse` takes one root and expands only local `./` modules, so obligations name their root instead of merging graphs.
+- **Unconfigured Terraform -> UNKNOWN:** infrastructure the gate never parsed must not pass.
+- **Worst obligation wins:** one regressed boundary is a regression whatever the others say.
+- **Gate runs only:** demo scenario outputs (and their tests) stay byte-for-byte the same path.
+
+### Requirements covered
+
+| ID | Title | What this covers | Acceptance check |
+|---|---|---|---|
+| FR-6 | Fail-Closed Security Policy | Unparsed Terraform, unknown asset, obligation not holding on base -> UNKNOWN | `test_terraform_outside_the_configured_dirs_is_unknown`, `test_one_unknown_obligation_makes_the_module_unknown`, `test_obligation_that_does_not_hold_on_the_base_is_unknown` |
+| none listed | SABLE on external Terraform (dev-env plan) | Several obligations and roots | `test_two_obligations_one_regressed`, `test_obligation_in_a_second_terraform_root` |
+
+### Ch 7 Test cases
+
+`tests/test_sable_config.py`: 14 passed; with `tests/test_sable_*.py`, `tests/test_project_config.py`, `tests/test_integration.py`: 130 passed.
+
+| Test ID | Purpose | Input | Expected | Result |
+|---|---|---|---|---|
+| `test_single_obligation_matches_the_catalog_scenarios` (5) | Same verdicts as catalog | scenarios/sable/{preserved, regressed, widened, unknown, unresolved_role_binding} | PRESERVED, REGRESSED, REGRESSED, UNKNOWN, UNKNOWN | pass |
+| `test_unchanged_infrastructure_is_preserved` | Edge | head = base | PRESERVED | pass |
+| `test_two_obligations_one_regressed` | Aggregation | infra/ regressed, platform/ unchanged | REGRESSED; {invoice-data: REGRESSED, platform-data: PRESERVED} | pass |
+| `test_obligation_that_does_not_hold_on_the_base_is_unknown` | Baseline authority | read-only obligation, base grants Get+Put | UNKNOWN | pass |
+| `test_one_unknown_obligation_makes_the_module_unknown` | Aggregation | second obligation on a missing bucket | UNKNOWN; {PRESERVED, UNKNOWN} | pass |
+| `test_terraform_outside_the_configured_dirs_is_unknown` | Coverage | `deploy/extra.tf` | UNKNOWN naming the file | pass |
+| `test_obligation_in_a_second_terraform_root` | Roots | `terraform_dir: platform` | PRESERVED, roots recorded | pass |
+| `test_obligation_naming_an_unconfigured_root_is_invalid_config` | Config | `terraform_dir: elsewhere` | ASENT_CONFIG_OBLIGATIONS | pass |
+| `test_gate_run_decision_for_a_regression` | Orchestrator | regressed head | BLOCK, "SABLE: REGRESSED" | pass |
+| `test_demo_context_keeps_the_single_obligation_path` | Compatibility | `sable_preserved` demo | old path, PRESERVED | pass |
+
+### Defects found and fixed
+
+- First draft of `test_two_obligations_one_regressed` accepted either outcome; probing showed a read-only obligation is UNKNOWN on the demo base (the base grants Get+Put), so the test now uses two roots and asserts exact statuses, and the base-authority case is its own test. Review: 0 passes of cavr-reviewer (not requested), 1 self-review pass, 0 MINOR open.
+
+### Known limitations / deferred
+
+- Same model as before: inline IAM role policies and S3 objects, local modules only, no plan expansion, no deployed state.
+
+### Tool disclosure (Ch 8.7)
+
+- **Generated by Claude Code:** all of the above. **Reviewed by Maryam / SABLE owner:** not yet. **Verified by:** tests written first; existing SABLE suites green.
+
+### Supervisor Q&A prep
+
+1. **What must a project give SABLE?** `obligations.json`: which principal may perform which actions on which asset, in which Terraform root; SABLE checks the base satisfies it and the head still does.
+2. **What if the PR adds Terraform in a new folder?** It is outside `terraform_dirs`, so SABLE is UNKNOWN and the gate REVIEW until the base config covers it.
+
+## Step 8 — `asent gate` command (2026-11-07)
+
+### Ch 6 Implementation
+
+- `backend/gate/runner.py` (new): `run_gate(repository, base, head, output_dir, data_dir=None, keep_workdir=False) -> (exit_code, report)`; `EXIT_CODES`.
+- `backend/gate/summary.py` (new): `module_rows(run, evidence)` (result per module: pass / block / review / "not assessed (disabled by base config)" / not applicable), `render_summary(report)`, `NEEDS` (project input per module).
+- `backend/cli.py`: `gate` subcommand (`--repository --base --head --output-dir --data-dir --keep-workdir`), local, no HTTP.
+- `tests/gate_support.py` (new, no tests): real git repos (`GateRepo`), recorded PyPI/OSV injection.
+- Algorithm: resolve both refs -> export both commits -> `create_gate_run` -> `analyze` (synchronous, no repair) -> report `asent.gate.v1` (refs + SHAs, decision, exit code, reasons, module rows, config digest/problems/changed_in_head, coverage, tool availability, full `asent.assurance.v1`) and summary; exit 0/1/2; any exception -> REVIEW with the reason; output not writable -> exit 2.
+
+### Design decisions
+
+- **Errors still produce a report:** CI needs to show why a change was refused; only an unwritable output directory gives no report (exit 2, message on stderr).
+- **`pass` only from current acceptable evidence of an assessed module:** a disabled module's row says "not assessed (disabled by base config)" with its reason, and an ACCEPT with such modules adds "Accepted for the assessed modules only".
+- **Temporary work directory by default:** nothing of the target repository stays on the runner; `--data-dir` keeps `runtime/` so the CAVR verdict cache can be reused across runs.
+- **No server:** the same `Service` the dashboard uses, called in-process.
+
+### Requirements covered
+
+| ID | Title | What this covers | Acceptance check |
+|---|---|---|---|
+| FR-6 | Fail-Closed Security Policy | Every failure is REVIEW / exit 2 with a report | 12 fail-closed tests in `tests/test_gate_cli.py` |
+| none listed | CI gate for external repositories (dev-env plan) | `asent gate` exit codes and outputs | `test_sable_preserved_is_accept`, `test_sable_regression_is_block`, `test_report_identifies_the_exact_commits_and_config` |
+
+### Ch 7 Test cases
+
+`tests/test_gate_cli.py`: 20 passed. With init, export and orchestrator config tests the first run was 66 passed, **1 failed** (`test_demo_fixture_config_is_valid_and_mirrors_its_legacy_policy`, a step-7 regression, see defects); the step 8 commit was made before that result was read. After the fix (separate commit): 67 passed.
+
+| Test ID | Purpose | Input | Expected | Result |
+|---|---|---|---|---|
+| `test_no_asent_at_base` | Missing config | no `.asent/` | 2, ASENT_CONFIG_MISSING, summary "REVIEW" | pass |
+| `test_invalid_config`, `test_unreviewed_starter` | Invalid / starter | `{broken` / `asent init` output | 2 | pass |
+| `test_head_edits_asent` | Config change | head edits `.asent/README.md` | 2, changed_in_head | pass |
+| `test_unknown_ref_still_writes_a_report`, `test_not_a_repository` | Git errors | bad ref / plain dir | 2 with report | pass |
+| `test_tf_present_without_sable_section` | Decision 3 | `.tf` and no SABLE section | 2, SABLE row "review" | pass |
+| `test_sable_enabled_with_invalid_obligations` | Invalid file | empty obligations | 2 | pass |
+| `test_satra_enabled_without_a_container_engine` | No engine | SATRA configured, no Docker | 2, SATRA INCONCLUSIVE | pass |
+| `test_symlink_in_head`, `test_internal_error_is_review_with_a_report`, `test_unwritable_output_directory` | Failures | symlink / injected RuntimeError / output is a file | 2 | pass |
+| `test_sable_preserved_is_accept`, `test_sable_regression_is_block` | Decisions | unchanged / regressed infra | 0 / 1 | pass |
+| `test_denied_package_added_in_head_is_block` | CAVR block | `reqeusts` added | 1 | pass |
+| `test_cavr_only_accept_with_disabled_modules_never_shown_as_passed` | Decision 3 | CAVR on, SATRA/SABLE off with `.py`/`.tf` present | 0; rows "not assessed (disabled by base config)" + reason, never "pass" | pass |
+| `test_report_identifies_the_exact_commits_and_config` | Report | tags `base`, `head` | SHAs = `git rev-parse`; 3 rows | pass |
+| `test_hooks_in_the_target_repository_are_not_run` | Isolation | 4 hooks | no marker | pass |
+| `test_work_directory_is_removed_unless_kept`, `test_run_gate_api_returns_the_same_report` | Housekeeping | default / `--data-dir` | temp dir empty / runtime kept | pass |
+
+### Defects found and fixed
+
+- Step-7 regression found here: the new optional `Obligation.terraform_dir` (value None) was copied into the legacy `infrastructure` policy, so the demo policy no longer equalled `policy.json` (`test_demo_fixture_config_is_valid_and_mirrors_its_legacy_policy` failed; step 7 had not run that file). Fixed in `frozen.policy_from_config` (legacy keys only), separate `fix(orchestrator)` commit.
+- Process defect: the step 8 commit was chained after `tail` and went in although that run had 1 failure; from now on the commit runs only after the test result has been read.
+- Review: 0 passes of cavr-reviewer (not requested), 1 self-review pass (read one generated summary), 0 MINOR open.
+
+### Known limitations / deferred
+
+- No PR comment posting; the workflow (step 10) uses the job summary and an artifact.
+- Evidence file paths inside `assurance` point into the deleted work directory unless `--data-dir`/`--keep-workdir` is used.
+
+### Tool disclosure (Ch 8.7)
+
+- **Generated by Claude Code:** runner, summary, CLI command, helpers, tests, notes. **Reviewed by Maryam:** not yet. **Verified by:** tests on real git repositories, written first.
+
+### Supervisor Q&A prep
+
+1. **What does a CI job get from ASENT?** An exit code (0/1/2), `asent-report.json` with the exact commit SHAs, config digest and all evidence, and a Markdown summary with one row per module.
+2. **Can ACCEPT hide a module that was not checked?** No: the row says "not assessed (disabled by base config)" with the reason from base config, and the summary says the acceptance covers the assessed modules only.
+
+## Step 9 — each CAVR verdict through `asent gate` (2026-11-07)
+
+### Ch 6 Implementation
+
+- `tests/test_gate_cavr_verdicts.py` (new): one end-to-end test per pipeline verdict through `cli.main(["gate", ...])` on real git repositories; plus `test_live_pypi_and_osv` behind `CAVR_LIVE=1`. No production code changed: steps 5 and 8 already carry the pipeline's status, stage, rule and the 8 cache-key fields into `asent-report.json` (`assurance.evidence[CAVR].details.pipeline`) and the CAVR summary row.
+
+### Design decisions
+
+- **Through the CLI, not the adapter:** the mapping is checked where CI sees it: decision, exit code, report fields and the summary row.
+- **REJECTED via a SYNTH- advisory:** no recorded advisory affects pypdf 6.19.0 in the repository data; the range check that rejects it is the real OSV code. The live variant checks the same path against live services.
+- **Live test asserts consistency, not a fixed verdict:** live advisories change over time; the exit code must follow whatever CAVR found.
+
+### Requirements covered
+
+| ID | Title | What this covers | Acceptance check |
+|---|---|---|---|
+| none listed | CAVR verdict mapping in the gate (Maryam's change 1) | VERIFIED 0, REJECTED 1, BLOCK 1, UNRESOLVED 2 | the four tests below |
+| FR-6 | Fail-Closed Security Policy | Network off is REVIEW, never ACCEPT | `test_unresolved_is_review_exit_2` |
+
+### Ch 7 Test cases
+
+`tests/test_gate_cavr_verdicts.py`: 4 passed, 1 skipped (live). With `CAVR_LIVE=1` (run once on 2026-11-07): live test passed.
+
+| Test ID | Purpose | Input | Expected | Result |
+|---|---|---|---|---|
+| `test_verified_is_accept_exit_0` | VERIFIED | `pypdf==6.19.0`, recorded registry + recorded "no advisories" | exit 0, ACCEPT, row "pass VERIFIED", 8 key fields, sha256 `7e5d6e73…` | pass |
+| `test_rejected_is_block_exit_1` | REJECTED | SYNTH-PYPDF-GATE affecting [6.0.0, 6.20.0) | exit 1, BLOCK, stage advisories | pass |
+| `test_block_is_block_exit_1_without_a_download` | BLOCK | `reqeusts==2.31.0` (denied) | exit 1, BLOCK, stage gate, 0 downloads | pass |
+| `test_unresolved_is_review_exit_2` | UNRESOLVED | every request fails | exit 2, REVIEW, "CAVR: UNRESOLVED" | pass |
+| `test_live_pypi_and_osv` | Live | live PyPI + OSV, `pypdf==6.19.0` | exit code consistent with CAVR status | pass: REJECTED advisories KNOWN_VULNERABILITY, "pypdf 6.19.0 is affected by 18 known advisories: GHSA-39mj-jf6j-2qj3, GHSA-42gh-23hr-vphw, GHSA-4vqv-7265-gm2w and 15 more" -> BLOCK, exit 1 |
+
+### Defects found and fixed
+
+- None in code. **Finding:** live OSV now lists 18 advisories for pypdf 6.19.0, the version pinned by the InvoiceHub demo (`demo_project/InvoiceHub/requirements.txt`, lock and `.asent/cavr/policy.json`). The recorded answer used by the tests (`tests/test_cavr_data/osv-pypdf-6.19.0.json`) has none. Not changed here: choosing the demo's dependency version is Maryam's decision. Review: 0 passes of cavr-reviewer (not requested), 1 self-review pass, 0 MINOR open.
+
+### Known limitations / deferred
+
+- The four offline tests depend on recorded data; their VERIFIED case is a statement about the recorded OSV answer of 2026-09-25, not about pypdf today (see finding).
+
+### Tool disclosure (Ch 8.7)
+
+- **Generated by Claude Code:** the tests and these notes; ran the live test once. **Reviewed by Maryam:** the required mapping is hers. **Verified by:** offline run and one live run.
+
+### Supervisor Q&A prep
+
+1. **Show that each CAVR verdict reaches CI correctly.** `tests/test_gate_cavr_verdicts.py`: four real repositories, four verdicts, exit codes 0/1/1/2, the pipeline's own stage and rule in the report.
+2. **Is the demo dependency safe?** On the recorded data yes; on live OSV (2026-11-07) pypdf 6.19.0 is affected by 18 advisories, and the gate blocks it.
+
+## Step 10 — CLI in the Docker image and a reusable GitHub Actions workflow (2026-11-07)
+
+### Ch 6 Implementation
+
+- `scripts/asent` (new, 0755): POSIX wrapper; `ASENT_HOME` (default the checkout above the script), `ASENT_PYTHON` (default `python3`); `exec python -m backend.cli "$@"`.
+- `Dockerfile`: installs the wrapper as `/usr/local/bin/asent`, `ENV ASENT_HOME=/app ASENT_PYTHON=python`; the server `CMD` is unchanged.
+- `.github/workflows/cd.yml`: image smoke test also runs `asent gate --help`.
+- `.github/workflows/asent-gate.yml` (new): `on: workflow_call` (inputs `asent-repository`, `asent-ref`, `review-fails`, optional `base`/`head`, `python-version`; outputs `decision`, `exit-code`); read-only permissions; target checkout with `fetch-depth: 0`; ASENT checkout at the pinned ref; `pip install -r requirements.lock.txt`; `docker build` of `asent-sandbox:local`; `asent gate` with the PR base/head SHAs (through env); summary to `$GITHUB_STEP_SUMMARY`; report artifact (`if: always()`); BLOCK fails, REVIEW fails unless `review-fails: false`.
+- `docs/gate/asent-pr.yml` (new): the copyable caller (`on: pull_request`).
+
+### Design decisions
+
+- **Runner-native, image ships the CLI too:** decided by Maryam (decision 2). Inside the image without a container engine, SATRA and CAVR deep paths are INCONCLUSIVE/UNRESOLVED -> REVIEW; documented in `docs/asent-gate.md`.
+- **Fork-safe workflow:** `pull_request` only, `contents: read`, `persist-credentials: false`, no `${{ }}` inside `run:` (tested), so a crafted branch name cannot inject shell code.
+- **Pinned ASENT ref as an input:** the gate code that decides must itself be a fixed, reviewable commit.
+- **Docker image run with `--user $(id -u):$(id -g)`:** git refuses repositories owned by another user (`safe.directory`), and the gate deliberately ignores global/system git config; matching the owner avoids a permanent REVIEW.
+
+### Requirements covered
+
+| ID | Title | What this covers | Acceptance check |
+|---|---|---|---|
+| none listed | Gate on any repository's pull requests (dev-env plan) | Reusable workflow and caller | `test_reusable_workflow_interface`, `test_gate_step_uses_the_pull_request_shas_and_maps_exit_codes`, `test_caller_example_runs_on_pull_requests` |
+| FR-6 | Fail-Closed Security Policy | REVIEW fails the job by default; missing exit code fails | `test_gate_step_uses_the_pull_request_shas_and_maps_exit_codes` |
+
+### Ch 7 Test cases
+
+`tests/test_gate_packaging.py`: 10 passed.
+
+| Test ID | Purpose | Input | Expected | Result |
+|---|---|---|---|---|
+| `test_reusable_workflow_interface` | Interface | asent-gate.yml | required inputs, boolean review-fails default true, outputs | pass |
+| `test_workflow_permissions_are_read_only` | Least privilege | both files | `contents: read` only | pass |
+| `test_no_pull_request_target_anywhere` | Fork safety | both files (text) | absent | pass |
+| `test_no_untrusted_expressions_inside_shell_scripts` | Injection | every `run:` | no `${{` | pass |
+| `test_checkouts_have_full_history_and_no_persisted_credentials` | Checkout | both checkouts | fetch-depth 0; pinned ASENT; no credentials | pass |
+| `test_gate_step_uses_the_pull_request_shas_and_maps_exit_codes` | Gate step | workflow | PR SHAs via env, sandbox build, artifact always, 1/2 mapping | pass |
+| `test_caller_example_runs_on_pull_requests` | Template | asent-pr.yml | pull_request, calls the reusable workflow | pass |
+| `test_dockerfile_installs_the_cli_and_keeps_the_server` | Image | Dockerfile | wrapper installed, ASENT_HOME, uvicorn CMD last | pass |
+| `test_cd_smoke_test_runs_the_gate_cli` | CD | cd.yml | `asent gate --help` | pass |
+| `test_wrapper_is_executable_and_runs_a_real_gate` | Wrapper | `scripts/asent gate` on a real repo | help exit 0; README-only project exit 2 with both files | pass |
+
+Not run here: `docker build` (Docker not installed), `actionlint` (not installed), and a real pull-request run of `asent-gate.yml` (would need a push; Maryam said not to push). These are the open items of the plan's done criterion.
+
+### Defects found and fixed
+
+- The workflow comment named the forbidden trigger and tripped the text check; reworded (the stricter text check was kept). Review: 0 passes of cavr-reviewer (not requested), 1 self-review pass, 0 MINOR open.
+
+### Known limitations / deferred
+
+- Actions are pinned by major version (`@v4`), as in the existing workflows; pinning by commit SHA is recommended for adopters (`docs/asent-gate.md`).
+- No PR comment is posted; results are in the job summary and the `asent-gate-report` artifact.
+
+### Tool disclosure (Ch 8.7)
+
+- **Generated by Claude Code:** wrapper, Dockerfile/CD lines, both workflow files, tests, notes. **Reviewed by Maryam:** not yet. **Verified by:** YAML parsed and checked by tests; wrapper executed for real; image and Actions run not verified (see above).
+
+### Supervisor Q&A prep
+
+1. **Is it safe to run on pull requests from strangers?** The workflow has a read-only token, keeps no credentials, never uses `pull_request_target`, and repository code runs only inside the `--network none` sandbox container.
+2. **How does another team adopt it?** `asent init`, review and merge `.asent/`, copy `docs/gate/asent-pr.yml` with a pinned ASENT SHA.
+
+## Step 11 — hardcoded-path guard, gate documentation, end-to-end check (2026-11-07)
+
+### Ch 6 Implementation
+
+- `tests/test_gate_no_hardcoded_paths.py` (new): text guard over the 20 modules a gate run executes (patterns `demo_project`, `sample_project`, `SAMPLE_PROJECT_DIR`, `scenarios/`, `fixtures/invoice.pdf`, `InvoiceHub/`, `DEMO` imports) with a 6-entry allowlist, each with the reason it is unreachable from a gate run; behaviour guards: a gate run with every demo-scenario function replaced by one that raises, and a fresh-interpreter gate run that must not import `backend.main`, `backend.cavr.api`, `backend.satra.settings`, `backend.satra.api`, `backend.sable.api`, `backend.sable.fixtures.scenarios`.
+- `tests/test_gate_end_to_end.py` (new): `asent init` -> REVIEW (starter) -> review -> ACCEPT (docs change) -> BLOCK (typosquat added) -> REVIEW (policy edited in the PR), all through the CLI on one fresh repository.
+- `docs/asent-gate.md` (new): usage, exit codes, how it works, adoption, local/Actions/Docker use, the per-module table, limitations. `README.md`: short section linking it.
+
+### Design decisions
+
+- **Behaviour guard instead of "never imports scenarios":** `orchestrator/service.py` imports `orchestrator.scenarios` at module level, so an import check is impossible without moving code; replacing its functions with ones that raise proves a gate run never calls them.
+- **`scenarios/laboratory_hashes.json` kept in `pytest_runner`, allowlisted:** moving it to a config constant would break `tests/test_hash_verification_line_endings.py`, which relocates it by patching `pytest_runner.ROOT`; it is ASENT's own index of inert sources, read only when `external=False`.
+- **Allowlist entries must still match:** `test_every_allowlist_entry_still_matches_a_line` stops the list from silently going stale.
+
+### Requirements covered
+
+| ID | Title | What this covers | Acceptance check |
+|---|---|---|---|
+| none listed | No hardcoded project paths in the analysis path (dev-env plan) | Text and behaviour guards | `test_gate_path_has_no_hardcoded_demo_paths`, `test_gate_run_never_calls_a_demo_scenario_function` |
+| FR-6 | Fail-Closed Security Policy | starter and PR-edited config give REVIEW in the real flow | `test_init_review_gate` |
+
+### Ch 7 Test cases
+
+`tests/test_gate_no_hardcoded_paths.py` + `tests/test_gate_end_to_end.py`: 5 passed.
+
+| Test ID | Purpose | Input | Expected | Result |
+|---|---|---|---|---|
+| `test_gate_path_has_no_hardcoded_demo_paths` | Text guard | 20 modules | no unexplained match | pass (first run found `pytest_runner.py:27`, see defects) |
+| `test_every_allowlist_entry_still_matches_a_line` | Guard upkeep | 6 entries | each still present, with a reason | pass |
+| `test_gate_run_never_calls_a_demo_scenario_function` | Behaviour | scenario functions raise | gate exit 0 | pass |
+| `test_gate_run_does_not_import_dashboard_or_live_satra_modules` | Behaviour | fresh interpreter | none of 7 modules imported | pass |
+| `test_init_review_gate` | Done criterion | init -> review -> 3 heads | 2, 0, 1, 2 | pass |
+
+### Defects found and fixed
+
+- The text guard found `backend/satra/pytest_runner.py:27` (`fixtures/invoice.pdf` in `permitted_builtin`) that the plan's inventory listed only by function; allowlisted with its reason (same host fallback, not consulted with `external=True`). Review: 0 passes of cavr-reviewer (not requested), 1 self-review pass, 0 MINOR open.
+
+### Known limitations / deferred
+
+- The guard checks text and two behaviours; it is not a proof that no other code path reads a demo file.
+
+### Tool disclosure (Ch 8.7)
+
+- **Generated by Claude Code:** guards, end-to-end test, documentation, README section, notes. **Reviewed by Maryam:** not yet.
+
+### Supervisor Q&A prep
+
+1. **How do you know the gate does not secretly analyse the demo project?** A text guard over every module the gate runs, plus a run where every demo function raises, plus an import check in a fresh interpreter.

@@ -1,0 +1,16 @@
+{
+  "obligations": [
+    {
+      "id": "invoice-data-least-privilege",
+      "principal": "aws_iam_role.app",
+      "protected_asset": "aws_s3_bucket.invoice_data",
+      "actions": [
+        "s3:GetObject",
+        "s3:PutObject"
+      ],
+      "scope": "objects",
+      "minimum_score": 6,
+      "margin": 3
+    }
+  ]
+}

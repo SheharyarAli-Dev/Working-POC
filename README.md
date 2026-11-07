@@ -161,6 +161,13 @@ uvicorn backend.main:app --host 127.0.0.1 --port 8000 --reload
 ```
 Navigate to `http://localhost:8000` to interact with the Run Workflow interface.
 
+### Gating any git repository (no server)
+
+`scripts/asent gate --repository PATH --base REF --head REF` decides one change of any repository that has a
+reviewed `.asent/` folder (start with `scripts/asent init`) and exits 0 ACCEPT, 1 BLOCK, 2 REVIEW. See
+[docs/asent-gate.md](docs/asent-gate.md) (usage, GitHub Actions, what each module needs) and
+[docs/asent-config.md](docs/asent-config.md) (the `.asent/` schema).
+
 ---
 
 ## 5. Scope & Explicit Capabilities

@@ -18,6 +18,11 @@ from backend.threat_repo.repository import active,seeds
 
 
 def analyze(context,store,outdir,emit):
+    # Gate runs on real repositories always use the M1 pipeline; this lockfile analyzer is kept
+    # only for the built-in demo scenarios (no project config can select it).
+    if getattr(context,'gate',False):
+        from backend.cavr.gate_adapter import analyze_pipeline
+        return analyze_pipeline(context,store,outdir,emit)
     start=time.perf_counter();nodes=[];uncertain=[];statuses=[]
     lock_file=context.path/'dependencies.lock.json'
     if not lock_file.exists():return 'UNRESOLVED',{'reason':'Exact artifact lock required; arbitrary resolver output is not a trust proof','nodes':[]},['Dependency artifacts unresolved']

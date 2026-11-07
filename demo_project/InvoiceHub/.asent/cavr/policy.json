@@ -1,0 +1,26 @@
+{
+  "project_task_description": "Automated Invoice PDF Text Extraction and Financial Document Parsing Pipeline",
+  "allowed_scopes": [
+    "FILE_READ:invoice_documents",
+    "FILE_WRITE:scratch_tmp",
+    "PROCESS_EXEC:none",
+    "NETWORK_CONNECT:none"
+  ],
+  "approved_requirements": [
+    "pypdf==6.19.0"
+  ],
+  "denied_packages": [],
+  "dependencies": {
+    "allowed": [
+      "pypdf",
+      "invoice-pdf-lab",
+      "invoice-pdf-safe"
+    ],
+    "purpose": "PDF text extraction",
+    "allow_network": false,
+    "allow_process": false,
+    "allow_secret": false,
+    "require_live_osv": false,
+    "advisory_max_age_days": 30
+  }
+}

@@ -16,7 +16,7 @@ from backend.orchestrator.evidence_bus import EvidenceBus
 from backend.orchestrator.event_router import route
 from backend.orchestrator.invalidation import invalidate_changed
 from backend.orchestrator.final_gate import decide
-from backend.orchestrator.scenarios import catalog,apply_scenario,replace_lab
+from backend.orchestrator.scenarios import catalog,apply_scenario,replace_lab,scenario_project
 from backend.integrations.git_adapter import git,diff
 from backend.integrations.agent_adapter import WorkspaceWatchAdapter,parse_dependency_command
 from backend.cavr import analyzer as cavr
@@ -48,7 +48,8 @@ class Service:
             if not source.is_dir():raise ValueError('Repository directory does not exist')
         label='LIVE WORKSPACE RUN' if source and mode=='watch' else 'PUBLISHED / RESEARCH CASE' if source and mode=='research' else ('MANUAL WORKSPACE' if source else item['source'])
         run=RunContext(scenario=scenario,title=item['title'],mode=mode,evidence_source=label,agent_metadata=agent_metadata or {})
-        candidate=self.workspaces.create(run,source)
+        # A plain scenario run uses the scenario's built-in fixture project, with its own .asent/.
+        candidate=self.workspaces.create(run,source or scenario_project(item))
         if not source:apply_scenario(candidate,scenario)
         if srs is not None:(candidate/'SRS.md').write_text(srs)
         if plan is not None:(candidate/'plan.md').write_text(plan)
@@ -57,6 +58,19 @@ class Service:
         self.store.save_run(run);bus=EvidenceBus(self.store,run)
         bus.emit('run.created',{'scenario':scenario,'source':label,'baseline_commit':run.baseline_commit,'candidate_workspace':str(candidate)})
         self.store.experiment({'experiment_id':run.run_id,'scenario':scenario,'srs_hash':digest((candidate/'SRS.md').read_text()) if (candidate/'SRS.md').exists() else None,'agent_metadata':run.agent_metadata,'candidate_hash':run.candidate_snapshot,'baseline_commit':run.baseline_commit,'evidence_source':label,'ground_truth':item.get('ground_truth') if not source else None,'expected_module_applicability':ContextService(candidate,run.baseline_workspace,self.threats.snapshot()).applicability(),'package_hashes':[{k:n.get(k) for k in ('name','version','sha256','ecosystem')} for n in json.loads((candidate/'dependencies.lock.json').read_text()).get('packages',[])] if (candidate/'dependencies.lock.json').exists() else [],'recorded_trace':run.agent_metadata.get('recorded_trace')})
+        return run
+    def create_gate_run(self,base,head,gate=None,title='ASENT gate run'):
+        # Baseline = base commit's files, candidate = head commit's files, authority = base .asent/ only.
+        from backend.project_config import tree_digest
+        base,head=Path(base).resolve(),Path(head).resolve()
+        for folder in (base,head):
+            if not folder.is_dir():raise ValueError('Export directory does not exist: '+str(folder))
+        run=RunContext(scenario='gate',title=title,mode='gate',evidence_source='GATE: base -> head',gate=dict(gate or {}))
+        candidate=self.workspaces.create(run,base,candidate_source=head,require_config=True)
+        run.config_changed_in_head=tree_digest(head/'.asent')!=tree_digest(base/'.asent')
+        run.candidate_snapshot=snapshot(candidate)
+        self.store.save_run(run);bus=EvidenceBus(self.store,run)
+        bus.emit('run.created',{'scenario':'gate','source':run.evidence_source,'baseline_commit':run.baseline_commit,'candidate_workspace':str(candidate),'gate':run.gate,'config_digest':run.config_digest,'config_problems':run.config_problems,'config_changed_in_head':run.config_changed_in_head})
         return run
     def start(self,rid,auto_repair=False):
         # Keep the API responsive while the run performs analysis in a background thread.
@@ -77,6 +91,7 @@ class Service:
     def analyze(self,rid,auto_repair=False):
         # Analyze one frozen candidate revision, then accept only evidence bound to that exact snapshot.
         with self.guard:lock=self.locks.setdefault(rid,threading.Lock())
+        if self.store.run(rid).mode=='gate':auto_repair=False  # a gate decides; it never rewrites the change
         if not lock.acquire(blocking=False):return
         try:
             run=self.store.run(rid);bus=EvidenceBus(self.store,run)
@@ -86,10 +101,11 @@ class Service:
                 run.reasons=['Candidate frozen; waiting for current evidence'];self.store.save_run(run)
                 bus.emit('final_gate.changed',{'decision':'REVIEW','reasons':run.reasons})
                 # Freeze before dispatch so parallel analyzers inspect the same candidate revision.
-                frozen,sha=self.workspaces.freeze(run);run.candidate_snapshot=sha;context=ContextService(frozen,run.baseline_workspace,self.threats.snapshot())
+                frozen,sha=self.workspaces.freeze(run);run.candidate_snapshot=sha;context=ContextService(frozen,run.baseline_workspace,self.threats.snapshot(),gate=run.mode=='gate')
                 run.threat_repo_version=context.knowledge['version'];run.threat_repo_digest=context.knowledge['digest']
                 run.srs_digest=digest(context.srs);run.approved_plan_digest=digest(context.plan);run.policy_digest=digest(context.policy)
-                run.applicable=context.applicability();paths=changed(manifest(run.baseline_workspace),context.manifest);run.changed_surfaces=route(paths)
+                run.applicable=context.applicability();run.coverage=context.coverage();paths=changed(manifest(run.baseline_workspace),context.manifest);run.changed_surfaces=route(paths)
+                extra=context.config_reasons()+(['ASENT configuration changed in this change; requires maintainer review'] if run.config_changed_in_head else [])
                 delta=diff(run.candidate_workspace,run.baseline_commit)
                 bus.emit('workspace.snapshot',{'hash':sha,'revision':run.revision,'files':len(context.manifest),'baseline_commit':run.baseline_commit,'git_diff':delta[:40000]})
                 bus.emit('file.changed',{'paths':paths,'routing':run.changed_surfaces})
@@ -125,7 +141,7 @@ class Service:
                         for e in self.store.evidence(rid):
                             if e['analyzer'] in changed_knowledge:self.store.invalidate(e['evidence_id'])
                         run.final_decision='REVIEW';run.reasons=['Threat knowledge changed during analysis; rerun required'];break
-                    decision,reasons,states=decide(run.applicable,self.store.evidence(rid),sha,{m:context.input_hash(m) for m in run.applicable})
+                    decision,reasons,states=decide(run.applicable,self.store.evidence(rid),sha,{m:context.input_hash(m) for m in run.applicable},extra)
                     run.final_decision=decision;run.reasons=reasons
                     bus.emit('final_gate.changed',{'decision':decision,'reasons':reasons,'statuses':states,'snapshot':sha});self.store.save_run(run)
                     if decision=='ACCEPT':
@@ -138,7 +154,7 @@ class Service:
                 stored=self.store.run(rid)
                 if stored.final_decision=='REVIEW' and run.final_decision=='ACCEPT':run=stored
                 run.lifecycle='COMPLETE';self.store.save_run(run)
-            report=self.report(rid);folder=self.root/'evidence'/rid;folder.mkdir(exist_ok=True);(folder/'assurance.json').write_text(json.dumps(report,indent=2))
+            report=self.report(rid);folder=self.root/'evidence'/rid;folder.mkdir(parents=True,exist_ok=True);(folder/'assurance.json').write_text(json.dumps(report,indent=2))
         except Exception as e:
             run=self.store.run(rid);run.lifecycle='ERROR';run.final_decision='REVIEW';run.reasons=['Run could not complete'];run.error=type(e).__name__+': '+str(e);self.store.save_run(run);self.store.event(rid,'run.error',{'reason':run.error})
         finally:lock.release()
@@ -213,7 +229,7 @@ class Service:
         unresolved=[x['data'] for x in events if x['kind'] in ('module.rerun','cavr.monitor_fallback')]
         unresolved.extend(t for e in evidence if e['analyzer']=='CAVR' for n in e.get('details',{}).get('nodes',[]) for t in n.get('static',{}).get('triggers',[]) if not t.get('activation_known'))
         cavr_nodes=[n for e in evidence if e['analyzer']=='CAVR' for n in e.get('details',{}).get('nodes',[])]
-        return {'schema':'asent.assurance.v1','run':run.model_dump(mode='json'),'project_candidate_snapshot':run.candidate_snapshot,'evidence':evidence,'evidence_state':[{'evidence_id':e['evidence_id'],'module':e['analyzer'],'snapshot':e['candidate_snapshot'],'stale':e['stale'],'integrity_valid':e['integrity_valid']} for e in evidence],'obligations_evaluated':[{'module':e['analyzer'],'status':e['status'],'candidate_snapshot':e['candidate_snapshot'],'input_hash':e['input_hash'],'stale':e['stale']} for e in evidence],'capability_obligations':[{'package':n.get('name'),'required':n.get('contract',{}).get('required',[]),'denied':n.get('contract',{}).get('denied',[]),'confidence':n.get('contract',{}).get('confidence'),'authority':n.get('contract',{}).get('authority')} for n in cavr_nodes],'dependency_use_attributions':[a for n in cavr_nodes for a in n.get('dependency_use',{}).get('dependency_attributions',[])],'discovered_triggers':[t for n in cavr_nodes for t in n.get('static',{}).get('triggers',[])],'triggered_conditions':[x['data'] for x in events if x['kind']=='cavr.trigger_found'],'exercised_conditions':[x['data'] for x in events if x['kind']=='cavr.counterfactual_started'],'unresolved_conditions':unresolved,'artifact_identifiers':[{'package':n.get('name'),'version':n.get('version'),'sha256':n.get('sha256'),'artifact':n.get('artifact'),'snapshot':e['candidate_snapshot']} for e in evidence if e['analyzer']=='CAVR' for n in e.get('details',{}).get('nodes',[])],'execution_modes':[r.get('execution_modes',r.get('execution_mode')) for n in cavr_nodes if (r:=n.get('runtime'))],'observed_security_events':[ev for n in cavr_nodes for ev in (n.get('runtime') or {}).get('runs',[]) for ev in ev.get('events',[]) if ev.get('type') in ('SECRET_ACCESS','NETWORK_CONNECT')],'causal_evidence':[n.get('causal_graph') for n in cavr_nodes if n.get('causal_graph')],'repair_outcomes':[{'kind':x['kind'],'data':x['data']} for x in events if x['kind'].startswith(('repair.','cavr.repair_'))],'verification_result':run.final_decision,'residual_uncertainty':[u for e in evidence for u in e.get('residual_uncertainty',[])],'threat_repository':{k:v for k,v in self.threats.snapshot().items() if k!='records'},'chain_valid':self.store.verify_chain(rid),'event_count':len(events),'bounded_claim':'Applicable supported obligations only. Source labels distinguish controlled demonstrations from observed agent events. No benchmark superiority or universal safety claim.'}
+        return {'schema':'asent.assurance.v1','run':run.model_dump(mode='json'),'project_candidate_snapshot':run.candidate_snapshot,'evidence':evidence,'evidence_state':[{'evidence_id':e['evidence_id'],'module':e['analyzer'],'snapshot':e['candidate_snapshot'],'stale':e['stale'],'integrity_valid':e['integrity_valid']} for e in evidence],'obligations_evaluated':[{'module':e['analyzer'],'status':e['status'],'candidate_snapshot':e['candidate_snapshot'],'input_hash':e['input_hash'],'stale':e['stale']} for e in evidence],'capability_obligations':[{'package':n.get('name'),'required':n.get('contract',{}).get('required',[]),'denied':n.get('contract',{}).get('denied',[]),'confidence':n.get('contract',{}).get('confidence'),'authority':n.get('contract',{}).get('authority')} for n in cavr_nodes],'dependency_use_attributions':[a for n in cavr_nodes for a in n.get('dependency_use',{}).get('dependency_attributions',[])],'discovered_triggers':[t for n in cavr_nodes for t in n.get('static',{}).get('triggers',[])],'triggered_conditions':[x['data'] for x in events if x['kind']=='cavr.trigger_found'],'exercised_conditions':[x['data'] for x in events if x['kind']=='cavr.counterfactual_started'],'unresolved_conditions':unresolved,'artifact_identifiers':[{'package':n.get('name'),'version':n.get('version'),'sha256':n.get('sha256'),'artifact':n.get('artifact'),'snapshot':e['candidate_snapshot']} for e in evidence if e['analyzer']=='CAVR' for n in e.get('details',{}).get('nodes',[])],'execution_modes':[r.get('execution_modes',r.get('execution_mode')) for n in cavr_nodes if (r:=n.get('runtime'))],'observed_security_events':[ev for n in cavr_nodes for ev in (n.get('runtime') or {}).get('runs',[]) for ev in ev.get('events',[]) if ev.get('type') in ('SECRET_ACCESS','NETWORK_CONNECT')],'causal_evidence':[n.get('causal_graph') for n in cavr_nodes if n.get('causal_graph')],'repair_outcomes':[{'kind':x['kind'],'data':x['data']} for x in events if x['kind'].startswith(('repair.','cavr.repair_'))],'verification_result':run.final_decision,'residual_uncertainty':[u for e in evidence for u in e.get('residual_uncertainty',[])],'threat_repository':{k:v for k,v in self.threats.snapshot().items() if k!='records'},'config':{'digest':run.config_digest,'source':run.config_source,'problems':run.config_problems,'changed_in_head':run.config_changed_in_head},'coverage':run.coverage,'chain_valid':self.store.verify_chain(rid),'event_count':len(events),'bounded_claim':'Applicable supported obligations only. Source labels distinguish controlled demonstrations from observed agent events. No benchmark superiority or universal safety claim.'}
     def watch(self,rid,source=None):
         if rid in self.watchers:return
         run=self.store.run(rid);path=Path(source or run.candidate_workspace).resolve();adapter=WorkspaceWatchAdapter(path)

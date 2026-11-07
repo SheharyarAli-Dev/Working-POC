@@ -1,0 +1,92 @@
+{
+  "$defs": {
+    "Obligation": {
+      "additionalProperties": false,
+      "properties": {
+        "actions": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Actions",
+          "type": "array"
+        },
+        "id": {
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "margin": {
+          "default": 3,
+          "minimum": 0,
+          "title": "Margin",
+          "type": "integer"
+        },
+        "minimum_score": {
+          "default": 6,
+          "minimum": 0,
+          "title": "Minimum Score",
+          "type": "integer"
+        },
+        "principal": {
+          "description": "Terraform address, e.g. \"aws_iam_role.app\"",
+          "minLength": 1,
+          "title": "Principal",
+          "type": "string"
+        },
+        "protected_asset": {
+          "description": "Terraform address, e.g. \"aws_s3_bucket.invoice_data\"",
+          "minLength": 1,
+          "title": "Protected Asset",
+          "type": "string"
+        },
+        "scope": {
+          "default": "objects",
+          "minLength": 1,
+          "title": "Scope",
+          "type": "string"
+        },
+        "terraform_dir": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Terraform root of this obligation; default: the first of terraform_dirs",
+          "title": "Terraform Dir"
+        }
+      },
+      "required": [
+        "id",
+        "principal",
+        "protected_asset",
+        "actions"
+      ],
+      "title": "Obligation",
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`.asent/sable/obligations.json`.",
+  "properties": {
+    "obligations": {
+      "items": {
+        "$ref": "#/$defs/Obligation"
+      },
+      "minItems": 1,
+      "title": "Obligations",
+      "type": "array"
+    }
+  },
+  "required": [
+    "obligations"
+  ],
+  "title": "ASENT SABLE obligations (.asent/sable/obligations.json)",
+  "type": "object"
+}
