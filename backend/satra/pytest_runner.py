@@ -26,7 +26,7 @@ def permitted_builtin(root):
     if any(f.endswith(('.so','.pyd','.dll','.dylib','.pyw','.pth','.zip','.egg')) for f in names):return False
     for name in ('pytest.ini','fixtures/invoice.pdf'):
         reference=ROOT/'demo_project/InvoiceHub'/name;candidate=Path(root)/name
-        if not candidate.is_file() or _lf_digest(candidate.read_bytes())!=_lf_digest(reference.read_bytes()):return False
+        if not candidate.is_file() or digest(candidate.read_bytes())!=digest(reference.read_bytes()):return False
     return all(_lf_digest((Path(root)/f).read_bytes()) in allowed for f in names if f.endswith('.py'))
 
 
