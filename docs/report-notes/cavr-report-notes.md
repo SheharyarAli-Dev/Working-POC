@@ -3303,7 +3303,7 @@ Container path: Docker is not installed here; `container_on_host` runs the exact
 
 ### Ch 7 Test cases
 
-`tests/test_gate_cli.py`: 20 passed (with init, export and orchestrator config tests: 78 passed).
+`tests/test_gate_cli.py`: 20 passed. With init, export and orchestrator config tests the first run was 66 passed, **1 failed** (`test_demo_fixture_config_is_valid_and_mirrors_its_legacy_policy`, a step-7 regression, see defects); the step 8 commit was made before that result was read. After the fix (separate commit): 67 passed.
 
 | Test ID | Purpose | Input | Expected | Result |
 |---|---|---|---|---|
@@ -3324,7 +3324,9 @@ Container path: Docker is not installed here; `container_on_host` runs the exact
 
 ### Defects found and fixed
 
-- None found by the tests. Review: 0 passes of cavr-reviewer (not requested), 1 self-review pass (read one generated summary), 0 MINOR open.
+- Step-7 regression found here: the new optional `Obligation.terraform_dir` (value None) was copied into the legacy `infrastructure` policy, so the demo policy no longer equalled `policy.json` (`test_demo_fixture_config_is_valid_and_mirrors_its_legacy_policy` failed; step 7 had not run that file). Fixed in `frozen.policy_from_config` (legacy keys only), separate `fix(orchestrator)` commit.
+- Process defect: the step 8 commit was chained after `tail` and went in although that run had 1 failure; from now on the commit runs only after the test result has been read.
+- Review: 0 passes of cavr-reviewer (not requested), 1 self-review pass (read one generated summary), 0 MINOR open.
 
 ### Known limitations / deferred
 

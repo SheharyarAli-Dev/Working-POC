@@ -78,6 +78,7 @@ def policy_from_config(result: ConfigResult | None):
         out["ownership"] = ownership
     obligations = (documents.get("sable_obligations") or {}).get("obligations")
     if obligations:
-        out["infrastructure"] = {key: value for key, value in obligations[0].items() if key != "id"}
+        # Exactly the legacy keys: `id` and `terraform_dir` belong to the configured path only.
+        out["infrastructure"] = {key: value for key, value in obligations[0].items() if key not in ("id", "terraform_dir")}
         out["infrastructure_obligations"] = obligations
     return out
