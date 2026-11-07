@@ -46,8 +46,8 @@ closed (REVIEW) whenever config or evidence is missing, and runs in Docker and i
 | `orchestrator/context_service.py:47-49,55` | alias map `invoice-pdf-*`/`pypdf`, only `app/` is scanned | `cavr.import_aliases`, `cavr.source_dirs` from config (4) |
 | `orchestrator/run_context.py:12` | default title "InvoiceHub assurance run" | generic default (4) |
 | `integrations/git_adapter.py:13` | commit message "Trusted InvoiceHub baseline" | "Trusted baseline" (3) |
-| `integrations/registry_adapter.py:21` | artifact falls back to `ROOT/rel` (ASENT's own tree) | `allow_builtin=False` unless the run is a demo run (5) |
-| `cavr/analyzer.py:80` | `context.path/'fixtures/invoice.pdf'` | `cavr.counterfactual_input` from config, missing → UNRESOLVED (5) |
+| `integrations/registry_adapter.py:21` | artifact falls back to `ROOT/rel` (ASENT's own tree) | lockfile analyzer only; unreachable from gate runs (5) |
+| `cavr/analyzer.py:80` | `context.path/'fixtures/invoice.pdf'` | lockfile analyzer only; unreachable from gate runs (5) |
 | `cavr/sandbox.py:23`, `satra/pytest_runner.py:23` | `scenarios/laboratory_hashes.json` | ASENT's own trust index, not a project path; moved to the `config.LAB_HASHES` constant (10) |
 | `satra/pytest_runner.py:28` | host-fallback compares against `demo_project/InvoiceHub/{pytest.ini,fixtures/invoice.pdf}` | never consulted in gate mode (`external=True` requires a container); allowlisted (6) |
 | `satra/pytest_runner.py:47-48` | copies `backend/satra/trusted_{fixtures,security,functional}.py` | `trusted_tests` dir from config (6) |
@@ -82,7 +82,7 @@ module's `input_hash` as `@config`.
   README.md              written by `asent init`
 ```
 `config.json` modules: `CAVR {enabled, policy, requirements_files, verify: all|changed,
-import_aliases, source_dirs, counterfactual_input}`, `SATRA {enabled, contract, trusted_tests, pytest_ini, source_dirs,
+import_aliases, source_dirs}`, `SATRA {enabled, contract, trusted_tests, pytest_ini, source_dirs,
 project_security_tests}`, `SABLE {enabled, terraform_dirs, obligations}`. `enabled:false` requires `reason`.
 
 The schema is a set of pydantic models (`extra='forbid'`; pydantic is already locked, jsonschema is not).
@@ -185,14 +185,14 @@ has the same return shape as `analyzer.analyze`. `verify: all` → `pip install 
 Mapping (module status for `final_gate`): VERIFIED→VERIFIED (pass), REJECTED→REJECTED and BLOCK→REJECTED
 (block; the pipeline's own status, stage and rule are kept in `details.pipeline`), UNRESOLVED or any unknown
 status→UNRESOLVED (review). `analyzer.analyze` dispatches on the run mode: gate → adapter, demo scenario → lockfile.
-`read_artifact(…, allow_builtin)`. `counterfactual_input` comes from config. The pipeline always gets an
-explicit `project_dir`. Tests `tests/test_cavr_gate_adapter.py`, using the recorded real-wheel transport
+(As built: `read_artifact(…, allow_builtin)` and `counterfactual_input` were dropped. The lockfile analyzer and its
+`ROOT` fallback and `fixtures/invoice.pdf` are now reachable only from demo scenario runs, never from a gate run.)
+The pipeline always gets an explicit `project_dir`. Tests `tests/test_cavr_gate_adapter.py`, using the recorded real-wheel transport
 helpers from `tests/test_cavr_support.py`: approved pin → VERIFIED; denied package → REJECTED with no download;
 unpinned → UNRESOLVED; tampered bytes → REJECTED/UNRESOLVED per the pipeline rule; network off → UNRESOLVED;
 only `pyproject.toml` present → UNRESOLVED "unsupported manifest"; `changed` with no edit → VERIFIED at the gate
 stage; an unknown pipeline status → UNRESOLVED; the 8 cache-key fields are in `details`; the adapter never
-resolves to `SAMPLE_PROJECT_DIR`; a lockfile-mode artifact under ASENT ROOT is refused
-when `allow_builtin=False`.
+resolves to `SAMPLE_PROJECT_DIR`; a gate context dispatches to the pipeline and a demo context does not.
 
 **6 — SATRA from config** `[owner review: satra, threat_repo]`. Contract from `contract.json`;
 `run_pytest(…, trusted_tests_dir, external)`, where external with no engine → unavailable; `mutate_return_true`;

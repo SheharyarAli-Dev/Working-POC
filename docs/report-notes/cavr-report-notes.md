@@ -3088,3 +3088,69 @@ All in `tests/test_project_config.py`; result of `.venv/bin/python -m pytest -q 
 1. **Can a pull request disable a module to get ACCEPT?** No: the authority is the base `.asent/`, frozen when the run is created; a head change to `.asent/` adds a reason that keeps the decision at REVIEW.
 2. **Why is a disabled module not a failure?** The project owner said, in reviewed base config with a reason, that it does not apply; the report says "not assessed (disabled by base config)" so nobody reads it as passed.
 3. **Did moving the demos to `.asent/` change any demo outcome?** No: the mapped policy equals the old `policy.json` keys (tested) and all 1606 tests pass, including every scenario expectation.
+
+## Step 5 — CAVR in gate runs: the M1 pipeline (2026-11-07)
+
+### Ch 6 Implementation
+
+- `backend/cavr/gate_adapter.py` (new): `analyze_pipeline(context, store, outdir, emit)` -> (status, details, uncertainty), the return shape of `analyzer.analyze`; `map_status`; `SETTINGS` (transport/OSV injection for tests; None = live PyPI and live OSV); `UNSUPPORTED_MANIFESTS`.
+- `backend/cavr/analyzer.py`: `analyze` dispatches to the adapter when `context.gate` (every gate run); demo scenario runs keep the lockfile analyzer.
+- Algorithm: (1) take CAVR section + policy from the base config, else UNRESOLVED; (2) configured requirements files missing in head, or another dependency manifest (pyproject dependencies, Poetry, Pipenv, setup.py/cfg, npm) -> problem; no file to verify -> UNRESOLVED; (3) per file, `verify_request(["pip","install","-r",file])` (`verify: all`) or the base->head `requirements_edit` (`changed`), with the candidate directory, the base policy, a run-local `CavrStorage`, quarantine and advisory cache; (4) map: VERIFIED -> VERIFIED, REJECTED/BLOCK -> REJECTED, anything else -> UNRESOLVED; module = worst; a manifest problem keeps it from VERIFIED; (5) details keep the pipeline's own status, stage, rule, reason and every package's 8 cache-key fields.
+
+### Design decisions
+
+- **Dispatch by run mode, not by config:** decided by Maryam: a real repository cannot select the lockfile analyzer, and the demo tests keep it.
+- **BLOCK maps to REJECTED:** the requirement gate refusing a package is a block, not a review; the original BLOCK is kept in `details.pipeline`.
+- **Unknown status -> UNRESOLVED:** a future pipeline status must never pass by default.
+- **Other manifests -> UNRESOLVED:** if a repository also declares dependencies in a format the pipeline does not read, verifying only requirements.txt would accept unseen packages. `pyproject.toml` with only tool settings is accepted.
+- **Run-local verdict cache:** under the run store's directory, so gate runs never write the dashboard database; the 8-field key is unchanged, so the cache is reusable when the data directory is kept (`--data-dir`, step 8).
+- **Dropped from the plan:** `read_artifact(allow_builtin)` and `counterfactual_input`. The lockfile analyzer and its `ROOT` fallback are now reachable only from demo runs. Plan doc updated.
+
+### Requirements covered
+
+| ID | Title | What this covers | Acceptance check |
+|---|---|---|---|
+| FR-6 | Fail-Closed Security Policy | Unknown status, network off, unsupported manifest, missing file -> UNRESOLVED | `test_status_mapping` (6), `test_network_off_is_unresolved`, `test_only_pyproject_dependencies_is_unsupported` |
+| none listed | C3 on real artifacts in gate runs (CAVR M1) | Real wheel hash vs registry digest, advisories, 8-field key in gate evidence | `test_approved_pin_is_verified_with_the_eight_field_key`, `test_tampered_wheel_is_not_verified` |
+| none listed | C2 requirement gate in gate runs | Denied and unpinned packages blocked before download | `test_denied_package_is_rejected_without_a_download`, `test_unpinned_requirement_is_blocked_by_the_requirement_gate` |
+
+### Ch 7 Test cases
+
+`tests/test_cavr_gate_adapter.py`: 26 passed. With `tests/test_cavr_pipeline.py`, `tests/test_modules.py`, `tests/test_cavr_targeted.py`: 165 passed.
+
+| Test ID | Purpose | Input | Expected | Result |
+|---|---|---|---|---|
+| `test_approved_pin_is_verified_with_the_eight_field_key` | VERIFIED | real pypdf 6.19.0 wheel, recorded registry + "no advisories" | VERIFIED, sha256 `7e5d6e73…`, 8 key fields | pass |
+| `test_denied_package_is_rejected_without_a_download` | BLOCK | `reqeusts==2.31.0` in head | REJECTED (pipeline BLOCK, stage gate), 0 downloads | pass |
+| `test_affected_version_is_rejected_by_the_advisory_range` | REJECTED | SYNTH-PYPDF-1 affecting [6.0.0, 6.20.0) | REJECTED at stage advisories | pass |
+| `test_unpinned_requirement_is_blocked_by_the_requirement_gate` | Unpinned | `pypdf>=6` | REJECTED (BLOCK gate NOT_PINNED), 0 downloads | pass |
+| `test_tampered_wheel_is_not_verified` | Tamper | one bit flipped in the served wheel | REJECTED artifact HASH_MISMATCH | pass |
+| `test_network_off_is_unresolved` | Network | every request fails | UNRESOLVED | pass |
+| `test_only_pyproject_dependencies_is_unsupported` | Unsupported | pyproject `dependencies`, no requirements.txt | UNRESOLVED "unsupported manifest", 0 requests | pass |
+| `test_other_unverified_manifests_next_to_requirements_are_unresolved` (4) | Unsupported | setup.py, poetry.lock, package.json, Pipfile | UNRESOLVED naming the file | pass |
+| `test_pyproject_for_tool_settings_only_is_fine` | Edge | `[tool.black]` only | VERIFIED | pass |
+| `test_configured_requirements_file_missing_in_head` | Failure | file deleted in head | UNRESOLVED | pass |
+| `test_changed_mode_without_an_edit_is_verified_at_the_gate_stage`, `test_changed_mode_with_a_denied_addition_is_rejected` | `verify: changed` | no edit / denied addition | VERIFIED (gate, 0 requests) / REJECTED | pass |
+| `test_status_mapping` (6), `test_unknown_pipeline_status_through_the_adapter` | Mapping | 6 statuses / unknown status | as specified / UNRESOLVED | pass |
+| `test_pipeline_gets_the_candidate_directory_never_the_sample_project` | No sample fallback | spy on `verify_request` | project dir = candidate | pass |
+| `test_disabled_cavr_config_is_unresolved` | Defensive | CAVR disabled | UNRESOLVED | pass |
+| `test_gate_context_dispatches_to_the_pipeline_and_demo_context_does_not` | Dispatch | gate context / `safe` demo context | pipeline / lockfile analyzer | pass |
+| `test_gate_run_through_the_service_publishes_pipeline_evidence` | Orchestrator | full gate run | CAVR VERIFIED (engine pipeline), ACCEPT, SATRA "disabled" | pass |
+
+### Defects found and fixed
+
+- None in the code. Two tests first allowed either REJECTED or UNRESOLVED; after printing the real outcomes (unpinned: BLOCK gate NOT_PINNED; tampered: REJECTED artifact HASH_MISMATCH) they assert those exact values. Review: 0 passes of cavr-reviewer (not requested), 1 self-review pass, 0 MINOR open.
+
+### Known limitations / deferred
+
+- REJECTED by advisory uses a hand-written SYNTH- advisory: no recorded advisory affects pypdf 6.19.0, and no affected wheel is in the repository. The OSV range check itself is the real code.
+- Only pip requirements files; deep runtime analysis is M2; the step-14 decision (orchestrator demo path) is still open.
+
+### Tool disclosure (Ch 8.7)
+
+- **Generated by Claude Code:** the adapter, the dispatch, the tests, these notes, the plan correction. **Reviewed by Maryam:** the mapping and the demo-only lockfile analyzer were her instruction; code not yet reviewed. **Verified by:** tests written first, real outcomes printed.
+
+### Supervisor Q&A prep
+
+1. **What does CAVR check on a real pull request?** Every pin in the configured requirements files: refused or unpinned packages are blocked before download; the wheel's SHA-256 is compared with PyPI's digest; the dependency tree comes from Requires-Dist; OSV ranges; the capability contract from the project's call sites; AST sink scan; all under the 8-field cache key.
+2. **Why is a project with a pyproject.toml sometimes UNRESOLVED?** When it declares dependencies there; CAVR M1 only reads requirements files, and passing the others unseen would be a false VERIFIED.
