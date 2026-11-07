@@ -1,0 +1,284 @@
+{
+  "$defs": {
+    "CavrModule": {
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "description": "false switches the module off; the report then says it was not assessed",
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "import_aliases": {
+          "additionalProperties": {
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "description": "distribution name -> import names, when they differ",
+          "propertyNames": {
+            "minLength": 1
+          },
+          "title": "Import Aliases",
+          "type": "object"
+        },
+        "policy": {
+          "default": "cavr/policy.json",
+          "description": "CAVR policy inside .asent/",
+          "title": "Policy",
+          "type": "string"
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "required when enabled is false",
+          "title": "Reason"
+        },
+        "requirements_files": {
+          "description": "pip requirements files in the project",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Requirements Files",
+          "type": "array"
+        },
+        "source_dirs": {
+          "description": "where call sites are read; empty = whole project",
+          "items": {
+            "type": "string"
+          },
+          "title": "Source Dirs",
+          "type": "array"
+        },
+        "verify": {
+          "default": "all",
+          "description": "all pins in head, or only the base->head edit",
+          "enum": [
+            "all",
+            "changed"
+          ],
+          "title": "Verify",
+          "type": "string"
+        }
+      },
+      "required": [
+        "enabled"
+      ],
+      "title": "CavrModule",
+      "type": "object"
+    },
+    "Modules": {
+      "additionalProperties": false,
+      "properties": {
+        "CAVR": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CavrModule"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "SABLE": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SableModule"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "SATRA": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SatraModule"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "title": "Modules",
+      "type": "object"
+    },
+    "Project": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "maxLength": 100,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "Project",
+      "type": "object"
+    },
+    "SableModule": {
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "description": "false switches the module off; the report then says it was not assessed",
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "obligations": {
+          "default": "sable/obligations.json",
+          "description": "SABLE obligations inside .asent/",
+          "title": "Obligations",
+          "type": "string"
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "required when enabled is false",
+          "title": "Reason"
+        },
+        "terraform_dirs": {
+          "description": "Terraform directories in the project",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Terraform Dirs",
+          "type": "array"
+        }
+      },
+      "required": [
+        "enabled"
+      ],
+      "title": "SableModule",
+      "type": "object"
+    },
+    "SatraModule": {
+      "additionalProperties": false,
+      "properties": {
+        "contract": {
+          "default": "satra/contract.json",
+          "description": "SATRA security contract inside .asent/",
+          "title": "Contract",
+          "type": "string"
+        },
+        "enabled": {
+          "description": "false switches the module off; the report then says it was not assessed",
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "project_security_tests": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "the project's own security test file, checked for a weakened oracle",
+          "title": "Project Security Tests"
+        },
+        "pytest_ini": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "pytest.ini for the trusted tests, inside .asent/",
+          "title": "Pytest Ini"
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "required when enabled is false",
+          "title": "Reason"
+        },
+        "source_dirs": {
+          "description": "application code; empty = whole project",
+          "items": {
+            "type": "string"
+          },
+          "title": "Source Dirs",
+          "type": "array"
+        },
+        "trusted_tests": {
+          "default": "satra/trusted_tests",
+          "description": "trusted pytest directory inside .asent/",
+          "title": "Trusted Tests",
+          "type": "string"
+        }
+      },
+      "required": [
+        "enabled"
+      ],
+      "title": "SatraModule",
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`.asent/config.json`.",
+  "properties": {
+    "_starter": {
+      "default": false,
+      "description": "written as true by `asent init`; a config with true is refused until a person reviews it",
+      "title": "Starter",
+      "type": "boolean"
+    },
+    "modules": {
+      "$ref": "#/$defs/Modules"
+    },
+    "project": {
+      "$ref": "#/$defs/Project"
+    },
+    "schema_version": {
+      "description": "must be 1",
+      "maximum": 1,
+      "minimum": 1,
+      "title": "Schema Version",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "schema_version",
+    "project",
+    "modules"
+  ],
+  "title": "ASENT project configuration (.asent/config.json)",
+  "type": "object"
+}

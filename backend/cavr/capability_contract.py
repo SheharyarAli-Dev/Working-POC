@@ -171,6 +171,15 @@ def _entry_modules(usage: dict) -> list[str]:
     return sorted({".".join(parts[:end]) for parts in (name.split(".") for name in found) for end in range(1, len(parts) + 1)})
 
 
+def capability_policy_problem(policy, knowledge=None):
+    """Why `policy` cannot give a capability contract (the CAPABILITY_POLICY_INVALID reason), or None.
+
+    The same check `infer_capability_contract` makes, so a project config can be refused when it is
+    loaded instead of only when a package is verified.
+    """
+    return _capabilities(policy, knowledge, vocabulary(knowledge))[1]
+
+
 def _capabilities(policy, knowledge, names: list[str]):
     """({allowed, denied, conflicts, capability_rules, task_description}, None), or (None, reason) for an unusable policy."""
     if not isinstance(policy, dict):

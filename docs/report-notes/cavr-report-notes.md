@@ -2803,3 +2803,92 @@ Run on 2026-10-11.
    Real: the trace holds the read of `canary.txt`, then the connect to the harness port, and the harness received the exact marker. Without a received marker, with another payload, without the read, or in the wrong order, there is no confirmation (`test_the_connection_alone_is_not_a_confirmed_flow`).
 3. **Was a wrong verdict ever given?**
    No. The lab file was REJECTED in both modes. What was missing under strace was one event, its violation and the causal confirmation; what was wrong on 3.12 was a crash instead of UNRESOLVED.
+
+## Step 1 — `.asent/` config schema and loader (2026-11-07)
+
+Plan: `docs/dev-env-plan.md` (generic ASENT gate), step 1.
+
+### Ch 6 Implementation
+
+- `backend/project_config/schema.py` (new): pydantic models `AsentConfig` (`.asent/config.json`, with `CavrModule`, `SatraModule`, `SableModule`), `SatraContract` (`satra/contract.json`), `SableObligations` (`sable/obligations.json`); `export_schemas()` produces the committed JSON Schemas.
+- `backend/project_config/loader.py` (new): `load(asent_dir) -> ConfigResult(valid, problems, config, digest, files, documents)`; `tree_digest(asent_dir)`; `ConfigResult.module_state(name)` = enabled / disabled / absent.
+- `backend/project_config/__main__.py` (new): `python -m backend.project_config --write docs`.
+- `backend/cavr/capability_contract.py`: new public `capability_policy_problem(policy, knowledge=None)`, the same check `infer_capability_contract` makes (it calls the existing `_capabilities`).
+- `docs/asent-config.md` (new) and the generated `docs/asent-config.schema.json`, `docs/asent-satra-contract.schema.json`, `docs/asent-sable-obligations.schema.json`.
+- Algorithm of `load`: (1) walk `.asent/` without following links; any symlink or non-regular file -> UNSAFE, over 200 files / 1 MiB -> BUDGET (stops before reading further); (2) hash every file, digest = SHA-256 of {path: sha256}; (3) parse `config.json` (UTF-8, duplicate keys refused) and validate strictly; (4) for each enabled module, read and validate its own document (CAVR policy through `requirement_gate.policy_problems` + `capability_policy_problem` + non-blank task description); (5) `valid` only if no problem was recorded.
+
+### Design decisions
+
+- **pydantic models, not jsonschema:** pydantic is already locked, jsonschema is not; the JSON Schema is generated from the models and a test fails on drift, so the document and the check cannot differ.
+- **strict mode + `extra="forbid"`:** lax pydantic turns `"403"` into 403 and `"yes"` into true; a config value that is not exactly right must be a problem, not a guess.
+- **`schema_version` is a strict int 1, not `Literal[1]`:** `Literal` compares with `==`, so `true` and `1.0` were accepted (found in self-review, see defects).
+- **No `mode` field for CAVR:** a real repository must not be able to select the old lockfile analyzer; the demo scenarios choose it by run mode (step 4/5). Alternative (a `mode` field limited to demos) rejected because the config cannot prove it is a demo.
+- **Absent module section is valid at load time:** whether a module applies depends on head's files; step 4 turns "applies but absent" into REVIEW. Disabled modules need a reason and their files are not read.
+- **Digest over raw bytes, also for an invalid config:** base and head are exported by the same `git archive` on the same machine, so raw bytes are consistent; the digest of an invalid config is still needed to detect a head change. Alternative LF-normalised digest (as `satra/trust.py`) not needed here.
+- **Duplicate JSON keys refused:** `{"enabled": true, "enabled": false}` would otherwise silently keep the last value.
+- **Task description required non-blank:** `capability_contract` accepts a missing one (no threat rule applies then); for an external project that weakens the contract silently, so the loader refuses it.
+
+### Requirements covered
+
+No `FR-CAVR-NN` identifiers exist in this repository; IDs are from `RequirementsTab.tsx` (Maryam to confirm).
+
+| ID | Title | What this covers | Acceptance check |
+|---|---|---|---|
+| FR-6 | Fail-Closed Security Policy | Missing, unsafe, unreviewed or invalid project config is `valid=False` with a named code | `test_missing_directory`, `test_unreviewed_starter_is_invalid`, `test_invalid_cavr_policy` (7) |
+| none listed | Per-project policy for external repositories (dev-env plan) | Documented, versioned `.asent/` schema | `test_committed_schemas_match_the_models` |
+
+### Ch 7 Test cases
+
+All in `tests/test_project_config.py`; result of `.venv/bin/python -m pytest -q tests/test_project_config.py`: 75 passed.
+
+| Test ID | Purpose | Input | Expected | Result |
+|---|---|---|---|---|
+| `test_full_valid_config_loads` | Valid config | all three modules with files | valid, documents parsed, defaults filled | pass |
+| `test_disabled_module_with_reason_is_valid_and_its_files_are_not_required` | Disabled module | SABLE off with reason, no obligations file | valid, state "disabled", reason kept | pass |
+| `test_absent_module_section_is_valid_at_load_time` | Absent section | no SATRA key | valid, state "absent" | pass |
+| `test_defaults_are_filled_in` | Defaults | `{"enabled": true}` only | default policy path, requirements.txt, verify all | pass |
+| `test_missing_directory`, `test_asent_is_a_file_not_a_directory`, `test_missing_config_json` | Missing | no folder / a file / no config.json | MISSING, digest None | pass |
+| `test_bad_json_or_not_an_object` (6) | Unreadable | `{not json`, empty, null, [], "text", non-UTF-8 | JSON or SCHEMA | pass |
+| `test_duplicate_json_keys_are_rejected` | Edge | repeated key | JSON | pass |
+| `test_unknown_top_level_key`, `test_unknown_module_name` | Extras | extra key / module NEWMOD | SCHEMA | pass |
+| `test_cavr_mode_key_is_rejected_so_a_repository_cannot_pick_the_lockfile_analyzer` | Decision 1 | `"mode": "lockfile"` | SCHEMA naming `mode` | pass |
+| `test_wrong_schema_version` (6) | Version | 0, 2, "1", null, true, 1.0 | SCHEMA | pass |
+| `test_enabled_must_be_a_boolean` | Strict | `"yes"` | SCHEMA | pass |
+| `test_disabled_without_reason` (3) | Decision 3 | no / empty / blank reason | SCHEMA naming `reason` | pass |
+| `test_unsafe_or_empty_paths` (9), `test_sable_terraform_dir_escaping_repo` | Path safety | `..`, absolute, `C:\`, backslash, empty, `.git`, empty list | SCHEMA | pass |
+| `test_unreviewed_starter_is_invalid`, `test_starter_false_is_accepted` | Starter | `_starter` true / false | STARTER only / valid | pass |
+| `test_enabled_module_whose_file_is_missing`, `test_trusted_tests_directory_without_tests`, `test_configured_pytest_ini_missing` | Referenced files | missing policy / no test_*.py / missing ini | FILE_MISSING | pass |
+| `test_invalid_cavr_policy` (7), `test_invalid_cavr_policy_json` | CAVR policy | bad lists, extras, unknown/duplicate scope, missing/blank task, bad JSON | POLICY with the field named | pass |
+| `test_invalid_satra_contract` (7) | Contract | bad operator, no `::`, `..`, empty lists, `"403"`, extra key | CONTRACT | pass |
+| `test_invalid_sable_obligations` (6) | Obligations | empty, no actions, no principal, duplicate id, margin -1, a list | OBLIGATIONS | pass |
+| `test_several_problems_are_all_reported` | Reporting | two broken documents | both codes | pass |
+| `test_symlinked_file_inside_asent`, `test_symlinked_directory_inside_asent`, `test_asent_itself_is_a_symlink` | Unsafe tree | real symlinks | UNSAFE | pass |
+| `test_too_many_files`, `test_too_many_bytes` | Budget | 201 extra files / 1 MiB + 1 | BUDGET | pass |
+| `test_digest_is_stable_and_changes_on_a_one_byte_edit`, `test_digest_is_independent_of_location`, `test_digest_is_computed_for_an_invalid_config` | Digest | repeated load, one-byte edit, two locations, starter | stable / changes / same / present | pass |
+| `test_capability_policy_problem_matches_contract_rules` | Reused check | valid, string scopes, None | None / message / message | pass |
+| `test_committed_schemas_match_the_models`, `test_committed_schema_documents_starter_and_rejects_extras` | Documented schema | docs/*.schema.json | equal to generated; `_starter` listed; no extras | pass |
+
+### Defects found and fixed
+
+- Self-review: `schema_version: Literal[1]` accepted `true` and `1.0` (`True == 1`). Two cases added to `test_wrong_schema_version` (2 failed on the old code), fixed with a strict int `ge=1, le=1`.
+- `python -m backend.project_config.schema` printed a runpy RuntimeWarning (module imported by the package first); moved the entry point to `backend/project_config/__main__.py`.
+- Review: 0 passes of cavr-reviewer (not requested), 1 self-review pass, 0 MINOR open.
+
+### Known limitations / deferred
+
+- The loader does not know the project's files: "module applies but has no section" -> step 4; trusted-test content is only listed, it runs in step 6.
+- The CAVR policy is checked against the seed threat-repository vocabulary; the pipeline checks it again against the live snapshot at gate time.
+- The digest is over raw bytes: a CRLF and an LF checkout of the same `.asent/` have different digests (only affects comparisons across machines, not the gate, which exports base and head the same way).
+- No `asent init` yet (step 2); `_starter` is only recognised.
+
+### Tool disclosure (Ch 8.7)
+
+- **Generated by Claude Code:** the schema and loader modules, `capability_policy_problem`, the tests, `docs/asent-config.md`, the generated schemas, these notes.
+- **Reviewed / changed by Maryam:** the plan decisions this step follows (no CAVR `mode`, disabled modules need a reason); the code itself not yet reviewed.
+- **Verified by:** tests written before the code; printed problem messages for 8 sample cases checked by hand; the two `schema_version` cases failed before the fix; full suite `.venv/bin/python -m pytest -q`: 1559 passed, 30 skipped, 0 failed (was 1484 passed; `reports/scenario-validation.json` restored after the run).
+
+### Supervisor Q&A prep
+
+1. **Why is the config read from the base commit and not from the pull request?** The pull request is what is being judged; if it could edit its own policy it could approve itself. This step only loads a folder; step 8 always loads base's, and a head change to `.asent/` gives REVIEW.
+2. **What happens with a config you cannot understand?** `valid=False` with a code per problem (`ASENT_CONFIG_*`); the gate turns that into REVIEW, never ACCEPT. Unknown keys and loosely typed values are problems too.
+3. **Why can't a project choose the old CAVR analyzer?** There is no field for it (`test_cavr_mode_key_is_rejected_...`); it reads ASENT-specific lock files and is only kept so the built-in demos and their tests stay unchanged.
