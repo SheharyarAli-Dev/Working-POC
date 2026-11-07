@@ -1,6 +1,7 @@
 """ASENT command line.
 
-Local commands (no server): `init` writes a starter .asent/ for a project.
+Local commands (no server): `init` writes a starter .asent/ for a project; `gate` decides one change
+(base -> head) of a git repository and exits 0 ACCEPT, 1 BLOCK, 2 REVIEW.
 Server commands (`run`, `watch`, `dependency`, `replay`, `research`, `report`, `capabilities`) call the
 same HTTP gateway the dashboard uses.
 """
@@ -14,7 +15,7 @@ from pathlib import Path
 import httpx
 from backend.integrations.research_loader import load as load_research
 
-LOCAL_COMMANDS=('init',)
+LOCAL_COMMANDS=('init','gate')
 
 def init_command(args):
     from backend.project_config.starter import init_project
@@ -24,6 +25,14 @@ def init_command(args):
     if report['not_copied']:print('Not approved (not an exact pin): '+', '.join(report['not_copied']))
     print('Starter written. Review every file in .asent/, then remove "_starter" from .asent/config.json; until then every gate decision is REVIEW.')
     return 0
+
+def gate_command(args):
+    from backend.gate.runner import run_gate
+    code,report=run_gate(args.repository,args.base,args.head,args.output_dir,args.data_dir,args.keep_workdir)
+    print(f"ASENT gate: {report['decision']} (exit {code}); report: {Path(args.output_dir)/'asent-report.json'}; summary: {Path(args.output_dir)/'asent-summary.md'}")
+    for reason in report['reasons'][:20]:print('  - '+reason)
+    if report.get('data_dir'):print('Work directory kept: '+report['data_dir'])
+    return code
 
 def main(argv=None):
     parser=argparse.ArgumentParser(prog='asent',description='ASENT assurance gate. Local: init. Server commands need scripts/start.sh first.')
@@ -37,8 +46,13 @@ def main(argv=None):
     p=sub.add_parser('report');p.add_argument('run');p.add_argument('--output')
     sub.add_parser('capabilities')
     p=sub.add_parser('init',help='write a starter .asent/ (refused by the gate until reviewed)');p.add_argument('--repository',default='.');p.add_argument('--force',action='store_true')
+    p=sub.add_parser('gate',help='decide base..head of a git repository without a server; exit 0 ACCEPT, 1 BLOCK, 2 REVIEW')
+    p.add_argument('--repository',required=True);p.add_argument('--base',required=True);p.add_argument('--head',required=True)
+    p.add_argument('--output-dir',default='.');p.add_argument('--data-dir',help='keep and reuse run data (verdict cache) here')
+    p.add_argument('--keep-workdir',action='store_true',help='do not delete the temporary work directory')
     args=parser.parse_args(argv)
     if args.action=='init':return init_command(args)
+    if args.action=='gate':return gate_command(args)
     with httpx.Client(base_url=args.url,timeout=180,trust_env=False) as client:
         def call(method,path,body=None):
             r=client.request(method,'/api'+path,json=body);r.raise_for_status();return r.json()

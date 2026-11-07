@@ -3276,3 +3276,66 @@ Container path: Docker is not installed here; `container_on_host` runs the exact
 
 1. **What must a project give SABLE?** `obligations.json`: which principal may perform which actions on which asset, in which Terraform root; SABLE checks the base satisfies it and the head still does.
 2. **What if the PR adds Terraform in a new folder?** It is outside `terraform_dirs`, so SABLE is UNKNOWN and the gate REVIEW until the base config covers it.
+
+## Step 8 — `asent gate` command (2026-11-07)
+
+### Ch 6 Implementation
+
+- `backend/gate/runner.py` (new): `run_gate(repository, base, head, output_dir, data_dir=None, keep_workdir=False) -> (exit_code, report)`; `EXIT_CODES`.
+- `backend/gate/summary.py` (new): `module_rows(run, evidence)` (result per module: pass / block / review / "not assessed (disabled by base config)" / not applicable), `render_summary(report)`, `NEEDS` (project input per module).
+- `backend/cli.py`: `gate` subcommand (`--repository --base --head --output-dir --data-dir --keep-workdir`), local, no HTTP.
+- `tests/gate_support.py` (new, no tests): real git repos (`GateRepo`), recorded PyPI/OSV injection.
+- Algorithm: resolve both refs -> export both commits -> `create_gate_run` -> `analyze` (synchronous, no repair) -> report `asent.gate.v1` (refs + SHAs, decision, exit code, reasons, module rows, config digest/problems/changed_in_head, coverage, tool availability, full `asent.assurance.v1`) and summary; exit 0/1/2; any exception -> REVIEW with the reason; output not writable -> exit 2.
+
+### Design decisions
+
+- **Errors still produce a report:** CI needs to show why a change was refused; only an unwritable output directory gives no report (exit 2, message on stderr).
+- **`pass` only from current acceptable evidence of an assessed module:** a disabled module's row says "not assessed (disabled by base config)" with its reason, and an ACCEPT with such modules adds "Accepted for the assessed modules only".
+- **Temporary work directory by default:** nothing of the target repository stays on the runner; `--data-dir` keeps `runtime/` so the CAVR verdict cache can be reused across runs.
+- **No server:** the same `Service` the dashboard uses, called in-process.
+
+### Requirements covered
+
+| ID | Title | What this covers | Acceptance check |
+|---|---|---|---|
+| FR-6 | Fail-Closed Security Policy | Every failure is REVIEW / exit 2 with a report | 12 fail-closed tests in `tests/test_gate_cli.py` |
+| none listed | CI gate for external repositories (dev-env plan) | `asent gate` exit codes and outputs | `test_sable_preserved_is_accept`, `test_sable_regression_is_block`, `test_report_identifies_the_exact_commits_and_config` |
+
+### Ch 7 Test cases
+
+`tests/test_gate_cli.py`: 20 passed (with init, export and orchestrator config tests: 78 passed).
+
+| Test ID | Purpose | Input | Expected | Result |
+|---|---|---|---|---|
+| `test_no_asent_at_base` | Missing config | no `.asent/` | 2, ASENT_CONFIG_MISSING, summary "REVIEW" | pass |
+| `test_invalid_config`, `test_unreviewed_starter` | Invalid / starter | `{broken` / `asent init` output | 2 | pass |
+| `test_head_edits_asent` | Config change | head edits `.asent/README.md` | 2, changed_in_head | pass |
+| `test_unknown_ref_still_writes_a_report`, `test_not_a_repository` | Git errors | bad ref / plain dir | 2 with report | pass |
+| `test_tf_present_without_sable_section` | Decision 3 | `.tf` and no SABLE section | 2, SABLE row "review" | pass |
+| `test_sable_enabled_with_invalid_obligations` | Invalid file | empty obligations | 2 | pass |
+| `test_satra_enabled_without_a_container_engine` | No engine | SATRA configured, no Docker | 2, SATRA INCONCLUSIVE | pass |
+| `test_symlink_in_head`, `test_internal_error_is_review_with_a_report`, `test_unwritable_output_directory` | Failures | symlink / injected RuntimeError / output is a file | 2 | pass |
+| `test_sable_preserved_is_accept`, `test_sable_regression_is_block` | Decisions | unchanged / regressed infra | 0 / 1 | pass |
+| `test_denied_package_added_in_head_is_block` | CAVR block | `reqeusts` added | 1 | pass |
+| `test_cavr_only_accept_with_disabled_modules_never_shown_as_passed` | Decision 3 | CAVR on, SATRA/SABLE off with `.py`/`.tf` present | 0; rows "not assessed (disabled by base config)" + reason, never "pass" | pass |
+| `test_report_identifies_the_exact_commits_and_config` | Report | tags `base`, `head` | SHAs = `git rev-parse`; 3 rows | pass |
+| `test_hooks_in_the_target_repository_are_not_run` | Isolation | 4 hooks | no marker | pass |
+| `test_work_directory_is_removed_unless_kept`, `test_run_gate_api_returns_the_same_report` | Housekeeping | default / `--data-dir` | temp dir empty / runtime kept | pass |
+
+### Defects found and fixed
+
+- None found by the tests. Review: 0 passes of cavr-reviewer (not requested), 1 self-review pass (read one generated summary), 0 MINOR open.
+
+### Known limitations / deferred
+
+- No PR comment posting; the workflow (step 10) uses the job summary and an artifact.
+- Evidence file paths inside `assurance` point into the deleted work directory unless `--data-dir`/`--keep-workdir` is used.
+
+### Tool disclosure (Ch 8.7)
+
+- **Generated by Claude Code:** runner, summary, CLI command, helpers, tests, notes. **Reviewed by Maryam:** not yet. **Verified by:** tests on real git repositories, written first.
+
+### Supervisor Q&A prep
+
+1. **What does a CI job get from ASENT?** An exit code (0/1/2), `asent-report.json` with the exact commit SHAs, config digest and all evidence, and a Markdown summary with one row per module.
+2. **Can ACCEPT hide a module that was not checked?** No: the row says "not assessed (disabled by base config)" with the reason from base config, and the summary says the acceptance covers the assessed modules only.
