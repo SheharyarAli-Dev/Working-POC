@@ -76,6 +76,18 @@ REQUIREMENT_MAP = {
         "kind": "docker",
         "default_desc": "Builds and runs SATRA runner and per-project gate images in Docker."
     },
+    # test_satra_harness_guard.py
+    "test_satra_harness_guard.py": {
+        "req": "FR-02",
+        "kind": "unit",
+        "default_desc": "Checks head changes to the test harness make a gate run INCONCLUSIVE for human review."
+    },
+    # test_satra_harness_isolation.py
+    "test_satra_harness_isolation.py": {
+        "req": "FR-07",
+        "kind": "unit",
+        "default_desc": "Checks trusted gate runs keep head config, conftest and results files out of the test harness."
+    },
     # test_satra_ollama_and_validator.py
     "test_satra_ollama_and_validator.py": {
         "req": "FR-08",

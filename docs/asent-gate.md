@@ -98,7 +98,21 @@ request can only import packages that are already approved and locked on the bas
 code that uses it. Otherwise the head's trusted tests fail on the import: INCONCLUSIVE when collection fails,
 or REJECT when the import fails inside a test.
 
+## SATRA's trusted test run
+
+The base commit's trusted tests and `pytest.ini` are mounted read-only at `/trusted`, the head at `/work`, and pytest
+starts as `python -P -s -m pytest -c /trusted/pytest.ini --rootdir=/trusted --confcutdir=/trusted -p no:cacheprovider`
+with plugin autoloading off. No head `conftest.py`, pytest settings file, `pytest.py`, `sitecustomize.py` or `.pth`
+file is loaded; the head is appended to the end of `sys.path` as code under test. Results are written to a fresh
+directory outside `/work` and must agree with pytest's exit code. A head that adds or changes any of these files, a native module (`.so`, `.pyd`, `.dylib`), a
+pytest setting, code that imports `_pytest` or writes `sys.modules` (test files included), or non-test code that imports pytest gets SATRA **INCONCLUSIVE** ("test-harness
+tampering suspected", REVIEW). Details: `docs/satra/harness-isolation.md`, `docs/satra/threat-model.md`.
+
 ## Known limitations
+
+- **SATRA cannot defend against code under test that attacks the test process.** The trusted tests import the head's
+  code, so that code runs inside the same pytest process and can still forge a passing result. A SATRA ACCEPT is not
+  evidence against a deliberately adversarial head; see `docs/satra/threat-model.md`.
 
 - Symlinks, submodules and Git LFS content are not analysed (symlinks/submodules → REVIEW).
 - A bare repository is not supported; `--repository` must be a work tree's top level.

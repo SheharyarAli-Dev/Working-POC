@@ -14,6 +14,10 @@ Steps (every pytest run is in a container with no network; without Docker/Podman
    There is no fallback to the shared asent-sandbox:local image. Test-run limits come from the base
    `.asent/satra/sandbox.json` (default 40 s / 512m, cap 180 s / 2g; outside that: INCONCLUSIVE).
 1. Contract `rule_id` must be an enabled threat-repository SATRA rule, else INCONCLUSIVE.
+   Then `harness_guard.suspicious(base, head)`: a head change to conftest.py, pytest/_pytest, site hooks,
+   .pth files, native modules (.so/.pyd/.dylib, EXTENSION_SUFFIXES) or a .py they shadow, a plain file or a
+   deletion at a base-ini pythonpath entry, non-test code importing a test module, pytest settings, or non-test code importing pytest / writing sys.modules → INCONCLUSIVE
+   ("test-harness tampering suspected") before any image is built or test runs.
 2. Trusted tests (base `.asent/satra/trusted_tests/`) on the base and on the head commit.
 3. The project's own tests (`tests/`, when present) on the head commit.
 4. Counterfactual: base copy with the contract's RETURN_TRUE target; the trusted tests must fail on
@@ -34,7 +38,7 @@ import tempfile
 from pathlib import Path
 
 from backend.orchestrator.hashing import copy_tree, digest
-from backend.satra import project_image, pytest_runner
+from backend.satra import harness_guard, project_image, pytest_runner
 from backend.satra.counterfactuals import mutate_return_true
 from backend.satra.diff_localizer import localize
 from backend.satra.static_adapters import scan
@@ -67,6 +71,13 @@ def analyze_configured(context, outdir, emit):
         emit("satra.region_localized", region)
     emit("satra.contract_created", contract)
     details["static"] = scan(context.path, cfg.source_dirs or ["."])
+    base_ini = Path(config.path) / cfg.pytest_ini if cfg.pytest_ini else None
+    tampering = harness_guard.suspicious(context.baseline, context.path, pytest_ini=base_ini)
+    if tampering:
+        details["harness_tampering"] = tampering
+        why = harness_guard.REASON + ": " + ", ".join(item["label"] for item in tampering)
+        return "INCONCLUSIVE", {**details, "reason": why, "executions": {}}, \
+            [harness_guard.REASON + "; a human must review the listed head changes before any SATRA result is trusted"]
 
     caps = pytest_runner.availability()
     engine = next((name for name in ("docker", "podman") if caps.get(name, {}).get("available")), None)
