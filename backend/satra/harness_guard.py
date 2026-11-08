@@ -3,6 +3,9 @@
 `suspicious(base_dir, head_dir)` compares the two snapshots (`hashing.manifest`, so `.asent/` and generated
 folders are left out) and lists every file the head ADDS or CHANGES that:
 
+- is a native extension module: the name ends (any letter case) with a suffix in
+  importlib.machinery.EXTENSION_SUFFIXES or with .so, .pyd or .dylib, in any folder. Python's import system
+  prefers an extension module over the .py file of the same name, so one can replace any module;
 - is named conftest.py, or is the module pytest / _pytest / sitecustomize / usercustomize (any extension), or
   lies inside a pytest/ or _pytest/ folder;
 - is a .pth file;
@@ -21,6 +24,7 @@ from __future__ import annotations
 import ast
 import configparser
 import tomllib
+from importlib.machinery import EXTENSION_SUFFIXES
 from pathlib import Path, PurePosixPath
 
 from backend.orchestrator.hashing import manifest
@@ -31,21 +35,27 @@ HARNESS_DIRS = {"pytest", "_pytest"}
 SETTINGS_FILES = {"pytest.ini", ".pytest.ini", "pytest.toml", ".pytest.toml"}
 SECTION_FILES = {"pyproject.toml", "tox.ini", "setup.cfg"}
 TEST_DIRS = {"tests", "test"}
+NATIVE_SUFFIXES = tuple(sorted({suffix.lower() for suffix in EXTENSION_SUFFIXES} | {".so", ".pyd", ".dylib"}))
 MUTATORS = {"__setitem__", "__delitem__", "update", "setdefault", "pop", "popitem", "clear"}
 
 
 def suspicious(base_dir, head_dir) -> list[dict]:
-    """[{path, why}] for each added or changed head file that touches the test harness."""
+    """[{path, why, label}] for each added or changed head file that touches the test harness.
+
+    `label` is what the gate reason lists: "native module <path>" for a native module, else the path."""
     base_dir, head_dir = Path(base_dir), Path(head_dir)
     try:
         old, new = manifest(base_dir), manifest(head_dir)
     except (OSError, ValueError) as error:
-        return [{"path": ".", "why": "base and head could not be compared: " + str(error)}]
+        return [{"path": ".", "why": "base and head could not be compared: " + str(error), "label": "."}]
     found = []
     for path in sorted(name for name, sha in new.items() if old.get(name) != sha):
+        if path.lower().endswith(NATIVE_SUFFIXES):
+            found.append({"path": path, "why": "native module " + path, "label": "native module " + path})
+            continue
         why = _why(path, base_dir if path in old else None, head_dir)
         if why:
-            found.append({"path": path, "why": why})
+            found.append({"path": path, "why": why, "label": path})
     return found
 
 

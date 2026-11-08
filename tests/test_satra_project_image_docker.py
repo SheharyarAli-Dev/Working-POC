@@ -151,7 +151,7 @@ def _probe_report(result):
 
 
 def test_real_container_trusted_run_resists_head_harness_attacks(docker, tmp_path, monkeypatch):
-    """Real container, no host mapping: harness attacks on a broken head give INCONCLUSIVE or REJECT, never a pass;
+    """Real container, no host mapping: harness and native-module attacks on a broken head give INCONCLUSIVE or REJECT, never a pass;
     writes to /trusted and to the plugin fail read-only; the plugin is mounted read-only at /asent, outside /work."""
     from backend.satra import pytest_runner
     from test_satra_config import BROKEN, gate, project
@@ -202,3 +202,18 @@ def test_real_container_trusted_run_resists_head_harness_attacks(docker, tmp_pat
                                           pytest_ini=base / ".asent/satra/pytest.ini", image=image)
         assert result["available"] and result["backend"] == "docker" and result["exit_code"] == 1, (attack, result.get("reason"), result.get("stdout"))
         assert {t["name"]: t["status"] for t in result["tests"]} == {"test_owner_allowed": "PASS", "test_other_user_denied": "FAIL"}, attack
+
+    # 4. Native module beside the broken module (review finding): the gate stops at the tripwire. Run directly, the
+    #    container's CPython 3.12 imports the .so instead of app/security.py (here a stand-in, so the import fails):
+    #    the vector is real, and the run is never a pass.
+    so = "app/security.cpython-312-x86_64-linux-gnu.so"
+    native = {so: "\x7fELF stand-in for a compiled module\n"}
+    status, details, _ = gate(tmp_path / "native", head_kwargs={"security": BROKEN, "extra": native})
+    assert status == "INCONCLUSIVE" and details["reason"] == "test-harness tampering suspected: native module " + so, details["reason"]
+    base = project(tmp_path / "native" / "base-direct")
+    head = project(tmp_path / "native" / "head-direct", security=BROKEN, extra=native)
+    result = pytest_runner.run_pytest(head, tmp_path / "native" / "out", "all", True, trusted_tests_dir=base / ".asent/satra/trusted_tests",
+                                      external=True, pytest_ini=base / ".asent/satra/pytest.ini", image=image)
+    assert result["backend"] == "docker" and result.get("exit_code") != 0 and result.get("passed", 0) == 0, result
+    evidence = result.get("stdout", "") + "".join(t["message"] for t in result.get("tests", []))
+    assert "security.cpython-312-x86_64-linux-gnu.so" in evidence, evidence

@@ -15,7 +15,7 @@ Steps (every pytest run is in a container with no network; without Docker/Podman
    `.asent/satra/sandbox.json` (default 40 s / 512m, cap 180 s / 2g; outside that: INCONCLUSIVE).
 1. Contract `rule_id` must be an enabled threat-repository SATRA rule, else INCONCLUSIVE.
    Then `harness_guard.suspicious(base, head)`: a head change to conftest.py, pytest/_pytest, site hooks,
-   .pth files, pytest settings, or non-test code importing pytest / writing sys.modules → INCONCLUSIVE
+   .pth files, native modules (.so/.pyd/.dylib, EXTENSION_SUFFIXES), pytest settings, or non-test code importing pytest / writing sys.modules → INCONCLUSIVE
    ("test-harness tampering suspected") before any image is built or test runs.
 2. Trusted tests (base `.asent/satra/trusted_tests/`) on the base and on the head commit.
 3. The project's own tests (`tests/`, when present) on the head commit.
@@ -73,7 +73,7 @@ def analyze_configured(context, outdir, emit):
     tampering = harness_guard.suspicious(context.baseline, context.path)
     if tampering:
         details["harness_tampering"] = tampering
-        why = harness_guard.REASON + ": " + ", ".join(item["path"] for item in tampering)
+        why = harness_guard.REASON + ": " + ", ".join(item["label"] for item in tampering)
         return "INCONCLUSIVE", {**details, "reason": why, "executions": {}}, \
             [harness_guard.REASON + "; a human must review the listed head changes before any SATRA result is trusted"]
 

@@ -332,3 +332,57 @@ Full suite: 1910 passed, 38 skipped (the new Docker test is the 38th), 1 xfailed
 
 **Supervisor Q&A prep**
 - *How do you know /trusted is really read-only?* Head code inside the container tries to write there and gets EROFS; the CI job fails if that test is skipped.
+
+## Step 6 — Review fix: native modules are tampering (2026-11-08)
+
+Independent review finding: a head could add `app/security.cpython-312-x86_64-linux-gnu.so` beside a broken
+`app/security.py`. Python's import system tries extension modules before source files in the same folder, so the
+`.so` would be imported instead of the `.py` that the diff shows; the tripwire did not flag it (only `pytest.so`-style
+names were caught).
+
+**Ch 6 Implementation**
+- `backend/satra/harness_guard.py`: `NATIVE_SUFFIXES` = lower-cased `importlib.machinery.EXTENSION_SUFFIXES` ∪
+  `{.so, .pyd, .dylib}`. In `suspicious`, every added or changed head file whose lower-cased path ends with one of them
+  is a finding `{"why": "native module <path>", "label": "native module <path>"}`, before any other rule. Every finding
+  now has a `label` (the path for all other kinds).
+- `backend/satra/gate_mode.py`: the reason lists labels: `test-harness tampering suspected: native module <path>`
+  (other findings unchanged: the path).
+- `tests/test_satra_project_image_docker.py::test_real_container_trusted_run_resists_head_harness_attacks`: part 4,
+  the review's attack in a real container (gate INCONCLUSIVE with that reason; direct run never passes and its error
+  names the `.so`, showing the container's CPython 3.12 does load it instead of `security.py`).
+
+**Design decisions**
+- `.so`/`.pyd`/`.dylib` added to the interpreter's own list: ASENT's host Python (3.14 here) and the container's (3.12)
+  have different suffixes; every CPython suffix ends in one of these three, so the union covers both.
+- Case-insensitive: Windows and macOS file systems may import `X.PYD`/`X.SO`.
+- Unchanged native modules from the base are not flagged (added/changed rule, as for every other finding).
+
+**Requirements covered:** FR-02 — a head-supplied native module can never reach ACCEPT; acceptance: the review's attack
+gives INCONCLUSIVE with "native module <path>".
+
+**Ch 7 Test cases** (`tests/test_satra_harness_guard.py` unless noted)
+
+| Test ID | Purpose | Input | Expected | Result |
+|---|---|---|---|---|
+| test_native_modules_added_by_the_head_are_flagged | suffixes, folders, case | 7 paths (cpython-312 .so, abi3.so, `.SO`, cp312 .pyd, `.PYD`, darwin .so, .dylib) | one native finding each | pass ×7 |
+| test_a_changed_native_module_is_flagged | changed | base v1 → head v2 | flagged | pass |
+| test_an_unchanged_native_module_from_the_base_is_not_flagged | no false positive | same bytes in base and head | nothing | pass |
+| test_every_extension_suffix_of_the_interpreter_is_covered | EXTENSION_SUFFIXES | each suffix, alternate upper case | all flagged | pass |
+| test_native_module_beside_a_broken_module_makes_the_gate_inconclusive | review's attack | broken security.py + security.cpython-312-x86_64-linux-gnu.so | INCONCLUSIVE, exact reason, no run | pass |
+| test_unchanged_native_module_from_the_base_keeps_the_normal_verdict | gate, no false REVIEW | base and head share a .so | ACCEPT | pass |
+| test_real_container_trusted_run_resists_head_harness_attacks (part 4) | real container | same attack | INCONCLUSIVE; direct run not a pass, error names the .so | skipped locally (no Docker); CI |
+
+Before the fix 10 of these failed (the review's gate attack was not INCONCLUSIVE); after: 142 passed, 1 xfailed in the
+three SATRA gate test files.
+
+**Defects found and fixed:** the review finding above.
+
+**Known limitations / deferred:** a native module the base already has can still be loaded by code under test (it is
+base-approved code). Native code is in-process code: the stated limit of Step 4 applies.
+
+**Tool disclosure (Ch 8.7):** Claude Code wrote the change, tests and this section; Maryam to review.
+
+**Review:** independent review reported 2 problems (this and Step 7); both fixed, tests first.
+
+**Supervisor Q&A prep**
+- *Why would a .so beat security.py?* `FileFinder` tries extension loaders before source loaders for the same module name.

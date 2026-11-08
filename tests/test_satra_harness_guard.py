@@ -62,6 +62,38 @@ FLAGGED = {
 }
 
 
+# Native extension modules: Python's import system prefers an extension module over the .py file of the
+# same name in the same folder, so a head .so/.pyd/.dylib can replace any module, not only pytest.
+NATIVE = ["app/security.cpython-312-x86_64-linux-gnu.so", "app/security.abi3.so", "lib/deep/x.SO",
+          "app/fast.cp312-win_amd64.pyd", "app/fast.PYD", "app/mac.cpython-312-darwin.so", "app/mac.dylib"]
+
+
+@pytest.mark.parametrize("path", NATIVE)
+def test_native_modules_added_by_the_head_are_flagged(tmp_path, path):
+    """Any added .so / .pyd / .dylib or EXTENSION_SUFFIXES file, any folder, any letter case, is a native module finding."""
+    found = check(tmp_path, {path: "\x7fELF not really"})
+    assert found == [{"path": path, "why": "native module " + path, "label": "native module " + path}]
+
+
+def test_a_changed_native_module_is_flagged(tmp_path):
+    """Changing a native module the base already has is flagged like adding one."""
+    so = "app/speedups.cpython-312-x86_64-linux-gnu.so"
+    assert [i["path"] for i in check(tmp_path, {so: "v2"}, {so: "v1"})] == [so]
+
+
+def test_an_unchanged_native_module_from_the_base_is_not_flagged(tmp_path):
+    """A .so file the base already had, byte for byte the same in the head, is not a finding."""
+    so = "app/speedups.cpython-312-x86_64-linux-gnu.so"
+    assert check(tmp_path, {"app/security.py": SECURE}, {so: "\x7fELF same bytes"}) == []
+
+
+def test_every_extension_suffix_of_the_interpreter_is_covered(tmp_path):
+    """Each suffix in importlib.machinery.EXTENSION_SUFFIXES is flagged (upper case too)."""
+    from importlib.machinery import EXTENSION_SUFFIXES
+    files = {"app/m%d%s" % (i, (suffix.upper() if i % 2 else suffix)): "x" for i, suffix in enumerate(EXTENSION_SUFFIXES)}
+    assert sorted(i["path"] for i in check(tmp_path, files)) == sorted(files)
+
+
 @pytest.mark.parametrize("case", list(FLAGGED))
 def test_harness_changes_in_the_head_are_flagged(tmp_path, case):
     """Each harness file, pytest setting or pytest/sys.modules-touching non-test change is listed with a reason."""
@@ -133,6 +165,23 @@ def test_tampering_makes_the_gate_run_inconclusive_before_any_test_runs(tmp_path
     assert [item["path"] for item in details["harness_tampering"]] == list(GATE_CASES[case])
     assert any("tampering" in item for item in uncertainty)
     assert container_on_host.runs == [] and not container_on_host.engine.builds()
+
+
+def test_native_module_beside_a_broken_module_makes_the_gate_inconclusive(tmp_path, container_on_host):
+    """The review's attack: broken app/security.py plus app/security.cpython-312-x86_64-linux-gnu.so is INCONCLUSIVE, never ACCEPT."""
+    so = "app/security.cpython-312-x86_64-linux-gnu.so"
+    status, details, _ = gate(tmp_path, head_kwargs={"security": BROKEN, "extra": {so: "\x7fELF stand-in for a compiled module"}})
+    assert status == "INCONCLUSIVE"
+    assert details["reason"] == "test-harness tampering suspected: native module " + so
+    assert container_on_host.runs == []
+
+
+def test_unchanged_native_module_from_the_base_keeps_the_normal_verdict(tmp_path, container_on_host):
+    """A .so the base already had and the head did not change is not a finding; the gate reaches its normal verdict."""
+    so = {"app/speedups.cpython-312-x86_64-linux-gnu.so": "\x7fELF same bytes in base and head"}
+    status, details, _ = gate(tmp_path, {"extra": so})
+    assert status == "ACCEPT", details["reason"]
+    assert "harness_tampering" not in details
 
 
 def test_project_tests_that_import_pytest_still_get_a_verdict(tmp_path, container_on_host):

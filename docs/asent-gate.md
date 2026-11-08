@@ -104,7 +104,7 @@ The base commit's trusted tests and `pytest.ini` are mounted read-only at `/trus
 starts as `python -P -s -m pytest -c /trusted/pytest.ini --rootdir=/trusted --confcutdir=/trusted -p no:cacheprovider`
 with plugin autoloading off. No head `conftest.py`, pytest settings file, `pytest.py`, `sitecustomize.py` or `.pth`
 file is loaded; the head is appended to the end of `sys.path` as code under test. Results are written to a fresh
-directory outside `/work` and must agree with pytest's exit code. A head that adds or changes any of these files, a
+directory outside `/work` and must agree with pytest's exit code. A head that adds or changes any of these files, a native module (`.so`, `.pyd`, `.dylib`), a
 pytest setting, or non-test code that imports pytest or writes `sys.modules` gets SATRA **INCONCLUSIVE** ("test-harness
 tampering suspected", REVIEW). Details: `docs/satra/harness-isolation.md`, `docs/satra/threat-model.md`.
 
