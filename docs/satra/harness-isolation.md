@@ -517,3 +517,89 @@ a test-named shim the base already has is not re-checked; the tripwire remains a
 **Supervisor Q&A prep**
 - *Why can a zip named `src` matter?* `sys.path` entries may be zip files; the plugin appends `/work/src`, so a zip there would be imported.
 - *Is the tripwire the security control?* No: the isolation is; the tripwire only sends suspicious heads to a human.
+
+## Step 9 — Base trusted data next to the suite: SATRA.trusted_data (2026-11-08)
+
+Gate run on `maryamfatimaaaaa/asent-target-invoicehub` (a `.gitignore`-only PR, base `57ae3dc`): SATRA
+INCONCLUSIVE. The image was READY (16 wheels). The trusted baseline had 0 passed, 1 failed and 14 errors, all
+`FileNotFoundError: /trusted/fixtures/invoice.pdf`. The trusted conftest uses
+`Path(__file__).resolve().parents[1] / "fixtures"`. Before Step 1 that resolved to `/work/fixtures`; since Step 1
+it resolves to `/trusted/fixtures`, which nothing created. The cause is Step 1's layout, not the per-project
+image, `-P -s`, rootdir/confcutdir, `sys.path`, the results folder or the harness guard.
+Interface written down in [trusted-suite.md](trusted-suite.md).
+
+**Ch 6 Implementation**
+- `backend/project_config/schema.py::SatraModule.trusted_data: list[ProjectPath]` (default `[]`);
+  `docs/asent-config.schema.json` regenerated.
+- `backend/satra/trusted_data.py::collect(base_dir, paths)` → `({path: bytes}, None)` or `(None, reason)`.
+  It walks each declared base path without following links and accepts regular files and folders only. It refuses a
+  missing path, an empty folder, a link anywhere on the way or inside, special files, a first part `asent_assurance` or
+  `pytest.ini`, code or native suffixes (`.py`, `.pyc`, `.pyo`, `.pyw`, `.pyi`, `.pth`, `.so`, `.pyd`, `.dylib`, `.dll`,
+  `EXTENSION_SUFFIXES`) and pytest/Python settings names, and more than `MAX_FILES` = 1000 files or
+  `MAX_BYTES` = 20 MiB in total. Each file is read once (`O_NOFOLLOW`, `fstat` regular). `summary()` gives the path,
+  size and SHA-256 for evidence.
+- `backend/satra/gate_mode.py::analyze_configured`: right after the harness guard, `collect(context.baseline, …)`.
+  A problem gives INCONCLUSIVE `Trusted data refused: <reason>` before the engine check, image build or any run;
+  otherwise `details["trusted_data"]`, and the same bytes are passed to every trusted run (base, head, mutant).
+- `backend/satra/pytest_runner.py::_trusted_layout(…, trusted_data)` writes each file to `/trusted/<path>`. It
+  refuses (unavailable, fail closed) a reserved, `..` or absolute path from any other caller.
+- `demo_project/InvoiceHub/.asent/config.json`: `"trusted_data": ["fixtures"]`. The demo conftest is unchanged
+  because it is pinned byte-identical to `backend/satra/trusted_fixtures.py`.
+
+**Design decisions**
+- Data from the **base**: test inputs are part of the oracle. Before Step 1 they came from the head copy, so
+  this is stronger than the pre-regression behaviour. Alternatives rejected: the suite back in `/work`
+  (reopens the Step 1 attacks); the head's `fixtures/` (head controls oracle inputs); mirroring the whole base
+  minus code (implicit, and one missed `.py` would put base code ahead of the head on `sys.path`); trusted tests
+  reading `ASENT_SATRA_HEAD` (couples tests to ASENT, uses head data).
+- Explicit list, no default: `parents[1]` can name any project file, so guessing which ones a suite needs would
+  be magic. An undeclared file still fails closed, as today.
+- Code and settings refused: pytest puts `/trusted` and `/trusted/asent_assurance` on `sys.path` before the head
+  (seen with `pythonpath = .`). A data folder there is only an empty namespace package, and a regular head package
+  of the same name still wins (test below).
+- Read into memory once (≤ 20 MiB): the bytes checked are the bytes mounted, with no second read from disk.
+- Checked before the image build: a configuration problem costs no build.
+
+**Requirements covered:** FR-02 (trusted inputs come only from the base): acceptance is that a head edit of
+`fixtures/` leaves the trusted runs' bytes at the base's. FR-07 (isolation kept): `/trusted` is read-only and
+contains no head file. NFR-03 (fail closed): every refusal and the cap give INCONCLUSIVE with the reason and no run.
+
+**Ch 7 Test cases** (`tests/test_satra_harness_isolation.py`)
+
+| Test ID | Purpose | Input | Expected | Result |
+|---|---|---|---|---|
+| test_declared_base_data_is_mounted_next_to_the_trusted_suite | layout | suite reads `parents[1]/fixtures/token.txt`, declared | ACCEPT; `/trusted` = suite, ini, `fixtures/token.txt` in all 3 runs, `:ro`; evidence sha | pass |
+| test_trusted_data_comes_from_the_base_even_when_the_head_changes_it | base-only | head edits the token | trusted runs see base bytes; `/work` keeps head bytes; ACCEPT | pass |
+| test_undeclared_data_next_to_the_suite_is_missing_and_the_gate_is_inconclusive | the InvoiceHub failure | not declared | INCONCLUSIVE, all tests FileNotFoundError | pass |
+| test_refused_trusted_data_makes_the_gate_inconclusive_before_any_build_or_run | refusals | missing, `asent_assurance`, `pytest.ini`, `.py`, `conftest.py`, `pyproject.toml`, native, `.pth` | `Trusted data refused: …`, no run, no build ×8 | pass |
+| test_collect_reads_exact_bytes_of_files_and_folders_once | reader | binary + CRLF bytes, overlap, single file, `[]` | exact bytes, one entry each | pass |
+| test_collect_accepts_regular_files_only | links/special | link in folder, link declared, linked subfolder, link on the way, FIFO in folder, FIFO declared, empty folder | refused ×7 | pass |
+| test_collect_file_count_cap | cap | 3 then 4 files, cap 3 | accepted at cap, refused over | pass |
+| test_collect_total_size_cap | cap | 10 then 11 bytes, cap 10 | accepted at cap, refused over | pass |
+| test_default_caps_are_1000_files_and_20_mib | caps stated | — | 1000 / 20 MiB | pass |
+| test_a_file_over_the_size_cap_is_refused_in_a_gate_run | cap, gate | 11 bytes, cap 4 | INCONCLUSIVE, no run | pass |
+| test_run_pytest_refuses_a_data_path_that_would_replace_the_suite | defence in depth | `asent_assurance/…`, `pytest.ini`, `../outside.txt` | unavailable ×3, no run | pass |
+| test_config_refuses_trusted_data_paths_outside_the_project | schema | `../fixtures`, `/etc`, `.asent/satra`, backslash, `.git/config` | ValueError ×5; default `[]` | pass |
+| test_trusted_data_folder_inside_a_head_package_does_not_shadow_it | namespace | declared `app/assets` | ACCEPT; `app.security` from head; mutant killed | pass |
+
+Without the `gate_mode.py`/`pytest_runner.py` change (stashed), 13 of the gate-level tests fail. The undeclared-data
+test passes both ways because it records the failure behaviour. With the change, 309 passed and 1 xfailed in the five
+SATRA config/isolation/guard and config-loader files. Full suite: 2072 passed, 38 skipped, 1 xfailed (the one failure on the first run, `test_wheel_holds_nothing_else`, was the new module being untracked; it passes once staged). Baseline before: 2042 passed, 38 skipped, 1 xfailed.
+
+**Defects found and fixed:** a `ValueError` from `_trusted_layout` was outside `run_pytest`'s `try`, so it would have
+crashed the analyzer instead of failing closed. Now it returns an unavailable result (found while writing the test).
+
+**Known limitations / deferred:** a CRLF→LF change made by git to a data file is outside SATRA. The target repo
+committed `fixtures/invoice.pdf` without `*.pdf binary` and `core.autocrlf=input`, so its blob is 687 bytes and not
+the 749-byte file. `docs/asent-config.md`'s field table and `asent init`'s starter config do not list `trusted_data`
+yet (outside this branch's approved scope).
+
+**Tool disclosure (Ch 8.7):** Claude Code diagnosed the failure from the CI report, wrote the code, tests and docs;
+Maryam to review. Host harness only (no Docker on this machine); the real-container test is in Step 10.
+
+**Review:** no independent review pass run for this step.
+
+**Supervisor Q&A prep**
+- *Doesn't a data folder in /trusted put base files ahead of the head?* Only data; code and settings are refused,
+  and a regular head package beats a namespace folder of the same name.
+- *Why not take fixtures from the head, as before?* The fixture is an input to the oracle; a PR could change it.

@@ -18,7 +18,10 @@ Steps (every pytest run is in a container with no network; without Docker/Podman
    .pth files, native modules (.so/.pyd/.dylib, EXTENSION_SUFFIXES) or a .py they shadow, a plain file or a
    deletion at a base-ini pythonpath entry, non-test code importing a test module, pytest settings, or non-test code importing pytest / writing sys.modules → INCONCLUSIVE
    ("test-harness tampering suspected") before any image is built or test runs.
-2. Trusted tests (base `.asent/satra/trusted_tests/`) on the base and on the head commit.
+   Then `trusted_data.collect(base, trusted_data)`: each declared base path must hold only regular data
+   files (no code, links or settings files), at most 1000 files / 20 MiB, else INCONCLUSIVE.
+2. Trusted tests (base `.asent/satra/trusted_tests/`) on the base and on the head commit, mounted at
+   /trusted/asent_assurance/ with the declared base data at /trusted/<path> (docs/satra/trusted-suite.md).
 3. The project's own tests (`tests/`, when present) on the head commit.
 4. Counterfactual: base copy with the contract's RETURN_TRUE target; the trusted tests must fail on
    it (killed), otherwise they cannot vouch for the contract: INCONCLUSIVE.
@@ -38,7 +41,7 @@ import tempfile
 from pathlib import Path
 
 from backend.orchestrator.hashing import copy_tree, digest
-from backend.satra import harness_guard, project_image, pytest_runner
+from backend.satra import harness_guard, project_image, pytest_runner, trusted_data
 from backend.satra.counterfactuals import mutate_return_true
 from backend.satra.diff_localizer import localize
 from backend.satra.static_adapters import scan
@@ -79,6 +82,13 @@ def analyze_configured(context, outdir, emit):
         return "INCONCLUSIVE", {**details, "reason": why, "executions": {}}, \
             [harness_guard.REASON + "; a human must review the listed head changes before any SATRA result is trusted"]
 
+    # Base data next to the trusted suite (/trusted/<path>): read and checked once, before any image is built.
+    data, problem = trusted_data.collect(context.baseline, cfg.trusted_data)
+    if problem:
+        why = "Trusted data refused: " + problem
+        return "INCONCLUSIVE", {**details, "reason": why, "executions": {}}, [why]
+    details["trusted_data"] = trusted_data.summary(data)
+
     caps = pytest_runner.availability()
     engine = next((name for name in ("docker", "podman") if caps.get(name, {}).get("available")), None)
     if engine is None:
@@ -105,7 +115,8 @@ def analyze_configured(context, outdir, emit):
     def execute(label, path, trusted=False, targets=None):
         result = pytest_runner.run_pytest(path, outdir / label, "all", trusted, trusted_tests_dir=trusted_dir if trusted else None,
                                           external=True, targets=targets, pytest_ini=ini if trusted else None,
-                                          image=image["image"], timeout=limits["timeout_seconds"], memory=limits["memory"])
+                                          image=image["image"], timeout=limits["timeout_seconds"], memory=limits["memory"],
+                                          trusted_data=data if trusted else None)
         executions[label] = result
         emit("satra.test_result", {"label": label, **{k: v for k, v in result.items() if k not in ("stdout", "stderr", "tests")}})
         return result
