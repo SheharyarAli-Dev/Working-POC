@@ -5,6 +5,8 @@ tests/test_satra_project_image_docker.py (it must run, not skip, in CI).
 """
 import re
 
+import pytest
+
 from backend.config import ROOT
 from backend.satra import project_image
 
@@ -96,6 +98,20 @@ def test_reusable_gate_workflow_builds_the_runner_before_the_gate_runs():
     build = next(i for i, r in enumerate(runs) if "-t asent-satra-runner:local" in r)
     gate = next(i for i, r in enumerate(runs) if "asent gate" in r)
     assert build < gate and "-f asent/docker/satra-runner.Dockerfile asent/docker" in runs[build]
+
+
+@pytest.mark.parametrize("name", ["asent-gate.yml", "satra-ci.yml"])
+def test_gate_and_satra_ci_workflows_do_not_switch_to_a_buildx_builder(name):
+    # docker/setup-buildx-action (like `docker buildx create`/`use`) makes a docker-container builder the
+    # default for later `docker build`s. That builder cannot see the local image store, so the gate
+    # image's `FROM asent-satra-runner:local` would fail (pull access denied) and every gate run would
+    # be INCONCLUSIVE. cd.yml may use it: it never builds FROM the runner.
+    path = WORKFLOWS / name
+    uses = [step.get("uses", "") for steps in _steps(path).values() for step in steps]
+    assert not [u for u in uses if u.split("@")[0].strip() == "docker/setup-buildx-action"], uses
+    text = path.read_text(encoding="utf-8")
+    for phrase in ("setup-buildx-action", "buildx create", "buildx use"):
+        assert phrase not in text, phrase
 
 
 def test_no_shipped_workflow_or_image_turns_on_cached_gate_image_reuse():

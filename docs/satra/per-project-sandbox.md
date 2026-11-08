@@ -345,6 +345,48 @@ change has not run on this machine (no Docker).
 - *Why not keep the cache in CI?* Its only check is labels, which anyone with daemon access can set; a fresh build from hashed wheels needs no trust.
 - *Does rebuilding change results?* No: same pinned wheels, same hashes; only time and PyPI downloads.
 
+## Step 7 — Guard: no buildx builder in the gate and SATRA CI workflows (2026-11-08)
+
+Fixes review finding LOW 3: nothing stopped a later edit from adding `docker/setup-buildx-action` to the
+workflows that build `FROM asent-satra-runner:local`.
+
+**Ch 6 Implementation**
+- `tests/test_satra_runner_image.py::test_gate_and_satra_ci_workflows_do_not_switch_to_a_buildx_builder`,
+  parametrized over `asent-gate.yml` and `satra-ci.yml`: no step `uses: docker/setup-buildx-action`, and the
+  file text contains none of `setup-buildx-action`, `buildx create`, `buildx use`.
+- No workflow changed: neither file uses buildx today. `cd.yml` does (line 21) and is not checked, because it only
+  builds and pushes the root `Dockerfile` and never builds FROM the runner.
+
+**Design decisions**
+- Why it matters: setup-buildx-action makes a `docker-container` builder the default for later `docker build`s.
+  That builder cannot see the local image store, so `FROM asent-satra-runner:local` would try to pull from Docker
+  Hub and fail; every gate run would be INCONCLUSIVE.
+- `buildx create` / `buildx use` are checked too: they switch the default builder the same way.
+- Text check besides the parsed `uses:` list, so the action cannot slip in through a form the YAML walk misses.
+
+**Requirements covered:** FR-07 in CI — the gate image build keeps working in the shipped workflows.
+
+**Ch 7 Test cases**
+
+| Test ID | Purpose | Input | Expected | Result |
+|---|---|---|---|---|
+| test_gate_and_satra_ci_workflows_do_not_switch_to_a_buildx_builder | no buildx builder | asent-gate.yml, satra-ci.yml | no setup-buildx-action / buildx create / buildx use | pass ×2 |
+
+The test was also run against a scratch copy of `asent-gate.yml` with `- uses: docker/setup-buildx-action@v3` inserted
+before the runner build: it fails on that copy and passes on `satra-ci.yml`.
+
+**Defects found and fixed:** LOW 3 from the branch review (missing regression guard).
+
+**Known limitations / deferred:** a builder switched outside these files (a reusable action, a runner-level
+default builder) is not detected.
+
+**Tool disclosure (Ch 8.7):** Claude Code wrote the test and this section; Maryam to review.
+
+**Review:** no independent review pass run for this step.
+
+**Supervisor Q&A prep**
+- *Why not just use buildx with `--load`?* `--load` exports the result into the local store, but a docker-container builder still cannot read `asent-satra-runner:local` as the `FROM` base.
+
 ## Known limits
 
 - **A new dependency must be approved and merged in its own PR before code uses it.** The image comes from the base
