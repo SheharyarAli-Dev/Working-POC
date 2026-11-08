@@ -18,7 +18,7 @@ import httpx
 from backend.config import VERSION
 from backend.integrations.research_loader import load as load_research
 
-LOCAL_COMMANDS=('init','gate','report')
+LOCAL_COMMANDS=('init','gate','report','doctor')
 
 def emit_json(value):
     print(json.dumps(value,indent=2,default=str))
@@ -53,6 +53,13 @@ def gate_command(args):
     if report.get('data_dir'):print('Work directory kept: '+report['data_dir'])
     return code
 
+def doctor_command(args):
+    from backend.commands import doctor
+    result=doctor.run_checks()
+    if args.json:emit_json(result)
+    else:print(doctor.render(result),end='')
+    return 0 if result['ready'] else 1
+
 def report_command(args):
     from backend.commands import report as local_report
     def fail(message):
@@ -70,7 +77,7 @@ def report_command(args):
     return 0
 
 def main(argv=None):
-    parser=argparse.ArgumentParser(prog='asent',description='ASENT assurance gate. Local: init, gate, report. Server commands need scripts/start.sh first.')
+    parser=argparse.ArgumentParser(prog='asent',description='ASENT assurance gate. Local: init, gate, report, doctor. Server commands need scripts/start.sh first.')
     parser.add_argument('--url',default=os.environ.get('ASENT_URL','http://127.0.0.1:8000'))
     parser.add_argument('--version',action='store_true',help='print the ASENT version and exit')
     parser.add_argument('--json',dest='json_top',action='store_true',help='with --version: print it as JSON')
@@ -87,6 +94,7 @@ def main(argv=None):
     p.add_argument('--file',help='report file (default: asent-report.json at the repository top level, else here)')
     p.add_argument('--run',help='dashboard run id: read its report from the server (needs scripts/start.sh)')
     p.add_argument('--output',help='with --run: write the server report to this file')
+    sub.add_parser('doctor',parents=[json_flag],help='check Python, git, Docker and the images; prints fixes, changes nothing')
     sub.add_parser('capabilities')
     p=sub.add_parser('init',parents=[json_flag],help='write a starter .asent/ (refused by the gate until reviewed)');p.add_argument('--repository',default='.');p.add_argument('--force',action='store_true')
     p=sub.add_parser('gate',parents=[json_flag],help='decide base..head of a git repository without a server; exit 0 ACCEPT, 1 BLOCK, 2 REVIEW')
@@ -104,6 +112,7 @@ def main(argv=None):
     if args.action is None:parser.error('a command is required (asent --help lists them)')
     if args.action=='init':return init_command(args)
     if args.action=='gate':return gate_command(args)
+    if args.action=='doctor':return doctor_command(args)
     if args.action=='report' and (args.run is None or args.legacy_run is not None):return report_command(args)
     with httpx.Client(base_url=args.url,timeout=180,trust_env=False) as client:
         def call(method,path,body=None):
