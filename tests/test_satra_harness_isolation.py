@@ -341,3 +341,20 @@ atexit.register(_forge)
 ''' % PASSING_JUNIT
     result = trusted_run(tmp_path, security=forger)
     assert not (result["available"] and result["exit_code"] == 0 and result["failed"] == 0)
+
+
+# --- the stated limit is documented (step 4) --------------------------------------------------------------
+
+DOCS = Path(__file__).resolve().parents[1] / "docs"
+
+
+def test_threat_model_states_that_in_process_forgery_is_not_solved():
+    """The threat model, the gate guide and these notes state the in-process limit and name its strict xfail."""
+    model = (DOCS / "satra/threat-model.md").read_text()
+    assert "Code under test runs in the same process as the trusted tests" in model
+    assert "does not hold against a head that attacks the test process itself" in model
+    assert "test_known_limit_in_process_code_under_test_can_still_forge_results" in model
+    assert "attacks the test process" in (DOCS / "asent-gate.md").read_text()
+    assert "Stated limit" in (DOCS / "satra/harness-isolation.md").read_text()
+    marker = test_known_limit_in_process_code_under_test_can_still_forge_results.pytestmark[0]
+    assert marker.name == "xfail" and marker.kwargs["strict"] is True

@@ -222,3 +222,58 @@ frames, `exec` of built strings) are not seen. Legitimate new `conftest.py` file
 - *Why not REJECT tampering?* It is a suspicion from a heuristic; a human decides. INCONCLUSIVE is never ACCEPT.
 - *Won't every PR that adds a conftest be stuck?* It goes to review (REVIEW at the shared gate); that is the intended
   cost of a change to the code that runs the tests.
+
+## Step 4 — Stated limit and threat model (2026-11-08)
+
+### Stated limit: code under test runs in the trusted pytest process
+
+The trusted tests import the head's modules, so head code runs inside the same pytest process with the same rights.
+Steps 1–3 close the routes that need no code (files pytest loads by itself, a planted or overwritten results file)
+and make the obvious code routes visible. They do **not** stop a fully adversarial head from patching pytest at run
+time, replacing what the tests call, writing a consistent results file at the `--junitxml` path from `sys.argv`, and
+exiting 0. This is not solved. It is kept visible as the strict xfail
+`test_known_limit_in_process_code_under_test_can_still_forge_results`: it fails today, and if it ever passes the
+test run fails until this documentation is updated.
+
+**Ch 6 Implementation**
+- `docs/satra/threat-model.md` (new; SATRA had no threat model document): scope, what an ACCEPT claims, trust boundary,
+  threats → controls → code → tests, five stated limits (in-process code; heuristic tripwire; head tests use head
+  config; trusted engine / host harness does not enforce `:ro`; results directory fallback).
+- `docs/asent-gate.md`: new section "SATRA's trusted test run"; first "Known limitations" bullet states the limit.
+- `docs/satra/README.md`: links to the threat model and these notes.
+- `tests/test_satra_harness_isolation.py::test_threat_model_states_that_in_process_forgery_is_not_solved`.
+
+**Design decisions**
+- Separate threat-model file instead of editing the report: the submitted report stays closed (AGENTS.md); the report
+  can cite this file.
+- Strict xfail, not a skipped or deleted test: the limit is executable evidence, and a future fix is forced to update
+  the docs.
+- Deferred fix: run the code under test in a separate process from the harness (tests reach the application over a
+  socket, or results from an observer outside the process). Not attempted here.
+
+**Requirements covered:** NFR-03 (security boundary stated honestly) — acceptance: the doc test finds the limit in all
+three documents and the xfail is strict.
+
+**Ch 7 Test cases**
+
+| Test ID | Purpose | Input | Expected | Result |
+|---|---|---|---|---|
+| test_threat_model_states_that_in_process_forgery_is_not_solved | limit stays documented | threat-model.md, asent-gate.md, these notes, xfail marker | phrases present; `strict=True` | pass |
+
+The documents were written before this test, so it passed on its first run (no red phase).
+Full suite: 1910 passed, 37 skipped, 1 xfailed; scenario verdicts equal the `HEAD` worktree's (report restored).
+
+**Defects found and fixed:** none.
+
+**Known limitations / deferred:** see the stated limit above. No real-container test of Steps 1–2 has been added:
+`tests/test_satra_project_image_docker.py` is named test-by-test in `.github/workflows/satra-ci.yml`, which this
+change does not edit; the existing real gate tests there exercise the new command in CI.
+
+**Tool disclosure (Ch 8.7):** Claude Code wrote the documents and the test; Maryam to review the wording of the limit.
+
+**Review:** no independent review pass run for this step.
+
+**Supervisor Q&A prep**
+- *Is the bypass fixed?* The file-based bypasses are (tests in Steps 1–2). A head whose code attacks the pytest process
+  can still lie; that is stated, tested as a strict xfail, and listed as a limit of SATRA ACCEPT.
+- *What would fix it fully?* Separating the code under test from the test harness process; deferred.
