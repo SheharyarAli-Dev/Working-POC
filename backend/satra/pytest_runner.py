@@ -36,22 +36,43 @@ def container_user_args(engine):
         return ['--user', f'{os.getuid()}:{os.getgid()}']
     return []
 
+# Trusted gate runs (docs/satra/harness-isolation.md): the base tests and ini are mounted read-only at
+# /trusted, the head at /work, and pytest starts from /trusted with every head config source switched off.
+TRUSTED_PLUGIN='asent_satra_trusted_run'
+TRUSTED_PYTHON=['python','-P','-s','-m','pytest']
+
+
+def _trusted_layout(base,trusted_tests_dir,pytest_ini):
+    """/trusted = base pytest.ini (or an empty one) + the base tests as asent_assurance/; /asent = the plugin only."""
+    trusted=Path(base)/'trusted';plugin=Path(base)/'asent'
+    copy_tree(trusted_tests_dir,trusted/'asent_assurance')
+    if pytest_ini is not None:shutil.copyfile(pytest_ini,trusted/'pytest.ini')
+    else:(trusted/'pytest.ini').write_text('[pytest]\n')
+    plugin.mkdir();shutil.copyfile(Path(__file__).with_name('trusted_run_plugin.py'),plugin/(TRUSTED_PLUGIN+'.py'))
+    return trusted,plugin
+
+
 def run_pytest(root,output,selected='all',trusted=False,trusted_tests_dir=None,external=False,targets=None,pytest_ini=None,image='asent-sandbox:local',timeout=40,memory='512m'):
     # Gate runs pass external=True (never on the host, whatever the files), trusted_tests_dir (the
     # base .asent/ tests), targets (explicit project test paths), pytest_ini (the trusted ini), and
     # image/timeout/memory from backend.satra.project_image (the per-project image and base limits).
     # The defaults are the built-in demo's shared image and limits.
+    # A trusted run with trusted_tests_dir in a container keeps the tests and ini outside the head
+    # (_trusted_layout); every other run is unchanged.
     start=time.perf_counter();output=Path(output);output.mkdir(parents=True,exist_ok=True)
     caps=availability();engine=next((e for e in ('docker','podman') if caps[e]['available']),None)
     if not engine and (external or not permitted_builtin(root)):return {'available':False,'exit_code':None,'reason':'External/modified code requires Docker/Podman; host execution is limited to hash-pinned bundled sources','tests':[]}
     with tempfile.TemporaryDirectory(prefix='asent-pytest-') as d:
         work=copy_tree(root,Path(d)/'project')
         generic=trusted_tests_dir is not None or targets is not None or pytest_ini is not None
+        isolated=bool(engine) and trusted and trusted_tests_dir is not None
         if trusted and trusted_tests_dir is not None:
             if (work/'asent_assurance').exists():return {'available':False,'exit_code':None,'reason':'project already has an asent_assurance directory','tests':[]}
-            copy_tree(trusted_tests_dir,work/'asent_assurance')
+            suite=work
+            if isolated:suite,plugin=_trusted_layout(d,trusted_tests_dir,pytest_ini)
+            else:copy_tree(trusted_tests_dir,work/'asent_assurance')
             wanted='asent_assurance/test_'+selected+'.py'
-            targets=['asent_assurance'] if selected=='all' or not (work/wanted).is_file() else [wanted]
+            targets=['asent_assurance'] if selected=='all' or not (suite/wanted).is_file() else [wanted]
         elif targets is not None:targets=list(targets)
         elif trusted:
             testdir=work/'assurance';testdir.mkdir()
@@ -60,11 +81,20 @@ def run_pytest(root,output,selected='all',trusted=False,trusted_tests_dir=None,e
             targets=['assurance'] if selected=='all' else ['assurance/test_'+selected+'.py']
         else:targets=['tests'] if selected=='all' else ['tests/test_'+selected+'.py']
         ini='pytest.ini'
-        if generic:
+        if generic and not isolated:
             if pytest_ini is not None:shutil.copyfile(pytest_ini,work/'.asent-pytest.ini');ini='.asent-pytest.ini'
             elif not (work/'pytest.ini').is_file():ini=None
         args=['-q','-o','addopts=',*(['-c',str(work/ini)] if ini else []),'--junitxml='+str(work/'results.xml'),*targets]
-        if engine:
+        if isolated:
+            # -P: /work (the cwd) is not put on sys.path; -s: no user site. -c/--rootdir/--confcutdir keep pytest's
+            # config and conftest discovery inside /trusted; autoload off and no cacheprovider. The plugin then
+            # appends the head to the end of sys.path (backend/satra/trusted_run_plugin.py).
+            args=['-q','-o','addopts=','-c','/trusted/pytest.ini','--rootdir=/trusted','--confcutdir=/trusted','-p','no:cacheprovider','-p',TRUSTED_PLUGIN,
+                  '--junitxml=/work/results.xml',*['/trusted/'+t for t in targets]]
+            cmd=[engine,'run','--rm',*container_user_args(engine),'--network','none','--read-only','--cap-drop','ALL','--security-opt','no-new-privileges','--memory',memory,'--cpus','1','--pids-limit','64','--tmpfs','/tmp:rw,nosuid,size=64m',
+                 '-v',str(work)+':/work:rw','-v',str(suite)+':/trusted:ro','-v',str(plugin)+':/asent:ro','-w','/work',
+                 '-e','PYTEST_DISABLE_PLUGIN_AUTOLOAD=1','-e','PYTHONPATH=/asent','-e','ASENT_SATRA_TRUSTED=/trusted','-e','ASENT_SATRA_HEAD=/work',image,*TRUSTED_PYTHON,*args]
+        elif engine:
             args=['-q','-o','addopts=',*(['-c','/work/'+ini] if ini else []),'--junitxml=/work/results.xml',*targets]
             cmd=[engine,'run','--rm',*container_user_args(engine),'--network','none','--read-only','--cap-drop','ALL','--security-opt','no-new-privileges','--memory',memory,'--cpus','1','--pids-limit','64','--tmpfs','/tmp:rw,nosuid,size=64m','-v',str(work)+':/work:rw','-w','/work','-e','PYTEST_DISABLE_PLUGIN_AUTOLOAD=1',image,'python','-m','pytest',*args]
         else:

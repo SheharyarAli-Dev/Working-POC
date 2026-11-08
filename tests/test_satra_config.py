@@ -10,6 +10,8 @@ temporary copy. Only the isolation is replaced; the arguments, files and verdict
 The per-project gate image is prepared by the real `project_image.prepare` against `FakeEngine`.
 """
 import json
+import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -43,6 +45,16 @@ CONTRACT = {"rule_id": "AUTHZ.IDOR.001", "route": "GET /items/{id}", "expected_s
             "scope": ["app/security.py"], "counterfactual": {"operator": "RETURN_TRUE", "target": "app/security.py::can_access"}}
 
 
+def mounts_of(cmd):
+    """`-v src:dst[:mode]` flags of a container command -> {dst: (src, mode)}."""
+    found = {}
+    for flag_, value in zip(cmd, cmd[1:]):
+        if flag_ == "-v":
+            src, dst, mode = value.rsplit(":", 2)
+            found[dst] = (src, mode)
+    return found
+
+
 @pytest.fixture
 def container_on_host(monkeypatch):
     """Docker reported available; each `docker run <gate image> python -m pytest` runs on the host.
@@ -51,22 +63,37 @@ def container_on_host(monkeypatch):
     inspect/probe/build calls, so the install plan and CAVR approval are real. Only commands that run
     pytest in an `asent-satra-project:` image are executed (on the host); any other `docker` command,
     including one for `asent-sandbox:local`, goes to the real engine, which is not installed here, and
-    so cannot pass. Returns the recorded runs and the fake engine.
+    so cannot pass. Each `-v` mount's container path is replaced by its host directory in the
+    arguments, the `-e` values and the `-w` directory; the environment is only the `-e` values plus
+    PATH, as in the container. Read-only mounts are recorded but not enforced on the host.
+    Returns the recorded runs (command, timeout, mounts, each mount's files and bytes before the run) and
+    the fake engine.
     """
     real_run = subprocess.run
     runs = []
 
     def run(cmd, *args, **kwargs):
         if isinstance(cmd, list) and cmd and cmd[0] == "docker":
-            at = next((i for i in range(len(cmd) - 3) if cmd[i + 1:i + 4] == ["python", "-m", "pytest"]), None)
-            if at is not None and cmd[at].startswith(project_image.PROJECT_REPOSITORY + ":"):
-                runs.append({"cmd": list(cmd), "timeout": kwargs.get("timeout")})
-                host = next(v.split(":/work")[0] for v in cmd if isinstance(v, str) and v.endswith(":/work:rw"))
-                inner = cmd[at + 1:]
-                assert inner[:3] == ["python", "-m", "pytest"] and "--network" in cmd and "none" in cmd
-                inner = [part.replace("/work", host) for part in inner]
-                kwargs["cwd"] = host
-                return real_run([sys.executable, *inner[1:]], *args, **kwargs)
+            at = next((i for i, part in enumerate(cmd) if isinstance(part, str) and part.startswith(project_image.PROJECT_REPOSITORY + ":")), None)
+            inner = cmd[at + 1:] if at is not None else []
+            if inner[:3] == ["python", "-m", "pytest"] or inner[:5] == ["python", "-P", "-s", "-m", "pytest"]:
+                mounts = mounts_of(cmd[:at])
+                contents = {dst: {p.relative_to(src).as_posix(): p.read_bytes() for p in Path(src).rglob("*") if p.is_file()}
+                            for dst, (src, _) in mounts.items()}
+                runs.append({"cmd": list(cmd), "timeout": kwargs.get("timeout"), "mounts": mounts, "before": contents})
+                assert "--network" in cmd and "none" in cmd
+
+                pattern = re.compile("(?<![^=:])(%s)(?=/|$)" % "|".join(map(re.escape, mounts)))
+
+                def host(text):
+                    # One pass: a container path at the start or after '=' / ':' -> its host directory.
+                    return pattern.sub(lambda m: mounts[m.group(1)][0], text)
+                # The container's environment is only what `-e` passes; nothing else reaches it.
+                env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin")}
+                env.update(host(value).split("=", 1) for flag_, value in zip(cmd[:at], cmd[1:at + 1]) if flag_ == "-e")
+                kwargs["env"] = env
+                kwargs["cwd"] = host(cmd[cmd.index("-w") + 1])
+                return real_run([sys.executable, *[host(part) for part in inner[1:]]], *args, **kwargs)
         return real_run(cmd, *args, **kwargs)
 
     monkeypatch.setattr(pytest_runner, "availability", lambda: {"docker": {"available": True}, "podman": {"available": False}})
