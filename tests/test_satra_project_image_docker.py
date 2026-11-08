@@ -209,7 +209,7 @@ def test_real_container_trusted_run_resists_head_harness_attacks(docker, tmp_pat
     so = "app/security.cpython-312-x86_64-linux-gnu.so"
     native = {so: "\x7fELF stand-in for a compiled module\n"}
     status, details, _ = gate(tmp_path / "native", head_kwargs={"security": BROKEN, "extra": native})
-    assert status == "INCONCLUSIVE" and details["reason"] == "test-harness tampering suspected: native module " + so, details["reason"]
+    assert status == "INCONCLUSIVE" and details["reason"].startswith("test-harness tampering suspected: native module " + so), details["reason"]
     base = project(tmp_path / "native" / "base-direct")
     head = project(tmp_path / "native" / "head-direct", security=BROKEN, extra=native)
     result = pytest_runner.run_pytest(head, tmp_path / "native" / "out", "all", True, trusted_tests_dir=base / ".asent/satra/trusted_tests",

@@ -440,3 +440,80 @@ Full suite: 1929 passed, 38 skipped, 1 xfailed; `reports/scenario-validation.jso
 
 **Supervisor Q&A prep**
 - *Why still allow `import pytest` in tests?* It is the normal test-file import; the dangerous parts (`_pytest`, `sys.modules`) are checked everywhere.
+
+## Step 8 — Second review: test-module shims, shadowing native modules, pythonpath files (2026-11-08)
+
+Second independent review, three findings: (1) non-test code could import a shim under `tests/` that uses pytest's
+public API (`from pytest import TestReport`), allowed there; (2) a head change to a `.py` whose folder already has a
+native module of the same name is never what runs (Python imports the `.so`); (3) a plain file — e.g. a zip, which is
+importable from `sys.path` — at a base-ini `pythonpath` entry, or that directory deleted, changes where the trusted
+run imports the head from.
+
+**Ch 6 Implementation** (`backend/satra/harness_guard.py`, `backend/satra/gate_mode.py`)
+- `_test_module(dotted)`: a part equal to `tests`/`test`, or starting `test_`, or ending `_test`. In `_code`, for
+  non-test files only: `import x`, `from x import y` (module and each imported name, relative imports included, e.g.
+  `from .tests import shim`, `from . import tests`), and literal `__import__`/`import_module` → "non-test code imports
+  test module …".
+- `suspicious`: builds `natives` {(folder, lower-case module name) → native path} from base ∪ head; a changed `.py`
+  with the same key → `why "shadowed by native module <so>"`, label `<py> (shadowed by native module <so>)`.
+- `suspicious(base, head, pytest_ini=None)` + `_pythonpath(ini)`: `[pytest] pythonpath` split with `shlex` (as pytest
+  does), normalised, keeping only entries the trusted-run plugin maps into the head (not `.`, absolute or `..`). For each:
+  an added/changed head file at exactly that path → "plain file where the base pytest.ini maps pythonpath entry …";
+  base files under `entry/` but none in the head → finding `entry/`, "deletes the directory …".
+- `gate_mode.py`: passes the base config's `pytest_ini` to `suspicious`.
+- `docs/satra/threat-model.md`: new "In short" section (isolation = control; tripwire = best-effort heuristic; in-process
+  forging = known limit; planned fix = app outside the test process, future work); threats table extended.
+
+**Design decisions**
+- Imported names are checked as well as the module (`from app import helpers_test`), because `from pkg import mod`
+  imports a submodule.
+- Shadowing uses base ∪ head: the review's case is a base `.so` the head did not touch, which the native-module rule
+  (added/changed only) cannot see.
+- The pythonpath rules read the same ini the trusted run uses (frozen base `.asent/`), not the head's.
+- Unreadable base ini → no pythonpath findings; the base trusted run then fails on its own (INCONCLUSIVE).
+
+**Requirements covered:** FR-02 — acceptance: the three review cases give INCONCLUSIVE before any test runs.
+
+**Ch 7 Test cases** (`tests/test_satra_harness_guard.py`)
+
+| Test ID | Purpose | Input | Expected | Result |
+|---|---|---|---|---|
+| test_non_test_code_importing_a_test_module_is_flagged | rule 1 | 11 forms (absolute, relative `.tests`, `. import tests`, `..test`, `test_*`, `*_test`, import_module, `__import__`) | app/util.py flagged | pass ×11 |
+| test_test_files_may_import_other_test_modules | no false positive | 3 test-file imports | nothing | pass ×3 |
+| test_names_that_only_contain_test_are_not_test_modules | no false positive | testing, latest, contest_rules, attest, testsuite | nothing | pass ×4 |
+| test_review_shim_with_test_report_makes_the_gate_inconclusive | review case 1 | app/tests/shim.py `from pytest import TestReport` + broken app/security.py importing it | INCONCLUSIVE `…: app/security.py`, no run | pass |
+| test_changed_py_next_to_a_base_native_module_is_flagged | review case 2 | base .py + .so, head changes .py | .py flagged with the .so named | pass |
+| test_any_native_suffix_of_the_same_module_name_shadows | suffixes, case, `__init__` | abi3.so, .pyd, `.DYLIB`, `__init__` .so | flagged ×4 | pass |
+| test_head_added_native_module_flags_the_changed_py_too | both flagged | head adds .so, breaks .py | 2 findings | pass |
+| test_native_modules_do_not_flag_other_modules | no false positive | other module, other folder, non-.py | nothing ×3 | pass |
+| test_base_native_module_beside_a_changed_py_makes_the_gate_inconclusive | review case 2, gate | base .so, head breaks .py | INCONCLUSIVE, no run | pass |
+| test_zip_file_named_like_a_pythonpath_entry_is_flagged | review case 3 | `pythonpath = src`, head src = real zip | `src` + `src/` | pass |
+| test_plain_file_at_a_nested_pythonpath_entry_is_flagged | nested entry | `lib pkgs/src`, file pkgs/src | pkgs/src only | pass |
+| test_deleting_a_pythonpath_directory_is_flagged | deletion | src/ removed | `src/` | pass |
+| test_pythonpath_rules_ignore_entries_outside_the_head | not mapped | `.`, none, `../outside /abs` | nothing ×3 | pass |
+| test_editing_files_inside_a_pythonpath_directory_is_not_flagged | no false positive | change inside src/ | nothing | pass |
+| test_zip_named_src_makes_the_gate_inconclusive | review case 3, gate | as above | INCONCLUSIVE `…: src, src/`, no run | pass |
+
+Changed existing assertions: `test_native_module_beside_a_broken_module_makes_the_gate_inconclusive` and part 4 of the
+real-container test now accept that the reason continues after `native module <so>` (the shadowed `.py` is listed
+second); the first test also checks both paths. Before the change the three review gate cases failed (INCONCLUSIVE
+only from incomplete execution, REJECT, and "do not detect the counterfactual"); after: 199 passed, 7 skipped, 1 xfailed
+in the five SATRA gate/image test files. Full suite: 1966 passed, 38 skipped, 1 xfailed; `reports/scenario-validation.json`
+restored.
+
+**Defects found and fixed:** the three review findings above. Found while testing, **not fixed (out of scope)**:
+`backend/orchestrator/workspace_manager.py::create` leaves the base's emptied folders in the candidate worktree, so a
+head that turns a directory into a file (`src/` → `src`) makes `create_gate_run` raise `IsADirectoryError`.
+`backend/gate/runner.py` turns that into REVIEW (fails closed), but SATRA never sees such a head in a real gate run.
+The gate test therefore builds the candidate workspace's shape itself.
+
+**Known limitations / deferred:** `django.test`-style framework modules imported by app code are flagged too (review);
+a test-named shim the base already has is not re-checked; the tripwire remains a heuristic (threat model, "In short").
+
+**Tool disclosure (Ch 8.7):** Claude Code wrote the change, tests and docs; Maryam to review.
+
+**Review:** second independent review reported 3 problems; all fixed, tests first.
+
+**Supervisor Q&A prep**
+- *Why can a zip named `src` matter?* `sys.path` entries may be zip files; the plugin appends `/work/src`, so a zip there would be imported.
+- *Is the tripwire the security control?* No: the isolation is; the tripwire only sends suspicious heads to a human.

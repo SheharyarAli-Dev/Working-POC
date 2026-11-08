@@ -3,6 +3,20 @@
 Scope: SATRA in a gate run (`backend/satra/gate_mode.py::analyze_configured`). It does not cover the built-in
 InvoiceHub demo path, SABLE, CAVR, or the shared orchestrator (see `docs/implementation-notes.md`).
 
+## In short
+
+- **The isolation is the control.** The base trusted tests and `pytest.ini` are mounted read-only at `/trusted`;
+  pytest starts as `python -P -s -m pytest` from there, with config and conftest discovery confined to `/trusted`, and
+  the head appended to the end of `sys.path` only; results go to a separate, fresh folder outside `/work` and are read
+  fail-closed. These hold whatever files the head contains.
+- **The tripwire is a best-effort heuristic.** `harness_guard.py` flags head changes that look like attempts on the
+  harness (conftest, pytest modules and settings, site hooks, native modules, test-module shims, pythonpath tricks)
+  and sends them to a human as INCONCLUSIVE. It is static, it can be evaded, and it is not what keeps a run honest.
+- **Known limit: in-process forging by code under test.** The trusted tests must import the head's code, which then
+  runs inside the pytest process and can still forge a passing result. Not solved; see "Stated limits" below.
+- **Planned fix (future work):** run the application under test outside the test process (for example a separate
+  process the trusted tests reach over a socket), so head code can no longer touch pytest or its results.
+
 ## What an ACCEPT claims
 
 The base commit's trusted contract tests pass on the head, they fail on one RETURN_TRUE counterfactual of the
@@ -32,6 +46,7 @@ are executed when the trusted tests import the code under test.
 | Head conftest or pytest settings (`pytest.ini`, `pyproject.toml`, `setup.cfg`, `tox.ini`) steer the trusted run | Trusted tests and base ini at `/trusted` (read-only); `-c /trusted/pytest.ini --rootdir=/trusted --confcutdir=/trusted`, autoload off, no cacheprovider | `pytest_runner.py` | same test, settings and conftest cases |
 | Head plants or overwrites the results file | `--junitxml` on a fresh tmpfs directory outside `/work`; head `results.xml` files deleted first; file read without following links, size-capped, must agree with the exit code | `pytest_runner.py::read_results` | step 2 tests in `tests/test_satra_harness_isolation.py` |
 | Head adds a native module (`.so`/`.pyd`/`.dylib`) that Python imports instead of the `.py` beside it | Tripwire: any added or changed native module → INCONCLUSIVE, "test-harness tampering suspected: native module <path>" | `harness_guard.py` | `test_native_module_beside_a_broken_module_makes_the_gate_inconclusive` |
+| Head reaches pytest's public API through a test-named shim, hides a change behind a base native module, or replaces a `pythonpath` directory by a file (e.g. a zip) | Tripwire: non-test code importing a test module (relative imports too); a changed `.py` with a same-name native module in its folder; a plain file at, or deletion of, a base-ini `pythonpath` entry | `harness_guard.py` | `test_review_shim_with_test_report_makes_the_gate_inconclusive`, `test_base_native_module_beside_a_changed_py_makes_the_gate_inconclusive`, `test_zip_named_src_makes_the_gate_inconclusive` |
 | Any attempt at the above | Tripwire: head changes to harness files, pytest settings, code importing _pytest or writing `sys.modules` (any `.py` file, test-named ones included), or non-test code importing pytest → INCONCLUSIVE, "test-harness tampering suspected" | `harness_guard.py` | `tests/test_satra_harness_guard.py` |
 
 ## Stated limits (not solved)
@@ -47,7 +62,7 @@ are executed when the trusted tests import the code under test.
    **A SATRA ACCEPT therefore does not hold against a head that attacks the test process itself;** it is one
    input to the shared gate and to human review. Closing this needs the code under test in a separate process
    from the harness (for example tests that reach the application only over a socket), which is deferred.
-2. **The tripwire is a heuristic.** It has false positives (a legitimate new `conftest.py` or pytest setting goes
+2. **The tripwire is a best-effort heuristic, not the control.** It has false positives (a legitimate new `conftest.py` or pytest setting goes
    to review) and false negatives (indirect imports, aliasing, dynamic code). It compares added and changed files
    only.
 3. **The head's own tests use the head's configuration.** Ordinary project tests (`tests/`) run in `/work` with the

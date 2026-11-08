@@ -172,7 +172,9 @@ def test_native_module_beside_a_broken_module_makes_the_gate_inconclusive(tmp_pa
     so = "app/security.cpython-312-x86_64-linux-gnu.so"
     status, details, _ = gate(tmp_path, head_kwargs={"security": BROKEN, "extra": {so: "\x7fELF stand-in for a compiled module"}})
     assert status == "INCONCLUSIVE"
-    assert details["reason"] == "test-harness tampering suspected: native module " + so
+    # Since step 8 the changed .py beside it is listed too ("shadowed by native module"); the .so comes first.
+    assert details["reason"].startswith("test-harness tampering suspected: native module " + so + ", ")
+    assert [item["path"] for item in details["harness_tampering"]] == [so, "app/security.py"]
     assert container_on_host.runs == []
 
 
@@ -218,3 +220,182 @@ def test_project_tests_that_import_pytest_still_get_a_verdict(tmp_path, containe
     status, details, _ = gate(tmp_path, head_kwargs={"project_tests": tests})
     assert status == "ACCEPT", details["reason"]
     assert "harness_tampering" not in details
+
+
+# --- second review (docs/satra/harness-isolation.md, step 8) ----------------------------------------------
+
+import io  # noqa: E402
+import zipfile  # noqa: E402
+from pathlib import Path  # noqa: E402
+
+from backend.orchestrator.context_service import ContextService  # noqa: E402
+from backend.orchestrator.service import Service  # noqa: E402
+from backend.satra import analyzer as satra_analyzer  # noqa: E402
+from test_satra_config import project  # noqa: E402
+
+# 1. Non-test code that imports a test-named module. A shim under tests/ may import pytest's public API (allowed in
+#    test files), e.g. TestReport, and app code can then reach it through the shim.
+SHIM = {"app/tests/__init__.py": "", "app/tests/shim.py": "from pytest import TestReport\n"}
+REVIEW_APP = BROKEN + "from app.tests.shim import TestReport\nTestReport.passed = property(lambda self: True)\n"
+TEST_IMPORTS = {
+    "from app.tests.shim": "from app.tests.shim import TestReport\n",
+    "import app.tests.shim": "import app.tests.shim\n",
+    "relative from .tests.shim": "from .tests.shim import TestReport\n",
+    "relative from .tests import shim": "from .tests import shim\n",
+    "relative from . import tests": "from . import tests\n",
+    "relative from ..test": "from ..test import helpers\n",
+    "test_ module": "import test_utils\n",
+    "_test module by name": "from app import helpers_test\n",
+    "relative test_ module": "from .test_fixtures import make\n",
+    "import_module literal": "import importlib\nimportlib.import_module('app.tests.shim')\n",
+    "__import__ literal": "__import__('tests.shim')\n",
+}
+
+
+@pytest.mark.parametrize("case", list(TEST_IMPORTS))
+def test_non_test_code_importing_a_test_module_is_flagged(tmp_path, case):
+    """Non-test code importing from tests/ or test/, or a test_* / *_test module (relative imports too), is flagged."""
+    found = check(tmp_path, {**SHIM, "app/util.py": TEST_IMPORTS[case]})
+    assert [item["path"] for item in found] == ["app/util.py"], found
+
+
+@pytest.mark.parametrize("source", ["from tests.helpers import make\n", "from .test_fixtures import make\n",
+                                    "import app.tests.shim\n"])
+def test_test_files_may_import_other_test_modules(tmp_path, source):
+    """Test files importing test helpers is normal and not flagged."""
+    assert check(tmp_path, {"tests/test_app.py": source, "tests/helpers.py": ""}) == []
+
+
+@pytest.mark.parametrize("source", ["import testing\n", "from app import latest, contest_rules\n", "import attest.core\n",
+                                    "from app.testsuite import x\n"])
+def test_names_that_only_contain_test_are_not_test_modules(tmp_path, source):
+    """testing, latest, contest_rules, attest, testsuite are not test-named modules."""
+    assert check(tmp_path, {"app/util.py": source}) == []
+
+
+def test_review_shim_with_test_report_makes_the_gate_inconclusive(tmp_path, container_on_host):
+    """The review's case: app/tests/shim.py imports pytest.TestReport and broken app/security.py imports the shim: INCONCLUSIVE."""
+    status, details, _ = gate(tmp_path, head_kwargs={"security": REVIEW_APP, "extra": SHIM})
+    assert status == "INCONCLUSIVE"
+    assert details["reason"] == "test-harness tampering suspected: app/security.py"
+    assert container_on_host.runs == []
+
+
+# 2. A changed .py beside a native module of the same name: the native module is what Python imports, so the
+#    change would never be tested (and the base's .so would answer for it).
+SO = "app/security.cpython-312-x86_64-linux-gnu.so"
+
+
+def test_changed_py_next_to_a_base_native_module_is_flagged(tmp_path):
+    """Base has app/security.py and app/security.<suffix>.so; the head changes only the .py: the .py is flagged."""
+    found = check(tmp_path, {"app/security.py": BROKEN}, {SO: "\x7fELF base module"})
+    assert found == [{"path": "app/security.py", "why": "shadowed by native module " + SO,
+                      "label": "app/security.py (shadowed by native module %s)" % SO}]
+
+
+@pytest.mark.parametrize("native", ["app/security.abi3.so", "app/security.pyd", "app/Security.DYLIB", "app/__init__.cpython-312-darwin.so"])
+def test_any_native_suffix_of_the_same_module_name_shadows(tmp_path, native):
+    """Every native suffix, any letter case, and __init__ modules count as the same module name."""
+    target = "app/__init__.py" if "__init__" in native else "app/security.py"
+    found = check(tmp_path, {target: "# changed\n"}, {native: "x"})
+    assert [item["path"] for item in found] == [target], found
+
+
+def test_head_added_native_module_flags_the_changed_py_too(tmp_path):
+    """A head-added .so is a native-module finding, and the changed .py beside it is flagged as shadowed."""
+    found = check(tmp_path, {"app/security.py": BROKEN, SO: "x"})
+    assert sorted(item["path"] for item in found) == sorted(["app/security.py", SO])
+
+
+@pytest.mark.parametrize("head, base", [
+    ({"app/other.py": "# changed\n"}, {SO: "x"}),            # another module in the same folder
+    ({"lib/security.py": "# new\n"}, {SO: "x"}),             # same name, other folder
+    ({"app/notes.txt": "x"}, {SO: "x"}),                     # nothing changed next to it
+])
+def test_native_modules_do_not_flag_other_modules(tmp_path, head, base):
+    """Only a changed .py with the same module name in the same folder is shadowed."""
+    assert check(tmp_path, head, base) == []
+
+
+def test_base_native_module_beside_a_changed_py_makes_the_gate_inconclusive(tmp_path, container_on_host):
+    """Gate: base ships app/security.py + .so, head breaks the .py: INCONCLUSIVE before anything runs."""
+    status, details, _ = gate(tmp_path, {"extra": {SO: "\x7fELF base module"}}, {"security": BROKEN, "extra": {SO: "\x7fELF base module"}})
+    assert status == "INCONCLUSIVE"
+    assert details["reason"] == "test-harness tampering suspected: app/security.py (shadowed by native module %s)" % SO
+    assert container_on_host.runs == []
+
+
+# 3. pythonpath entries of the base pytest.ini: a plain file there (a zip file is importable from sys.path), or the
+#    directory removed, changes where the trusted run imports the head from.
+def zipped(files):
+    data = io.BytesIO()
+    with zipfile.ZipFile(data, "w") as archive:
+        for name, text in files.items():
+            archive.writestr(name, text)
+    return data.getvalue()
+
+
+def layout(tmp_path, ini, base_files, head_files, head_bytes=None):
+    base = write(tmp_path / "base", {"app/__init__.py": "", **base_files})
+    head = write(tmp_path / "head", {"app/__init__.py": "", **head_files})
+    for name, data in (head_bytes or {}).items():
+        (head / name).parent.mkdir(parents=True, exist_ok=True)
+        (head / name).write_bytes(data)
+    (tmp_path / "pytest.ini").write_text(ini)
+    return harness_guard.suspicious(base, head, pytest_ini=tmp_path / "pytest.ini")
+
+
+SRC = {"src/app/__init__.py": "", "src/app/security.py": SECURE}
+
+
+def test_zip_file_named_like_a_pythonpath_entry_is_flagged(tmp_path):
+    """The review's case: base `pythonpath = src`; the head replaces src/ by a zip file named src: both are flagged."""
+    found = layout(tmp_path, "[pytest]\npythonpath = src\n", SRC, {}, {"src": zipped({"app/__init__.py": "", "app/security.py": SECURE})})
+    assert [(item["path"], item["why"]) for item in found] == [
+        ("src", "plain file where the base pytest.ini maps pythonpath entry src"),
+        ("src/", "deletes the directory the base pytest.ini maps as pythonpath entry src")]
+
+
+def test_plain_file_at_a_nested_pythonpath_entry_is_flagged(tmp_path):
+    """Every pythonpath entry is checked, nested ones included; an existing directory entry is fine."""
+    found = layout(tmp_path, "[pytest]\npythonpath = lib pkgs/src\n", {"lib/m.py": ""}, {"lib/m.py": "", "pkgs/src": "x"})
+    assert [item["path"] for item in found] == ["pkgs/src"]
+
+
+def test_deleting_a_pythonpath_directory_is_flagged(tmp_path):
+    """Removing every file under the mapped directory is flagged even without a file in its place."""
+    found = layout(tmp_path, "[pytest]\npythonpath = src\n", SRC, {"app/security.py": SECURE})
+    assert [item["path"] for item in found] == ["src/"]
+
+
+@pytest.mark.parametrize("ini", ["[pytest]\npythonpath = .\n", "[pytest]\n", "[pytest]\npythonpath = ../outside /abs\n"])
+def test_pythonpath_rules_ignore_entries_outside_the_head(tmp_path, ini):
+    """'.', no entry, and entries the plugin does not map into the head (.., absolute) add no finding."""
+    assert layout(tmp_path, ini, SRC, {**SRC, "src/app/security.py": BROKEN}) == []
+
+
+def test_editing_files_inside_a_pythonpath_directory_is_not_flagged(tmp_path):
+    """Changing code inside src/ keeps src a directory: ordinary change."""
+    assert layout(tmp_path, "[pytest]\npythonpath = src\n", SRC, {**SRC, "src/app/security.py": BROKEN}) == []
+
+
+def test_zip_named_src_makes_the_gate_inconclusive(tmp_path, container_on_host):
+    """Gate: base ini `pythonpath = src`; head deletes src/ and adds a zip file named src: INCONCLUSIVE, nothing runs.
+
+    `create_gate_run` cannot yet place a head file where the base has a directory (backend/orchestrator/workspace_manager.py
+    leaves the base's emptied folders in the candidate worktree, so the copy fails with IsADirectoryError). The run is
+    created from the head without the zip, and the candidate workspace is then given the head's real shape."""
+    import shutil
+    ini = {".asent/satra/pytest.ini": "[pytest]\npythonpath = src\n"}
+    base = project(tmp_path / "base", extra={**ini, **SRC})
+    head = project(tmp_path / "head", security=BROKEN, extra=ini)
+    service = Service(tmp_path / "runtime")
+    run = service.create_gate_run(base, head, {})
+    candidate = Path(run.candidate_workspace)
+    shutil.rmtree(candidate / "src")
+    (candidate / "src").write_bytes(zipped({"app/__init__.py": "", "app/security.py": SECURE}))
+    context = ContextService(run.candidate_workspace, run.baseline_workspace, service.threats.snapshot(), gate=True)
+    status, details, _ = satra_analyzer.analyze(context, tmp_path / "out", lambda *a: None)
+    assert status == "INCONCLUSIVE"
+    assert details["reason"] == "test-harness tampering suspected: src, src/"
+    assert container_on_host.runs == []
