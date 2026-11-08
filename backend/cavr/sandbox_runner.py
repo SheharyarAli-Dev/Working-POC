@@ -6,8 +6,10 @@ import time
 from pathlib import Path
 from typing import Callable
 
+from backend.config import ASSETS
+
 # Absolute, so `docker run` finds the profile whatever the current directory is.
-SECCOMP_PROFILE = Path(__file__).resolve().parents[2] / "docker" / "asent-seccomp.json"
+SECCOMP_PROFILE = ASSETS / "docker" / "asent-seccomp.json"
 
 class SandboxRunner:
     def __init__(self, use_gvisor: bool = False):

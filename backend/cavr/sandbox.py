@@ -7,7 +7,7 @@ import sys
 import tempfile
 import threading
 from pathlib import Path
-from backend.config import ROOT
+from backend.config import ASSETS,ROOT
 from backend.orchestrator.hashing import digest
 from backend.cavr.runtime_monitor import normalize
 from backend.integrations.tooling import availability
@@ -20,7 +20,7 @@ def _lf_digest(data):
 def run_counterfactual(source,pdf,outdir,emit):
     source,pdf,outdir=Path(source),Path(pdf),Path(outdir);outdir.mkdir(parents=True,exist_ok=True)
     caps=availability();engine=next((e for e in ('docker','podman') if caps[e]['available']),None)
-    known_path=ROOT/'scenarios'/'laboratory_hashes.json'
+    known_path=ASSETS/'scenarios'/'laboratory_hashes.json'
     known=json.loads(known_path.read_text()) if known_path.exists() else {}
     pinned=_lf_digest(source.read_bytes()) in known.get('cavr_sources',[])
     if not engine and not pinned:return {'available':False,'reason':'Untrusted package requires Docker/Podman; host fallback only accepts hash-pinned inert sources','runs':[]}
