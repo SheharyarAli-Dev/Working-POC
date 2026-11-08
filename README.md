@@ -98,6 +98,56 @@ This project is developed as a joint Final Year Project by:
 
 ## 4. Getting Started
 
+### 4.0 Install the `asent` command (no checkout needed)
+
+pipx is recommended: it gives `asent` its own virtual environment (see the import-name note below).
+
+```bash
+pipx install git+https://github.com/SheharyarAli-Dev/Working-POC
+# or, inside a virtual environment you manage:
+pip install git+https://github.com/SheharyarAli-Dev/Working-POC
+# or the wheel built by CI (Actions → "Package" → artifact asent-wheel), which also bundles the dashboard UI:
+pipx install ./asent-1.0.0-py3-none-any.whl
+```
+
+Needs Python 3.12 or newer and git. Docker is needed for SATRA's sandboxed test runs: without it an enabled
+SATRA is INCONCLUSIVE and the gate decides REVIEW. An install from git has no dashboard UI (`frontend/dist` is
+not in git), so `asent dashboard` then serves the API only; the CI wheel includes the UI.
+
+**Quick start**, inside the repository you want to gate:
+
+```bash
+asent doctor          # what is missing (Docker, images, git, Python), each with the exact fix; changes nothing
+asent init            # writes a starter .asent/; review every file, then remove "_starter" from .asent/config.json
+git add .asent && git commit -m "Add reviewed ASENT config"
+# ... make a change on a branch and commit it ...
+asent gate            # base: the default branch (origin/HEAD, else main, else master), head: HEAD
+asent report          # prints the asent-report.json the last gate run wrote
+asent dashboard       # the dashboard at http://127.0.0.1:8000/ (this machine only)
+asent --version
+```
+
+`asent gate` exits 0 ACCEPT, 1 BLOCK, 2 REVIEW, writes `asent-report.json` and `asent-summary.md` to the
+repository top level, and takes `--base`, `--head`, `--repository`, `--output-dir` to override the defaults. With
+no default branch it decides REVIEW and says to pass `--base`. `asent doctor` prints the `docker build` commands
+for the two sandbox images (`asent-sandbox:local`, `asent-satra-runner:local`) using the Dockerfiles inside the
+installed package; it never builds them itself.
+
+**For editors and scripts:** every command above takes `--json` and then prints exactly one JSON document on
+stdout: `gate --json` the gate report (same content as `asent-report.json`), `report --json` that file,
+`doctor --json` `{"schema": "asent.doctor.v1", "ready", "checks": [{"id", "label", "status", "required",
+"detail", "fix"}], ...}` (exit 1 when not ready), `dashboard --json` one line `{"url", "api", "ui_bundled",
+"data_dir"}` before serving, `init --json` the files written, `--version --json` `{"name", "version"}`.
+Errors under `--json` are `{"error": "..."}` with exit 2.
+
+`asent report --run RUN_ID` reads a dashboard run's report from the server (it used to be `asent report RUN_ID`).
+An installed `asent` keeps its run data, advisory cache and SATRA workspace in `~/.local/share/asent`
+(`$XDG_DATA_HOME/asent`; `ASENT_DATA` overrides the run data folder); a checkout keeps using the repository.
+
+**Known limitation:** the importable Python package is called `backend`. Installed next to another package of that
+name in the same environment, one would overwrite the other; pipx avoids this by giving `asent` its own
+environment. Renaming it would touch every module and test, so it is left for later.
+
 ### 4.1 Prerequisites
 - **Python**: 3.12 (strictly pinned via `requirements.lock.txt`)
 - **Node.js**: 18.x or 20.x with npm (for frontend dashboard)
@@ -163,6 +213,7 @@ Navigate to `http://localhost:8000` to interact with the Run Workflow interface.
 
 ### Gating any git repository (no server)
 
+With the installed command this is `asent gate` (section 4.0). From a checkout,
 `scripts/asent gate --repository PATH --base REF --head REF` decides one change of any repository that has a
 reviewed `.asent/` folder (start with `scripts/asent init`) and exits 0 ACCEPT, 1 BLOCK, 2 REVIEW. See
 [docs/asent-gate.md](docs/asent-gate.md) (usage, GitHub Actions, what each module needs) and
