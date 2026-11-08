@@ -9,6 +9,7 @@ there, so the guarded check is not vacuous.
 Runs use `container_on_host` (tests/test_satra_config.py): the exact container command, executed on the
 host with each mount's container path mapped to its host directory.
 """
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -18,7 +19,7 @@ import pytest
 
 from backend.orchestrator.hashing import copy_tree
 from backend.satra import pytest_runner
-from test_satra_config import BROKEN, TRUSTED, container_on_host, flag, project  # noqa: F401  (fixture)
+from test_satra_config import BROKEN, SECURE, TRUSTED, container_on_host, flag, gate, project  # noqa: F401  (fixture)
 
 IMAGE = "asent-satra-project:test"
 
@@ -182,3 +183,161 @@ def test_control_the_same_files_force_a_pass_on_an_unguarded_run(tmp_path, attac
     assert unguarded(tmp_path, None) == (1, ["test_other_user_denied"])
     assert unguarded(tmp_path / "attacked", ATTACKS[attack]) == (0, [])
 
+
+# --- the results file (step 2) ----------------------------------------------------------------------------
+
+PASSING_JUNIT = ('<testsuites><testsuite name="pytest" tests="2">'
+                 '<testcase classname="asent_assurance.test_contract" name="test_owner_allowed"/>'
+                 '<testcase classname="asent_assurance.test_contract" name="test_other_user_denied"/>'
+                 '</testsuite></testsuites>')
+
+
+def results_mount(run):
+    return run["mounts"]["/results"]
+
+
+@pytest.mark.parametrize("kind", ["trusted", "head tests"])
+def test_results_file_is_written_to_a_fresh_tmpfs_directory_outside_the_head(tmp_path, container_on_host, kind):
+    """--junitxml points at /results, an empty directory that is not inside /work (on /dev/shm where it exists) and is removed afterwards."""
+    if kind == "trusted":
+        result = trusted_run(tmp_path, security=SECURE)
+    else:
+        head = project(tmp_path / "head", project_tests={"tests/test_app.py": "def test_app():\n    assert True\n"})
+        result = pytest_runner.run_pytest(head, tmp_path / "out", external=True, targets=["tests"], image=IMAGE)
+    assert result["available"] and result["exit_code"] == 0
+    [run] = container_on_host.runs
+    assert "--junitxml=/results/results.xml" in run["cmd"] and not any("--junitxml=/work" in part for part in run["cmd"])
+    source, mode = results_mount(run)
+    assert mode == "rw" and run["before"]["/results"] == {}
+    work = Path(run["mounts"]["/work"][0])
+    assert work not in Path(source).parents and Path(source) not in work.parents
+    if Path("/dev/shm").is_dir() and os.access("/dev/shm", os.W_OK):
+        assert Path(source).parent == Path("/dev/shm") and result["results_location"] == "tmpfs (/dev/shm)"
+    assert not Path(source).exists()
+
+
+def test_results_files_in_the_head_are_deleted_before_the_run(tmp_path, container_on_host):
+    """Every results.xml the head carries is removed from the copy before pytest starts; the real result stands."""
+    forged = {"results.xml": PASSING_JUNIT, "app/results.xml": PASSING_JUNIT}
+    result = trusted_run(tmp_path, forged)
+    assert result["exit_code"] == 1 and statuses(result)["test_other_user_denied"] == "FAIL"
+    assert result["removed_results_files"] == ["app/results.xml", "results.xml"]
+    assert not [name for name in container_on_host.runs[0]["before"]["/work"] if name.endswith("results.xml")]
+    assert (tmp_path / "head/results.xml").read_text() == PASSING_JUNIT  # only the copy is cleaned
+
+
+# Code under test that overwrites ./results.xml (the old results path) when the process exits.
+WRITE_WORK_RESULTS = BROKEN + '''
+import atexit, os
+
+def _forge():
+    with open(os.path.join(os.getcwd(), "results.xml"), "w") as out:
+        out.write(%r)
+atexit.register(_forge)
+''' % PASSING_JUNIT
+
+
+def test_head_code_writing_results_xml_in_the_head_does_not_change_the_result(tmp_path, container_on_host):
+    """Head code that writes /work/results.xml at exit no longer reaches the file SATRA reads."""
+    result = trusted_run(tmp_path, security=WRITE_WORK_RESULTS)
+    assert result["available"] and result["exit_code"] == 1
+    assert statuses(result) == {"test_owner_allowed": "PASS", "test_other_user_denied": "FAIL"}
+
+
+def test_head_code_that_exits_before_pytest_writes_results_is_unavailable(tmp_path, container_on_host):
+    """Exit 0 without a results file (head calls os._exit(0) on import) is unavailable, not a pass."""
+    result = trusted_run(tmp_path, security=BROKEN + "import os\nos._exit(0)\n")
+    assert result["available"] is False and result["exit_code"] is None and result["pytest_exit_code"] == 0
+    assert result["reason"] == "results file missing"
+
+
+def test_forged_exit_code_with_the_real_results_file_is_unavailable(tmp_path, container_on_host):
+    """Head code that forces exit 0 after a failing run leaves a results file that contradicts it: unavailable."""
+    code = BROKEN + "import atexit, os\natexit.register(lambda: os._exit(0))\n"
+    result = trusted_run(tmp_path, security=code)
+    assert result["available"] is False and "does not match" in result["reason"]
+
+
+def test_missing_results_file_makes_a_gate_run_inconclusive(tmp_path, container_on_host):
+    """A gate run whose head trusted run has no results file is INCONCLUSIVE, never ACCEPT."""
+    status, details, _ = gate(tmp_path, head_kwargs={"security": SECURE + "import os\nos._exit(0)\n"})
+    assert status == "INCONCLUSIVE" and details["reason"] == "Candidate test execution is incomplete"
+
+
+def junit(tmp_path, text):
+    path = tmp_path / "results.xml"
+    path.write_text(text)
+    return path
+
+
+ONE_PASS = '<testsuites><testsuite><testcase classname="c" name="t"/></testsuite></testsuites>'
+ONE_FAIL = '<testsuites><testsuite><testcase classname="c" name="t"><failure message="x">x</failure></testcase></testsuite></testsuites>'
+
+
+@pytest.mark.parametrize("text, code, words", [
+    ("not xml at all", 0, "not valid XML"),
+    ("<html><body/></html>", 0, "not a JUnit report"),
+    (ONE_FAIL, 0, "does not match pytest exit code 0"),
+    ("<testsuite/>", 0, "does not match pytest exit code 0"),
+    (ONE_PASS, 1, "does not match pytest exit code 1"),
+])
+def test_invalid_results_files_are_refused(tmp_path, text, code, words):
+    """Unparseable, non-JUnit, or exit-code-contradicting results files are refused."""
+    tests, problem = pytest_runner.read_results(junit(tmp_path, text), code)
+    assert tests is None and words in problem
+
+
+def test_results_file_that_is_not_a_regular_file_is_refused(tmp_path):
+    """A symlink (it could point at any host file) or a directory is refused, and a symlink is not followed."""
+    target = junit(tmp_path, ONE_PASS)
+    (tmp_path / "link").mkdir()
+    (tmp_path / "link/results.xml").symlink_to(target)
+    (tmp_path / "dir/results.xml").mkdir(parents=True)
+    assert pytest_runner.read_results(tmp_path / "link/results.xml", 0)[0] is None
+    assert pytest_runner.read_results(tmp_path / "dir/results.xml", 0)[0] is None
+    assert pytest_runner.read_results(tmp_path / "none.xml", 0) == (None, "results file missing")
+
+
+def test_oversized_results_file_is_refused(tmp_path, monkeypatch):
+    """A results file over the size limit is refused without being parsed."""
+    monkeypatch.setattr(pytest_runner, "RESULTS_LIMIT", 10)
+    assert pytest_runner.read_results(junit(tmp_path, ONE_PASS), 0) == (None, "results file too large")
+
+
+@pytest.mark.parametrize("text, code", [(ONE_PASS, 0), (ONE_FAIL, 1), ("<testsuites/>", 5)])
+def test_consistent_results_files_are_read(tmp_path, text, code):
+    """Pass with exit 0, failure with exit 1, and an empty report with exit 5 (no tests) are accepted as evidence."""
+    tests, problem = pytest_runner.read_results(junit(tmp_path, text), code)
+    assert problem is None and len(tests) == (0 if code == 5 else 1)
+
+
+def test_host_builtin_run_writes_results_outside_the_workspace(tmp_path, monkeypatch):
+    """The hash-pinned host path (no engine) also writes its results file outside the project copy."""
+    seen = []
+    monkeypatch.setattr(pytest_runner, "availability", lambda: {"docker": {"available": False}, "podman": {"available": False}})
+    monkeypatch.setattr(pytest_runner, "permitted_builtin", lambda root: True)
+    monkeypatch.setattr(pytest_runner.subprocess, "run", lambda cmd, *a, **k: seen.append(cmd) or subprocess.CompletedProcess(cmd, 4, "", ""))
+    (tmp_path / "p").mkdir()
+    result = pytest_runner.run_pytest(tmp_path / "p", tmp_path / "out")
+    [cmd] = seen
+    work = Path(cmd[cmd.index(str(pytest_runner.ROOT / "backend/satra/runner_entry.py")) + 1])
+    junit_path = Path(next(part.split("=", 1)[1] for part in cmd if part.startswith("--junitxml=")))
+    assert work not in junit_path.parents and result["available"] is False
+
+
+@pytest.mark.xfail(strict=True, reason="Known limit (docs/satra/threat-model.md): code under test runs in the trusted "
+                                       "pytest process and can still write a consistent forged results file and exit 0.")
+def test_known_limit_in_process_code_under_test_can_still_forge_results(tmp_path, container_on_host):
+    """Stated limit, kept as a strict xfail: it fails today; if it ever passes, the documentation must change."""
+    forger = BROKEN + '''
+import atexit, os, sys
+_path = next(a.split("=", 1)[1] for a in sys.argv if a.startswith("--junitxml="))
+
+def _forge():
+    with open(_path, "w") as out:
+        out.write(%r)
+    os._exit(0)
+atexit.register(_forge)
+''' % PASSING_JUNIT
+    result = trusted_run(tmp_path, security=forger)
+    assert not (result["available"] and result["exit_code"] == 0 and result["failed"] == 0)

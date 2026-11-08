@@ -94,3 +94,66 @@ Verified by the tests above on the host harness; not run in a real container on 
   the image, and the head is appended last, after pytest is already loaded.
 - *Why can't a head conftest load?* Pytest only collects `/trusted` paths, rootdir and confcutdir are `/trusted`,
   and `/work` is not an ancestor of `/trusted`.
+
+## Step 2 — Results file outside the head, read fail-closed (2026-11-08)
+
+**Ch 6 Implementation** (`backend/satra/pytest_runner.py`)
+- `_results_parent()`: `/dev/shm` (tmpfs) when it is a writable directory on a POSIX host, else the system temp dir.
+- `run_pytest`: a second `TemporaryDirectory(prefix='asent-results-')` per run, mounted `-v <dir>:/results:rw`
+  in every container run (trusted, head tests, demo); `--junitxml=/results/results.xml`. The host built-in path
+  writes `<dir>/results.xml`. The directory is never inside the project copy and is removed after the run.
+- `_remove_results_files(work)`: deletes every `results.xml` in the project copy before the run (the source tree
+  is not touched); listed in the result as `removed_results_files`.
+- `read_results(xml, exit_code)` / `_load_results`: opens with `O_NOFOLLOW|O_NONBLOCK`, requires a regular file
+  ≤ `RESULTS_LIMIT` (32 MiB), parses the bytes, root must be `testsuites`/`testsuite`; exit 0 needs ≥ 1 testcase and
+  no failure/error, exit 1 needs ≥ 1 failure/error. Any problem → `{'available': False, 'exit_code': None,
+  'pytest_exit_code': …, 'reason': …}`; gate mode already treats unavailable as INCONCLUSIVE.
+- The stored `junit.xml` and `junit_sha256` are the exact bytes that were parsed (no second read).
+
+**Design decisions**
+- Host `/dev/shm` instead of `--tmpfs /results`: a container tmpfs disappears with the container, and `docker cp`
+  cannot read it, so the host could never read the file. A bind-mounted host tmpfs directory is fresh, outside
+  `/work`, and not written to disk. Fallback (no `/dev/shm`, e.g. Windows): a fresh temp directory, recorded in
+  `results_location`.
+- Exit-code agreement check: before, `is_pass` looked at the exit code and the passed count but not the failed
+  count, so a run forced to exit 0 after a failure (`atexit` + `os._exit(0)`) counted as a pass. Now it is refused.
+- Missing file is unavailable, not "0 tests": exit 0 with no results file can only mean something stopped pytest.
+- Not following links: anything in `/results` was written by the container; a symlink there would be resolved on the host.
+
+**Requirements covered:** FR-07, NFR-03 (fail closed) — the verdict is read only from a file the head cannot pre-plant;
+a missing, malformed or contradictory file can never yield ACCEPT.
+
+**Ch 7 Test cases** (`tests/test_satra_harness_isolation.py`)
+
+| Test ID | Purpose | Input | Expected | Result |
+|---|---|---|---|---|
+| test_results_file_is_written_to_a_fresh_tmpfs_directory_outside_the_head | location | trusted run; head tests run | `/results`, empty before, not in `/work`, on `/dev/shm`, removed after | pass ×2 |
+| test_results_files_in_the_head_are_deleted_before_the_run | planted file | forged `results.xml`, `app/results.xml` | both removed from copy; real FAIL | pass |
+| test_head_code_writing_results_xml_in_the_head_does_not_change_the_result | old bypass | head atexit writes passing `./results.xml` | exit 1, denied FAIL | pass |
+| test_head_code_that_exits_before_pytest_writes_results_is_unavailable | missing file | `os._exit(0)` on import | unavailable, "results file missing" | pass |
+| test_forged_exit_code_with_the_real_results_file_is_unavailable | exit-code forgery | atexit `os._exit(0)` after failure | unavailable, "does not match" | pass |
+| test_missing_results_file_makes_a_gate_run_inconclusive | gate | head exits before results | INCONCLUSIVE | pass |
+| test_invalid_results_files_are_refused | reader | not XML, HTML, fail+0, empty+0, pass+1 | refused ×5 | pass |
+| test_results_file_that_is_not_a_regular_file_is_refused | reader | symlink, directory, missing | refused ×3 | pass |
+| test_oversized_results_file_is_refused | reader | limit 10 bytes | "too large" | pass |
+| test_consistent_results_files_are_read | reader | pass+0, fail+1, empty+5 | accepted ×3 | pass |
+| test_host_builtin_run_writes_results_outside_the_workspace | demo host path | no engine, exit 4 | junit path outside copy; unavailable | pass |
+| test_known_limit_in_process_code_under_test_can_still_forge_results | stated limit | head writes consistent forged file at the argv path, exits 0 | strict xfail (forgery succeeds today) | xfail |
+
+Before the change, 18 of these failed, including `…writing_results_xml_in_the_head…` (the denied test showed PASS)
+and `…makes_a_gate_run_inconclusive` (REJECT, from the stale exit code). With the change: 71 passed, 1 xfailed in
+this file and `tests/test_satra_config.py`. Full suite: 1851 passed, 37 skipped, 1 xfailed. Scenario verdicts in the
+regenerated `reports/scenario-validation.json` equal those of the unmodified `HEAD` worktree (file restored).
+
+**Defects found and fixed:** none beyond the bypasses above.
+
+**Known limitations / deferred:** code under test can still write `/results/results.xml` itself (it can read the
+path from `sys.argv`) — Step 4 states this limit; the strict xfail keeps it visible.
+
+**Tool disclosure (Ch 8.7):** Claude Code wrote the code, tests and this section; Maryam to review. Host harness only.
+
+**Review:** no independent review pass run for this step.
+
+**Supervisor Q&A prep**
+- *Why not use Docker's `--tmpfs` for /results?* The host cannot read a container tmpfs after the container exits; a host tmpfs directory gives the same freshness and is readable.
+- *Can a head still forge the file?* Not by shipping one (deleted, wrong path) or by writing `/work/results.xml`; code running inside the test process still can — stated limit.

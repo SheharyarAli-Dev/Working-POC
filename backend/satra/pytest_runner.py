@@ -3,6 +3,7 @@ import hashlib
 import json
 import os
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -52,6 +53,61 @@ def _trusted_layout(base,trusted_tests_dir,pytest_ini):
     return trusted,plugin
 
 
+# Results file (docs/satra/harness-isolation.md, step 2): a fresh directory outside the project copy, on
+# tmpfs where the host has /dev/shm, mounted at /results. Read without following links, size-capped, and
+# refused when it is not a JUnit report that agrees with pytest's exit code.
+RESULTS_LIMIT=32*1024*1024
+
+
+def _results_parent():
+    shm=Path('/dev/shm')
+    if os.name=='posix' and shm.is_dir() and os.access(shm,os.W_OK|os.X_OK):return shm,'tmpfs (/dev/shm)'
+    return None,'temporary directory'
+
+
+def _remove_results_files(work):
+    removed=sorted(p.relative_to(work).as_posix() for p in Path(work).rglob('results.xml') if p.is_file())
+    for name in removed:(Path(work)/name).unlink()
+    return removed
+
+
+def read_results(xml,exit_code):
+    """JUnit file -> (tests, None), or (None, problem) when it is missing, not a regular file, too large,
+    not a JUnit report, or contradicts the exit code (0 needs at least one test and no failure/error,
+    1 needs at least one failure/error)."""
+    return _load_results(xml,exit_code)[:2]
+
+
+def _case(t):
+    error=t.find('error');failure=t.find('failure');skip=t.find('skipped')
+    status='ERROR' if error is not None else 'FAIL' if failure is not None else 'SKIP' if skip is not None else 'PASS'
+    detail=error if error is not None else failure
+    return {'name':t.attrib.get('name'),'classname':t.attrib.get('classname'),'status':status,'seconds':float(t.attrib.get('time',0)),'message':(detail.text or '')[-4000:] if detail is not None else ''}
+
+
+def _load_results(xml,exit_code):
+    # (tests, problem, raw bytes). O_NOFOLLOW: a symlink planted in /results is never followed on the host.
+    try:fd=os.open(xml,os.O_RDONLY|getattr(os,'O_NOFOLLOW',0)|getattr(os,'O_NONBLOCK',0))
+    except FileNotFoundError:return None,'results file missing',None
+    except OSError:return None,'results file is not a regular file',None
+    try:
+        info=os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode):return None,'results file is not a regular file',None
+        if info.st_size>RESULTS_LIMIT:return None,'results file too large',None
+        with os.fdopen(fd,'rb',closefd=False) as handle:data=handle.read(RESULTS_LIMIT+1)
+    finally:os.close(fd)
+    if len(data)>RESULTS_LIMIT:return None,'results file too large',None
+    try:root=ET.fromstring(data)
+    except ET.ParseError as e:return None,'results file is not valid XML: '+str(e),None
+    if root.tag not in ('testsuites','testsuite'):return None,'results file is not a JUnit report',None
+    try:tests=[_case(t) for t in root.iter('testcase')]
+    except ValueError:return None,'results file has an invalid testcase',None
+    bad=sum(t['status'] in ('FAIL','ERROR') for t in tests)
+    if (exit_code==0 and (not tests or bad)) or (exit_code==1 and not bad):
+        return None,'results file does not match pytest exit code %d'%exit_code,None
+    return tests,None,data
+
+
 def run_pytest(root,output,selected='all',trusted=False,trusted_tests_dir=None,external=False,targets=None,pytest_ini=None,image='asent-sandbox:local',timeout=40,memory='512m'):
     # Gate runs pass external=True (never on the host, whatever the files), trusted_tests_dir (the
     # base .asent/ tests), targets (explicit project test paths), pytest_ini (the trusted ini), and
@@ -62,8 +118,10 @@ def run_pytest(root,output,selected='all',trusted=False,trusted_tests_dir=None,e
     start=time.perf_counter();output=Path(output);output.mkdir(parents=True,exist_ok=True)
     caps=availability();engine=next((e for e in ('docker','podman') if caps[e]['available']),None)
     if not engine and (external or not permitted_builtin(root)):return {'available':False,'exit_code':None,'reason':'External/modified code requires Docker/Podman; host execution is limited to hash-pinned bundled sources','tests':[]}
-    with tempfile.TemporaryDirectory(prefix='asent-pytest-') as d:
-        work=copy_tree(root,Path(d)/'project')
+    shm,location=_results_parent()
+    with tempfile.TemporaryDirectory(prefix='asent-pytest-') as d,tempfile.TemporaryDirectory(prefix='asent-results-',dir=shm,ignore_cleanup_errors=True) as fresh:
+        work=copy_tree(root,Path(d)/'project');results=Path(fresh)
+        removed=_remove_results_files(work)
         generic=trusted_tests_dir is not None or targets is not None or pytest_ini is not None
         isolated=bool(engine) and trusted and trusted_tests_dir is not None
         if trusted and trusted_tests_dir is not None:
@@ -84,19 +142,19 @@ def run_pytest(root,output,selected='all',trusted=False,trusted_tests_dir=None,e
         if generic and not isolated:
             if pytest_ini is not None:shutil.copyfile(pytest_ini,work/'.asent-pytest.ini');ini='.asent-pytest.ini'
             elif not (work/'pytest.ini').is_file():ini=None
-        args=['-q','-o','addopts=',*(['-c',str(work/ini)] if ini else []),'--junitxml='+str(work/'results.xml'),*targets]
+        args=['-q','-o','addopts=',*(['-c',str(work/ini)] if ini else []),'--junitxml='+str(results/'results.xml'),*targets]
         if isolated:
             # -P: /work (the cwd) is not put on sys.path; -s: no user site. -c/--rootdir/--confcutdir keep pytest's
             # config and conftest discovery inside /trusted; autoload off and no cacheprovider. The plugin then
             # appends the head to the end of sys.path (backend/satra/trusted_run_plugin.py).
             args=['-q','-o','addopts=','-c','/trusted/pytest.ini','--rootdir=/trusted','--confcutdir=/trusted','-p','no:cacheprovider','-p',TRUSTED_PLUGIN,
-                  '--junitxml=/work/results.xml',*['/trusted/'+t for t in targets]]
+                  '--junitxml=/results/results.xml',*['/trusted/'+t for t in targets]]
             cmd=[engine,'run','--rm',*container_user_args(engine),'--network','none','--read-only','--cap-drop','ALL','--security-opt','no-new-privileges','--memory',memory,'--cpus','1','--pids-limit','64','--tmpfs','/tmp:rw,nosuid,size=64m',
-                 '-v',str(work)+':/work:rw','-v',str(suite)+':/trusted:ro','-v',str(plugin)+':/asent:ro','-w','/work',
+                 '-v',str(work)+':/work:rw','-v',str(suite)+':/trusted:ro','-v',str(plugin)+':/asent:ro','-v',str(results)+':/results:rw','-w','/work',
                  '-e','PYTEST_DISABLE_PLUGIN_AUTOLOAD=1','-e','PYTHONPATH=/asent','-e','ASENT_SATRA_TRUSTED=/trusted','-e','ASENT_SATRA_HEAD=/work',image,*TRUSTED_PYTHON,*args]
         elif engine:
-            args=['-q','-o','addopts=',*(['-c','/work/'+ini] if ini else []),'--junitxml=/work/results.xml',*targets]
-            cmd=[engine,'run','--rm',*container_user_args(engine),'--network','none','--read-only','--cap-drop','ALL','--security-opt','no-new-privileges','--memory',memory,'--cpus','1','--pids-limit','64','--tmpfs','/tmp:rw,nosuid,size=64m','-v',str(work)+':/work:rw','-w','/work','-e','PYTEST_DISABLE_PLUGIN_AUTOLOAD=1',image,'python','-m','pytest',*args]
+            args=['-q','-o','addopts=',*(['-c','/work/'+ini] if ini else []),'--junitxml=/results/results.xml',*targets]
+            cmd=[engine,'run','--rm',*container_user_args(engine),'--network','none','--read-only','--cap-drop','ALL','--security-opt','no-new-privileges','--memory',memory,'--cpus','1','--pids-limit','64','--tmpfs','/tmp:rw,nosuid,size=64m','-v',str(work)+':/work:rw','-v',str(results)+':/results:rw','-w','/work','-e','PYTEST_DISABLE_PLUGIN_AUTOLOAD=1',image,'python','-m','pytest',*args]
         else:
             cmd=[sys.executable,'-I',str(ROOT/'backend/satra/runner_entry.py'),str(work),*args]
         env={'PATH':os.environ.get('PATH','/usr/bin:/bin'),'HOME':str(work),'LANG':'C.UTF-8','PYTEST_DISABLE_PLUGIN_AUTOLOAD':'1','PYTHONDONTWRITEBYTECODE':'1'}
@@ -108,13 +166,10 @@ def run_pytest(root,output,selected='all',trusted=False,trusted_tests_dir=None,e
         try:
             result=subprocess.run(cmd,cwd=work,env=env,text=True,capture_output=True,timeout=timeout)
             (output/'stdout.log').write_text(result.stdout);(output/'stderr.log').write_text(result.stderr)
-            xml=work/'results.xml';tests=[]
-            if xml.exists():
-                shutil.copyfile(xml,output/'junit.xml')
-                for t in ET.parse(xml).getroot().iter('testcase'):
-                    error=t.find('error');failure=t.find('failure');skip=t.find('skipped')
-                    status='ERROR' if error is not None else 'FAIL' if failure is not None else 'SKIP' if skip is not None else 'PASS'
-                    detail=error if error is not None else failure
-                    tests.append({'name':t.attrib.get('name'),'classname':t.attrib.get('classname'),'status':status,'seconds':float(t.attrib.get('time',0)),'message':(detail.text or '')[-4000:] if detail is not None else ''})
-            return {'available':True,'exit_code':result.returncode,'tests':tests,'passed':sum(t['status']=='PASS' for t in tests),'failed':sum(t['status']=='FAIL' for t in tests),'errors':sum(t['status']=='ERROR' for t in tests),'skipped':sum(t['status']=='SKIP' for t in tests),'duration_ms':round((time.perf_counter()-start)*1000,2),'backend':engine or 'HASH_PINNED_BUILTIN_SUBPROCESS','isolation':'container with network none' if engine else 'Known bundled sources only; isolated temp workspace, sanitized environment, resource limits and network/process audit restrictions; not an arbitrary-code sandbox','stdout':result.stdout[-10000:],'stderr':result.stderr[-2000:],'junit_path':str(output/'junit.xml'),'junit_sha256':digest(xml.read_bytes()) if xml.exists() else None}
+            tests,problem,data=_load_results(results/'results.xml',result.returncode)
+            backend=engine or 'HASH_PINNED_BUILTIN_SUBPROCESS'
+            evidence={'backend':backend,'results_location':location,'removed_results_files':removed,'stdout':result.stdout[-10000:],'stderr':result.stderr[-2000:]}
+            if problem:return {'available':False,'exit_code':None,'pytest_exit_code':result.returncode,'reason':problem,'tests':[],**evidence}
+            (output/'junit.xml').write_bytes(data)
+            return {'available':True,'exit_code':result.returncode,'tests':tests,'passed':sum(t['status']=='PASS' for t in tests),'failed':sum(t['status']=='FAIL' for t in tests),'errors':sum(t['status']=='ERROR' for t in tests),'skipped':sum(t['status']=='SKIP' for t in tests),'duration_ms':round((time.perf_counter()-start)*1000,2),'isolation':'container with network none' if engine else 'Known bundled sources only; isolated temp workspace, sanitized environment, resource limits and network/process audit restrictions; not an arbitrary-code sandbox','junit_path':str(output/'junit.xml'),'junit_sha256':digest(data),**evidence}
         except Exception as e:return {'available':False,'exit_code':None,'reason':str(e),'tests':[]}
