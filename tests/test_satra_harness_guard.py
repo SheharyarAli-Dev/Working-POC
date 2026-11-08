@@ -110,8 +110,8 @@ def test_a_changed_existing_conftest_is_flagged(tmp_path):
 
 NOT_FLAGGED = {
     "unchanged conftest and settings": ({}, {"conftest.py": "import pytest\n", "pytest.ini": "[pytest]\n"}),
-    "test files import pytest": ({"tests/test_app.py": "import pytest\n", "test_root.py": "import pytest\n",
-                                  "app/sec_test.py": "import _pytest\n", "test/helpers.py": "import pytest\n"}, None),
+    "test files import pytest": ({"tests/test_app.py": "import pytest\n", "test_root.py": "from pytest import fixture\n",
+                                  "app/sec_test.py": "import pytest.mark\n", "test/helpers.py": "p = __import__('pytest')\n"}, None),
     "pyproject outside the pytest table": ({"pyproject.toml": '[project]\nname = "b"\n[tool.pytest.ini_options]\naddopts = "-q"\n'},
                                            {"pyproject.toml": '[project]\nname = "a"\n[tool.pytest.ini_options]\naddopts = "-q"\n'}),
     "tox.ini outside [pytest]": ({"tox.ini": "[tox]\nenvlist = py313\n[pytest]\naddopts = -q\n"},
@@ -182,6 +182,34 @@ def test_unchanged_native_module_from_the_base_keeps_the_normal_verdict(tmp_path
     status, details, _ = gate(tmp_path, {"extra": so})
     assert status == "ACCEPT", details["reason"]
     assert "harness_tampering" not in details
+
+
+# Test-named files are exempt only from the plain `pytest` import check: a file under tests/ (for example the review's
+# app/tests/shim.py) is still importable by code under test, so _pytest imports and sys.modules writes count anywhere.
+TEST_NAMED = {
+    "app/tests/shim.py writes sys.modules": {"app/tests/shim.py": "import sys\nsys.modules['app.security'] = object()\n"},
+    "app/tests/shim.py imports _pytest": {"app/tests/shim.py": "from _pytest import runner\n"},
+    "test file imports _pytest": {"tests/test_app.py": "import _pytest.reports\n"},
+    "test_ file binds sys.modules": {"test_root.py": "from sys import modules\n"},
+    "_test.py file deletes from sys.modules": {"app/sec_test.py": "import sys as s\ndel s.modules['json']\n"},
+    "test file import_module _pytest": {"test/helpers.py": "import importlib\nimportlib.import_module('_pytest.runner')\n"},
+}
+
+
+@pytest.mark.parametrize("case", list(TEST_NAMED))
+def test_test_named_files_are_still_checked_for_pytest_internals_and_sys_modules(tmp_path, case):
+    """Only `import pytest` is allowed in test-named files; _pytest imports and sys.modules writes are flagged in every .py file."""
+    found = check(tmp_path, TEST_NAMED[case])
+    assert [item["path"] for item in found] == list(TEST_NAMED[case]), found
+
+
+def test_review_shim_under_a_tests_folder_makes_the_gate_inconclusive(tmp_path, container_on_host):
+    """The review's case: app/tests/shim.py that writes sys.modules, with a broken head, is INCONCLUSIVE and nothing runs."""
+    shim = {"app/tests/__init__.py": "", "app/tests/shim.py": "import sys\nsys.modules['app.security'] = object()\n"}
+    status, details, _ = gate(tmp_path, head_kwargs={"security": BROKEN, "extra": shim})
+    assert status == "INCONCLUSIVE"
+    assert details["reason"] == "test-harness tampering suspected: app/tests/shim.py"
+    assert container_on_host.runs == []
 
 
 def test_project_tests_that_import_pytest_still_get_a_verdict(tmp_path, container_on_host):

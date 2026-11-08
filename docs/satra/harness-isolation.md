@@ -169,10 +169,11 @@ path from `sys.argv`) — Step 4 states this limit; the strict xfail keeps it vi
   - `pytest.ini`, `.pytest.ini`, `pytest.toml`, `.pytest.toml`; the pytest section of `pyproject.toml`
     (`[tool.pytest]`, incl. `ini_options`), `tox.ini` (`[pytest]`), `setup.cfg` (`[tool:pytest]`), compared
     parsed; an unreadable settings file is flagged;
-  - non-test `.py` (not under `tests/`/`test/`, not `test_*.py`/`*_test.py`): AST finds `import pytest`/`_pytest`,
-    `from _pytest …`, `__import__`/`import_module` with a literal pytest name, `from sys import modules`, and writes
-    to `sys.modules` (via any `import sys as …` alias: item/attribute assignment, `del`, `update`, `setdefault`,
-    `pop`, `popitem`, `clear`, `__setitem__`, `__delitem__`); an unparseable file is flagged.
+  - every `.py` file: AST finds imports of `_pytest` (`import`, `from _pytest …`, `__import__`/`import_module` with a
+    literal name), `from sys import modules`, and writes to `sys.modules` (via any `import sys as …` alias:
+    item/attribute assignment, `del`, `update`, `setdefault`, `pop`, `popitem`, `clear`, `__setitem__`, `__delitem__`);
+    non-test `.py` only (not under `tests/`/`test/`, not `test_*.py`/`*_test.py`): imports of `pytest` itself; an
+    unparseable file is flagged. (As corrected in Step 7.)
 - `backend/satra/gate_mode.py::analyze_configured`: right after the contract rule check and the static scan, a
   non-empty list → `INCONCLUSIVE`, reason `test-harness tampering suspected: <paths>`, `details["harness_tampering"]`,
   an uncertainty line asking for human review. No image is built and no test runs.
@@ -184,8 +185,10 @@ path from `sys.argv`) — Step 4 states this limit; the strict xfail keeps it vi
 - Added/changed only: a deleted head file is never loaded into the trusted run (Step 1), so deletion cannot help.
 - Settings files compared as parsed sections, so a version bump in `pyproject.toml` is not flagged, but any change
   to the pytest table is. Any change to a dedicated pytest settings file is flagged.
-- Test files are exempt from the import/`sys.modules` check: test code normally imports pytest, and the head's tests
-  never run in the trusted process. `conftest.py` is never exempt.
+- Test files are exempt only from the plain `import pytest` check, because test code normally imports pytest. A
+  test-named file is not safe by its name: code under test can import it (for example `app/tests/shim.py`), so it can
+  run in the trusted process; `_pytest` imports and `sys.modules` writes are checked in every `.py` file, and
+  `conftest.py` is never exempt. (Corrected in Step 7; the first version exempted test files from all code checks.)
 - Fail towards review: unreadable settings and unparseable Python are flagged, since they cannot be shown harmless.
 - It is a tripwire, not the control: Step 1's isolation already makes these files inert. Static checks are evadable;
   see Step 4.
@@ -386,3 +389,54 @@ base-approved code). Native code is in-process code: the stated limit of Step 4 
 
 **Supervisor Q&A prep**
 - *Why would a .so beat security.py?* `FileFinder` tries extension loaders before source loaders for the same module name.
+
+## Step 7 — Review fix: test-named files are checked for _pytest and sys.modules (2026-11-08)
+
+Independent review finding: test-named files were exempt from all code checks, but a file under a `tests/` folder is
+not inert: code under test can import it (the review's `app/tests/shim.py`), so it runs in the trusted process. A
+shim there could write `sys.modules` or import `_pytest` without a finding. The Step 3 design note said the head's
+tests "never run in the trusted process"; that was wrong and is corrected above.
+
+**Ch 6 Implementation** (`backend/satra/harness_guard.py`)
+- `_why`: every `.py` file goes to `_code(path, test_file=_is_test(parts))` (before: non-test files only).
+- `_imports_harness(module, test_file)`: `_pytest` always counts; `pytest` itself counts only outside test files.
+  Used for `import`, `from … import` and literal `__import__`/`import_module` calls.
+- `from sys import modules` and every `sys.modules` write are checked regardless of the file's name.
+- Reasons now read "code imports …" / "code writes sys.modules" (no longer "non-test code").
+- Docs: Step 3 implementation bullet and design note, `docs/satra/threat-model.md`, `docs/asent-gate.md` corrected.
+
+**Design decisions**
+- Keep the `import pytest` exemption: nearly every test file has it, and flagging it would send every PR with tests to
+  review. `pytest`'s public API cannot rewrite reports by itself; the `_pytest` internals and `sys.modules` can.
+- No exemption by folder or name for the other checks: whether a file can be imported depends on the code under
+  test, which the head controls.
+- Cost: a head test that legitimately imports `_pytest` (e.g. `from _pytest.monkeypatch import MonkeyPatch`) now goes
+  to review.
+
+**Requirements covered:** FR-02 — acceptance: the review's `app/tests/shim.py` gives INCONCLUSIVE; test files that
+only import `pytest` still get a normal verdict.
+
+**Ch 7 Test cases** (`tests/test_satra_harness_guard.py`)
+
+| Test ID | Purpose | Input | Expected | Result |
+|---|---|---|---|---|
+| test_test_named_files_are_still_checked_for_pytest_internals_and_sys_modules | no name exemption | app/tests/shim.py (sys.modules write; _pytest import), tests/test_app.py `import _pytest.reports`, test_root.py `from sys import modules`, app/sec_test.py `del s.modules[…]`, test/helpers.py `import_module('_pytest.runner')` | each flagged | pass ×6 |
+| test_review_shim_under_a_tests_folder_makes_the_gate_inconclusive | review's case, gate | broken head + app/tests/shim.py writing sys.modules | INCONCLUSIVE, `…: app/tests/shim.py`, no run | pass |
+| test_ordinary_changes_are_not_flagged["test files import pytest"] | exemption kept | `import pytest`, `from pytest import fixture`, `import pytest.mark`, `__import__('pytest')` in test files | nothing | pass |
+| test_project_tests_that_import_pytest_still_get_a_verdict | gate, unchanged | head test importing pytest | ACCEPT | pass |
+
+Changed existing case: `NOT_FLAGGED["test files import pytest"]` held `app/sec_test.py: import _pytest`, which asserted
+the defect; it now holds `import pytest.mark`, and the `_pytest` form is a flagged case above.
+Before the fix the 7 new cases failed; after: 149 passed, 1 xfailed in the three SATRA gate test files.
+Full suite: 1929 passed, 38 skipped, 1 xfailed; `reports/scenario-validation.json` restored. (Step 6 full suite: 1922 passed, 38 skipped, 1 xfailed.)
+
+**Defects found and fixed:** the review finding above, and the wrong design sentence in Step 3.
+
+**Known limitations / deferred:** indirect forms remain unseen (Step 3 limits); unchanged base test files are not scanned.
+
+**Tool disclosure (Ch 8.7):** Claude Code wrote the change, tests and this section; Maryam to review.
+
+**Review:** independent review reported 2 problems (Step 6 and this); both fixed, tests first.
+
+**Supervisor Q&A prep**
+- *Why still allow `import pytest` in tests?* It is the normal test-file import; the dangerous parts (`_pytest`, `sys.modules`) are checked everywhere.
