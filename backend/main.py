@@ -10,7 +10,7 @@ from fastapi import FastAPI,HTTPException,Request,UploadFile,File
 from fastapi.responses import FileResponse,StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel,Field
-from backend.config import ROOT,DATA,DEMO
+from backend.config import ASSETS,DATA,DEMO
 from backend.orchestrator.service import Service
 from backend.orchestrator.scenarios import catalog
 from backend.integrations.tooling import availability
@@ -145,4 +145,4 @@ def artifact(rid:str,path:str):
 sys.path.insert(0,str(DEMO))
 from app.main import create_app
 app.mount('/invoicehub',create_app(DATA/'invoicehub-demo',seed=True))
-if (ROOT/'frontend/dist').is_dir():app.mount('/',StaticFiles(directory=ROOT/'frontend/dist',html=True),name='dashboard')
+if (ASSETS/'frontend/dist').is_dir():app.mount('/',StaticFiles(directory=ASSETS/'frontend/dist',html=True),name='dashboard')

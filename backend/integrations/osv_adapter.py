@@ -4,11 +4,11 @@ import os
 from datetime import datetime,timezone
 from pathlib import Path
 import httpx
-from backend.config import ROOT
+from backend.config import ADVISORIES
 from backend.orchestrator.hashing import digest
 
 class OSV:
-    def __init__(self,cache=None):self.cache=Path(cache or ROOT/'advisories');self.cache.mkdir(parents=True,exist_ok=True)
+    def __init__(self,cache=None):self.cache=Path(cache or ADVISORIES);self.cache.mkdir(parents=True,exist_ok=True)
     def query(self,name,version,ecosystem='PyPI',live=False,max_age_days=30):
         query={'package':{'name':name,'ecosystem':ecosystem},'version':version}
         path=self.cache/(digest(query)+'.json')
