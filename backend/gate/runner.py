@@ -33,6 +33,8 @@ from backend.integrations.git_adapter import export_commit, resolve_commit
 EXIT_CODES = {"ACCEPT": 0, "BLOCK": 1, "REVIEW": 2}
 REPORT_NAME = "asent-report.json"
 SUMMARY_NAME = "asent-summary.md"
+NO_BASE = ("no base commit: the repository has no origin/HEAD and no 'main' or 'master' branch "
+           "(backend/gate/defaults.py); pass --base REF")
 
 
 def _tools():
@@ -60,6 +62,8 @@ def run_gate(repository, base, head, output_dir=".", data_dir=None, keep_workdir
             report["data_dir"] = str(work)
     exports = work / "exports" / uuid.uuid4().hex[:12]
     try:
+        if base is None:  # `asent gate` found no default branch (backend/gate/defaults.py)
+            raise ValueError(NO_BASE)
         for side, ref in (("base", base), ("head", head)):
             report[side]["sha"] = resolve_commit(repository, ref)
         export_commit(repository, report["base"]["sha"], exports / "base")
