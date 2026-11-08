@@ -18,7 +18,7 @@ import httpx
 from backend.config import VERSION
 from backend.integrations.research_loader import load as load_research
 
-LOCAL_COMMANDS=('init','gate','report','doctor')
+LOCAL_COMMANDS=('init','gate','report','doctor','dashboard')
 
 def emit_json(value):
     print(json.dumps(value,indent=2,default=str))
@@ -76,8 +76,28 @@ def report_command(args):
     else:print(local_report.render(report,path),end='')
     return 0
 
+def dashboard_port(text):
+    from backend.commands.dashboard import port_type
+    return port_type(text)
+
+def dashboard_command(args):
+    from backend.commands import dashboard
+    if not dashboard.port_free(args.port):
+        message=f"port {args.port} on {dashboard.HOST} is already in use (another dashboard?); choose one with --port"
+        if args.json:emit_json({'error':message})
+        else:print(message,file=sys.stderr)
+        return 2
+    about=dashboard.info(args.port)
+    if args.json:print(json.dumps(about),flush=True)
+    else:
+        print(f"ASENT dashboard: {about['url']} (this machine only; Ctrl+C stops it). Data: {about['data_dir']}")
+        if not about['ui_bundled']:
+            print(f"This install has no dashboard UI, so it serves the API only at {about['api']} (see `asent doctor`).")
+    dashboard.serve(args.port)
+    return 0
+
 def main(argv=None):
-    parser=argparse.ArgumentParser(prog='asent',description='ASENT assurance gate. Local: init, gate, report, doctor. Server commands need scripts/start.sh first.')
+    parser=argparse.ArgumentParser(prog='asent',description='ASENT assurance gate. Local: init, gate, report, doctor, dashboard. Server commands need scripts/start.sh (or asent dashboard) first.')
     parser.add_argument('--url',default=os.environ.get('ASENT_URL','http://127.0.0.1:8000'))
     parser.add_argument('--version',action='store_true',help='print the ASENT version and exit')
     parser.add_argument('--json',dest='json_top',action='store_true',help='with --version: print it as JSON')
@@ -92,9 +112,11 @@ def main(argv=None):
     p=sub.add_parser('report',parents=[json_flag],help='print the last asent-report.json; --run ID reads a run report from the server')
     p.add_argument('legacy_run',nargs='?',help=argparse.SUPPRESS)  # the old `report RUN_ID`: refused with the new form
     p.add_argument('--file',help='report file (default: asent-report.json at the repository top level, else here)')
-    p.add_argument('--run',help='dashboard run id: read its report from the server (needs scripts/start.sh)')
+    p.add_argument('--run',help='dashboard run id: read its report from the server (needs scripts/start.sh or asent dashboard)')
     p.add_argument('--output',help='with --run: write the server report to this file')
     sub.add_parser('doctor',parents=[json_flag],help='check Python, git, Docker and the images; prints fixes, changes nothing')
+    p=sub.add_parser('dashboard',parents=[json_flag],help='start the dashboard on 127.0.0.1 (this machine only)')
+    p.add_argument('--port',type=dashboard_port,default=8000,help='port on 127.0.0.1 (default 8000)')
     sub.add_parser('capabilities')
     p=sub.add_parser('init',parents=[json_flag],help='write a starter .asent/ (refused by the gate until reviewed)');p.add_argument('--repository',default='.');p.add_argument('--force',action='store_true')
     p=sub.add_parser('gate',parents=[json_flag],help='decide base..head of a git repository without a server; exit 0 ACCEPT, 1 BLOCK, 2 REVIEW')
@@ -113,6 +135,7 @@ def main(argv=None):
     if args.action=='init':return init_command(args)
     if args.action=='gate':return gate_command(args)
     if args.action=='doctor':return doctor_command(args)
+    if args.action=='dashboard':return dashboard_command(args)
     if args.action=='report' and (args.run is None or args.legacy_run is not None):return report_command(args)
     with httpx.Client(base_url=args.url,timeout=180,trust_env=False) as client:
         def call(method,path,body=None):
