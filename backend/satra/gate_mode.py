@@ -7,6 +7,12 @@ is the frozen base config, so the change under review cannot switch SATRA off or
 
 Steps (every pytest run is in a container with no network; without Docker/Podman: INCONCLUSIVE):
 
+0. Gate image (`project_image.prepare`): the SATRA runner plus exactly the CAVR-approved wheels of the
+   BASE commit's dependencies.lock.json, built before any test runs (a cached image is reused only
+   when ASENT_SATRA_REUSE_IMAGES=1, for local development).
+   No lockfile, an entry CAVR does not permit, a clash with the runner, a failed build: INCONCLUSIVE.
+   There is no fallback to the shared asent-sandbox:local image. Test-run limits come from the base
+   `.asent/satra/sandbox.json` (default 40 s / 512m, cap 180 s / 2g; outside that: INCONCLUSIVE).
 1. Contract `rule_id` must be an enabled threat-repository SATRA rule, else INCONCLUSIVE.
 2. Trusted tests (base `.asent/satra/trusted_tests/`) on the base and on the head commit.
 3. The project's own tests (`tests/`, when present) on the head commit.
@@ -28,7 +34,7 @@ import tempfile
 from pathlib import Path
 
 from backend.orchestrator.hashing import copy_tree, digest
-from backend.satra import pytest_runner
+from backend.satra import project_image, pytest_runner
 from backend.satra.counterfactuals import mutate_return_true
 from backend.satra.diff_localizer import localize
 from backend.satra.static_adapters import scan
@@ -63,8 +69,22 @@ def analyze_configured(context, outdir, emit):
     details["static"] = scan(context.path, cfg.source_dirs or ["."])
 
     caps = pytest_runner.availability()
-    if not any(caps.get(engine, {}).get("available") for engine in ("docker", "podman")):
+    engine = next((name for name in ("docker", "podman") if caps.get(name, {}).get("available")), None)
+    if engine is None:
         return "INCONCLUSIVE", {**details, "reason": NO_ENGINE, "executions": {}}, [NO_ENGINE]
+
+    limits, problem = project_image.sandbox_limits(config)
+    details["sandbox_limits"] = limits
+    if limits is None:
+        return "INCONCLUSIVE", {**details, "reason": problem, "executions": {}}, [problem]
+    image = project_image.prepare(context.baseline, config, engine)
+    details["sandbox_image"] = {key: image.get(key) for key in (
+        "status", "reason", "image", "key", "reused", "runner", "lockfile_sha256", "requirements_sha256",
+        "packages", "provided_by_runner", "decisions", "build_log_tail")}
+    emit("satra.sandbox_image", {key: details["sandbox_image"][key] for key in ("status", "reason", "image", "reused")})
+    if image["status"] != "READY":
+        why = "No approved gate image for this project: " + image["reason"]
+        return "INCONCLUSIVE", {**details, "reason": why, "executions": {}}, [why]
 
     root = Path(config.path)
     trusted_dir = root / cfg.trusted_tests
@@ -73,7 +93,8 @@ def analyze_configured(context, outdir, emit):
 
     def execute(label, path, trusted=False, targets=None):
         result = pytest_runner.run_pytest(path, outdir / label, "all", trusted, trusted_tests_dir=trusted_dir if trusted else None,
-                                          external=True, targets=targets, pytest_ini=ini if trusted else None)
+                                          external=True, targets=targets, pytest_ini=ini if trusted else None,
+                                          image=image["image"], timeout=limits["timeout_seconds"], memory=limits["memory"])
         executions[label] = result
         emit("satra.test_result", {"label": label, **{k: v for k, v in result.items() if k not in ("stdout", "stderr", "tests")}})
         return result

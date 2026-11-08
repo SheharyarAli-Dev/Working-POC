@@ -58,6 +58,24 @@ REQUIREMENT_MAP = {
         "kind": "docker",
         "default_desc": "Verifies container sandbox network isolation, read-only root, and resource limits."
     },
+    # test_satra_runner_image.py
+    "test_satra_runner_image.py": {
+        "req": "FR-07",
+        "kind": "unit",
+        "default_desc": "Checks the SATRA runner base image is pytest only, hash-pinned and wheels only."
+    },
+    # test_satra_project_image.py
+    "test_satra_project_image.py": {
+        "req": "FR-07",
+        "kind": "unit",
+        "default_desc": "Checks the per-project gate image install plan and build/reuse fail closed."
+    },
+    # test_satra_project_image_docker.py
+    "test_satra_project_image_docker.py": {
+        "req": "FR-07",
+        "kind": "docker",
+        "default_desc": "Builds and runs SATRA runner and per-project gate images in Docker."
+    },
     # test_satra_ollama_and_validator.py
     "test_satra_ollama_and_validator.py": {
         "req": "FR-08",
