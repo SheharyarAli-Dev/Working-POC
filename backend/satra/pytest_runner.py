@@ -10,7 +10,7 @@ import tempfile
 import time
 from pathlib import Path
 from xml.etree import ElementTree as ET
-from backend.config import ROOT
+from backend.config import ASSETS,ROOT
 from backend.orchestrator.hashing import copy_tree,digest,files
 from backend.integrations.tooling import availability
 
@@ -21,12 +21,12 @@ def _lf_digest(data: bytes) -> str:
 
 
 def permitted_builtin(root):
-    index=ROOT/'scenarios/laboratory_hashes.json'
+    index=ASSETS/'scenarios/laboratory_hashes.json'
     allowed=json.loads(index.read_text()).get('python_sources',[]) if index.exists() else []
     names=files(root)
     if any(f.endswith(('.so','.pyd','.dll','.dylib','.pyw','.pth','.zip','.egg')) for f in names):return False
     for name in ('pytest.ini','fixtures/invoice.pdf'):
-        reference=ROOT/'demo_project/InvoiceHub'/name;candidate=Path(root)/name
+        reference=ASSETS/'demo_project/InvoiceHub'/name;candidate=Path(root)/name
         if not candidate.is_file() or digest(candidate.read_bytes())!=digest(reference.read_bytes()):return False
     return all(_lf_digest((Path(root)/f).read_bytes()) in allowed for f in names if f.endswith('.py'))
 

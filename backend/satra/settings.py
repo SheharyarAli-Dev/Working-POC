@@ -5,7 +5,9 @@ import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
 
-PROJECT_TOP = Path(__file__).resolve().parents[2]
+from backend.config import STATE
+
+PROJECT_TOP = STATE
 DEFAULT_TARGET_URL = "https://github.com/SheharyarAli-Dev/Threat-Repository"
 DEFAULT_ALLOWLIST = "SheharyarAli-Dev/Threat-Repository"
 DEFAULT_MODEL = "qwen2.5-coder:1.5b"
