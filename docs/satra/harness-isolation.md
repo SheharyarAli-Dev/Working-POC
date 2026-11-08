@@ -157,3 +157,68 @@ path from `sys.argv`) — Step 4 states this limit; the strict xfail keeps it vi
 **Supervisor Q&A prep**
 - *Why not use Docker's `--tmpfs` for /results?* The host cannot read a container tmpfs after the container exits; a host tmpfs directory gives the same freshness and is readable.
 - *Can a head still forge the file?* Not by shipping one (deleted, wrong path) or by writing `/work/results.xml`; code running inside the test process still can — stated limit.
+
+## Step 3 — Tripwire: suspected harness tampering is INCONCLUSIVE (2026-11-08)
+
+**Ch 6 Implementation**
+- `backend/satra/harness_guard.py::suspicious(base_dir, head_dir)` → `[{path, why}]`. Compares `hashing.manifest`
+  of base and head (so `.asent/` and generated folders are excluded, as in every gate snapshot) and checks each
+  head file that is **added or changed**:
+  - `conftest.py` anywhere; a module named `pytest`, `_pytest`, `sitecustomize`, `usercustomize` (any extension);
+    any file under a `pytest/` or `_pytest/` folder; any `.pth` file;
+  - `pytest.ini`, `.pytest.ini`, `pytest.toml`, `.pytest.toml`; the pytest section of `pyproject.toml`
+    (`[tool.pytest]`, incl. `ini_options`), `tox.ini` (`[pytest]`), `setup.cfg` (`[tool:pytest]`), compared
+    parsed; an unreadable settings file is flagged;
+  - non-test `.py` (not under `tests/`/`test/`, not `test_*.py`/`*_test.py`): AST finds `import pytest`/`_pytest`,
+    `from _pytest …`, `__import__`/`import_module` with a literal pytest name, `from sys import modules`, and writes
+    to `sys.modules` (via any `import sys as …` alias: item/attribute assignment, `del`, `update`, `setdefault`,
+    `pop`, `popitem`, `clear`, `__setitem__`, `__delitem__`); an unparseable file is flagged.
+- `backend/satra/gate_mode.py::analyze_configured`: right after the contract rule check and the static scan, a
+  non-empty list → `INCONCLUSIVE`, reason `test-harness tampering suspected: <paths>`, `details["harness_tampering"]`,
+  an uncertainty line asking for human review. No image is built and no test runs.
+
+**Design decisions**
+- Checked before running anything: the result would be untrustworthy either way, and a REJECT from a run the head may
+  have steered is not better evidence than "a human must look". Cost: a tampering PR that also breaks the code gets
+  REVIEW, not REJECT.
+- Added/changed only: a deleted head file is never loaded into the trusted run (Step 1), so deletion cannot help.
+- Settings files compared as parsed sections, so a version bump in `pyproject.toml` is not flagged, but any change
+  to the pytest table is. Any change to a dedicated pytest settings file is flagged.
+- Test files are exempt from the import/`sys.modules` check: test code normally imports pytest, and the head's tests
+  never run in the trusted process. `conftest.py` is never exempt.
+- Fail towards review: unreadable settings and unparseable Python are flagged, since they cannot be shown harmless.
+- It is a tripwire, not the control: Step 1's isolation already makes these files inert. Static checks are evadable;
+  see Step 4.
+
+**Requirements covered:** FR-02 (detect planting of unauthorised test-harness code) — acceptance: each listed change
+gives INCONCLUSIVE with "test-harness tampering suspected" and no execution.
+
+**Ch 7 Test cases** (`tests/test_satra_harness_guard.py`)
+
+| Test ID | Purpose | Input | Expected | Result |
+|---|---|---|---|---|
+| test_harness_changes_in_the_head_are_flagged | every category | 32 cases (conftest ×2, pytest/_pytest modules & folders ×6, site hooks ×2, .pth, 3 settings files, pyproject ×2, tox, setup.cfg, 2 unreadable, 6 pytest imports, 6 sys.modules forms, unparseable) | exactly that path listed | pass ×32 |
+| test_a_changed_existing_conftest_is_flagged | changed, not only added | base vs head conftest | flagged | pass |
+| test_ordinary_changes_are_not_flagged | false positives | unchanged harness files, test files importing pytest, unrelated pyproject/tox/setup.cfg changes, sys.modules reads, pytest-like names, app change | nothing listed ×8 | pass |
+| test_deleting_a_harness_file_is_not_flagged | deletions | base conftest + ini removed | nothing listed | pass |
+| test_asent_config_folder_is_not_compared | frozen config | head `.asent/…/conftest.py` | nothing listed | pass |
+| test_tampering_makes_the_gate_run_inconclusive_before_any_test_runs | gate | 7 cases × secure/broken head | INCONCLUSIVE, reason, paths, no build, no run | pass ×14 |
+| test_project_tests_that_import_pytest_still_get_a_verdict | no false REVIEW | head adds tests/test_app.py importing pytest | ACCEPT | pass |
+
+Before wiring into `gate_mode.py` the 14 gate cases failed (ACCEPT/REJECT); after: 129 passed, 1 xfailed across
+the three SATRA gate test files. Full suite: 1909 passed, 37 skipped, 1 xfailed; scenario verdicts equal the `HEAD`
+worktree's (report restored).
+
+**Defects found and fixed:** none.
+
+**Known limitations / deferred:** heuristic; indirect forms (`getattr(__import__("s"+"ys"), "modules")`, `gc`,
+frames, `exec` of built strings) are not seen. Legitimate new `conftest.py` files or pytest settings now go to review.
+
+**Tool disclosure (Ch 8.7):** Claude Code wrote the module, gate change, tests and this section; Maryam to review.
+
+**Review:** no independent review pass run for this step.
+
+**Supervisor Q&A prep**
+- *Why not REJECT tampering?* It is a suspicion from a heuristic; a human decides. INCONCLUSIVE is never ACCEPT.
+- *Won't every PR that adds a conftest be stuck?* It goes to review (REVIEW at the shared gate); that is the intended
+  cost of a change to the code that runs the tests.
