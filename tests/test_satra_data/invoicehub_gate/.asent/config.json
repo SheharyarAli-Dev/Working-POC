@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "project": {
+    "name": "InvoiceHub"
+  },
+  "modules": {
+    "CAVR": {
+      "enabled": true,
+      "policy": "cavr/policy.json",
+      "requirements_files": [
+        "requirements.txt"
+      ],
+      "verify": "all"
+    },
+    "SATRA": {
+      "enabled": true,
+      "contract": "satra/contract.json",
+      "trusted_tests": "satra/trusted_tests",
+      "pytest_ini": "satra/pytest.ini",
+      "trusted_data": [
+        "fixtures"
+      ],
+      "source_dirs": [
+        "app"
+      ],
+      "project_security_tests": "tests/test_security.py"
+    },
+    "SABLE": {
+      "enabled": true,
+      "terraform_dirs": [
+        "infra"
+      ],
+      "obligations": "sable/obligations.json"
+    }
+  }
+}

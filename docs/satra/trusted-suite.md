@@ -77,3 +77,14 @@ Data only, never code: a data folder sits next to `asent_assurance/` and contain
 and nothing that changes pytest's configuration. So the security properties in
 [harness-isolation.md](harness-isolation.md) are unchanged: no head file is loaded by pytest, `/trusted`
 is read-only, and dependencies come from the base only.
+
+## Checking a trusted suite against this interface
+
+- `tests/test_satra_project_image_docker.py::test_real_gate_run_of_the_invoicehub_trusted_suite_passes_on_its_base`
+  runs asent-target-invoicehub's real trusted suite (15 tests that read `fixtures/invoice.pdf`) through gate mode,
+  in its real 16-wheel image, in a real container (CI, `satra-ci.yml`: listed, so a skip fails the job).
+- `tests/test_satra_config.py::test_invoicehub_trusted_suite_passes_through_gate_mode_on_the_host_harness` runs
+  the same suite through gate mode with the host harness on every machine. Next to it,
+  `…_without_trusted_data_reproduces_the_ci_failure` gives the CI report's 0 passed / 1 failed / 14 errors.
+- Inputs: `tests/test_satra_data/invoicehub_gate/` (the target's base `.asent/`, lockfile and requirements;
+  provenance in `tests/test_satra_data/README.md`) on top of `demo_project/InvoiceHub/`.

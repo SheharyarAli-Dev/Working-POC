@@ -320,3 +320,76 @@ def test_demo_path_keeps_the_shared_image_and_default_limits(tmp_path, monkeypat
     pytest_runner.run_pytest(tmp_path / "p", tmp_path / "out")
     [(cmd, timeout)] = seen
     assert "asent-sandbox:local" in cmd and flag(cmd, "--memory") == "512m" and timeout == 40
+
+
+# --- the real InvoiceHub trusted suite through gate mode (docs/satra/trusted-suite.md) ----------------------
+
+INVOICEHUB = Path(__file__).resolve().parents[1] / "demo_project" / "InvoiceHub"
+# asent-target-invoicehub at base 57ae3dc: its .asent/ (+ "trusted_data": ["fixtures"]), lockfile, requirements.
+INVOICEHUB_OVERLAY = Path(__file__).resolve().parent / "test_satra_data" / "invoicehub_gate"
+INVOICEHUB_PDF_SHA256 = "ad55c63308a20f8591d0575d3b63d75155ad78b4d94eb59da4b5c146caaa73b9"  # demo_project/InvoiceHub/fixtures/invoice.pdf
+INVOICEHUB_TRUSTED = 15  # conftest + test_archive (1), test_functional (5), test_security (9)
+
+
+def invoicehub(root: Path, extra=None, trusted_data=True) -> Path:
+    """The target's base: demo app/tests/fixtures (identical at 57ae3dc) + the overlay; `extra` bytes on top."""
+    import shutil
+    from backend.orchestrator.hashing import copy_tree
+    copy_tree(INVOICEHUB, root)  # no .asent/, no __pycache__
+    shutil.copytree(INVOICEHUB_OVERLAY, root, dirs_exist_ok=True)
+    if not trusted_data:  # the target's config exactly as committed at 57ae3dc
+        config = root / ".asent/config.json"
+        document = json.loads(config.read_text())
+        del document["modules"]["SATRA"]["trusted_data"]
+        config.write_text(json.dumps(document, indent=2) + "\n")
+    for name, data in (extra or {}).items():
+        (root / name).parent.mkdir(parents=True, exist_ok=True)
+        (root / name).write_bytes(data)
+    return root
+
+
+def invoicehub_gate(tmp_path, head_extra=None, trusted_data=True):
+    """Gate mode for a head that only adds .gitignore (the pull request whose gate was INCONCLUSIVE)."""
+    base = invoicehub(tmp_path / "base", trusted_data=trusted_data)
+    head = invoicehub(tmp_path / "head", {".gitignore": b".asent-report/\n", **(head_extra or {})}, trusted_data=trusted_data)
+    service = Service(tmp_path / "runtime")
+    run = service.create_gate_run(base, head, {})
+    context = ContextService(run.candidate_workspace, run.baseline_workspace, service.threats.snapshot(), gate=True)
+    return satra_analyzer.analyze(context, tmp_path / "out", lambda *a: None)
+
+
+def counts(result):
+    return result.get("passed"), result.get("failed"), result.get("errors")
+
+
+def test_invoicehub_trusted_suite_passes_through_gate_mode_on_the_host_harness(tmp_path, container_on_host):
+    """All 15 real trusted tests pass on base and head, read the base invoice.pdf from /trusted, and kill the mutant."""
+    status, details, _ = invoicehub_gate(tmp_path)
+    executions = details["executions"]
+    assert counts(executions["trusted_baseline"]) == (INVOICEHUB_TRUSTED, 0, 0), executions["trusted_baseline"].get("stdout", "")[-3000:]
+    assert counts(executions["trusted_candidate"]) == (INVOICEHUB_TRUSTED, 0, 0)
+    assert executions["trusted_counterfactual"]["failed"] + executions["trusted_counterfactual"]["errors"] >= 1
+    assert status == "ACCEPT", details["reason"]
+    assert details["trusted_data"] == {"files": [{"path": "fixtures/invoice.pdf", "bytes": 749, "sha256": INVOICEHUB_PDF_SHA256}],
+                                       "file_count": 1, "total_bytes": 749}
+    assert len(details["sandbox_image"]["packages"]) == 16
+    for run in [r for r in container_on_host.runs if "/trusted" in r["mounts"]]:
+        assert "fixtures/invoice.pdf" in run["before"]["/trusted"] and run["mounts"]["/trusted"][1] == "ro"
+
+
+def test_invoicehub_target_config_without_trusted_data_reproduces_the_ci_failure(tmp_path, container_on_host):
+    """The config exactly as committed at 57ae3dc: 0 passed, 1 failed, 14 errors, FileNotFoundError .../fixtures/invoice.pdf."""
+    status, details, _ = invoicehub_gate(tmp_path, trusted_data=False)
+    baseline = details["executions"]["trusted_baseline"]
+    assert status == "INCONCLUSIVE" and "do not pass on the base commit" in details["reason"]
+    assert counts(baseline) == (0, 1, 14)
+    assert all("FileNotFoundError" in t["message"] and "fixtures/invoice.pdf" in t["message"] for t in baseline["tests"])
+
+
+def test_invoicehub_head_replacing_the_fixture_does_not_change_the_trusted_runs(tmp_path, container_on_host):
+    """A head with a broken invoice.pdf: trusted runs still pass on the base bytes; the project's own tests catch it."""
+    status, details, _ = invoicehub_gate(tmp_path, {"fixtures/invoice.pdf": b"not a pdf"})
+    executions = details["executions"]
+    assert counts(executions["trusted_candidate"]) == (INVOICEHUB_TRUSTED, 0, 0)
+    assert executions["ordinary_candidate"]["exit_code"] == 1
+    assert status == "REJECT" and details["reason"] == "Ordinary project tests do not provide a clean regression result"

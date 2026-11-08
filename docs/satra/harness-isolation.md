@@ -603,3 +603,53 @@ Maryam to review. Host harness only (no Docker on this machine); the real-contai
 - *Doesn't a data folder in /trusted put base files ahead of the head?* Only data; code and settings are refused,
   and a regular head package beats a namespace folder of the same name.
 - *Why not take fixtures from the head, as before?* The fixture is an input to the oracle; a PR could change it.
+
+## Step 10 — The real InvoiceHub trusted suite through gate mode (2026-11-08)
+
+**Ch 6 Implementation**
+- `tests/test_satra_data/invoicehub_gate/`: byte copies from asent-target-invoicehub at base `57ae3dc`
+  (`git archive … .asent dependencies.lock.json requirements.txt`). The only edit is `"trusted_data": ["fixtures"]`
+  in `.asent/config.json`. Provenance: `tests/test_satra_data/README.md`.
+- `tests/test_satra_config.py::invoicehub(root, extra, trusted_data)` builds the target's base as demo
+  `app/ tests/ fixtures/ …` (byte-identical at `57ae3dc`, checked with `cmp`) plus the overlay.
+  `invoicehub_gate(tmp_path, head_extra, trusted_data)` runs gate mode for a head that only adds `.gitignore`,
+  which is the PR shape.
+- `tests/test_satra_project_image_docker.py::test_real_gate_run_of_the_invoicehub_trusted_suite_passes_on_its_base`:
+  the same run in a real container with the real image build. It is added to the no-skip list in
+  `.github/workflows/satra-ci.yml`.
+
+**Design decisions**
+- Overlay instead of a full copy: the target's app, tests and fixtures are already in `demo_project/InvoiceHub`.
+  Only what differs (the 15-test suite, the 16-wheel lock and the policy) is stored again.
+- Demo `fixtures/invoice.pdf` (749 bytes) rather than the target's committed blob (687 bytes, CRLF stripped by git;
+  Step 9 limitation): the test checks the gate's mechanics with the real fixture.
+- A host-harness twin so the regression is caught on every machine, not only in the Docker CI job.
+
+**Requirements covered:** FR-07/FR-02: acceptance is that the real suite passes 15/15 on base and head through gate
+mode and kills the counterfactual; NFR-03: acceptance is that the undeclared config still gives INCONCLUSIVE.
+
+**Ch 7 Test cases**
+
+| Test ID | Purpose | Input | Expected | Result |
+|---|---|---|---|---|
+| test_invoicehub_trusted_suite_passes_through_gate_mode_on_the_host_harness | real suite, host | target base + `.gitignore` head | 15/0/0 base and head, mutant killed, ACCEPT, pdf 749 B sha `ad55c633…`, 16 packages | pass |
+| test_invoicehub_target_config_without_trusted_data_reproduces_the_ci_failure | the CI failure | config as committed | INCONCLUSIVE, 0/1/14, all FileNotFoundError `fixtures/invoice.pdf` | pass |
+| test_invoicehub_head_replacing_the_fixture_does_not_change_the_trusted_runs | base-only data | head pdf = `not a pdf` | trusted head 15/0/0; project tests exit 1 → REJECT | pass |
+| test_real_gate_run_of_the_invoicehub_trusted_suite_passes_on_its_base | real container | as the first row, real image | 15/0/0, ACCEPT, all runs `docker` | skipped here (no Docker); runs in CI |
+
+With `gate_mode.py`/`pytest_runner.py` from before Step 9, the first and third tests fail with `(0, 1, 14) == (15, 0, 0)`.
+Full suite: 2075 passed, 39 skipped (the new Docker test), 1 xfailed.
+
+**Defects found and fixed:** none in this step.
+
+**Known limitations / deferred:** the Docker test has not run on this machine; its first real run is the CI job.
+
+**Tool disclosure (Ch 8.7):** Claude Code wrote the overlay, tests and docs; Maryam to review.
+
+**Review:** no independent review pass run for this step.
+
+**Supervisor Q&A prep**
+- *How do you know the test reproduces the real failure?* Without `trusted_data` it gives the CI report's numbers
+  exactly: 0 passed, 1 failed, 14 errors, the same FileNotFoundError.
+- *Why does a broken fixture in the head give REJECT, not ACCEPT?* The project's own tests use the head's file
+  and fail; the trusted tests do not, because they read the base's copy.

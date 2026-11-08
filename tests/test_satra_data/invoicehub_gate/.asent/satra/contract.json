@@ -1,0 +1,27 @@
+{
+  "rule_id": "AUTHZ.IDOR.001",
+  "version": 1,
+  "route": "GET /invoices/{invoice_id}",
+  "expected_status": 403,
+  "authority_sources": [
+    "SRS.md#FR-03",
+    "policy.json#ownership"
+  ],
+  "preconditions": [
+    "authenticated normal user",
+    "existing invoice owned by another user"
+  ],
+  "scope": [
+    "app/main.py",
+    "app/security.py"
+  ],
+  "counterfactual": {
+    "operator": "RETURN_TRUE",
+    "target": "app/security.py::can_access_invoice"
+  },
+  "subject": "authenticated normal user",
+  "action": "GET invoice",
+  "resource": "invoice owned by another user",
+  "state_effect": "none",
+  "description": "A normal user who requests another user's invoice gets HTTP 403 and no state changes (SRS FR-03). The ownership decision is app/security.py::can_access_invoice, used by GET and DELETE /invoices/{invoice_id} in app/main.py."
+}
