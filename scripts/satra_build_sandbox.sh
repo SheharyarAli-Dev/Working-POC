@@ -10,6 +10,12 @@ docker build \
     -f "${ROOT_DIR}/docker/sandbox.Dockerfile" \
     "${ROOT_DIR}"
 
+echo "Building asent-satra-runner:local (pytest only; base of per-project gate images)..."
+docker build \
+    -t asent-satra-runner:local \
+    -f "${ROOT_DIR}/docker/satra-runner.Dockerfile" \
+    "${ROOT_DIR}/docker"
+
 echo "Validating built images..."
 docker images | grep -E "asent-sandbox"
 
@@ -24,5 +30,8 @@ docker run --rm \
     --pids-limit 64 \
     --tmpfs /tmp:rw,nosuid,size=64m \
     asent-sandbox:local python -c "import pytest, pydantic, fastapi; print('Sandbox container verification SUCCESS')"
+
+docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges \
+    asent-satra-runner:local python -c "import pytest; print('SATRA runner verification SUCCESS: pytest', pytest.__version__)"
 
 echo "Phase 6 Docker sandbox image built and verified."
