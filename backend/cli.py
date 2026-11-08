@@ -79,6 +79,9 @@ def main(argv=None):
         print(json.dumps(result,indent=2))
     return 0
 
-if __name__=='__main__':
+def entry():
+    """The installed `asent` command (pyproject.toml [project.scripts]); same as `python -m backend.cli`."""
     try:raise SystemExit(main())
     except (httpx.HTTPError,ValueError,FileNotFoundError,TimeoutError) as e:print(str(e),file=sys.stderr);raise SystemExit(2)
+
+if __name__=='__main__':entry()

@@ -1,0 +1,60 @@
+# ASENT as an installable tool:  pipx install git+https://github.com/SheharyarAli-Dev/Working-POC
+# The import package stays `backend` (see README "Known limitations"); `asent` is the command.
+# Non-Python assets are copied into the wheel under backend/_data/ (backend/config.py:layout reads
+# them from there when installed); in a checkout every path is unchanged.
+[build-system]
+requires = ["hatchling>=1.26,<2"]
+build-backend = "hatchling.build"
+
+[project]
+name = "asent"
+dynamic = ["version"]
+description = "ASENT assurance gate for AI-assisted changes: CAVR dependencies, SATRA code contracts, SABLE Terraform obligations."
+readme = "README.md"
+requires-python = ">=3.12"
+# Same ranges as requirements.txt (tests/test_cli_packaging.py checks they agree);
+# requirements.lock.txt stays the exact, reproducible set and CI installs with it as constraints.
+dependencies = [
+    "fastapi>=0.115,<1",
+    "uvicorn>=0.30,<1",
+    "pydantic>=2.8,<3",
+    "networkx>=3.3,<4",
+    "z3-solver>=4.13,<6",
+    "python-hcl2==8.1.4",
+    "pytest>=8,<10",
+    "httpx[socks]>=0.27,<1",
+    "pypdf==6.19.0",
+    "python-multipart>=0.0.18",
+    "packaging>=24",
+    "bandit>=1.8,<2",
+]
+
+[project.scripts]
+asent = "backend.cli:entry"
+
+[tool.hatch.version]
+path = "backend/config.py"
+pattern = "VERSION='(?P<version>[^']+)'"
+
+[tool.hatch.build.targets.wheel]
+# Only these paths; .gitignore still applies inside them (no __pycache__, runtime or recorded replays).
+only-include = ["backend", "docker", "scenarios", "demo_project"]
+
+[tool.hatch.build.targets.wheel.sources]
+"docker" = "backend/_data/docker"
+"scenarios" = "backend/_data/scenarios"
+"demo_project" = "backend/_data/demo_project"
+
+[tool.hatch.build.targets.wheel.force-include]
+"requirements.lock.txt" = "backend/_data/requirements.lock.txt"  # the sandbox image installs it
+# The pinned demo artifact is tracked but matches the `artifacts/*.whl` ignore rule, so it is named here.
+"artifacts/pypdf-6.19.0-py3-none-any.whl" = "backend/_data/artifacts/pypdf-6.19.0-py3-none-any.whl"
+"artifacts/pypdf-LICENSE.txt" = "backend/_data/artifacts/pypdf-LICENSE.txt"
+"artifacts/pypi-pypdf.json" = "backend/_data/artifacts/pypi-pypdf.json"
+
+[tool.hatch.build.targets.wheel.hooks.custom]
+# hatch_build.py: adds frontend/dist (the dashboard UI) only when it has been built.
+
+[tool.hatch.build.targets.sdist]
+only-include = ["backend", "docker", "scenarios", "demo_project", "artifacts", "requirements.lock.txt",
+                "requirements.txt", "hatch_build.py", "README.md", "THIRD_PARTY_NOTICES.md"]
