@@ -36,9 +36,11 @@ def container_user_args(engine):
         return ['--user', f'{os.getuid()}:{os.getgid()}']
     return []
 
-def run_pytest(root,output,selected='all',trusted=False,trusted_tests_dir=None,external=False,targets=None,pytest_ini=None):
+def run_pytest(root,output,selected='all',trusted=False,trusted_tests_dir=None,external=False,targets=None,pytest_ini=None,image='asent-sandbox:local',timeout=40,memory='512m'):
     # Gate runs pass external=True (never on the host, whatever the files), trusted_tests_dir (the
-    # base .asent/ tests), targets (explicit project test paths) and pytest_ini (the trusted ini).
+    # base .asent/ tests), targets (explicit project test paths), pytest_ini (the trusted ini), and
+    # image/timeout/memory from backend.satra.project_image (the per-project image and base limits).
+    # The defaults are the built-in demo's shared image and limits.
     start=time.perf_counter();output=Path(output);output.mkdir(parents=True,exist_ok=True)
     caps=availability();engine=next((e for e in ('docker','podman') if caps[e]['available']),None)
     if not engine and (external or not permitted_builtin(root)):return {'available':False,'exit_code':None,'reason':'External/modified code requires Docker/Podman; host execution is limited to hash-pinned bundled sources','tests':[]}
@@ -64,7 +66,7 @@ def run_pytest(root,output,selected='all',trusted=False,trusted_tests_dir=None,e
         args=['-q','-o','addopts=',*(['-c',str(work/ini)] if ini else []),'--junitxml='+str(work/'results.xml'),*targets]
         if engine:
             args=['-q','-o','addopts=',*(['-c','/work/'+ini] if ini else []),'--junitxml=/work/results.xml',*targets]
-            cmd=[engine,'run','--rm',*container_user_args(engine),'--network','none','--read-only','--cap-drop','ALL','--security-opt','no-new-privileges','--memory','512m','--cpus','1','--pids-limit','64','--tmpfs','/tmp:rw,nosuid,size=64m','-v',str(work)+':/work:rw','-w','/work','-e','PYTEST_DISABLE_PLUGIN_AUTOLOAD=1','asent-sandbox:local','python','-m','pytest',*args]
+            cmd=[engine,'run','--rm',*container_user_args(engine),'--network','none','--read-only','--cap-drop','ALL','--security-opt','no-new-privileges','--memory',memory,'--cpus','1','--pids-limit','64','--tmpfs','/tmp:rw,nosuid,size=64m','-v',str(work)+':/work:rw','-w','/work','-e','PYTEST_DISABLE_PLUGIN_AUTOLOAD=1',image,'python','-m','pytest',*args]
         else:
             cmd=[sys.executable,'-I',str(ROOT/'backend/satra/runner_entry.py'),str(work),*args]
         env={'PATH':os.environ.get('PATH','/usr/bin:/bin'),'HOME':str(work),'LANG':'C.UTF-8','PYTEST_DISABLE_PLUGIN_AUTOLOAD':'1','PYTHONDONTWRITEBYTECODE':'1'}
@@ -74,7 +76,7 @@ def run_pytest(root,output,selected='all',trusted=False,trusted_tests_dir=None,e
             if system_root:
                 env['SYSTEMROOT'] = system_root
         try:
-            result=subprocess.run(cmd,cwd=work,env=env,text=True,capture_output=True,timeout=40)
+            result=subprocess.run(cmd,cwd=work,env=env,text=True,capture_output=True,timeout=timeout)
             (output/'stdout.log').write_text(result.stdout);(output/'stderr.log').write_text(result.stderr)
             xml=work/'results.xml';tests=[]
             if xml.exists():

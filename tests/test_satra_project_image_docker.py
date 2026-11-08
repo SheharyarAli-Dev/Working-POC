@@ -73,3 +73,29 @@ def test_pip_refuses_a_wheel_that_does_not_fit_even_past_the_tag_check(docker, t
     root, config = base(tmp_path, requirements="numpy==2.5.4\n", lock=[NUMPY_CP314_ONLY], pol=policy(["numpy==2.5.4"]))
     result = project_image.prepare(root, config, docker)
     assert result["status"] == "INCONCLUSIVE" and "build failed" in result["reason"], result["reason"]
+
+
+# --- real gate runs in a per-project image (no fake engine, no host execution) --------------------
+
+def _six_project():
+    from test_satra_config import CAVR_POLICY, SECURE
+    deps = {"requirements.txt": "six==1.17.0\n", "dependencies.lock.json": json.dumps({"packages": [SIX]}),
+            ".asent/cavr/policy.json": json.dumps({**CAVR_POLICY, "approved_requirements": ["six==1.17.0"]})}
+    return deps, "import six  # an approved third-party dependency\n\n\n" + SECURE
+
+
+def test_real_gate_run_uses_an_approved_dependency_and_kills_the_mutant(docker, tmp_path):
+    from test_satra_config import gate
+    deps, secure = _six_project()
+    status, details, _ = gate(tmp_path, {"deps": deps, "security": secure})
+    assert status == "ACCEPT", details["reason"]
+    assert [p["name"] for p in details["sandbox_image"]["packages"]] == ["six"]
+    assert details["executions"]["trusted_counterfactual"]["failed"] >= 1
+    assert all(run["backend"] == "docker" for run in details["executions"].values())
+
+
+def test_real_gate_run_cannot_import_an_unlocked_dependency(docker, tmp_path):
+    from test_satra_config import NO_DEPENDENCIES, gate
+    _, secure = _six_project()
+    status, details, _ = gate(tmp_path, {"deps": NO_DEPENDENCIES, "security": secure})
+    assert status == "INCONCLUSIVE" and "do not pass on the base commit" in details["reason"]

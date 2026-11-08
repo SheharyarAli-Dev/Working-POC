@@ -382,3 +382,35 @@ def test_empty_install_set_builds_the_runner_with_labels_only(tmp_path, engine):
     result = prepare(tmp_path, requirements="", lock=[])
     assert result["status"] == "READY", result["reason"]
     assert "RUN" not in fake.contexts[0]["Dockerfile"] and fake.contexts[0]["requirements.txt"] == ""
+
+
+# --- step 4: test-run limits from the base .asent/satra/sandbox.json ------------------------------
+
+def limits_of(tmp_path, text):
+    root, config = base(tmp_path, extra={".asent/satra/sandbox.json": text} if text is not None else None)
+    return project_image.sandbox_limits(config)
+
+
+def test_limits_default_to_the_current_values(tmp_path):
+    assert limits_of(tmp_path, None) == ({"timeout_seconds": 40, "memory": "512m", "source": "default"}, None)
+
+
+@pytest.mark.parametrize("text, expected", [
+    ('{"timeout_seconds": 180}', (180, "512m")), ('{"memory": "2g"}', (40, "2g")), ('{"memory": "2048m"}', (40, "2048m")),
+    ('{"timeout_seconds": 40, "memory": "512m"}', (40, "512m")),
+])
+def test_limits_can_be_raised_up_to_the_cap(tmp_path, text, expected):
+    limits, problem = limits_of(tmp_path, text)
+    assert problem is None and (limits["timeout_seconds"], limits["memory"]) == expected
+
+
+@pytest.mark.parametrize("text", [
+    '{"timeout_seconds": 181}', '{"memory": "3g"}', '{"memory": "2049m"}',      # above the cap
+    '{"timeout_seconds": 39}', '{"memory": "256m"}',                             # below the default
+    '{"timeout_seconds": true}', '{"timeout_seconds": "60"}', '{"timeout_seconds": 60.5}',
+    '{"memory": 1024}', '{"memory": "1G"}', '{"memory": "1gb"}', '{"memory": "-1g"}',
+    '{"cpus": 2}', '{"network": "bridge"}', '[]', 'not json',
+])
+def test_any_other_limit_is_refused(tmp_path, text):
+    limits, problem = limits_of(tmp_path, text)
+    assert limits is None and "sandbox.json" in problem

@@ -179,3 +179,75 @@ The three Docker tests have not run on this machine.
 **Supervisor Q&A prep**
 - *Why can't a cached image be wrong?* Reuse needs all five labels and the runner's layers; the key covers the base lockfile bytes, runner ID and Python.
 - *Does any project code run at build time?* No: the context is two generated files, and `--only-binary :all:` means no setup.py runs.
+
+## Step 4 — Gate mode uses the project image; limits from the base config (2026-11-08)
+
+**Ch 6 Implementation**
+- `backend/satra/gate_mode.py::analyze_configured`: after the engine check, `project_image.sandbox_limits(config)`
+  then `project_image.prepare(context.baseline, config, engine)`; not READY → INCONCLUSIVE before any test runs.
+  Every `run_pytest` call gets `image=`, `timeout=`, `memory=`. Evidence in `details["sandbox_image"]`,
+  `details["sandbox_limits"]`; event `satra.sandbox_image`.
+- `backend/satra/pytest_runner.py::run_pytest`: new keyword parameters `image='asent-sandbox:local'`, `timeout=40`,
+  `memory='512m'` (the old hard-coded values, so the built-in InvoiceHub demo is unchanged). All other flags identical.
+- `project_image.sandbox_limits(config)`: optional frozen base `.asent/satra/sandbox.json`; only `timeout_seconds`
+  (int 40–180) and `memory` (`<n>m`/`<n>g`, 512m–2g); anything else → INCONCLUSIVE.
+
+**Design decisions**
+- Limits live in `.asent/satra/sandbox.json`, not in `config.json`'s SATRA section: the section schema
+  (`backend/project_config/schema.py`, `extra="forbid"`) is outside the approved paths; the file is still frozen from
+  base and covered by the config digest, so head cannot change it. Alternative: a schema field (cleaner, needs approval).
+- Lowering below the defaults is refused too ("can only be raised").
+- No fallback: a gate run either has an approved project image or is INCONCLUSIVE; the shared image is reachable only
+  through `run_pytest`'s default, which gate mode never uses (asserted on every recorded run).
+
+**The 10 changed tests (`tests/test_satra_config.py`) — setup only, assertions unchanged**
+
+| Test | Old setup (S0) | New setup (S1) |
+|---|---|---|
+| test_secure_change_is_accepted_and_the_mutant_is_killed | S0 | S1 |
+| test_regressed_head_is_rejected | S0, head BROKEN | S1, head BROKEN |
+| test_weak_project_security_test_is_rejected | S0 + weak project test | S1 + weak project test |
+| test_strong_project_security_test_is_accepted | S0 + strong project test | S1 + strong project test |
+| test_failing_ordinary_project_tests_are_rejected | S0 + failing tests/ | S1 + failing tests/ |
+| test_missing_counterfactual_target_is_inconclusive | S0 + missing target | S1 + missing target |
+| test_trusted_tests_that_miss_the_mutant_are_inconclusive | S0 + blind trusted test | S1 + blind trusted test |
+| test_disabled_contract_rule_is_inconclusive | S0 + disabled rule | S1 + disabled rule (stops before the image) |
+| test_trusted_tests_come_from_base_even_when_head_edits_them | S0, head BROKEN + lenient | S1, head BROKEN + lenient |
+| test_candidate_srs_cannot_switch_satra_off_in_a_gate_run | S0, head BROKEN | S1, head BROKEN |
+
+S0: `project()` without requirements.txt/lockfile, CAVR disabled; `container_on_host` ran `docker … asent-sandbox:local` on the host.
+S1: `project()` adds `NO_DEPENDENCIES` (empty requirements.txt, `{"packages": []}` lockfile, CAVR policy approving nothing),
+CAVR enabled; `container_on_host` runs only `docker … asent-satra-project:<key> python -m pytest` on the host and
+replaces `project_image._run` with `FakeEngine` (so plan and approval are real). With S1 but the old gate code, 9 of the
+10 failed (the 10th stops before the image) — the fixture cannot pass through the old image.
+
+**Requirements covered:** FR-07 (gate tests run in the approved project image under unchanged isolation); fail-closed NFR-03.
+
+**Ch 7 Test cases (new)**
+
+| Test ID | Purpose | Input | Expected | Result |
+|---|---|---|---|---|
+| test_every_gate_test_run_uses_the_project_image_with_full_isolation | isolation unchanged, no shared image | S1 | every run: project image, 7 flags, 512m, 40 s | pass |
+| test_without_an_approved_lockfile_there_is_no_fallback_image | no fallback | no lockfile; six with empty lockfile | INCONCLUSIVE, no run, no build | pass ×2 |
+| test_a_failed_image_build_is_inconclusive | build failure | engine exit 1 | INCONCLUSIVE, no run | pass |
+| test_cavr_disabled_in_base_means_no_gate_image | approval needs CAVR | CAVR off | INCONCLUSIVE | pass |
+| test_head_cannot_add_a_package_to_the_gate_image | base only | head adds six + policy | ACCEPT, image installs nothing | pass |
+| test_raised_limits_from_the_base_config_reach_every_run | B | base 120 s / 1g | every run 120 s / 1g | pass |
+| test_limits_raised_only_in_head_are_ignored | B, base only | head 180 s / 2g | 40 s / 512m | pass |
+| test_limits_above_the_cap_are_inconclusive | B | 181 s, 3g, 2049m | INCONCLUSIVE ×3 | pass |
+| test_demo_path_keeps_the_shared_image_and_default_limits | InvoiceHub demo unchanged | `run_pytest` defaults | asent-sandbox:local, 512m, 40 s | pass |
+| test_limits_default_to_the_current_values / _can_be_raised_up_to_the_cap / test_any_other_limit_is_refused | B parser | 1 + 4 + 16 inputs | defaults / accepted / refused | pass |
+| test_real_gate_run_uses_an_approved_dependency_and_kills_the_mutant | real end-to-end | app imports six, six locked+approved | ACCEPT, mutant killed, all docker | skipped locally; CI |
+| test_real_gate_run_cannot_import_an_unlocked_dependency | unapproved import fails | app imports six, empty lock | INCONCLUSIVE (base trusted fail) | skipped locally; CI |
+
+**Defects found and fixed:** none in this step.
+
+**Known limitations / deferred:** see "Known limits" below (dependency-introducing PRs).
+
+**Tool disclosure (Ch 8.7):** Claude Code wrote code and tests; Maryam to review. Docker tests not run on this machine.
+
+**Review:** no independent review pass run for this step.
+
+**Supervisor Q&A prep**
+- *What if the lockfile is missing?* INCONCLUSIVE before any test runs; the old shared image is never used in gate mode (tested on every run command).
+- *Can a PR raise its own timeout?* No: limits come from the frozen base `.asent/`; head's file is ignored (tested).

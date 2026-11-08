@@ -7,19 +7,22 @@ Docker/Podman is not installed on this machine, and a gate run never runs extern
 To exercise the container path anyway, `container_on_host` reports Docker as available and executes
 the exact pytest command that `run_pytest` builds for the container, with `/work` mapped to the
 temporary copy. Only the isolation is replaced; the arguments, files and verdict logic are real.
+The per-project gate image is prepared by the real `project_image.prepare` against `FakeEngine`.
 """
 import json
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 from backend.orchestrator.context_service import ContextService
 from backend.orchestrator.service import Service
 from backend.satra import analyzer as satra_analyzer
-from backend.satra import pytest_runner
+from backend.satra import project_image, pytest_runner
 from backend.satra.counterfactuals import mutate_return_true
+from test_satra_project_image import FakeEngine
 
 SECURE = "def can_access(user, owner):\n    return user == owner\n"
 BROKEN = "def can_access(user, owner):\n    return True\n"
@@ -30,34 +33,55 @@ TRUSTED = ("from app.security import can_access\n\n\ndef test_owner_allowed():\n
 PROJECT_CONFTEST = "import pytest\nfrom app.security import can_access as real\n\n\n@pytest.fixture\ndef can_access():\n    return real\n"
 WEAK_PROJECT_TEST = "def test_security(can_access):\n    assert can_access('a', 'a')\n"
 STRONG_PROJECT_TEST = "def test_security(can_access):\n    assert not can_access('a', 'b')\n"
+# A project with no third-party dependencies: an empty requirements file, an empty lockfile and a
+# CAVR policy that approves nothing. The gate image is then the SATRA runner (pytest) only.
+CAVR_POLICY = {"project_task_description": "access check service", "allowed_scopes": ["NETWORK_CONNECT:none"],
+               "approved_requirements": [], "denied_packages": []}
+NO_DEPENDENCIES = {"requirements.txt": "", "dependencies.lock.json": json.dumps({"packages": []}),
+                   ".asent/cavr/policy.json": json.dumps(CAVR_POLICY)}
 CONTRACT = {"rule_id": "AUTHZ.IDOR.001", "route": "GET /items/{id}", "expected_status": 403, "authority_sources": ["README#access"],
             "scope": ["app/security.py"], "counterfactual": {"operator": "RETURN_TRUE", "target": "app/security.py::can_access"}}
 
 
 @pytest.fixture
 def container_on_host(monkeypatch):
+    """Docker reported available; each `docker run <gate image> python -m pytest` runs on the host.
+
+    The gate image comes from `project_image.prepare` with `FakeEngine` standing in for the engine's
+    inspect/probe/build calls, so the install plan and CAVR approval are real. Only commands that run
+    pytest in an `asent-satra-project:` image are executed (on the host); any other `docker` command,
+    including one for `asent-sandbox:local`, goes to the real engine, which is not installed here, and
+    so cannot pass. Returns the recorded runs and the fake engine.
+    """
     real_run = subprocess.run
+    runs = []
 
     def run(cmd, *args, **kwargs):
-        if isinstance(cmd, list) and cmd and cmd[0] == "docker" and "asent-sandbox:local" in cmd:
-            host = next(v.split(":/work")[0] for v in cmd if isinstance(v, str) and v.endswith(":/work:rw"))
-            inner = cmd[cmd.index("asent-sandbox:local") + 1:]
-            assert inner[:3] == ["python", "-m", "pytest"] and "--network" in cmd and "none" in cmd
-            inner = [part.replace("/work", host) for part in inner]
-            kwargs["cwd"] = host
-            return real_run([sys.executable, *inner[1:]], *args, **kwargs)
+        if isinstance(cmd, list) and cmd and cmd[0] == "docker":
+            at = next((i for i in range(len(cmd) - 3) if cmd[i + 1:i + 4] == ["python", "-m", "pytest"]), None)
+            if at is not None and cmd[at].startswith(project_image.PROJECT_REPOSITORY + ":"):
+                runs.append({"cmd": list(cmd), "timeout": kwargs.get("timeout")})
+                host = next(v.split(":/work")[0] for v in cmd if isinstance(v, str) and v.endswith(":/work:rw"))
+                inner = cmd[at + 1:]
+                assert inner[:3] == ["python", "-m", "pytest"] and "--network" in cmd and "none" in cmd
+                inner = [part.replace("/work", host) for part in inner]
+                kwargs["cwd"] = host
+                return real_run([sys.executable, *inner[1:]], *args, **kwargs)
         return real_run(cmd, *args, **kwargs)
 
     monkeypatch.setattr(pytest_runner, "availability", lambda: {"docker": {"available": True}, "podman": {"available": False}})
     monkeypatch.setattr(pytest_runner.subprocess, "run", run)
+    engine = FakeEngine()
+    monkeypatch.setattr(project_image, "_run", engine)
+    return SimpleNamespace(runs=runs, engine=engine)
 
 
-def project(root: Path, security=SECURE, trusted=TRUSTED, satra=None, extra=None, project_tests=None):
-    files = {"app/__init__.py": "", "app/security.py": security, "app/main.py": "from app.security import can_access\n",
+def project(root: Path, security=SECURE, trusted=TRUSTED, satra=None, extra=None, project_tests=None, deps=None):
+    files = {**(NO_DEPENDENCIES if deps is None else deps),"app/__init__.py": "", "app/security.py": security, "app/main.py": "from app.security import can_access\n",
              "SRS.md": "unrelated text without any security words\n",
              ".asent/config.json": json.dumps({"schema_version": 1, "project": {"name": "t"}, "modules": {
                  "SATRA": {"enabled": True, "pytest_ini": "satra/pytest.ini", "source_dirs": ["app"], **(satra or {})},
-                 "CAVR": {"enabled": False, "reason": "not in this test"}, "SABLE": {"enabled": False, "reason": "not in this test"}}}),
+                 "CAVR": {"enabled": True}, "SABLE": {"enabled": False, "reason": "not in this test"}}}),
              ".asent/satra/contract.json": json.dumps(CONTRACT),
              ".asent/satra/pytest.ini": "[pytest]\npythonpath = .\n",
              ".asent/satra/trusted_tests/test_contract.py": trusted}
@@ -180,3 +204,92 @@ def test_mutate_fails_closed(tmp_path, files, target):
     before = {name: (tmp_path / name).read_text() for name in files}
     assert mutate_return_true(tmp_path, target) is False
     assert {name: (tmp_path / name).read_text() for name in files} == before
+
+
+# --- per-project gate image (docs/satra/per-project-sandbox.md, step 4) ---------------------------
+
+ISOLATION = [("--network", "none"), ("--read-only", None), ("--cap-drop", "ALL"), ("--security-opt", "no-new-privileges"),
+             ("--cpus", "1"), ("--pids-limit", "64"), ("--tmpfs", "/tmp:rw,nosuid,size=64m")]
+
+
+def flag(cmd, name):
+    return cmd[cmd.index(name) + 1] if name in cmd else None
+
+
+def test_every_gate_test_run_uses_the_project_image_with_full_isolation(tmp_path, container_on_host):
+    status, details, _ = gate(tmp_path)
+    assert status == "ACCEPT", details["reason"]
+    image = details["sandbox_image"]["image"]
+    assert image.startswith("asent-satra-project:") and details["sandbox_image"]["packages"] == []
+    assert len(container_on_host.runs) == len(details["executions"]) >= 3
+    for run in container_on_host.runs:
+        cmd = run["cmd"]
+        assert "asent-sandbox:local" not in cmd and image in cmd
+        for name, value in ISOLATION:
+            assert name in cmd and (value is None or flag(cmd, name) == value), (name, cmd)
+        assert flag(cmd, "--memory") == "512m" and run["timeout"] == 40
+
+
+@pytest.mark.parametrize("deps, words", [
+    ({"requirements.txt": "", ".asent/cavr/policy.json": json.dumps(CAVR_POLICY)}, "no dependencies.lock.json"),
+    ({**NO_DEPENDENCIES, "requirements.txt": "six==1.17.0\n"}, "six"),
+])
+def test_without_an_approved_lockfile_there_is_no_fallback_image(tmp_path, container_on_host, deps, words):
+    status, details, _ = gate(tmp_path, {"deps": deps})
+    assert status == "INCONCLUSIVE" and words in details["reason"]
+    assert container_on_host.runs == [] and not container_on_host.engine.builds()
+
+
+def test_a_failed_image_build_is_inconclusive(tmp_path, container_on_host):
+    container_on_host.engine.build_code = 1
+    status, details, _ = gate(tmp_path)
+    assert status == "INCONCLUSIVE" and "build failed" in details["reason"] and container_on_host.runs == []
+
+
+def test_cavr_disabled_in_base_means_no_gate_image(tmp_path, container_on_host):
+    config = json.loads((project(tmp_path / "probe") / ".asent/config.json").read_text())
+    config["modules"]["CAVR"] = {"enabled": False, "reason": "off"}
+    status, details, _ = gate(tmp_path, {"extra": {".asent/config.json": json.dumps(config)}})
+    assert status == "INCONCLUSIVE" and "CAVR" in details["reason"] and container_on_host.runs == []
+
+
+def test_head_cannot_add_a_package_to_the_gate_image(tmp_path, container_on_host):
+    six = {"name": "six", "version": "1.17.0", "ecosystem": "PyPI", "filename": "six-1.17.0-py2.py3-none-any.whl",
+           "sha256": "4721f391ed90541fddacab5acf947aa0d3dc7d27b2e1e8eda2be8970586c3274"}
+    head_deps = {"requirements.txt": "six==1.17.0\n", "dependencies.lock.json": json.dumps({"packages": [six]}),
+                 ".asent/cavr/policy.json": json.dumps({**CAVR_POLICY, "approved_requirements": ["six==1.17.0"]})}
+    status, details, _ = gate(tmp_path, head_kwargs={"deps": head_deps})
+    assert status == "ACCEPT", details["reason"]
+    assert details["sandbox_image"]["packages"] == []
+    assert [c["requirements.txt"] for c in container_on_host.engine.contexts] == [""]
+
+
+def test_raised_limits_from_the_base_config_reach_every_run(tmp_path, container_on_host):
+    limits = {".asent/satra/sandbox.json": json.dumps({"timeout_seconds": 120, "memory": "1g"})}
+    status, details, _ = gate(tmp_path, {"extra": limits})
+    assert status == "ACCEPT", details["reason"]
+    assert details["sandbox_limits"] == {"timeout_seconds": 120, "memory": "1g", "source": "base .asent/satra/sandbox.json"}
+    assert {(flag(r["cmd"], "--memory"), r["timeout"]) for r in container_on_host.runs} == {("1g", 120)}
+
+
+def test_limits_raised_only_in_head_are_ignored(tmp_path, container_on_host):
+    limits = {".asent/satra/sandbox.json": json.dumps({"timeout_seconds": 180, "memory": "2g"})}
+    status, details, _ = gate(tmp_path, head_kwargs={"extra": limits})
+    assert status == "ACCEPT" and {(flag(r["cmd"], "--memory"), r["timeout"]) for r in container_on_host.runs} == {("512m", 40)}
+
+
+@pytest.mark.parametrize("limits", [{"timeout_seconds": 181}, {"memory": "3g"}, {"memory": "2049m"}])
+def test_limits_above_the_cap_are_inconclusive(tmp_path, container_on_host, limits):
+    status, details, _ = gate(tmp_path, {"extra": {".asent/satra/sandbox.json": json.dumps(limits)}})
+    assert status == "INCONCLUSIVE" and "sandbox.json" in details["reason"] and container_on_host.runs == []
+
+
+def test_demo_path_keeps_the_shared_image_and_default_limits(tmp_path, monkeypatch):
+    seen = []
+    monkeypatch.setattr(pytest_runner, "availability", lambda: {"docker": {"available": True}, "podman": {"available": False}})
+    monkeypatch.setattr(pytest_runner.subprocess, "run", lambda cmd, *a, **k: seen.append((cmd, k.get("timeout"))) or
+                        subprocess.CompletedProcess(cmd, 0, "", ""))
+    (tmp_path / "p").mkdir()
+    pytest_runner.run_pytest(tmp_path / "p", tmp_path / "out")
+    [(cmd, timeout)] = seen
+    assert "asent-sandbox:local" in cmd and flag(cmd, "--memory") == "512m" and timeout == 40

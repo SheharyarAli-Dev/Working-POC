@@ -342,3 +342,49 @@ def prepare(base_dir, config, engine) -> dict:
         return {**evidence, "status": "INCONCLUSIVE", "requirements_text": None, "reused": False, "build_log_tail": tail,
                 "reason": "built gate image does not carry the expected labels on top of the SATRA runner layers"}
     return {**evidence, "reused": False, "build_log_tail": tail, "reason": plan["reason"] + "; image built"}
+
+
+# --- test-run limits ------------------------------------------------------------------------------
+
+LIMITS_FILE = "satra/sandbox.json"
+DEFAULT_LIMITS = {"timeout_seconds": 40, "memory": "512m"}
+MAX_TIMEOUT_SECONDS = 180
+MAX_MEMORY_MIB = 2048
+_MEMORY = re.compile(r"^([1-9][0-9]{0,5})([mg])$")
+
+
+def _mib(memory):
+    match = _MEMORY.match(memory)
+    return int(match[1]) * (1024 if match[2] == "g" else 1) if match else None
+
+
+def sandbox_limits(config):
+    """(limits, None) or (None, reason): the pytest timeout and container memory for gate runs.
+
+    Only the frozen base `.asent/satra/sandbox.json` can change them, and only upward from the
+    defaults (40 s, 512m) to the hard cap (180 s, 2g). The file is optional; anything in it other
+    than `timeout_seconds` (int) and `memory` ("<n>m" or "<n>g") is refused, so a gate run is
+    INCONCLUSIVE rather than running with limits nobody approved.
+    """
+    files = getattr(config, "files", None) or {}
+    if LIMITS_FILE not in files:
+        return {**DEFAULT_LIMITS, "source": "default"}, None
+    shown = "base .asent/" + LIMITS_FILE
+    try:
+        data = json.loads((Path(config.path) / LIMITS_FILE).read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, ValueError) as exc:
+        return None, f"{shown} is not readable JSON: {exc}"
+    if not isinstance(data, dict):
+        return None, f"{shown} must be a JSON object"
+    unknown = sorted(set(data) - set(DEFAULT_LIMITS))
+    if unknown:
+        return None, f"{shown} may only set timeout_seconds and memory, not {', '.join(unknown)}"
+    timeout = data.get("timeout_seconds", DEFAULT_LIMITS["timeout_seconds"])
+    memory = data.get("memory", DEFAULT_LIMITS["memory"])
+    if type(timeout) is not int or not DEFAULT_LIMITS["timeout_seconds"] <= timeout <= MAX_TIMEOUT_SECONDS:
+        return None, (f"{shown}: timeout_seconds must be a whole number from {DEFAULT_LIMITS['timeout_seconds']} "
+                      f"to {MAX_TIMEOUT_SECONDS}, not {timeout!r}")
+    size = _mib(memory) if isinstance(memory, str) else None
+    if size is None or not _mib(DEFAULT_LIMITS["memory"]) <= size <= MAX_MEMORY_MIB:
+        return None, f"{shown}: memory must be from {DEFAULT_LIMITS['memory']} to 2g (like \"1g\" or \"1536m\"), not {memory!r}"
+    return {"timeout_seconds": timeout, "memory": memory, "source": shown}, None
