@@ -121,3 +121,61 @@ pypi.org or copied from the Flask lockfile). Maryam to review.
 **Supervisor Q&A prep**
 - *Can a PR add a package?* No: `install_plan` gets only the base export and the frozen base config; tested.
 - *Why must transitive packages be in the policy?* Option 1: every installed wheel is individually PERMITTED by CAVR.
+
+## Step 3 — Build or reuse the gate image (2026-11-08)
+
+**Ch 6 Implementation**
+- `project_image.runner_identity(engine)`: `image inspect asent-satra-runner:local` (ID, layers) and one
+  `--network none --read-only --cap-drop ALL` run of the runner printing `platform.python_version()` and
+  `packaging.tags.sys_tags()`.
+- `project_image.image_key(lockfile_sha256, runner_id, python, requirements_text)`: sha256 over those plus
+  `BUILDER_VERSION`; tag `asent-satra-project:<key>`.
+- `project_image.prepare(base_dir, config, engine)`: identity → `install_plan` → reuse if the tagged image's labels
+  (key, lockfile sha256, runner ID, python, builder) all match **and** its layers start with the runner's layers;
+  else build from a temp context holding only `Dockerfile` + `requirements.txt`
+  (`FROM asent-satra-runner:local`, `pip install --require-hashes --no-deps --only-binary :all:`), then re-inspect.
+- `_run` is the single engine call site (replaced by `FakeEngine` in tests).
+
+**Design decisions**
+- Key includes the generated requirements digest and `BUILDER_VERSION` besides the three asked-for inputs: both
+  are derived, but including them means a code change can never reuse an image built from other instructions.
+- Name match alone never reuses: labels and the runner layer prefix are checked; mismatch → rebuild (tests both).
+- Python version and tags read from the runner's interpreter, not assumed from the base image tag.
+- Build uses the engine's default build network (needed for PyPI); no `--network host`. Test runs are unchanged.
+- An empty install set builds a labelled image with no `RUN` (pip refuses an empty requirements file).
+
+**Requirements covered:** FR-07 — content-addressed, label-verified images; build failures fail closed.
+
+**Ch 7 Test cases** (`tests/test_satra_project_image.py`, fake engine; `tests/test_satra_project_image_docker.py`, real Docker)
+
+| Test ID | Purpose | Input | Expected | Result |
+|---|---|---|---|---|
+| test_build_context_holds_only_the_dockerfile_and_the_hashed_requirements | no project code, wheels only | Flask lock | 2 files, 3 pip flags, 1 COPY, no host network | pass |
+| test_runner_is_probed_without_network | isolation of probe | — | `--network none --read-only` | pass |
+| test_key_is_a_hash_of_lockfile_runner_and_python | content address | 4 key variants | 4 distinct keys | pass |
+| test_image_with_the_right_label_is_reused | cache | same base twice | 1 build, reused | pass |
+| test_image_with_the_right_name_but_not_the_right_label_is_rebuilt | never reuse by name | no labels / wrong key | rebuilt ×2 | pass |
+| test_missing_runner_image_is_inconclusive | fail closed | no runner | INCONCLUSIVE, no build | pass |
+| test_unusable_runner_probe_is_inconclusive | fail closed | 3 bad probes | INCONCLUSIVE ×3 | pass |
+| test_plan_refusal_builds_nothing | fail closed | no lockfile | no build | pass |
+| test_build_failure_is_inconclusive_with_the_end_of_the_log | build failure | exit 1 + pip hash error | INCONCLUSIVE + log tail | pass |
+| test_build_timeout_is_inconclusive | timeout | TimeoutExpired | INCONCLUSIVE | pass |
+| test_built_image_that_is_not_on_the_runner_is_inconclusive | wrong base | foreign layers | INCONCLUSIVE | pass |
+| test_empty_install_set_builds_the_runner_with_labels_only | no deps | empty req + lock | READY, no RUN | pass |
+| test_gate_image_is_built_from_a_real_lock_entry_and_then_reused | real build | real six 1.17.0 wheel | imports six, not flask; reused | skipped locally; CI |
+| test_a_changed_hash_makes_pip_refuse_the_build | hash enforcement | six sdist sha on wheel | INCONCLUSIVE, HASH in log | skipped locally; CI |
+| test_pip_refuses_a_wheel_that_does_not_fit_even_past_the_tag_check | pip final check | numpy cp314 only, tag check bypassed | INCONCLUSIVE | skipped locally; CI |
+
+**Defects found and fixed:** none in this step.
+
+**Known limitations / deferred:** images are never garbage-collected (one per distinct key); a local attacker with
+Docker access could forge labels — the Docker daemon is inside the trust boundary, as for `asent-sandbox:local`.
+
+**Tool disclosure (Ch 8.7):** Claude Code wrote code and tests; six/numpy hashes are PyPI digests. Maryam to review.
+The three Docker tests have not run on this machine.
+
+**Review:** no independent review pass run for this step.
+
+**Supervisor Q&A prep**
+- *Why can't a cached image be wrong?* Reuse needs all five labels and the runner's layers; the key covers the base lockfile bytes, runner ID and Python.
+- *Does any project code run at build time?* No: the context is two generated files, and `--only-binary :all:` means no setup.py runs.

@@ -32,3 +32,44 @@ def test_runner_image_has_only_pytest_and_its_dependencies(docker):
     assert set(json.loads(listing.stdout)) == {"pip", "pytest", "pluggy", "iniconfig", "packaging", "pygments"}
     for module in ("fastapi", "pydantic", "flask"):
         assert _probe(docker, RUNNER, f"import {module}").returncode != 0, module
+
+
+# --- per-project gate images (real builds from PyPI; the build is the only step with network) ------
+
+from backend.satra import project_image  # noqa: E402
+from test_satra_project_image import NUMPY_CP314_ONLY, base, policy  # noqa: E402
+
+SIX = {"name": "six", "version": "1.17.0", "ecosystem": "PyPI", "filename": "six-1.17.0-py2.py3-none-any.whl",
+       "sha256": "4721f391ed90541fddacab5acf947aa0d3dc7d27b2e1e8eda2be8970586c3274"}
+SIX_SDIST_SHA = "ff70335d468e7eb6ec65b95b99d3a2836546063f63acc5171de367e834932a81"  # real six-1.17.0.tar.gz
+
+
+def test_gate_image_is_built_from_a_real_lock_entry_and_then_reused(docker, tmp_path):
+    root, config = base(tmp_path, requirements="six==1.17.0\n", lock=[SIX], pol=policy(["six==1.17.0"]))
+    built = project_image.prepare(root, config, docker)
+    assert built["status"] == "READY" and not built["reused"], built["reason"] + built.get("build_log_tail", "")
+    imported = _probe(docker, built["image"], "import six; print(six.__version__)")
+    assert imported.returncode == 0 and imported.stdout.strip() == "1.17.0", imported.stderr
+    assert _probe(docker, built["image"], "import flask").returncode != 0
+    again = project_image.prepare(root, config, docker)
+    assert again["reused"] and again["image"] == built["image"]
+
+
+def test_a_changed_hash_makes_pip_refuse_the_build(docker, tmp_path):
+    root, config = base(tmp_path, requirements="six==1.17.0\n", lock=[{**SIX, "sha256": SIX_SDIST_SHA}], pol=policy(["six==1.17.0"]))
+    result = project_image.prepare(root, config, docker)
+    assert result["status"] == "INCONCLUSIVE" and "build failed" in result["reason"]
+    assert "HASH" in result["build_log_tail"].upper()
+
+
+def test_pip_refuses_a_wheel_that_does_not_fit_even_past_the_tag_check(docker, tmp_path, monkeypatch):
+    real = project_image.runner_identity
+
+    def claims_cp314(engine):  # make the plan's own tag check pass, so pip is the one that refuses
+        identity, problem = real(engine)
+        return ({**identity, "tags": identity["tags"] + ["cp314-cp314-manylinux_2_28_x86_64"]}, None) if identity else (None, problem)
+
+    monkeypatch.setattr(project_image, "runner_identity", claims_cp314)
+    root, config = base(tmp_path, requirements="numpy==2.5.4\n", lock=[NUMPY_CP314_ONLY], pol=policy(["numpy==2.5.4"]))
+    result = project_image.prepare(root, config, docker)
+    assert result["status"] == "INCONCLUSIVE" and "build failed" in result["reason"], result["reason"]

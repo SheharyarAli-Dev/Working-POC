@@ -10,6 +10,8 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import subprocess
+import tempfile
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -26,6 +28,17 @@ from backend.orchestrator.hashing import files as project_files
 
 RUNNER_IMAGE = "asent-satra-runner:local"
 RUNNER_REQUIREMENTS = ROOT / "docker/satra-runner.requirements.txt"
+PROJECT_REPOSITORY = "asent-satra-project"
+# Bump when the generated Dockerfile or requirements format changes: images built by older code
+# then get a different key and are never reused.
+BUILDER_VERSION = "1"
+LABEL_PREFIX = "org.asent.satra."
+LABEL_KEY = LABEL_PREFIX + "key"
+BUILD_TIMEOUT = 900
+PROBE_TIMEOUT = 60
+PIP_FLAGS = "--no-cache-dir --disable-pip-version-check --require-hashes --no-deps --only-binary :all:"
+PROBE = ("import json, platform; from packaging import tags; "
+         "print(json.dumps({'python': platform.python_version(), 'tags': [str(t) for t in tags.sys_tags()]}))")
 
 NAME = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$")
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
@@ -204,3 +217,128 @@ def install_plan(base_dir, config, supported_tags) -> dict:
     return {"status": "READY", "reason": f"{len(packages)} CAVR-approved wheel(s) from the base {LOCKFILE_NAME}",
             "requirements_text": "".join(line + "\n" for line in lines), "lockfile_sha256": lock_sha, "packages": packages,
             "provided_by_runner": provided, "decisions": decisions}
+
+
+# --- build or reuse -------------------------------------------------------------------------------
+
+def _run(cmd, timeout):
+    """The only place this module runs the container engine (tests replace it)."""
+    return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+
+
+def image_key(lockfile_sha256, runner_id, python_version, requirements_text) -> str:
+    """Content address of a gate image: base lockfile bytes, runner image ID, runner Python version,
+    plus the generated requirements and BUILDER_VERSION (both derived, included so that a change in
+    this code can never reuse an image built from different instructions)."""
+    material = {"builder": BUILDER_VERSION, "lockfile_sha256": lockfile_sha256, "runner_image_id": runner_id,
+                "python": python_version, "requirements_sha256": hashlib.sha256(requirements_text.encode()).hexdigest()}
+    return hashlib.sha256(json.dumps(material, sort_keys=True).encode()).hexdigest()
+
+
+def _inspect(engine, image):
+    try:
+        done = _run([engine, "image", "inspect", image], PROBE_TIMEOUT)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if done.returncode != 0:
+        return None
+    try:
+        found = json.loads(done.stdout)
+    except ValueError:
+        return None
+    return found[0] if isinstance(found, list) and found and isinstance(found[0], dict) else None
+
+
+def _labels(info):
+    return ((info or {}).get("Config") or {}).get("Labels") or {}
+
+
+def _layers(info):
+    return ((info or {}).get("RootFS") or {}).get("Layers") or []
+
+
+def runner_identity(engine):
+    """({"image_id", "layers", "python", "tags"}, None) of the local runner image, or (None, reason).
+
+    The Python version and wheel tags come from the runner's own interpreter, run with no network."""
+    info = _inspect(engine, RUNNER_IMAGE)
+    if info is None or not isinstance(info.get("Id"), str):
+        return None, f"SATRA runner image {RUNNER_IMAGE} is not available; build it with scripts/satra_build_sandbox.sh"
+    try:
+        done = _run([engine, "run", "--rm", "--network", "none", "--read-only", "--cap-drop", "ALL",
+                     "--security-opt", "no-new-privileges", RUNNER_IMAGE, "python", "-c", PROBE], PROBE_TIMEOUT)
+        probe = json.loads(done.stdout) if done.returncode == 0 else None
+    except (OSError, subprocess.SubprocessError, ValueError):
+        probe = None
+    if not (isinstance(probe, dict) and isinstance(probe.get("python"), str) and isinstance(probe.get("tags"), list)
+            and probe["tags"] and all(isinstance(t, str) for t in probe["tags"])):
+        return None, f"SATRA runner image {RUNNER_IMAGE} did not report its Python version and wheel tags"
+    return {"image_id": info["Id"], "layers": _layers(info), "python": probe["python"], "tags": probe["tags"]}, None
+
+
+def _dockerfile(requirements_text):
+    lines = [f"FROM {RUNNER_IMAGE}"]
+    if requirements_text:
+        lines += ["COPY requirements.txt /opt/asent/project-requirements.txt",
+                  f"RUN python -m pip install {PIP_FLAGS} -r /opt/asent/project-requirements.txt"]
+    return "\n".join(lines) + "\n"
+
+
+def prepare(base_dir, config, engine) -> dict:
+    """The gate image for this base commit: reused when an image with the same key label exists,
+    otherwise built FROM the runner with the install plan's requirements. INCONCLUSIVE when the runner
+    is missing, the plan refuses, the build fails or times out, or the result is not what was asked for.
+
+    Only the build has network access (the engine's default build network); nothing of the project
+    is in the build context, which holds exactly a Dockerfile and requirements.txt."""
+    identity, problem = runner_identity(engine)
+    if identity is None:
+        return _refuse(problem)
+    plan = install_plan(base_dir, config, identity["tags"])
+    runner = {"image": RUNNER_IMAGE, "image_id": identity["image_id"], "python": identity["python"]}
+    if plan["status"] != "READY":
+        return {**plan, "runner": runner}
+    text = plan["requirements_text"]
+    key = image_key(plan["lockfile_sha256"], identity["image_id"], identity["python"], text)
+    tag = f"{PROJECT_REPOSITORY}:{key}"
+    labels = {LABEL_KEY: key, LABEL_PREFIX + "lockfile_sha256": plan["lockfile_sha256"],
+              LABEL_PREFIX + "runner_image_id": identity["image_id"], LABEL_PREFIX + "python": identity["python"],
+              LABEL_PREFIX + "builder": BUILDER_VERSION}
+    evidence = {**plan, "runner": runner, "key": key, "image": tag, "labels": labels,
+                "requirements_sha256": hashlib.sha256(text.encode()).hexdigest()}
+
+    def built_right(info):
+        found = _labels(info)
+        layers = _layers(info)
+        return (all(found.get(name) == value for name, value in labels.items())
+                and layers[:len(identity["layers"])] == identity["layers"] and len(identity["layers"]) > 0)
+
+    existing = _inspect(engine, tag)
+    if existing is not None and built_right(existing):
+        return {**evidence, "reused": True, "reason": plan["reason"] + "; cached image reused (key label matches)"}
+
+    with tempfile.TemporaryDirectory(prefix="asent-satra-image-") as context:
+        context = Path(context)
+        (context / "Dockerfile").write_text(_dockerfile(text), encoding="utf-8")
+        (context / "requirements.txt").write_text(text, encoding="utf-8")
+        cmd = [engine, "build", "-t", tag]
+        for name, value in labels.items():
+            cmd += ["--label", f"{name}={value}"]
+        cmd += ["-f", str(context / "Dockerfile"), str(context)]
+        try:
+            done = _run(cmd, BUILD_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            return {**evidence, "status": "INCONCLUSIVE", "requirements_text": None, "reused": False,
+                    "reason": f"gate image build timed out after {BUILD_TIMEOUT} s", "build_log_tail": ""}
+        except OSError as exc:
+            return {**evidence, "status": "INCONCLUSIVE", "requirements_text": None, "reused": False,
+                    "reason": f"gate image build could not start: {exc}", "build_log_tail": ""}
+    tail = ((done.stdout or "") + (done.stderr or ""))[-4000:]
+    if done.returncode != 0:
+        return {**evidence, "status": "INCONCLUSIVE", "requirements_text": None, "reused": False, "build_log_tail": tail,
+                "reason": f"gate image build failed (exit {done.returncode}); pip refuses wheels that are missing, "
+                          "do not fit this Python/platform, or do not match the lockfile hashes"}
+    if not built_right(_inspect(engine, tag)):
+        return {**evidence, "status": "INCONCLUSIVE", "requirements_text": None, "reused": False, "build_log_tail": tail,
+                "reason": "built gate image does not carry the expected labels on top of the SATRA runner layers"}
+    return {**evidence, "reused": False, "build_log_tail": tail, "reason": plan["reason"] + "; image built"}
