@@ -52,3 +52,54 @@ def test_runner_pins_reader_refuses_a_line_without_a_hash(tmp_path):
 def test_build_script_builds_the_runner_image():
     script = (ROOT / "scripts/satra_build_sandbox.sh").read_text()
     assert "-t asent-satra-runner:local" in script and "docker/satra-runner.Dockerfile" in script
+
+
+# --- CI: images are built the same way, and Docker-backed tests must really run -------------------
+
+import ast  # noqa: E402
+
+import yaml  # noqa: E402
+
+WORKFLOWS = ROOT / ".github/workflows"
+
+
+def _steps(path):
+    data = yaml.safe_load(path.read_text())
+    return {name: job.get("steps", []) for name, job in data["jobs"].items()}
+
+
+def _docker_tests():
+    tree = ast.parse((ROOT / "tests/test_satra_project_image_docker.py").read_text())
+    return {node.name for node in tree.body if isinstance(node, ast.FunctionDef) and node.name.startswith("test_")}
+
+
+def test_satra_ci_fails_when_any_docker_backed_test_is_missing_or_skipped():
+    jobs = _steps(WORKFLOWS / "satra-ci.yml")
+    [check] = [s for s in jobs["satra-suite"] if s.get("name") == "Verify Docker sandbox tests ran without skips"]
+    for name in _docker_tests() | {"test_sandbox_network_isolated", "test_sandbox_readonly_root"}:
+        assert f'"{name}"' in check["run"], name
+    assert "test_satra_project_image_docker" in check["run"]  # every test of that module, not only the listed ones
+    run = [s for s in jobs["satra-suite"] if "pytest" in s.get("run", "") and "junitxml" in s.get("run", "")][0]["run"]
+    assert "tests/test_satra*.py" in run
+
+
+def test_both_satra_ci_jobs_build_the_runner_through_the_build_script():
+    for name, steps in _steps(WORKFLOWS / "satra-ci.yml").items():
+        names = [s.get("run", "") for s in steps]
+        assert any("scripts/satra_build_sandbox.sh" in r for r in names), name
+    assert any("asent-satra-runner:local" in s.get("run", "") for s in _steps(WORKFLOWS / "satra-ci.yml")["satra-suite"])
+
+
+def test_reusable_gate_workflow_builds_the_runner_before_the_gate_runs():
+    [steps] = _steps(WORKFLOWS / "asent-gate.yml").values()
+    runs = [s.get("run", "") for s in steps]
+    build = next(i for i, r in enumerate(runs) if "-t asent-satra-runner:local" in r)
+    gate = next(i for i, r in enumerate(runs) if "asent gate" in r)
+    assert build < gate and "-f asent/docker/satra-runner.Dockerfile asent/docker" in runs[build]
+
+
+def test_gate_documentation_states_the_dependency_rule_and_limits():
+    text = (ROOT / "docs/asent-gate.md").read_text()
+    for phrase in ("asent-satra-runner:local", "dependencies.lock.json", "its own pull request", ".asent/satra/sandbox.json",
+                   "180", "2g", "INCONCLUSIVE"):
+        assert phrase in text, phrase

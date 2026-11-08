@@ -36,6 +36,7 @@ jobs:
         run: |
           docker info >/dev/null
           docker image inspect asent-sandbox:local >/dev/null
+          docker image inspect asent-satra-runner:local >/dev/null
       - name: Run SATRA suite with JUnit report
         env:
           SATRA_ALLOW_HOST_EXEC: "1"
@@ -53,9 +54,20 @@ jobs:
               "test_sandbox_readonly_root",
               "test_sandbox_tmpfs_isolated",
               "test_sandbox_execution_timeout",
+              # tests/test_satra_project_image_docker.py: runner and per-project gate images
+              "test_runner_image_has_only_pytest_and_its_dependencies",
+              "test_gate_image_is_built_from_a_real_lock_entry_and_then_reused",
+              "test_a_changed_hash_makes_pip_refuse_the_build",
+              "test_pip_refuses_a_wheel_that_does_not_fit_even_past_the_tag_check",
+              "test_real_gate_run_uses_an_approved_dependency_and_kills_the_mutant",
+              "test_real_gate_run_cannot_import_an_unlocked_dependency",
           }
           missing = sorted(required - cases.keys())
           skipped = sorted(name for name in required & cases.keys() if cases[name].find("skipped") is not None)
+          # Any other test in the per-project image module must not be skipped either.
+          skipped += sorted(name for name, case in cases.items() if name not in required
+                            and "test_satra_project_image_docker" in case.attrib.get("classname", "")
+                            and case.find("skipped") is not None)
           if missing or skipped:
               raise SystemExit(f"Docker-backed SATRA tests missing={missing}, skipped={skipped}")
           print(f"Docker-backed SATRA tests ran: {len(required)}; skips: 0")

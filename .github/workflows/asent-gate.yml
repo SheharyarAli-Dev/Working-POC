@@ -2,10 +2,12 @@
 # (copyable template: docs/gate/asent-pr.yml; usage: docs/asent-gate.md).
 #
 # It checks out the target repository (full history, so the base commit exists), checks out ASENT at
-# a pinned commit, builds the sandbox image ASENT runs tests and packages in, and runs
+# a pinned commit, builds the sandbox image ASENT runs packages in and the SATRA runner image, and runs
 #   asent gate --repository target --base <PR base SHA> --head <PR head SHA>
 # The authority is the target's .asent/ folder at the BASE commit. Exit codes: 0 ACCEPT, 1 BLOCK,
 # 2 REVIEW. BLOCK always fails the job; REVIEW fails it unless review-fails is false.
+# During the gate SATRA builds (or reuses) an image FROM the runner with the base commit's CAVR-approved
+# wheels: that build downloads from PyPI; the tests in it then run with --network none.
 #
 # Safe to run on pull requests from forks: triggered by `pull_request` (never the privileged base-branch trigger),
 # read-only token, no credentials kept in the checkouts, and event data reaches shell scripts only
@@ -80,6 +82,8 @@ jobs:
         run: python -m pip install -r asent/requirements.lock.txt
       - name: Build the ASENT sandbox image (tests and packages run only inside it)
         run: docker build -t asent-sandbox:local -f asent/docker/sandbox.Dockerfile asent
+      - name: Build the SATRA runner image (base of the per-project gate image built during the gate run)
+        run: docker build -t asent-satra-runner:local -f asent/docker/satra-runner.Dockerfile asent/docker
       - name: Run the gate
         id: gate
         env:

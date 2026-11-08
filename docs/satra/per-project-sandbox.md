@@ -251,3 +251,49 @@ replaces `project_image._run` with `FakeEngine` (so plan and approval are real).
 **Supervisor Q&A prep**
 - *What if the lockfile is missing?* INCONCLUSIVE before any test runs; the old shared image is never used in gate mode (tested on every run command).
 - *Can a PR raise its own timeout?* No: limits come from the frozen base `.asent/`; head's file is ignored (tested).
+
+## Step 5 — CI and documentation (2026-11-08)
+
+**Ch 6 Implementation**
+- `.github/workflows/satra-ci.yml`: the "Require Docker engine" step also inspects `asent-satra-runner:local` (built by
+  `scripts/satra_build_sandbox.sh` in both jobs); the "ran without skips" step lists the 6 tests of
+  `tests/test_satra_project_image_docker.py` and also fails if any other test of that module is skipped.
+- `.github/workflows/asent-gate.yml`: new step builds `asent-satra-runner:local` from `asent/docker/` before the gate runs.
+  `docs/gate/asent-pr.yml` is unchanged (it only calls the reusable workflow).
+- `docs/asent-gate.md`: section "SATRA's per-project test image" (rules 1–6, limits, dependency rule); SATRA row and
+  "Running it" updated.
+
+**Design decisions**
+- Explicit names in the CI check (greppable, and a renamed test fails as "missing") plus a module-wide skip check, so a
+  future Docker test in that file cannot be silently skipped.
+
+**Requirements covered:** FR-07 in CI — Docker-backed tests cannot pass by skipping.
+
+**Ch 7 Test cases** (`tests/test_satra_runner_image.py`)
+
+| Test ID | Purpose | Input | Expected | Result |
+|---|---|---|---|---|
+| test_satra_ci_fails_when_any_docker_backed_test_is_missing_or_skipped | no silent skip | satra-ci.yml | every Docker test named; module-wide check; suite runs tests/test_satra*.py | pass |
+| test_both_satra_ci_jobs_build_the_runner_through_the_build_script | same build in CI | satra-ci.yml | both jobs run the script; runner inspected | pass |
+| test_reusable_gate_workflow_builds_the_runner_before_the_gate_runs | gate workflow | asent-gate.yml | runner build step before `asent gate` | pass |
+| test_gate_documentation_states_the_dependency_rule_and_limits | C and B documented | docs/asent-gate.md | phrases present | pass |
+
+The skip check's Python was also run against two synthetic JUnit files: all required present → exit 0; one extra test of
+the module skipped → exit 1 (`skipped=['test_extra']`).
+
+**Defects found and fixed:** none in this step.
+
+**Tool disclosure (Ch 8.7):** Claude Code edited the workflows and docs; Maryam to review. Not run on GitHub (not pushed).
+
+**Review:** no independent review pass run for this step.
+
+**Supervisor Q&A prep**
+- *How do you know the Docker tests ran in CI?* The job fails unless each is present in the JUnit report and not skipped.
+
+## Known limits
+
+- **A new dependency must be approved and merged in its own PR before code uses it.** The image comes from the base
+  commit, so head code importing a package the base has not locked fails: INCONCLUSIVE at collection, REJECT if the
+  import is inside a test. Documented in `docs/asent-gate.md`.
+- Docker-backed tests (6) have not run on the development machine (no Docker); their first run is CI.
+- Gate images are not garbage-collected.
