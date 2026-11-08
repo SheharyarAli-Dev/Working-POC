@@ -1,0 +1,149 @@
+# ASENT as an installable tool: build the wheel (with the dashboard UI), install it into a fresh virtual
+# environment outside the checkout, and run the installed `asent` there: --version, doctor --json, and
+# gate on two small sample repositories with known decisions (ACCEPT and BLOCK).
+# The installed command never sees the checkout: no PYTHONPATH, no ASENT_HOME, and it runs from
+# $RUNNER_TEMP. The checkout is used only for requirements.lock.txt (install constraints) and the
+# sample-repository script.
+name: Package
+
+on:
+  push:
+    branches: ["**"]
+    paths-ignore: ["report/**"]
+  pull_request:
+    branches: [master]
+    paths-ignore: ["report/**"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: package-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  wheel:
+    name: Build the wheel
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Build the dashboard UI (bundled into the wheel)
+        run: npm ci --prefix frontend && npm run build --prefix frontend
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build the wheel straight from the source tree
+        run: |
+          python -m pip install "build>=1.2,<2"
+          python -m build --wheel --outdir dist
+      - name: Check the wheel (assets, policies, entry point, UI)
+        run: python scripts/ci/check_wheel.py dist/*.whl --require-ui
+      - uses: actions/upload-artifact@v4
+        with:
+          name: asent-wheel
+          path: dist/*.whl
+          if-no-files-found: error
+
+  installed:
+    name: Install the wheel and run asent outside the checkout
+    needs: wheel
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: source
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/download-artifact@v4
+        with:
+          name: asent-wheel
+          path: ${{ runner.temp }}/wheel
+      - name: Install into a fresh virtual environment outside the repository
+        run: |
+          python -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/python" -m pip install --constraint source/requirements.lock.txt "$RUNNER_TEMP"/wheel/*.whl
+          echo "$RUNNER_TEMP/venv/bin" >> "$GITHUB_PATH"
+      - name: asent --version
+        working-directory: ${{ runner.temp }}
+        run: |
+          unset PYTHONPATH ASENT_HOME ASENT_PYTHON
+          asent --version
+          asent --version --json > version.json
+          python - <<'EOF'
+          import json, os, backend, backend.config as c
+          venv = os.path.join(os.environ["RUNNER_TEMP"], "venv")
+          assert os.path.realpath(backend.__file__).startswith(os.path.realpath(venv)), backend.__file__
+          assert c.INSTALLED, "installed asent thinks it is a checkout"
+          assert json.load(open("version.json")) == {"name": "asent", "version": c.VERSION}
+          print("asent", c.VERSION, "imported from", backend.__file__)
+          EOF
+      - name: asent doctor --json (before the images exist)
+        working-directory: ${{ runner.temp }}
+        run: |
+          set +e
+          asent doctor --json > doctor-before.json
+          code=$?
+          set -e
+          python - "$code" <<'EOF'
+          import json, sys
+          d = json.load(open("doctor-before.json"))
+          checks = {c["id"]: c for c in d["checks"]}
+          assert d["schema"] == "asent.doctor.v1", d
+          assert checks["resources"]["status"] == "ok", checks["resources"]
+          assert checks["dashboard-ui"]["status"] == "ok", "the CI wheel must bundle the UI"
+          assert (sys.argv[1] == "0") == d["ready"], (sys.argv[1], d["ready"])
+          for c in d["checks"]:
+              print(f"{c['status']:8} {c['label']}: {c['detail']}")
+          EOF
+      - name: Build the sandbox images from the packaged Dockerfiles
+        working-directory: ${{ runner.temp }}
+        run: |
+          assets=$(python -c 'import json; print(json.load(open("doctor-before.json"))["assets"])')
+          case "$assets" in "$RUNNER_TEMP/venv/"*) ;; *) echo "assets outside the venv: $assets"; exit 1 ;; esac
+          docker build -t asent-sandbox:local -f "$assets/docker/sandbox.Dockerfile" "$assets"
+          docker build -t asent-satra-runner:local -f "$assets/docker/satra-runner.Dockerfile" "$assets/docker"
+      - name: asent doctor --json (ready)
+        working-directory: ${{ runner.temp }}
+        run: |
+          asent doctor
+          asent doctor --json > doctor.json
+          python -c 'import json; d = json.load(open("doctor.json")); assert d["ready"] is True, d'
+      - name: asent gate on the sample repositories
+        working-directory: ${{ runner.temp }}
+        run: |
+          for case in accept:0:ACCEPT block:1:BLOCK; do
+            mode=${case%%:*}; rest=${case#*:}; want=${rest%%:*}; decision=${rest#*:}
+            "$GITHUB_WORKSPACE/source/scripts/ci/make_sample_repo.sh" "$RUNNER_TEMP/sample-$mode" "$GITHUB_WORKSPACE/source" "$mode"
+            cd "$RUNNER_TEMP/sample-$mode"
+            set +e
+            asent gate --json > "$RUNNER_TEMP/gate-$mode.json"
+            code=$?
+            set -e
+            asent report
+            got=$(python -c 'import json, sys; print(json.load(open(sys.argv[1]))["decision"])' "$RUNNER_TEMP/gate-$mode.json")
+            echo "sample $mode: exit $code, decision $got"
+            if [ "$code" != "$want" ] || [ "$got" != "$decision" ]; then
+              echo "::error::sample $mode: expected exit $want ($decision), got exit $code ($got)"; exit 1
+            fi
+            cd "$RUNNER_TEMP"
+          done
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: asent-installed-check
+          path: |
+            ${{ runner.temp }}/*.json
+            ${{ runner.temp }}/sample-*/asent-report.json
+            ${{ runner.temp }}/sample-*/asent-summary.md
+          if-no-files-found: warn

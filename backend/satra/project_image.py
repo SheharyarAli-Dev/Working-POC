@@ -24,11 +24,11 @@ from backend.cavr.gate_adapter import _unsupported as unsupported_manifests
 from backend.cavr.manifest_parser import read_manifest
 from backend.cavr.pipeline import LOCKFILE_NAME
 from backend.cavr.requirement_gate import evaluate_requirement, lockfile_problems
-from backend.config import ROOT
+from backend.config import ASSETS
 from backend.orchestrator.hashing import files as project_files
 
 RUNNER_IMAGE = "asent-satra-runner:local"
-RUNNER_REQUIREMENTS = ROOT / "docker/satra-runner.requirements.txt"
+RUNNER_REQUIREMENTS = ASSETS / "docker/satra-runner.requirements.txt"
 PROJECT_REPOSITORY = "asent-satra-project"
 # Bump when the generated Dockerfile or requirements format changes: images built by older code
 # then get a different key and are never reused.

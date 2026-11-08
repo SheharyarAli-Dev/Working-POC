@@ -30,8 +30,8 @@ ALLOWED = {
     ("backend/cavr/analyzer.py", "context.path/'fixtures/invoice.pdf'"): "lockfile analyzer; analyze() returns the pipeline adapter first for every gate run",
     ("backend/orchestrator/service.py", "scenarios/cavr_controlled/invoice_pdf_safe.py"): "demo repair (_repair); analyze() forces auto_repair=False for gate runs",
     ("backend/orchestrator/service.py", "branch/'fixtures'/'invoice.pdf'"): "demo repair (_repair); unreachable for gate runs",
-    ("backend/satra/pytest_runner.py", "ROOT/'scenarios/laboratory_hashes.json'"): "ASENT's own index of bundled inert sources; only read when external=False",
-    ("backend/satra/pytest_runner.py", "ROOT/'demo_project/InvoiceHub'"): "host fallback for bundled sources; run_pytest(external=True) returns before it",
+    ("backend/satra/pytest_runner.py", "ASSETS/'scenarios/laboratory_hashes.json'"): "ASENT's own index of bundled inert sources; only read when external=False",
+    ("backend/satra/pytest_runner.py", "ASSETS/'demo_project/InvoiceHub'"): "host fallback for bundled sources; run_pytest(external=True) returns before it",
     ("backend/satra/pytest_runner.py", "for name in ('pytest.ini','fixtures/invoice.pdf'):"): "same host fallback (permitted_builtin); not consulted when external=True",
 }
 

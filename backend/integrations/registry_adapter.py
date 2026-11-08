@@ -4,7 +4,7 @@ from pathlib import Path
 from zipfile import ZipFile
 from email.parser import Parser
 import httpx
-from backend.config import ROOT
+from backend.config import ADVISORIES,ASSETS
 from backend.orchestrator.hashing import digest
 
 def metadata(name,version,ecosystem='PyPI'):
@@ -18,7 +18,7 @@ def read_artifact(node,workspace):
     # Artifacts must be local to the candidate or the supplied immutable artifact directory.
     if not rel or Path(rel).is_absolute() or '..' in Path(rel).parts:raise ValueError('Invalid artifact path')
     local=Path(workspace)/rel
-    path=local if local.is_file() else ROOT/rel
+    path=local if local.is_file() else ASSETS/rel
     if not path.is_file():raise ValueError('Artifact missing: '+rel)
     raw=path.read_bytes();sha=digest(raw)
     if sha!=node.get('sha256'):raise ValueError('Artifact hash mismatch: '+node['name'])
@@ -35,7 +35,7 @@ def read_artifact(node,workspace):
     if meta.get('name','').lower().replace('_','-')!=node['name'].lower().replace('_','-') or meta.get('version')!=node['version']:raise ValueError('Artifact metadata does not match lock')
     if path.suffix=='.whl':
         query={'package':{'name':node['name'],'ecosystem':'PyPI'},'version':node['version']}
-        record=ROOT/'advisories'/('registry-'+digest(query)+'.json')
+        record=ADVISORIES/('registry-'+digest(query)+'.json')
         registry=json.loads(record.read_text()) if record.exists() else metadata(node['name'],node['version'])
         response=registry.get('response',{})
         if 'response_sha256' in registry and digest(response)!=registry['response_sha256']:raise ValueError('Registry response digest mismatch')

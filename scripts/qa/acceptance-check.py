@@ -84,7 +84,7 @@ with tempfile.TemporaryDirectory(prefix='asent-final-http-') as temp:
                 auth={'Authorization':'Bearer '+login.json()['access_token']}
                 invoice=c.post('/invoicehub/invoices',headers=auth,files={'file':('invoice.pdf',(DEMO/'fixtures/invoice.pdf').read_bytes(),'application/pdf')});assert invoice.status_code==201 and 'Invoice IH-' in invoice.json()['text']
                 results['checks']['invoice_pdf_upload']=True
-                command=subprocess.run([sys.executable,'-m','backend.cli','--url','http://127.0.0.1:8000','report',safe['run_id']],capture_output=True,text=True,timeout=15)
+                command=subprocess.run([sys.executable,'-m','backend.cli','--url','http://127.0.0.1:8000','report','--run',safe['run_id']],capture_output=True,text=True,timeout=15)
                 assert command.returncode==0 and json.loads(command.stdout)['chain_valid'];results['checks']['cli_report']=True
                 # Retain genuine JUnit/traces/envelopes for these executions, never live DB credentials.
                 dest=reports/'acceptance-artifacts'

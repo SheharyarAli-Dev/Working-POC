@@ -6,7 +6,7 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor,as_completed
 from pathlib import Path
-from backend.config import DATA,ROOT
+from backend.config import ASSETS,DATA
 from backend.db.storage import Store
 from backend.orchestrator.run_context import RunContext,Evidence
 from backend.orchestrator.hashing import digest,manifest,snapshot,changed,copy_tree,files
@@ -177,7 +177,7 @@ class Service:
                     lock=json.loads((branch/'dependencies.lock.json').read_text())
                     candidate=next((x for x in lock['packages'] if x['name']=='invoice-pdf-safe'),None)
                     artifact=Path(candidate['artifact']) if candidate else None
-                    identity_ok=bool(candidate and artifact and (branch/artifact).is_file() and digest((branch/artifact).read_bytes())==candidate.get('sha256') and candidate.get('sha256')==digest((ROOT/'scenarios/cavr_controlled/invoice_pdf_safe.py').read_bytes()))
+                    identity_ok=bool(candidate and artifact and (branch/artifact).is_file() and digest((branch/artifact).read_bytes())==candidate.get('sha256') and candidate.get('sha256')==digest((ASSETS/'scenarios/cavr_controlled/invoice_pdf_safe.py').read_bytes()))
                     changed_files+=proposal_changes
                     bus.emit('cavr.repair_candidate_checked',{'candidate_id':'local-safe-adapter-v1','artifact_identity_valid':identity_ok,'artifact':candidate,'proposal_snapshot':snapshot(branch)})
         if 'SATRA' in needs:

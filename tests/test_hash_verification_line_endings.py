@@ -55,7 +55,7 @@ def test_satra_pinned_python_source_normalizes_but_other_assets_stay_byte_exact(
     (reference_root / 'scenarios/laboratory_hashes.json').write_text(json.dumps({
         'python_sources': [_sha(source)],
     }))
-    monkeypatch.setattr(pytest_runner, 'ROOT', reference_root)
+    monkeypatch.setattr(pytest_runner, 'ASSETS', reference_root)  # permitted_builtin reads its references from config.ASSETS
 
     assert pytest_runner.permitted_builtin(candidate_root)
     (candidate_root / 'test_app.py').write_bytes(b'changed source\r\n')
