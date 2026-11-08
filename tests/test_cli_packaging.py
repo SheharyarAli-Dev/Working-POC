@@ -158,3 +158,34 @@ def test_installed_asent_command_runs_a_real_gate_outside_the_checkout(installed
     assert result.returncode == 2, result.stderr
     report = json.loads((tmp_path / "out/asent-report.json").read_text())
     assert report["decision"] == "REVIEW" and report["asent_version"] == VERSION
+
+
+# --- scripts/ci/check_wheel.py (the CI gate before upload) ---------------------------------------
+
+def check_wheel(*args):
+    return subprocess.run([sys.executable, str(REPO / "scripts/ci/check_wheel.py"), *map(str, args)],
+                          capture_output=True, text=True)
+
+
+def test_check_wheel_accepts_the_built_wheel(wheel):
+    done = check_wheel(wheel)
+    assert done.returncode == 0 and done.stdout.strip().endswith(": ok"), done.stderr
+
+
+def test_check_wheel_require_ui_fails_without_the_dashboard_build(wheel):
+    if "backend/_data/frontend/dist/index.html" in names(wheel):
+        pytest.skip("frontend/dist was built here, so this wheel has the UI")
+    done = check_wheel(wheel, "--require-ui")
+    assert done.returncode == 1 and "frontend/dist/index.html" in done.stderr
+
+
+def test_check_wheel_lists_a_missing_asset(wheel, tmp_path):
+    broken = tmp_path / wheel.name
+    with zipfile.ZipFile(wheel) as src, zipfile.ZipFile(broken, "w") as dst:
+        for item in src.infolist():
+            if item.filename != "backend/_data/docker/asent-seccomp.json":
+                dst.writestr(item, src.read(item))
+        dst.writestr("tests/stray.py", "")
+    done = check_wheel(broken)
+    assert done.returncode == 1
+    assert "missing backend/_data/docker/asent-seccomp.json" in done.stderr and "unexpected tests/stray.py" in done.stderr
