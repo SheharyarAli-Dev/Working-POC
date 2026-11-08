@@ -358,3 +358,171 @@ def test_threat_model_states_that_in_process_forgery_is_not_solved():
     assert "Stated limit" in (DOCS / "satra/harness-isolation.md").read_text()
     marker = test_known_limit_in_process_code_under_test_can_still_forge_results.pytestmark[0]
     assert marker.name == "xfail" and marker.kwargs["strict"] is True
+
+
+# --- base data next to the trusted suite (SATRA.trusted_data, docs/satra/trusted-suite.md) ----------------
+
+import hashlib  # noqa: E402
+from importlib.machinery import EXTENSION_SUFFIXES  # noqa: E402
+
+from backend.project_config.schema import SatraModule  # noqa: E402
+from backend.satra import trusted_data  # noqa: E402
+
+# A trusted suite that finds its fixture next to itself, as InvoiceHub's conftest does (parents[1] / "fixtures").
+DATA_TRUSTED = ("from pathlib import Path\n\nfrom app.security import can_access\n\n"
+                "TOKEN = Path(__file__).resolve().parents[1] / 'fixtures' / 'token.txt'\n\n\n"
+                "def test_owner_allowed():\n    assert TOKEN.read_text() == 'base token\\n'\n    assert can_access('a', 'a')\n\n\n"
+                "def test_other_user_denied():\n    assert TOKEN.read_text() == 'base token\\n'\n    assert not can_access('a', 'b')\n")
+WITH_DATA = {"trusted": DATA_TRUSTED, "satra": {"trusted_data": ["fixtures"]}, "extra": {"fixtures/token.txt": "base token\n"}}
+
+
+def trusted_runs(container_on_host):
+    return [run for run in container_on_host.runs if "/trusted" in run["mounts"]]
+
+
+def test_declared_base_data_is_mounted_next_to_the_trusted_suite(tmp_path, container_on_host):
+    """trusted_data ["fixtures"]: /trusted/fixtures/token.txt exists in every trusted run (base, head, mutant), read-only."""
+    status, details, _ = gate(tmp_path, WITH_DATA)
+    assert status == "ACCEPT", details["reason"]
+    assert details["trusted_data"] == {"files": [{"path": "fixtures/token.txt", "bytes": 11,
+                                                  "sha256": hashlib.sha256(b"base token\n").hexdigest()}],
+                                       "file_count": 1, "total_bytes": 11}
+    runs = trusted_runs(container_on_host)
+    assert len(runs) == 3
+    for run in runs:
+        assert sorted(run["before"]["/trusted"]) == ["asent_assurance/test_contract.py", "fixtures/token.txt", "pytest.ini"]
+        assert run["mounts"]["/trusted"][1] == "ro"
+
+
+def test_trusted_data_comes_from_the_base_even_when_the_head_changes_it(tmp_path, container_on_host):
+    """The head edits fixtures/token.txt: the trusted runs still see the base bytes; the head copy keeps its own."""
+    head = {**WITH_DATA, "extra": {"fixtures/token.txt": "head token\n"}}
+    status, details, _ = gate(tmp_path, WITH_DATA, head)
+    assert status == "ACCEPT", details["reason"]
+    runs = trusted_runs(container_on_host)
+    assert [run["before"]["/trusted"]["fixtures/token.txt"] for run in runs] == [b"base token\n"] * 3
+    assert runs[1]["before"]["/work"]["fixtures/token.txt"] == b"head token\n"  # trusted_candidate: the head copy
+
+
+def test_undeclared_data_next_to_the_suite_is_missing_and_the_gate_is_inconclusive(tmp_path, container_on_host):
+    """The asent-target-invoicehub failure: the fixture is not declared, the suite cannot find it -> INCONCLUSIVE."""
+    status, details, _ = gate(tmp_path, {**WITH_DATA, "satra": {}})
+    assert status == "INCONCLUSIVE" and "do not pass on the base commit" in details["reason"]
+    baseline = details["executions"]["trusted_baseline"]
+    assert baseline["passed"] == 0 and baseline["tests"]
+    assert all("FileNotFoundError" in t["message"] and "fixtures/token.txt" in t["message"] for t in baseline["tests"])
+
+
+NATIVE = "fixtures/fast" + EXTENSION_SUFFIXES[0]  # e.g. fixtures/fast.cpython-312-x86_64-linux-gnu.so
+
+
+@pytest.mark.parametrize("declared, files, words", [
+    (["fixtures"], {}, "trusted_data 'fixtures' is not in the base commit"),
+    (["asent_assurance"], {"asent_assurance/a.txt": "x"}, "would replace /trusted/asent_assurance"),
+    (["pytest.ini"], {"pytest.ini": "[pytest]\n"}, "would replace /trusted/pytest.ini"),
+    (["fixtures"], {"fixtures/token.txt": "x", "fixtures/helper.py": "x = 1\n"}, "fixtures/helper.py is Python code"),
+    (["fixtures"], {"fixtures/conftest.py": "import pytest\n"}, "fixtures/conftest.py is a pytest or Python settings file"),
+    (["fixtures"], {"fixtures/pyproject.toml": "[tool.pytest.ini_options]\n"}, "settings file"),
+    (["fixtures"], {NATIVE: "not really native"}, "is Python code or a native module"),
+    (["fixtures"], {"fixtures/hook.pth": "import os\n"}, "fixtures/hook.pth is Python code"),
+], ids=["missing", "asent_assurance", "pytest.ini", ".py", "conftest.py", "pyproject.toml", "native", ".pth"])
+def test_refused_trusted_data_makes_the_gate_inconclusive_before_any_build_or_run(tmp_path, container_on_host, declared, files, words):
+    kwargs = {"satra": {"trusted_data": declared}, "extra": files}
+    status, details, _ = gate(tmp_path, kwargs)
+    assert status == "INCONCLUSIVE" and details["reason"].startswith("Trusted data refused: ") and words in details["reason"], details["reason"]
+    assert details["executions"] == {} and container_on_host.runs == []
+    assert not any(call[1] == "build" for call in container_on_host.engine.calls)
+
+
+def _tree(root, files):
+    for name, data in files.items():
+        (root / name).parent.mkdir(parents=True, exist_ok=True)
+        (root / name).write_bytes(data)
+    return root
+
+
+def test_collect_reads_exact_bytes_of_files_and_folders_once(tmp_path):
+    base = _tree(tmp_path, {"fixtures/a.bin": b"\x00\r\n\xff", "fixtures/sub/b.txt": b"b", "data.csv": b"x,y\r\n"})
+    found, problem = trusted_data.collect(base, ["fixtures", "fixtures/sub/b.txt", "data.csv"])
+    assert problem is None
+    assert found == {"fixtures/a.bin": b"\x00\r\n\xff", "fixtures/sub/b.txt": b"b", "data.csv": b"x,y\r\n"}
+    assert trusted_data.collect(base, []) == ({}, None)
+
+
+@pytest.mark.skipif(os.name != "posix", reason="symbolic links and FIFOs")
+@pytest.mark.parametrize("make, declared, words", [
+    (lambda b: os.symlink(b / "outside.txt", b / "fixtures/link.txt"), ["fixtures"], "fixtures/link.txt is a symbolic link"),
+    (lambda b: os.symlink(b / "outside.txt", b / "fixtures/link.txt"), ["fixtures/link.txt"], "fixtures/link.txt is a symbolic link"),
+    (lambda b: os.symlink(b / "elsewhere", b / "fixtures/sub"), ["fixtures"], "fixtures/sub is a symbolic link"),
+    (lambda b: os.symlink(b / "elsewhere", b / "linked"), ["linked/inner.txt"], "linked is a symbolic link"),
+    (lambda b: os.mkfifo(b / "fixtures/pipe"), ["fixtures"], "fixtures/pipe is a special file"),
+    (lambda b: os.mkfifo(b / "pipe"), ["pipe"], "is a special file, not a regular file or folder"),
+    (lambda b: (b / "empty").mkdir(), ["empty"], "trusted_data 'empty' has no files in the base commit"),
+], ids=["link in folder", "link declared", "linked subfolder", "link on the way", "fifo in folder", "fifo declared", "empty folder"])
+def test_collect_accepts_regular_files_only(tmp_path, make, declared, words):
+    base = _tree(tmp_path, {"fixtures/token.txt": b"t", "outside.txt": b"secret", "elsewhere/inner.txt": b"i"})
+    make(base)
+    found, problem = trusted_data.collect(base, declared)
+    assert found is None and words in problem, problem
+
+
+def test_collect_file_count_cap(tmp_path, monkeypatch):
+    monkeypatch.setattr(trusted_data, "MAX_FILES", 3)
+    base = _tree(tmp_path, {f"fixtures/{i}.txt": b"x" for i in range(3)})
+    assert trusted_data.collect(base, ["fixtures"])[1] is None  # exactly at the cap
+    (base / "fixtures/3.txt").write_bytes(b"x")
+    assert trusted_data.collect(base, ["fixtures"]) == (None, "trusted_data has more than 3 files (cap 3)")
+
+
+def test_collect_total_size_cap(tmp_path, monkeypatch):
+    monkeypatch.setattr(trusted_data, "MAX_BYTES", 10)
+    base = _tree(tmp_path, {"fixtures/a.txt": b"12345", "fixtures/b.txt": b"67890"})
+    assert trusted_data.collect(base, ["fixtures"])[1] is None  # exactly at the cap
+    (base / "fixtures/c.txt").write_bytes(b"!")
+    found, problem = trusted_data.collect(base, ["fixtures"])
+    assert found is None and problem.startswith("trusted_data is larger than 10 bytes")
+
+
+def test_default_caps_are_1000_files_and_20_mib():
+    assert trusted_data.MAX_FILES == 1000 and trusted_data.MAX_BYTES == 20 * 1024 * 1024
+
+
+def test_a_file_over_the_size_cap_is_refused_in_a_gate_run(tmp_path, container_on_host, monkeypatch):
+    monkeypatch.setattr(trusted_data, "MAX_BYTES", 4)
+    status, details, _ = gate(tmp_path, WITH_DATA)
+    assert status == "INCONCLUSIVE" and "Trusted data refused: trusted_data is larger than 4 bytes" in details["reason"]
+    assert container_on_host.runs == []
+
+
+def test_run_pytest_refuses_a_data_path_that_would_replace_the_suite(tmp_path, container_on_host):
+    """Defence in depth for callers other than gate mode: the layout itself refuses reserved or escaping paths."""
+    base = project(tmp_path / "base")
+    for rel in ("asent_assurance/test_contract.py", "pytest.ini", "../outside.txt"):
+        result = pytest_runner.run_pytest(base, tmp_path / "out", "all", True, trusted_tests_dir=base / ".asent/satra/trusted_tests",
+                                          external=True, image=IMAGE, trusted_data={rel: b"def test_x():\n    pass\n"})
+        assert result["available"] is False and "trusted data path not allowed" in result["reason"], rel
+    assert container_on_host.runs == []
+
+
+@pytest.mark.parametrize("path", ["../fixtures", "/etc", ".asent/satra", "fixtures\\x", ".git/config"])
+def test_config_refuses_trusted_data_paths_outside_the_project(path):
+    with pytest.raises(ValueError):
+        SatraModule.model_validate({"enabled": True, "trusted_data": [path]})
+    assert SatraModule.model_validate({"enabled": True}).trusted_data == []
+
+
+SHADOW_TRUSTED = ("from pathlib import Path\n\nimport app.security\nfrom app.security import can_access\n\n"
+                  "LOGO = Path(__file__).resolve().parents[1] / 'app' / 'assets' / 'logo.txt'\n\n\n"
+                  "def test_owner_allowed():\n    assert LOGO.read_bytes() == b'logo'\n"
+                  "    assert app.security.__file__.startswith(__import__('os').environ['ASENT_SATRA_HEAD'])\n"
+                  "    assert can_access('a', 'a')\n\n\n"
+                  "def test_other_user_denied():\n    assert not can_access('a', 'b')\n")
+
+
+def test_trusted_data_folder_inside_a_head_package_does_not_shadow_it(tmp_path, container_on_host):
+    """trusted_data ["app/assets"] creates /trusted/app (on sys.path before the head when pythonpath = .); `app` is still the head's package."""
+    kwargs = {"trusted": SHADOW_TRUSTED, "satra": {"trusted_data": ["app/assets"]}, "extra": {"app/assets/logo.txt": "logo"}}
+    status, details, _ = gate(tmp_path, kwargs)
+    assert status == "ACCEPT", details["reason"]
+    assert [entry["path"] for entry in details["trusted_data"]["files"]] == ["app/assets/logo.txt"]
+    assert details["executions"]["trusted_counterfactual"]["failed"] >= 1  # the mutant in /work is what was imported

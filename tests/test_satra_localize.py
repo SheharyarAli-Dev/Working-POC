@@ -102,3 +102,51 @@ def test_end_to_end_localization_on_repo(tmp_path):
         assert len(loc["test_changes"]) == 0
     finally:
         release_run_dirs(handle_docs)
+
+
+# --- localize(baseline, candidate): the folder-to-folder form gate mode uses ----------------------------
+
+def _write(root, files):
+    for name, text in files.items():
+        (root / name).parent.mkdir(parents=True, exist_ok=True)
+        (root / name).write_bytes(text.encode() if isinstance(text, str) else text)
+    return root
+
+
+PROJECT = {"app/main.py": SNIPPET_SAFE_IDOR, "tests/test_security.py": "def test_a():\n    assert True\n",
+           "tests/conftest.py": "import pytest\n", "README.md": "v1\n"}
+
+
+def test_localize_lists_no_unchanged_files(tmp_path):
+    """A head that changes no .py file (the asent-target-invoicehub .gitignore-only PR): nothing is listed as changed."""
+    base = _write(tmp_path / "base", PROJECT)
+    head = _write(tmp_path / "head", {**PROJECT, ".gitignore": "x\n", "README.md": "v2\n"})
+    loc = diff_localizer.localize(base, head)
+    assert loc["test_changes"] == [] and loc["regions"] == [] and loc["diff"] == ""
+
+
+def test_localize_lists_only_the_changed_test_file_with_its_own_diff(tmp_path):
+    base = _write(tmp_path / "base", PROJECT)
+    head = _write(tmp_path / "head", {**PROJECT, "tests/test_security.py": "def test_a():\n    assert False\n",
+                                      "tests/test_new.py": "def test_b():\n    pass\n"})
+    loc = diff_localizer.localize(base, head)
+    assert [(t["path"], t["status"]) for t in loc["test_changes"]] == [("tests/test_new.py", "added"), ("tests/test_security.py", "modified")]
+    changed = loc["test_changes"][1]["diff"]
+    assert "-    assert True" in changed and "+    assert False" in changed and "test_new" not in changed
+    assert "+def test_b():" in loc["test_changes"][0]["diff"]
+    assert loc["regions"] == []
+
+
+def test_localize_still_finds_a_changed_application_region(tmp_path):
+    base = _write(tmp_path / "base", PROJECT)
+    head = _write(tmp_path / "head", {**PROJECT, "app/main.py": SNIPPET_BYPASS_IDOR})
+    loc = diff_localizer.localize(base, head)
+    assert [r["function"] for r in loc["regions"]] == ["read_invoice"] and loc["test_changes"] == []
+    assert "AUTHZ.IDOR.001" in loc["regions"][0]["families"] and "app/main.py" in loc["diff"]
+
+
+def test_localize_treats_a_line_ending_only_change_as_unchanged(tmp_path):
+    """Text is compared as Python reads it (universal newlines), so CRLF -> LF alone is not a change to localize."""
+    base = _write(tmp_path / "base", {**PROJECT, "tests/test_security.py": b"def test_a():\r\n    assert True\r\n"})
+    head = _write(tmp_path / "head", PROJECT)
+    assert diff_localizer.localize(base, head)["test_changes"] == []

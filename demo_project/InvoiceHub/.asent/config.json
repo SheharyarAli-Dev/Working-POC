@@ -30,6 +30,9 @@
       "enabled": true,
       "contract": "satra/contract.json",
       "trusted_tests": "satra/trusted_tests",
+      "trusted_data": [
+        "fixtures"
+      ],
       "source_dirs": [
         "app"
       ],

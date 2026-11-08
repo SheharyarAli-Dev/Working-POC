@@ -133,35 +133,34 @@ def localize_change_set(change_set, baseline_dir, candidate_dir):
 
 
 def localize(baseline, candidate):
+    """Change set of the .py files that differ between two folders, then `localize_change_set`.
+
+    A file is listed only when it is new in `candidate` or its text differs from `baseline` (read as Python
+    reads source, so a line-ending-only change is not a change); each entry carries its own unified diff.
+    Unchanged files are not listed: before, every candidate .py file was reported as "modified" with an empty diff.
+    """
     import difflib
-    diffs = []
     cand_path = Path(candidate)
     base_path = Path(baseline)
+    files, diffs = [], []
 
     for p in sorted(cand_path.rglob("*.py")):
-        if "__pycache__" in p.parts or ".git" in p.parts:
-            continue
         rel = p.relative_to(cand_path)
+        if "__pycache__" in rel.parts or ".git" in rel.parts or not p.is_file():
+            continue
         old_file = base_path / rel
-        before = old_file.read_text(encoding="utf-8", errors="replace") if old_file.exists() else ""
+        before = old_file.read_text(encoding="utf-8", errors="replace") if old_file.is_file() else None
         after = p.read_text(encoding="utf-8", errors="replace")
-        if before != after:
-            diffs.extend(difflib.unified_diff(
-                before.splitlines(), after.splitlines(),
-                fromfile=str(rel), tofile=str(rel), lineterm=""
-            ))
+        if before == after:
+            continue
+        lines = list(difflib.unified_diff(
+            (before or "").splitlines(), after.splitlines(),
+            fromfile=rel.as_posix(), tofile=rel.as_posix(), lineterm=""
+        ))
+        diffs.extend(lines)
+        files.append({"path": rel.as_posix(), "status": "added" if before is None else "modified",
+                      "binary": False, "diff": "\n".join(lines)})
 
-    synthetic_change_set = {
-        "files": [
-            {
-                "path": str(p.relative_to(cand_path)).replace("\\", "/"),
-                "status": "modified" if (base_path / p.relative_to(cand_path)).exists() else "added",
-                "binary": False
-            }
-            for p in sorted(cand_path.rglob("*.py"))
-            if "__pycache__" not in p.parts and ".git" not in p.parts
-        ]
-    }
-    result = localize_change_set(synthetic_change_set, baseline, candidate)
+    result = localize_change_set({"files": files}, baseline, candidate)
     result["diff"] = "\n".join(diffs)
     return result

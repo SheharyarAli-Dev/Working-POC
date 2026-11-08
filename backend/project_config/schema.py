@@ -94,6 +94,9 @@ class SatraModule(_Module):
     contract: AsentPath = Field("satra/contract.json", description="SATRA security contract inside .asent/")
     trusted_tests: AsentPath = Field("satra/trusted_tests", description="trusted pytest directory inside .asent/")
     pytest_ini: Optional[AsentPath] = Field(None, description="pytest.ini for the trusted tests, inside .asent/")
+    trusted_data: list[ProjectPath] = Field(default_factory=list,
+                                            description="base files or folders the trusted tests read, copied read-only to "
+                                                        "/trusted/<path> (regular data files only; docs/satra/trusted-suite.md)")
     source_dirs: list[ProjectPath] = Field(default_factory=list, description="application code; empty = whole project")
     project_security_tests: Optional[ProjectPath] = Field(None, description="the project's own security test file, checked for a weakened oracle")
 

@@ -236,6 +236,14 @@
           "title": "Source Dirs",
           "type": "array"
         },
+        "trusted_data": {
+          "description": "base files or folders the trusted tests read, copied read-only to /trusted/<path> (regular data files only; docs/satra/trusted-suite.md)",
+          "items": {
+            "type": "string"
+          },
+          "title": "Trusted Data",
+          "type": "array"
+        },
         "trusted_tests": {
           "default": "satra/trusted_tests",
           "description": "trusted pytest directory inside .asent/",

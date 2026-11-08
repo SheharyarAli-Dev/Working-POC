@@ -18,7 +18,10 @@ Steps (every pytest run is in a container with no network; without Docker/Podman
    .pth files, native modules (.so/.pyd/.dylib, EXTENSION_SUFFIXES) or a .py they shadow, a plain file or a
    deletion at a base-ini pythonpath entry, non-test code importing a test module, pytest settings, or non-test code importing pytest / writing sys.modules → INCONCLUSIVE
    ("test-harness tampering suspected") before any image is built or test runs.
-2. Trusted tests (base `.asent/satra/trusted_tests/`) on the base and on the head commit.
+   Then `trusted_data.collect(base, trusted_data)`: each declared base path must hold only regular data
+   files (no code, links or settings files), at most 1000 files / 20 MiB, else INCONCLUSIVE.
+2. Trusted tests (base `.asent/satra/trusted_tests/`) on the base and on the head commit, mounted at
+   /trusted/asent_assurance/ with the declared base data at /trusted/<path> (docs/satra/trusted-suite.md).
 3. The project's own tests (`tests/`, when present) on the head commit.
 4. Counterfactual: base copy with the contract's RETURN_TRUE target; the trusted tests must fail on
    it (killed), otherwise they cannot vouch for the contract: INCONCLUSIVE.
@@ -38,7 +41,7 @@ import tempfile
 from pathlib import Path
 
 from backend.orchestrator.hashing import copy_tree, digest
-from backend.satra import harness_guard, project_image, pytest_runner
+from backend.satra import harness_guard, project_image, pytest_runner, trusted_data
 from backend.satra.counterfactuals import mutate_return_true
 from backend.satra.diff_localizer import localize
 from backend.satra.static_adapters import scan
@@ -47,6 +50,32 @@ from backend.threat_repo.repository import active
 
 NO_ENGINE = "External code requires Docker/Podman; a gate run never executes repository code on the host"
 BOUNDED = "Bounded to the configured contract, its trusted tests and one RETURN_TRUE counterfactual; other vulnerability families are not covered"
+
+
+def _error_line(message):
+    """The first line of the last block of pytest `E ` lines (the final exception's message, also after a chained
+    traceback), else the message's last non-empty line; at most 300 characters."""
+    lines = [line.strip() for line in (message or "").splitlines() if line.strip()]
+    first, previous = None, False
+    for line in lines:
+        current = line.startswith("E ")
+        if current and not previous:
+            first = line[1:].strip()
+        previous = current
+    return (first if first is not None else lines[-1] if lines else "")[:300]
+
+
+def describe(label, result):
+    """One line for a reason: counts and the first failing test's error, or why the run is unavailable."""
+    if not result.get("available"):
+        return "%s unavailable: %s" % (label, result.get("reason") or "no result")
+    text = "%s: %s passed, %s failed, %s errors" % (label, result.get("passed", 0), result.get("failed", 0), result.get("errors", 0))
+    first = next((t for t in result.get("tests", []) if t["status"] in ("FAIL", "ERROR")), None)
+    if first is not None:
+        text += "; first: %s: %s" % (first["name"], _error_line(first["message"]))
+    elif result.get("exit_code") not in (0, None):
+        text += "; pytest exit code %s" % result["exit_code"]
+    return text
 
 
 def analyze_configured(context, outdir, emit):
@@ -79,6 +108,13 @@ def analyze_configured(context, outdir, emit):
         return "INCONCLUSIVE", {**details, "reason": why, "executions": {}}, \
             [harness_guard.REASON + "; a human must review the listed head changes before any SATRA result is trusted"]
 
+    # Base data next to the trusted suite (/trusted/<path>): read and checked once, before any image is built.
+    data, problem = trusted_data.collect(context.baseline, cfg.trusted_data)
+    if problem:
+        why = "Trusted data refused: " + problem
+        return "INCONCLUSIVE", {**details, "reason": why, "executions": {}}, [why]
+    details["trusted_data"] = trusted_data.summary(data)
+
     caps = pytest_runner.availability()
     engine = next((name for name in ("docker", "podman") if caps.get(name, {}).get("available")), None)
     if engine is None:
@@ -105,9 +141,10 @@ def analyze_configured(context, outdir, emit):
     def execute(label, path, trusted=False, targets=None):
         result = pytest_runner.run_pytest(path, outdir / label, "all", trusted, trusted_tests_dir=trusted_dir if trusted else None,
                                           external=True, targets=targets, pytest_ini=ini if trusted else None,
-                                          image=image["image"], timeout=limits["timeout_seconds"], memory=limits["memory"])
+                                          image=image["image"], timeout=limits["timeout_seconds"], memory=limits["memory"],
+                                          trusted_data=data if trusted else None)
         executions[label] = result
-        emit("satra.test_result", {"label": label, **{k: v for k, v in result.items() if k not in ("stdout", "stderr", "tests")}})
+        emit("satra.test_result", {"label": label, **{k: v for k, v in result.items() if k not in ("stdout", "stderr", "tests", "command")}})
         return result
 
     baseline = execute("trusted_baseline", context.baseline, trusted=True)
@@ -153,7 +190,7 @@ def analyze_configured(context, outdir, emit):
     details["adaptive"] = {"available": False, "reason": "adaptive test generation is not used in gate runs", "validations": []}
 
     if not is_pass(baseline):
-        status, why = "INCONCLUSIVE", "Trusted tests do not pass on the base commit, or execution is unavailable"
+        status, why = "INCONCLUSIVE", "Trusted tests do not pass on the base commit, or execution is unavailable (" + describe("trusted baseline", baseline) + ")"
     elif not candidate.get("available") or candidate.get("exit_code") not in (0, 1):
         status, why = "INCONCLUSIVE", "Candidate test execution is incomplete"
     elif not is_pass(candidate):

@@ -8,11 +8,12 @@ import subprocess
 import sys
 import tempfile
 import time
-from pathlib import Path
+from pathlib import Path,PurePosixPath
 from xml.etree import ElementTree as ET
 from backend.config import ASSETS,ROOT
 from backend.orchestrator.hashing import copy_tree,digest,files
 from backend.integrations.tooling import availability
+from backend.satra.trusted_data import RESERVED as RESERVED_TRUSTED
 
 
 def _lf_digest(data: bytes) -> str:
@@ -43,10 +44,15 @@ TRUSTED_PLUGIN='asent_satra_trusted_run'
 TRUSTED_PYTHON=['python','-P','-s','-m','pytest']
 
 
-def _trusted_layout(base,trusted_tests_dir,pytest_ini):
-    """/trusted = base pytest.ini (or an empty one) + the base tests as asent_assurance/; /asent = the plugin only."""
+def _trusted_layout(base,trusted_tests_dir,pytest_ini,trusted_data=None):
+    """/trusted = base pytest.ini (or an empty one) + the base tests as asent_assurance/ + each declared base data
+    file at its project path (backend/satra/trusted_data.py, already checked); /asent = the plugin only."""
     trusted=Path(base)/'trusted';plugin=Path(base)/'asent'
     copy_tree(trusted_tests_dir,trusted/'asent_assurance')
+    for rel,data in (trusted_data or {}).items():
+        parts=PurePosixPath(rel).parts
+        if not parts or parts[0] in RESERVED_TRUSTED or '..' in parts or PurePosixPath(rel).is_absolute():raise ValueError('trusted data path not allowed: '+rel)
+        target=trusted.joinpath(*parts);target.parent.mkdir(parents=True,exist_ok=True);target.write_bytes(data)
     if pytest_ini is not None:shutil.copyfile(pytest_ini,trusted/'pytest.ini')
     else:(trusted/'pytest.ini').write_text('[pytest]\n')
     plugin.mkdir();shutil.copyfile(Path(__file__).with_name('trusted_run_plugin.py'),plugin/(TRUSTED_PLUGIN+'.py'))
@@ -108,13 +114,14 @@ def _load_results(xml,exit_code):
     return tests,None,data
 
 
-def run_pytest(root,output,selected='all',trusted=False,trusted_tests_dir=None,external=False,targets=None,pytest_ini=None,image='asent-sandbox:local',timeout=40,memory='512m'):
+def run_pytest(root,output,selected='all',trusted=False,trusted_tests_dir=None,external=False,targets=None,pytest_ini=None,image='asent-sandbox:local',timeout=40,memory='512m',trusted_data=None):
     # Gate runs pass external=True (never on the host, whatever the files), trusted_tests_dir (the
     # base .asent/ tests), targets (explicit project test paths), pytest_ini (the trusted ini), and
     # image/timeout/memory from backend.satra.project_image (the per-project image and base limits).
     # The defaults are the built-in demo's shared image and limits.
     # A trusted run with trusted_tests_dir in a container keeps the tests and ini outside the head
-    # (_trusted_layout); every other run is unchanged.
+    # (_trusted_layout); every other run is unchanged. trusted_data ({path: bytes} from
+    # backend.satra.trusted_data.collect on the base) is written next to the suite in that layout only.
     start=time.perf_counter();output=Path(output);output.mkdir(parents=True,exist_ok=True)
     caps=availability();engine=next((e for e in ('docker','podman') if caps[e]['available']),None)
     if not engine and (external or not permitted_builtin(root)):return {'available':False,'exit_code':None,'reason':'External/modified code requires Docker/Podman; host execution is limited to hash-pinned bundled sources','tests':[]}
@@ -127,7 +134,9 @@ def run_pytest(root,output,selected='all',trusted=False,trusted_tests_dir=None,e
         if trusted and trusted_tests_dir is not None:
             if (work/'asent_assurance').exists():return {'available':False,'exit_code':None,'reason':'project already has an asent_assurance directory','tests':[]}
             suite=work
-            if isolated:suite,plugin=_trusted_layout(d,trusted_tests_dir,pytest_ini)
+            if isolated:
+                try:suite,plugin=_trusted_layout(d,trusted_tests_dir,pytest_ini,trusted_data)
+                except ValueError as e:return {'available':False,'exit_code':None,'reason':str(e),'tests':[]}
             else:copy_tree(trusted_tests_dir,work/'asent_assurance')
             wanted='asent_assurance/test_'+selected+'.py'
             targets=['asent_assurance'] if selected=='all' or not (suite/wanted).is_file() else [wanted]
@@ -168,7 +177,7 @@ def run_pytest(root,output,selected='all',trusted=False,trusted_tests_dir=None,e
             (output/'stdout.log').write_text(result.stdout);(output/'stderr.log').write_text(result.stderr)
             tests,problem,data=_load_results(results/'results.xml',result.returncode)
             backend=engine or 'HASH_PINNED_BUILTIN_SUBPROCESS'
-            evidence={'backend':backend,'results_location':location,'removed_results_files':removed,'stdout':result.stdout[-10000:],'stderr':result.stderr[-2000:]}
+            evidence={'backend':backend,'command':list(cmd),'results_location':location,'removed_results_files':removed,'stdout':result.stdout[-10000:],'stderr':result.stderr[-2000:]}
             if problem:return {'available':False,'exit_code':None,'pytest_exit_code':result.returncode,'reason':problem,'tests':[],**evidence}
             (output/'junit.xml').write_bytes(data)
             return {'available':True,'exit_code':result.returncode,'tests':tests,'passed':sum(t['status']=='PASS' for t in tests),'failed':sum(t['status']=='FAIL' for t in tests),'errors':sum(t['status']=='ERROR' for t in tests),'skipped':sum(t['status']=='SKIP' for t in tests),'duration_ms':round((time.perf_counter()-start)*1000,2),'isolation':'container with network none' if engine else 'Known bundled sources only; isolated temp workspace, sanitized environment, resource limits and network/process audit restrictions; not an arbitrary-code sandbox','junit_path':str(output/'junit.xml'),'junit_sha256':digest(data),**evidence}

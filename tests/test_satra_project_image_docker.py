@@ -108,6 +108,22 @@ def test_real_gate_run_cannot_import_an_unlocked_dependency(docker, tmp_path):
     assert status == "INCONCLUSIVE" and "do not pass on the base commit" in details["reason"]
 
 
+def test_real_gate_run_of_the_invoicehub_trusted_suite_passes_on_its_base(docker, tmp_path):
+    """asent-target-invoicehub's real trusted suite (15 tests, reads fixtures/invoice.pdf) in its real 16-wheel gate
+    image, for a .gitignore-only head: the run that gave INCONCLUSIVE before SATRA.trusted_data (docs/satra/trusted-suite.md)."""
+    from test_satra_config import INVOICEHUB_PDF_SHA256, INVOICEHUB_TRUSTED, counts, invoicehub_gate
+    status, details, _ = invoicehub_gate(tmp_path)
+    executions = details["executions"]
+    assert details["sandbox_image"]["status"] == "READY", details["sandbox_image"]["reason"] + (details["sandbox_image"].get("build_log_tail") or "")
+    assert counts(executions["trusted_baseline"]) == (INVOICEHUB_TRUSTED, 0, 0), executions["trusted_baseline"].get("stdout", "")[-3000:]
+    assert counts(executions["trusted_candidate"]) == (INVOICEHUB_TRUSTED, 0, 0)
+    assert executions["trusted_counterfactual"]["failed"] + executions["trusted_counterfactual"]["errors"] >= 1
+    assert status == "ACCEPT", details["reason"]
+    assert details["trusted_data"]["files"] == [{"path": "fixtures/invoice.pdf", "bytes": 749, "sha256": INVOICEHUB_PDF_SHA256}]
+    assert len(details["sandbox_image"]["packages"]) == 16
+    assert all(run["backend"] == "docker" for run in executions.values())
+
+
 # --- trusted-run isolation in a real container (docs/satra/harness-isolation.md, step 5) -----------------
 
 # Head code under test, run on import inside the trusted pytest process: it tries to plant a file in /trusted,
