@@ -704,3 +704,52 @@ not where to find it afterwards.
 
 **Supervisor Q&A prep**
 - *Is the command in the report a leak?* It holds fixed flags, temp paths and the image tag; no secrets or environment values from the host.
+
+## Step 12 — test_changes listed unchanged files (2026-11-08)
+
+The asent-target-invoicehub report (a `.gitignore`-only PR) listed `tests/conftest.py`, `tests/test_archive.py`,
+`tests/test_functional.py` and `tests/test_security.py` under `test_changes` as `"modified"` with empty diffs.
+Reproduced after Step 9 on the same base/head: the files are byte-identical, mode 0644 on both sides, with no CR bytes.
+So the cause is neither line endings nor file mode. `backend/satra/diff_localizer.py::localize(baseline, candidate)`
+built its change set from **every** candidate `.py` file and called one `"modified"` whenever it existed in the base.
+It attached no per-file diff. It is evidence only: no verdict reads `test_changes` (gate mode and the demo
+analyzer store it; the CLI uses `localize_change_set` with a real git change set).
+
+**Ch 6 Implementation**
+- `localize`: a `.py` file is listed only when it is new (`added`) or its text differs (`modified`). It is read as
+  Python reads source (universal newlines), and each entry carries its own unified diff. Paths are checked for
+  `__pycache__`/`.git` relative to the candidate root (before, the absolute path was checked). A base path that is
+  a folder is treated as absent (`is_file`).
+
+**Design decisions**
+- Text comparison rather than bytes: a CRLF→LF-only edit is not a change for localisation, and it would give
+  an empty diff, the same symptom.
+- Deleted `.py` files are still not listed (unchanged behaviour). Listing them would add `function deleted` regions
+  for every gate run with deletions, which is a separate change. Deferred, noted below.
+- Side effect: an unchanged file with a syntax error no longer produces a `syntax_error` region on every run.
+  Only changed files are localised, which is what the regions claim to describe.
+
+**Requirements covered:** NFR-02 (accurate evidence): acceptance is that a head changing no `.py` file gives
+`test_changes == []`, and a changed test file is listed once with its diff.
+
+**Ch 7 Test cases** (`tests/test_satra_localize.py`)
+
+| Test ID | Purpose | Input | Expected | Result |
+|---|---|---|---|---|
+| test_localize_lists_no_unchanged_files | the InvoiceHub symptom | head adds `.gitignore`, edits README | no test changes, no regions, empty diff | pass |
+| test_localize_lists_only_the_changed_test_file_with_its_own_diff | per-file diff | one test edited, one added | exactly those two, `modified`/`added`, own diffs | pass |
+| test_localize_still_finds_a_changed_application_region | no regression | IDOR bypass in `app/main.py` | one `read_invoice` region, AUTHZ.IDOR.001 | pass |
+| test_localize_treats_a_line_ending_only_change_as_unchanged | CRLF | base CRLF, head LF | not listed | pass |
+
+All 4 fail before the change. Full suite: 2088 passed, 39 skipped, 1 xfailed.
+
+**Defects found and fixed:** the bug above.
+
+**Known limitations / deferred:** deleted `.py` files are not in `localize`'s change set (pre-existing); left for SATRA's owner.
+
+**Tool disclosure (Ch 8.7):** Claude Code investigated, wrote the fix, tests and notes; Maryam to review.
+
+**Review:** no independent review pass run for this step.
+
+**Supervisor Q&A prep**
+- *Did this bug change any verdict?* No. `test_changes` is only stored as evidence; the decision logic never reads it.
