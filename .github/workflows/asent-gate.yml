@@ -6,7 +6,7 @@
 #   asent gate --repository target --base <PR base SHA> --head <PR head SHA>
 # The authority is the target's .asent/ folder at the BASE commit. Exit codes: 0 ACCEPT, 1 BLOCK,
 # 2 REVIEW. BLOCK always fails the job; REVIEW fails it unless review-fails is false.
-# During the gate SATRA builds (or reuses) an image FROM the runner with the base commit's CAVR-approved
+# During the gate SATRA builds a fresh image FROM the runner with the base commit's CAVR-approved
 # wheels: that build downloads from PyPI; the tests in it then run with --network none.
 #
 # Safe to run on pull requests from forks: triggered by `pull_request` (never the privileged base-branch trigger),

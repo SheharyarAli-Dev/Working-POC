@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 import subprocess
 import tempfile
@@ -35,6 +36,9 @@ BUILDER_VERSION = "1"
 LABEL_PREFIX = "org.asent.satra."
 LABEL_KEY = LABEL_PREFIX + "key"
 BUILD_TIMEOUT = 900
+# Reusing a cached gate image trusts labels anyone with access to the engine can set, so it is
+# off unless this is exactly "1" (local development). Shipped workflows never set it.
+REUSE_ENV = "ASENT_SATRA_REUSE_IMAGES"
 PROBE_TIMEOUT = 60
 PIP_FLAGS = "--no-cache-dir --disable-pip-version-check --require-hashes --no-deps --only-binary :all:"
 PROBE = ("import json, platform; from packaging import tags; "
@@ -285,9 +289,11 @@ def _dockerfile(requirements_text):
 
 
 def prepare(base_dir, config, engine) -> dict:
-    """The gate image for this base commit: reused when an image with the same key label exists,
-    otherwise built FROM the runner with the install plan's requirements. INCONCLUSIVE when the runner
-    is missing, the plan refuses, the build fails or times out, or the result is not what was asked for.
+    """The gate image for this base commit, built FROM the runner with the install plan's requirements.
+    Every build passes --no-cache, so no layer comes from the engine's build cache. Only when
+    ASENT_SATRA_REUSE_IMAGES=1 (local development) is an existing image with matching labels and the
+    runner's layers reused instead. INCONCLUSIVE when the runner is missing, the plan refuses, the
+    build fails or times out, or the result is not what was asked for.
 
     Only the build has network access (the engine's default build network); nothing of the project
     is in the build context, which holds exactly a Dockerfile and requirements.txt."""
@@ -313,15 +319,17 @@ def prepare(base_dir, config, engine) -> dict:
         return (all(found.get(name) == value for name, value in labels.items())
                 and layers[:len(identity["layers"])] == identity["layers"] and len(identity["layers"]) > 0)
 
-    existing = _inspect(engine, tag)
-    if existing is not None and built_right(existing):
-        return {**evidence, "reused": True, "reason": plan["reason"] + "; cached image reused (key label matches)"}
+    reuse = os.environ.get(REUSE_ENV) == "1"
+    if reuse:
+        existing = _inspect(engine, tag)
+        if existing is not None and built_right(existing):
+            return {**evidence, "reused": True, "reason": plan["reason"] + "; cached image reused (key label matches)"}
 
     with tempfile.TemporaryDirectory(prefix="asent-satra-image-") as context:
         context = Path(context)
         (context / "Dockerfile").write_text(_dockerfile(text), encoding="utf-8")
         (context / "requirements.txt").write_text(text, encoding="utf-8")
-        cmd = [engine, "build", "-t", tag]
+        cmd = [engine, "build", "--no-cache", "-t", tag]
         for name, value in labels.items():
             cmd += ["--label", f"{name}={value}"]
         cmd += ["-f", str(context / "Dockerfile"), str(context)]
@@ -341,7 +349,8 @@ def prepare(base_dir, config, engine) -> dict:
     if not built_right(_inspect(engine, tag)):
         return {**evidence, "status": "INCONCLUSIVE", "requirements_text": None, "reused": False, "build_log_tail": tail,
                 "reason": "built gate image does not carry the expected labels on top of the SATRA runner layers"}
-    return {**evidence, "reused": False, "build_log_tail": tail, "reason": plan["reason"] + "; image built"}
+    built = "; image built" if reuse else f"; image built (cached-image reuse is off; {REUSE_ENV}=1 enables it locally)"
+    return {**evidence, "reused": False, "build_log_tail": tail, "reason": plan["reason"] + built}
 
 
 # --- test-run limits ------------------------------------------------------------------------------

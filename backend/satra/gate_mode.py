@@ -8,7 +8,8 @@ is the frozen base config, so the change under review cannot switch SATRA off or
 Steps (every pytest run is in a container with no network; without Docker/Podman: INCONCLUSIVE):
 
 0. Gate image (`project_image.prepare`): the SATRA runner plus exactly the CAVR-approved wheels of the
-   BASE commit's dependencies.lock.json, built (or reused by its content key) before any test runs.
+   BASE commit's dependencies.lock.json, built before any test runs (a cached image is reused only
+   when ASENT_SATRA_REUSE_IMAGES=1, for local development).
    No lockfile, an entry CAVR does not permit, a clash with the runner, a failed build: INCONCLUSIVE.
    There is no fallback to the shared asent-sandbox:local image. Test-run limits come from the base
    `.asent/satra/sandbox.json` (default 40 s / 512m, cap 180 s / 2g; outside that: INCONCLUSIVE).

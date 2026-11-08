@@ -44,15 +44,21 @@ SIX = {"name": "six", "version": "1.17.0", "ecosystem": "PyPI", "filename": "six
 SIX_SDIST_SHA = "ff70335d468e7eb6ec65b95b99d3a2836546063f63acc5171de367e834932a81"  # real six-1.17.0.tar.gz
 
 
-def test_gate_image_is_built_from_a_real_lock_entry_and_then_reused(docker, tmp_path):
+def test_gate_image_is_built_from_a_real_lock_entry_and_then_reused(docker, tmp_path, monkeypatch):
+    monkeypatch.delenv("ASENT_SATRA_REUSE_IMAGES", raising=False)  # gate default: always build
     root, config = base(tmp_path, requirements="six==1.17.0\n", lock=[SIX], pol=policy(["six==1.17.0"]))
     built = project_image.prepare(root, config, docker)
     assert built["status"] == "READY" and not built["reused"], built["reason"] + built.get("build_log_tail", "")
     imported = _probe(docker, built["image"], "import six; print(six.__version__)")
     assert imported.returncode == 0 and imported.stdout.strip() == "1.17.0", imported.stderr
     assert _probe(docker, built["image"], "import flask").returncode != 0
+    monkeypatch.setenv("ASENT_SATRA_REUSE_IMAGES", "1")  # local-development opt-in
     again = project_image.prepare(root, config, docker)
     assert again["reused"] and again["image"] == built["image"]
+    monkeypatch.delenv("ASENT_SATRA_REUSE_IMAGES")
+    rebuilt = project_image.prepare(root, config, docker)
+    assert rebuilt["status"] == "READY" and not rebuilt["reused"], rebuilt["reason"] + rebuilt.get("build_log_tail", "")
+    assert rebuilt["image"] == built["image"]
 
 
 def test_a_changed_hash_makes_pip_refuse_the_build(docker, tmp_path):

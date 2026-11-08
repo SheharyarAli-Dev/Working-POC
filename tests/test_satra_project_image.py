@@ -323,7 +323,11 @@ def test_key_is_a_hash_of_lockfile_runner_and_python(tmp_path):
     assert len({key, *changed}) == 4
 
 
-def test_image_with_the_right_label_is_reused(tmp_path, engine):
+REUSE = "ASENT_SATRA_REUSE_IMAGES"
+
+
+def test_image_with_the_right_label_is_reused(tmp_path, engine, monkeypatch):
+    monkeypatch.setenv(REUSE, "1")  # reuse is opt-in for local development
     fake = engine()
     first = prepare(tmp_path)
     root, config = base(tmp_path)  # same files again
@@ -332,13 +336,44 @@ def test_image_with_the_right_label_is_reused(tmp_path, engine):
 
 
 @pytest.mark.parametrize("labels", [{}, {project_image.LABEL_KEY: "0" * 64}])
-def test_image_with_the_right_name_but_not_the_right_label_is_rebuilt(tmp_path, engine, labels):
+def test_image_with_the_right_name_but_not_the_right_label_is_rebuilt(tmp_path, engine, monkeypatch, labels):
+    monkeypatch.setenv(REUSE, "1")  # even with reuse on, the labels must match
     fake = engine()
     expected = prepare(tmp_path / "probe")["image"]
     fake.calls.clear()
     fake.images[expected] = {"Id": "sha256:" + "3" * 64, "Config": {"Labels": labels}, "RootFS": {"Layers": RUNNER_LAYERS}}
     result = prepare(tmp_path / "again")
     assert len(fake.builds()) == 1 and not result["reused"] and result["status"] == "READY"
+
+
+@pytest.mark.parametrize("value", [None, "", "0", "true", "yes", " 1", "1 "])
+def test_without_the_reuse_opt_in_a_matching_cached_image_is_rebuilt(tmp_path, engine, monkeypatch, value):
+    if value is None:
+        monkeypatch.delenv(REUSE, raising=False)
+    else:
+        monkeypatch.setenv(REUSE, value)
+    fake = engine()
+    first = prepare(tmp_path)
+    root, config = base(tmp_path)  # same files again: the first build's image matches every label
+    second = project_image.prepare(root, config, "docker")
+    assert first["status"] == second["status"] == "READY", second["reason"]
+    assert len(fake.builds()) == 2 and not first["reused"] and not second["reused"]
+    assert second["image"] == first["image"] and "reuse is off" in second["reason"]
+    # The tag is inspected only to verify a build that just ran, never to decide on reuse.
+    tag_inspects = [i for i, c in enumerate(fake.calls) if c[1:3] == ["image", "inspect"] and c[3] == first["image"]]
+    assert len(tag_inspects) == 2 and all(fake.calls[i - 1][1] == "build" for i in tag_inspects)
+
+
+@pytest.mark.parametrize("value", [None, "1"])
+def test_every_build_bypasses_the_engine_build_cache(tmp_path, engine, monkeypatch, value):
+    if value is None:
+        monkeypatch.delenv(REUSE, raising=False)
+    else:
+        monkeypatch.setenv(REUSE, value)
+    fake = engine()
+    assert prepare(tmp_path)["status"] == "READY"
+    [build] = fake.builds()
+    assert "--no-cache" in build
 
 
 def test_missing_runner_image_is_inconclusive(tmp_path, engine):

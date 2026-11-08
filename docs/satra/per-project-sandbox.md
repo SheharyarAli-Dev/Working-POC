@@ -290,6 +290,61 @@ the module skipped → exit 1 (`skipped=['test_extra']`).
 **Supervisor Q&A prep**
 - *How do you know the Docker tests ran in CI?* The job fails unless each is present in the JUnit report and not skipped.
 
+## Step 6 — Cached gate images are reused only on opt-in (2026-11-08)
+
+Fixes review finding LOW 2: reuse trusted the image's labels and its bottom (runner) layers, but not the
+layers on top, so anyone with access to the same Docker daemon could plant `asent-satra-project:<key>`
+with matching labels and extra layers.
+
+**Ch 6 Implementation**
+- `project_image.REUSE_ENV = "ASENT_SATRA_REUSE_IMAGES"`. `prepare()` looks for a cached image only when
+  `os.environ.get(REUSE_ENV) == "1"`; otherwise it never inspects the tag before building, and always builds.
+- Every `docker build` now passes `--no-cache`, so a rebuild cannot take a layer from the engine's build cache.
+- The tag is still inspected after a build (`built_right`: labels + runner layer prefix), as before.
+- The READY reason says when reuse was off: `image built (cached-image reuse is off; ASENT_SATRA_REUSE_IMAGES=1 enables it locally)`.
+
+**How to use it.** Gate runs (CI, `asent gate`) leave the variable unset and build a fresh image every time.
+On a development machine, `export ASENT_SATRA_REUSE_IMAGES=1` skips the rebuild when an image with the same key,
+all five labels and the runner's layers exists. Only the exact value `1` turns it on (`true`, `yes`, ` 1` do not).
+No workflow, the gate template `docs/gate/asent-pr.yml`, the root `Dockerfile` or `docker/*.Dockerfile` may set it.
+
+**Design decisions**
+- Opt-in, not opt-out: an unset variable is the safe case, so a misconfigured runner fails towards rebuilding.
+- `--no-cache` on every build: without it a "rebuild" could still reuse cached layers (the classic builder even
+  matches local images as cache), which would bring back the trust in a planted image through another path.
+  Cost: each gate run downloads the approved wheels from PyPI; GitHub-hosted runners start empty anyway.
+- Exact `"1"` rather than truthy parsing: one documented value, nothing to misread.
+- Alternative considered: record and check the built image ID. Rejected for now — it still trusts whatever the
+  daemon reports and adds state between runs; always rebuilding is simpler to defend.
+
+**Requirements covered:** FR-07 — the gate image is built from the base lockfile on every gate run.
+
+**Ch 7 Test cases**
+
+| Test ID | Purpose | Input | Expected | Result |
+|---|---|---|---|---|
+| test_without_the_reuse_opt_in_a_matching_cached_image_is_rebuilt | default rebuild | same base twice; env unset, "", "0", "true", "yes", " 1", "1 " | 2 builds, never reused, tag inspected only right after a build | pass ×7 |
+| test_every_build_bypasses_the_engine_build_cache | no build cache | env unset / "1" | `--no-cache` in the build | pass ×2 |
+| test_image_with_the_right_label_is_reused | opt-in reuse | env "1", same base twice | 1 build, reused (setup changed; assertions unchanged) | pass |
+| test_image_with_the_right_name_but_not_the_right_label_is_rebuilt | labels still checked | env "1", no labels / wrong key | rebuilt (setup changed; assertions unchanged) | pass ×2 |
+| test_gate_image_is_built_from_a_real_lock_entry_and_then_reused | real Docker | six 1.17.0: unset → "1" → unset | built, reused, rebuilt | skipped locally; CI |
+| test_no_shipped_workflow_or_image_turns_on_cached_gate_image_reuse | CI never opts in | `.github/workflows/*`, gate template, Dockerfiles | variable name absent | pass |
+| test_sandbox_doc_states_that_cached_image_reuse_is_opt_in | documented | this file | `ASENT_SATRA_REUSE_IMAGES=1`, `--no-cache` present | pass |
+
+**Defects found and fixed:** LOW 2 from the branch review (label-only trust of cached images).
+
+**Known limitations / deferred:** with the opt-in on, a local machine trusts its own daemon, as before. Images are
+still not garbage-collected; a rebuild re-tags and leaves the previous image dangling.
+
+**Tool disclosure (Ch 8.7):** Claude Code wrote the change, tests and this section; Maryam to review. The Docker test
+change has not run on this machine (no Docker).
+
+**Review:** no independent review pass run for this step.
+
+**Supervisor Q&A prep**
+- *Why not keep the cache in CI?* Its only check is labels, which anyone with daemon access can set; a fresh build from hashed wheels needs no trust.
+- *Does rebuilding change results?* No: same pinned wheels, same hashes; only time and PyPI downloads.
+
 ## Known limits
 
 - **A new dependency must be approved and merged in its own PR before code uses it.** The image comes from the base

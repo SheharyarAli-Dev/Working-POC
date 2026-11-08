@@ -77,8 +77,10 @@ SATRA runs the trusted tests of a gate run in an image made for the project, not
 4. **Network only while building.** The build downloads the wheels from PyPI. The tests then run exactly as
    before: `--network none`, read-only root, `--cap-drop ALL`, no-new-privileges, CPU/process/tmpfs limits.
 5. **Content-addressed.** The tag `asent-satra-project:<key>` is a hash of the lockfile digest, the runner
-   image ID and the Python version (plus the generated requirements and builder version). A cached image is
-   reused only when its labels carry the same key and its layers start with the runner's.
+   image ID and the Python version (plus the generated requirements and builder version). Every gate run
+   builds it fresh with `--no-cache`; a cached image is reused only on a development machine that sets
+   `ASENT_SATRA_REUSE_IMAGES=1`, and then only when its labels carry the same key and its layers start with
+   the runner's.
 6. **Runner packages.** If the lockfile also pins pytest, pluggy, iniconfig, packaging or Pygments, it must be
    the runner's version with the runner's wheel hash; otherwise INCONCLUSIVE.
 

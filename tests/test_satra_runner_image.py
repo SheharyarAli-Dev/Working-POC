@@ -98,6 +98,21 @@ def test_reusable_gate_workflow_builds_the_runner_before_the_gate_runs():
     assert build < gate and "-f asent/docker/satra-runner.Dockerfile asent/docker" in runs[build]
 
 
+def test_no_shipped_workflow_or_image_turns_on_cached_gate_image_reuse():
+    # Reuse of a cached gate image is for local development only (backend/satra/project_image.py).
+    shipped = [*sorted(WORKFLOWS.glob("*.yml")), *sorted(WORKFLOWS.glob("*.yaml")), ROOT / "docs/gate/asent-pr.yml",
+               ROOT / "Dockerfile", *sorted((ROOT / "docker").glob("*.Dockerfile"))]
+    assert {WORKFLOWS / "asent-gate.yml", WORKFLOWS / "satra-ci.yml"} <= set(shipped)
+    for path in shipped:
+        assert "ASENT_SATRA_REUSE_IMAGES" not in path.read_text(encoding="utf-8"), path
+    assert project_image.REUSE_ENV == "ASENT_SATRA_REUSE_IMAGES"
+
+
+def test_sandbox_doc_states_that_cached_image_reuse_is_opt_in():
+    text = (ROOT / "docs/satra/per-project-sandbox.md").read_text(encoding="utf-8")
+    assert "ASENT_SATRA_REUSE_IMAGES=1" in text and "--no-cache" in text
+
+
 def test_gate_documentation_states_the_dependency_rule_and_limits():
     text = (ROOT / "docs/asent-gate.md").read_text()
     for phrase in ("asent-satra-runner:local", "dependencies.lock.json", "its own pull request", ".asent/satra/sandbox.json",
