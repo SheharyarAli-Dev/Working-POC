@@ -61,6 +61,8 @@ jobs:
               "test_pip_refuses_a_wheel_that_does_not_fit_even_past_the_tag_check",
               "test_real_gate_run_uses_an_approved_dependency_and_kills_the_mutant",
               "test_real_gate_run_cannot_import_an_unlocked_dependency",
+              # trusted-run isolation in a real container (docs/satra/harness-isolation.md, step 5)
+              "test_real_container_trusted_run_resists_head_harness_attacks",
           }
           missing = sorted(required - cases.keys())
           skipped = sorted(name for name in required & cases.keys() if cases[name].find("skipped") is not None)

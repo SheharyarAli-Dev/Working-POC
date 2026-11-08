@@ -277,3 +277,58 @@ change does not edit; the existing real gate tests there exercise the new comman
 - *Is the bypass fixed?* The file-based bypasses are (tests in Steps 1–2). A head whose code attacks the pytest process
   can still lie; that is stated, tested as a strict xfail, and listed as a limit of SATRA ACCEPT.
 - *What would fix it fully?* Separating the code under test from the test harness process; deferred.
+
+## Step 5 — Real-container test of the trusted-run isolation (2026-11-08)
+
+**Ch 6 Implementation**
+- `tests/test_satra_project_image_docker.py::test_real_container_trusted_run_resists_head_harness_attacks`: real
+  Docker, real per-project image, no host mapping (subprocess calls are only recorded, then passed to the engine).
+  1. Gate on a head whose `app/security.py` (`PROBE_HEAD`) on import tries to create `/trusted/planted.txt`, overwrite
+     `/trusted/asent_assurance/test_contract.py`, and append to the plugin file found in `sys.modules`; `can_access`
+     returns a report string (truthy, so the check is broken) that appears in the real JUnit failure message.
+     Expected: REJECT; report `plugin=/asent/asent_satra_trusted_run.py`, all three writes `EROFS`.
+  2. From the recorded command: `/asent:ro`, `/trusted:ro`, `/work:rw`; the host folders of `/asent`, `/trusted`,
+     `/results` are not inside the head copy; `PYTHONPATH=/asent`, `-p asent_satra_trusted_run`.
+  3. Gate on a head that writes a passing `/work/results.xml` at exit (`WRITE_WORK_RESULTS`): REJECT, denied test FAIL.
+  4. Root conftest forcing passes, head `pytest.py`, `sitecustomize.py`, `pyproject.toml` addopts, each on a broken
+     head: gate INCONCLUSIVE ("test-harness tampering suspected"), and the same head run directly as a trusted run in
+     the real container: exit 1, `test_other_user_denied` FAIL.
+- `.github/workflows/satra-ci.yml`: the test added to the "ran without skips" required list.
+
+**Where the plugin lives in the container:** `/asent/asent_satra_trusted_run.py`. `run_pytest` copies
+`backend/satra/trusted_run_plugin.py` to `<tmp>/asent/` (a sibling of the head copy `<tmp>/project`, never inside it)
+and mounts it `-v <tmp>/asent:/asent:ro`; `PYTHONPATH=/asent` and `-p asent_satra_trusted_run` load it.
+
+**Design decisions**
+- One test function, not parametrized: the CI step matches JUnit names exactly, and `[param]` ids would not match.
+- Tripwire-caught attacks are also run directly, because the gate never executes them; otherwise the container
+  isolation would be untested for those files.
+- The read-only check is observed from inside the container by the head's own code (errno names), not inferred
+  from the command line.
+
+**Requirements covered:** FR-07 in CI — the isolation of Steps 1–2 is checked in a real container, and the job fails if
+the test is skipped or missing.
+
+**Ch 7 Test cases**
+
+| Test ID | Purpose | Input | Expected | Result |
+|---|---|---|---|---|
+| test_real_container_trusted_run_resists_head_harness_attacks | real-container isolation | 6 attacks on a broken head | REJECT ×2, INCONCLUSIVE ×4, direct runs FAIL ×4; `/asent`, `/trusted` writes EROFS; plugin at `/asent`, ro, outside `/work` | skipped locally (no Docker); must run in CI |
+| test_satra_ci_fails_when_any_docker_backed_test_is_missing_or_skipped | CI list complete | satra-ci.yml | new test listed | failed before the workflow edit; pass after |
+
+The probe and report parsing were dry-run once through the host harness (throwaway test, not committed): REJECT, report
+parsed, mounts as above; on the host the writes do not fail (the harness does not enforce `:ro`), as expected.
+
+Full suite: 1910 passed, 38 skipped (the new Docker test is the 38th), 1 xfailed; `reports/scenario-validation.json` restored
+(no runtime code changed in this step).
+
+**Defects found and fixed:** none.
+
+**Known limitations / deferred:** the new test has not run on this machine; its first run is CI.
+
+**Tool disclosure (Ch 8.7):** Claude Code wrote the test, the workflow line and this section; Maryam to review.
+
+**Review:** no independent review pass run for this step.
+
+**Supervisor Q&A prep**
+- *How do you know /trusted is really read-only?* Head code inside the container tries to write there and gets EROFS; the CI job fails if that test is skipped.
