@@ -653,3 +653,54 @@ Full suite: 2075 passed, 39 skipped (the new Docker test), 1 xfailed.
   exactly: 0 passed, 1 failed, 14 errors, the same FileNotFoundError.
 - *Why does a broken fixture in the head give REJECT, not ACCEPT?* The project's own tests use the head's file
   and fail; the trusted tests do not, because they read the base's copy.
+
+## Step 11 — The report says which command ran and why the base did not pass (2026-11-08)
+
+The asent-target-invoicehub report did not contain the docker command, and its reason was the generic "Trusted tests do
+not pass on the base commit, or execution is unavailable". Finding the FileNotFoundError meant reading JUnit messages.
+
+**Ch 6 Implementation**
+- `backend/satra/pytest_runner.py::run_pytest`: each completed run's result has `command`, the exact argument list
+  given to `subprocess.run` (engine command with host temp paths, or the host built-in command). It is evidence in
+  `details.executions.<run>.command`. `gate_mode.execute` leaves it out of the `satra.test_result` event.
+- `backend/satra/gate_mode.py::describe(label, result)`: `"<label> unavailable: <reason>"`, or
+  `"<label>: P passed, F failed, E errors; first: <test>: <error line>"`, or `…; pytest exit code N` when nothing
+  failed. `_error_line` is the first line of the last block of pytest `E ` lines (the final exception, also after a
+  chained traceback), else the last non-empty line, at most 300 characters.
+- The base-not-passing reason is the old text plus `(describe("trusted baseline", baseline))`. The prefix is kept,
+  so existing matches on it still hold.
+
+**Design decisions**
+- Command in evidence, not in events: the event chain stays the same size; the details record is the report.
+- First line of the last `E` block rather than the last `E` line: pytest's last lines are often explanation
+  (`+  where …`), and an earlier block belongs to an exception that was handled and re-raised.
+- Only the baseline reason is extended: it is the one that sends a reader looking for the cause. The head and
+  ordinary-test reasons already come with a failing-test list or a status.
+
+**Requirements covered:** NFR-02 (explainable evidence): acceptance is that the InvoiceHub report's reason names
+`0 passed, 1 failed, 14 errors` and the FileNotFoundError, and each execution carries its command.
+
+**Ch 7 Test cases** (`tests/test_satra_config.py`)
+
+| Test ID | Purpose | Input | Expected | Result |
+|---|---|---|---|---|
+| test_invoicehub_target_config_without_trusted_data_reproduces_the_ci_failure (extended) | reason | config as committed | reason has the counts, `first: test_archive_is_admin_only_and_keeps_ownership: FileNotFoundError …invoice.pdf'` | pass |
+| test_every_execution_records_its_exact_container_command | command | secure gate | each `command` = the recorded engine command; `docker run --rm`, `--network none`; not in events | pass |
+| test_unavailable_base_run_is_named_in_the_reason | unavailable | base exits before results | reason ends `(trusted baseline unavailable: results file missing)` | pass |
+| test_describe_summarises_a_run_in_one_line | formatter | unavailable, no reason, exit 5, assert, chained, no `E` line | one line each ×6 | pass |
+| test_describe_caps_the_error_line_at_300_characters | cap | 1000-character error | 300 kept | pass |
+
+All 10 fail against Step 10's code. Full suite: 2084 passed, 39 skipped, 1 xfailed.
+
+**Defects found and fixed:** the first version took the last `E` line, which gave `+  where 0 = f()` for an
+assertion. Changed to the first line of the last `E` block before commit.
+
+**Known limitations / deferred:** the command shows host temp paths, which are gone after the run; it says what ran,
+not where to find it afterwards.
+
+**Tool disclosure (Ch 8.7):** Claude Code wrote the change, tests and docs; Maryam to review.
+
+**Review:** no independent review pass run for this step.
+
+**Supervisor Q&A prep**
+- *Is the command in the report a leak?* It holds fixed flags, temp paths and the image tag; no secrets or environment values from the host.

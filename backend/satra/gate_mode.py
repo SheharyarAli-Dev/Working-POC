@@ -52,6 +52,32 @@ NO_ENGINE = "External code requires Docker/Podman; a gate run never executes rep
 BOUNDED = "Bounded to the configured contract, its trusted tests and one RETURN_TRUE counterfactual; other vulnerability families are not covered"
 
 
+def _error_line(message):
+    """The first line of the last block of pytest `E ` lines (the final exception's message, also after a chained
+    traceback), else the message's last non-empty line; at most 300 characters."""
+    lines = [line.strip() for line in (message or "").splitlines() if line.strip()]
+    first, previous = None, False
+    for line in lines:
+        current = line.startswith("E ")
+        if current and not previous:
+            first = line[1:].strip()
+        previous = current
+    return (first if first is not None else lines[-1] if lines else "")[:300]
+
+
+def describe(label, result):
+    """One line for a reason: counts and the first failing test's error, or why the run is unavailable."""
+    if not result.get("available"):
+        return "%s unavailable: %s" % (label, result.get("reason") or "no result")
+    text = "%s: %s passed, %s failed, %s errors" % (label, result.get("passed", 0), result.get("failed", 0), result.get("errors", 0))
+    first = next((t for t in result.get("tests", []) if t["status"] in ("FAIL", "ERROR")), None)
+    if first is not None:
+        text += "; first: %s: %s" % (first["name"], _error_line(first["message"]))
+    elif result.get("exit_code") not in (0, None):
+        text += "; pytest exit code %s" % result["exit_code"]
+    return text
+
+
 def analyze_configured(context, outdir, emit):
     outdir = Path(outdir)
     outdir.mkdir(parents=True, exist_ok=True)
@@ -118,7 +144,7 @@ def analyze_configured(context, outdir, emit):
                                           image=image["image"], timeout=limits["timeout_seconds"], memory=limits["memory"],
                                           trusted_data=data if trusted else None)
         executions[label] = result
-        emit("satra.test_result", {"label": label, **{k: v for k, v in result.items() if k not in ("stdout", "stderr", "tests")}})
+        emit("satra.test_result", {"label": label, **{k: v for k, v in result.items() if k not in ("stdout", "stderr", "tests", "command")}})
         return result
 
     baseline = execute("trusted_baseline", context.baseline, trusted=True)
@@ -164,7 +190,7 @@ def analyze_configured(context, outdir, emit):
     details["adaptive"] = {"available": False, "reason": "adaptive test generation is not used in gate runs", "validations": []}
 
     if not is_pass(baseline):
-        status, why = "INCONCLUSIVE", "Trusted tests do not pass on the base commit, or execution is unavailable"
+        status, why = "INCONCLUSIVE", "Trusted tests do not pass on the base commit, or execution is unavailable (" + describe("trusted baseline", baseline) + ")"
     elif not candidate.get("available") or candidate.get("exit_code") not in (0, 1):
         status, why = "INCONCLUSIVE", "Candidate test execution is incomplete"
     elif not is_pass(candidate):

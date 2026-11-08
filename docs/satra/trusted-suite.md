@@ -36,7 +36,8 @@ Nothing else is in `/trusted`. There is no network.
 
 - **Read an undeclared project file through a path relative to itself.** It is not there. The test then
   fails or errors on the base commit, and SATRA reports INCONCLUSIVE ("Trusted tests do not pass on the base
-  commit, or execution is unavailable"). Declare the file or folder in `trusted_data`.
+  commit, or execution is unavailable (trusted baseline: 0 passed, 1 failed, 14 errors; first: <test>:
+  FileNotFoundError: … /trusted/fixtures/…)"). Declare the file or folder in `trusted_data`.
 - **Write to `/trusted`.** It is read-only. Write to `tmp_path` instead.
 - **Import helper modules from `/trusted`.** pytest puts `/trusted/asent_assurance` (and `/trusted`, when the
   trusted ini says `pythonpath = .`) on `sys.path` before the head. That is why `trusted_data` refuses code:
@@ -71,7 +72,7 @@ test run, and the reason starts with `Trusted data refused:`, when:
 
 Files that a gate snapshot never contains (for example `.env*`, `*.pyc`, `__pycache__/`) count as
 not in the base commit. The report lists each copied file with its size and SHA-256 under
-`details.trusted_data`.
+`details.trusted_data`, and each run's exact engine command under `details.executions.<run>.command`.
 
 Data only, never code: a data folder sits next to `asent_assurance/` and contains nothing Python can import
 and nothing that changes pytest's configuration. So the security properties in

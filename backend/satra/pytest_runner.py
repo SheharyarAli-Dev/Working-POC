@@ -177,7 +177,7 @@ def run_pytest(root,output,selected='all',trusted=False,trusted_tests_dir=None,e
             (output/'stdout.log').write_text(result.stdout);(output/'stderr.log').write_text(result.stderr)
             tests,problem,data=_load_results(results/'results.xml',result.returncode)
             backend=engine or 'HASH_PINNED_BUILTIN_SUBPROCESS'
-            evidence={'backend':backend,'results_location':location,'removed_results_files':removed,'stdout':result.stdout[-10000:],'stderr':result.stderr[-2000:]}
+            evidence={'backend':backend,'command':list(cmd),'results_location':location,'removed_results_files':removed,'stdout':result.stdout[-10000:],'stderr':result.stderr[-2000:]}
             if problem:return {'available':False,'exit_code':None,'pytest_exit_code':result.returncode,'reason':problem,'tests':[],**evidence}
             (output/'junit.xml').write_bytes(data)
             return {'available':True,'exit_code':result.returncode,'tests':tests,'passed':sum(t['status']=='PASS' for t in tests),'failed':sum(t['status']=='FAIL' for t in tests),'errors':sum(t['status']=='ERROR' for t in tests),'skipped':sum(t['status']=='SKIP' for t in tests),'duration_ms':round((time.perf_counter()-start)*1000,2),'isolation':'container with network none' if engine else 'Known bundled sources only; isolated temp workspace, sanitized environment, resource limits and network/process audit restrictions; not an arbitrary-code sandbox','junit_path':str(output/'junit.xml'),'junit_sha256':digest(data),**evidence}
