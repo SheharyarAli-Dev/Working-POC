@@ -64,6 +64,12 @@ REQUIREMENT_MAP = {
         "kind": "unit",
         "default_desc": "Checks the SATRA runner base image is pytest only, hash-pinned and wheels only."
     },
+    # test_satra_project_image.py
+    "test_satra_project_image.py": {
+        "req": "FR-07",
+        "kind": "unit",
+        "default_desc": "Checks the per-project gate image install plan and build/reuse fail closed."
+    },
     # test_satra_project_image_docker.py
     "test_satra_project_image_docker.py": {
         "req": "FR-07",
