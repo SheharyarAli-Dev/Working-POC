@@ -4,7 +4,7 @@ Local commands (no server): `init` writes a starter .asent/ for a project; `gate
 (base -> head) of a git repository and exits 0 ACCEPT, 1 BLOCK, 2 REVIEW. With no arguments `gate`
 gates the current repository: its top level, head HEAD, base its default branch (gate/defaults.py).
 Every local command takes --json and then prints exactly one JSON document on stdout (for editors).
-Server commands (`run`, `watch`, `dependency`, `replay`, `research`, `report`, `capabilities`) call the
+Server commands (`run`, `watch`, `dependency`, `replay`, `research`, `report --run`, `capabilities`) call the
 same HTTP gateway the dashboard uses.
 """
 import argparse
@@ -18,7 +18,7 @@ import httpx
 from backend.config import VERSION
 from backend.integrations.research_loader import load as load_research
 
-LOCAL_COMMANDS=('init','gate')
+LOCAL_COMMANDS=('init','gate','report')
 
 def emit_json(value):
     print(json.dumps(value,indent=2,default=str))
@@ -53,8 +53,24 @@ def gate_command(args):
     if report.get('data_dir'):print('Work directory kept: '+report['data_dir'])
     return code
 
+def report_command(args):
+    from backend.commands import report as local_report
+    def fail(message):
+        if args.json:emit_json({'error':message})
+        else:print(message,file=sys.stderr)
+        return 2
+    if args.legacy_run is not None:
+        return fail(f"`asent report RUN_ID` is now `asent report --run {args.legacy_run}` (a run report from the server). "
+                    "`asent report` with no argument prints the last asent-report.json; --file PATH picks another one.")
+    path=Path(args.file) if args.file else local_report.default_path()
+    try:report=local_report.load(path)
+    except local_report.ReportError as e:return fail(str(e))
+    if args.json:emit_json(report)
+    else:print(local_report.render(report,path),end='')
+    return 0
+
 def main(argv=None):
-    parser=argparse.ArgumentParser(prog='asent',description='ASENT assurance gate. Local: init, gate. Server commands need scripts/start.sh first.')
+    parser=argparse.ArgumentParser(prog='asent',description='ASENT assurance gate. Local: init, gate, report. Server commands need scripts/start.sh first.')
     parser.add_argument('--url',default=os.environ.get('ASENT_URL','http://127.0.0.1:8000'))
     parser.add_argument('--version',action='store_true',help='print the ASENT version and exit')
     parser.add_argument('--json',dest='json_top',action='store_true',help='with --version: print it as JSON')
@@ -66,7 +82,11 @@ def main(argv=None):
     p=sub.add_parser('dependency');p.add_argument('--run',required=True);p.add_argument('command',nargs=argparse.REMAINDER)
     p=sub.add_parser('replay');p.add_argument('bundle');p.add_argument('--wait',action='store_true');p.add_argument('--repair',action='store_true')
     p=sub.add_parser('research');p.add_argument('manifest');p.add_argument('--opt-in',action='store_true');p.add_argument('--wait',action='store_true')
-    p=sub.add_parser('report');p.add_argument('run');p.add_argument('--output')
+    p=sub.add_parser('report',parents=[json_flag],help='print the last asent-report.json; --run ID reads a run report from the server')
+    p.add_argument('legacy_run',nargs='?',help=argparse.SUPPRESS)  # the old `report RUN_ID`: refused with the new form
+    p.add_argument('--file',help='report file (default: asent-report.json at the repository top level, else here)')
+    p.add_argument('--run',help='dashboard run id: read its report from the server (needs scripts/start.sh)')
+    p.add_argument('--output',help='with --run: write the server report to this file')
     sub.add_parser('capabilities')
     p=sub.add_parser('init',parents=[json_flag],help='write a starter .asent/ (refused by the gate until reviewed)');p.add_argument('--repository',default='.');p.add_argument('--force',action='store_true')
     p=sub.add_parser('gate',parents=[json_flag],help='decide base..head of a git repository without a server; exit 0 ACCEPT, 1 BLOCK, 2 REVIEW')
@@ -84,6 +104,7 @@ def main(argv=None):
     if args.action is None:parser.error('a command is required (asent --help lists them)')
     if args.action=='init':return init_command(args)
     if args.action=='gate':return gate_command(args)
+    if args.action=='report' and (args.run is None or args.legacy_run is not None):return report_command(args)
     with httpx.Client(base_url=args.url,timeout=180,trust_env=False) as client:
         def call(method,path,body=None):
             r=client.request(method,'/api'+path,json=body);r.raise_for_status();return r.json()
