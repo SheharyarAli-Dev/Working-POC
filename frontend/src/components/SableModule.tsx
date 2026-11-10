@@ -211,6 +211,8 @@ export const SableModule: React.FC = () => {
           next.diffLines = payload.diff_lines ?? [];
           next.diff = payload.diff ?? '';
           next.candidateFiles = payload.candidate_files ?? [];
+          next.candidateTf = payload.candidate_tf ?? {};
+          next.baselineTf = payload.baseline_tf ?? {};
           next.baselineResources = payload.baseline_files ?? [];
           unlockTab('diff');
           break;

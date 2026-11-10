@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Play, RefreshCw, AlertTriangle, CheckCircle2, XCircle, BarChart3, Grid } from 'lucide-react';
+import { Play, RefreshCw, AlertTriangle, CheckCircle2, XCircle, BarChart3, Grid, Download, Shield } from 'lucide-react';
 import { executeSableBenchmark } from '../benchmarkStream';
 
 interface BenchmarkResult {
@@ -38,6 +38,7 @@ const VERDICT_COLORS: Record<string, string> = {
 
 export const BenchmarkTab: React.FC = () => {
   const [result, setResult] = useState<BenchmarkResult | null>(null);
+  const [researchEval, setResearchEval] = useState<any>(null);
   const [running, setRunning] = useState(false);
   const [progress, setProgress] = useState<{ scenario: string; pct: number } | null>(null);
   const [activeMetricView, setActiveMetricView] = useState<'table' | 'bars'>('bars');
@@ -47,6 +48,10 @@ export const BenchmarkTab: React.FC = () => {
     fetch('/api/sable/benchmark/result')
       .then(r => r.ok ? r.json() : null)
       .then(d => { if (d) setResult(d); })
+      .catch(() => {});
+    fetch('/api/sable/research-eval')
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d) setResearchEval(d); })
       .catch(() => {});
   }, []);
 
@@ -375,6 +380,118 @@ export const BenchmarkTab: React.FC = () => {
           )}
         </>
       )}
+
+      {/* Academic Comparator Taxonomy & Independent Oracle Review */}
+      <div className="sable-card" style={{ marginTop: '2rem', padding: '16px', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+          <div>
+            <div className="sable-card-label" style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <Shield size={14} color="#2563eb" /> ACADEMIC COMPARATOR TAXONOMY & INDEPENDENT ORACLE
+            </div>
+            <span className="sable-small-note" style={{ display: 'block', marginTop: '2px' }}>
+              Taxonomy formalization and unreviewed benchmark protocol ({researchEval?.dataset?.id ?? 'sable-independent-oracle-v1'})
+            </span>
+          </div>
+          <a
+            href="/api/sable/research-eval/package"
+            download="sable_independent_review_package.json"
+            className="sable-btn sable-btn-secondary"
+            style={{ fontSize: '0.75rem', padding: '5px 10px', textDecoration: 'none' }}
+          >
+            <Download size={12} /> Download Review Package
+          </a>
+        </div>
+
+        {/* Academic honesty alert */}
+        <div className="sable-benchmark-note" style={{ background: '#fffbeb', border: '1px solid #fde68a', color: '#92400e', marginBottom: '14px' }}>
+          <AlertTriangle size={14} color="#d97706" />
+          <span>
+            <strong>Academic Evaluation Honesty:</strong> The 6 benchmark cases authored for this research evaluation remain{' '}
+            <strong style={{ color: '#b45309' }}>UNREVIEWED</strong> by external evaluators. All aggregate research metrics are strictly{' '}
+            <strong style={{ color: '#b45309' }}>UNMEASURED</strong> until independent expert attestation is complete. Predictions are displayed for diagnostic inspection only.
+          </span>
+        </div>
+
+        {/* Comparator Taxonomy Grid */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '10px', marginBottom: '14px' }}>
+          <div style={{ background: '#ffffff', border: '1px solid #cbd5e1', borderRadius: '6px', padding: '10px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+              <strong style={{ fontSize: '0.8rem', color: '#0f172a' }}>independent_moved_only</strong>
+              <span className="sable-badge" style={{ background: '#dbeafe', color: '#1e40af', fontSize: '0.65rem' }}>INDEPENDENT BASELINE</span>
+            </div>
+            <div style={{ fontSize: '0.72rem', color: '#64748b', lineHeight: 1.4 }}>
+              <strong>Independence:</strong> Zero SABLE coupling (pure regex parser).<br />
+              <strong>Limitation:</strong> Cannot evaluate policy semantics or detect regressions.
+            </div>
+          </div>
+
+          <div style={{ background: '#ffffff', border: '1px solid #cbd5e1', borderRadius: '6px', padding: '10px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+              <strong style={{ fontSize: '0.8rem', color: '#0f172a' }}>B0 · B1 · B2 · B3</strong>
+              <span className="sable-badge" style={{ background: '#f1f5f9', color: '#475569', fontSize: '0.65rem' }}>INTERNAL ABLATIONS</span>
+            </div>
+            <div style={{ fontSize: '0.72rem', color: '#64748b', lineHeight: 1.4 }}>
+              <strong>Independence:</strong> Reuses SABLE core modules.<br />
+              <strong>Purpose:</strong> Isolate causal contribution of correspondence and policy stages.
+            </div>
+          </div>
+
+          <div style={{ background: '#ffffff', border: '1px solid #fed7aa', borderRadius: '6px', padding: '10px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+              <strong style={{ fontSize: '0.8rem', color: '#c2410c' }}>B4 (Composite)</strong>
+              <span className="sable-badge" style={{ background: '#ffedd5', color: '#9a3412', fontSize: '0.65rem' }}>INTERNAL ABLATION COMPOSITE</span>
+            </div>
+            <div style={{ fontSize: '0.72rem', color: '#64748b', lineHeight: 1.4 }}>
+              <strong>Implementation Leakage:</strong> Reuses SABLE's correspondence ranker and authorization engine.<br />
+              <strong>Academic Rule:</strong> Must NOT be reported as an independent baseline.
+            </div>
+          </div>
+        </div>
+
+        {/* 6 Cases Summary Table */}
+        {researchEval?.cases && (
+          <div>
+            <div className="sable-card-label" style={{ fontSize: '0.75rem', marginBottom: '6px' }}>
+              INDEPENDENT ORACLE EVALUATION CASES (n={researchEval.cases.length}) — STATUS: {researchEval.metrics?.sable_outcomes?.status ?? 'UNMEASURED'}
+            </div>
+            <table style={{ width: '100%', fontSize: '0.75rem', borderCollapse: 'collapse', textAlign: 'left' }}>
+              <thead>
+                <tr style={{ background: '#e2e8f0', color: '#475569' }}>
+                  <th style={{ padding: '6px 8px' }}>Scenario</th>
+                  <th style={{ padding: '6px 8px' }}>Authored Expectation</th>
+                  <th style={{ padding: '6px 8px' }}>SABLE Prediction</th>
+                  <th style={{ padding: '6px 8px' }}>Independent Review</th>
+                </tr>
+              </thead>
+              <tbody>
+                {researchEval.cases.map((c: any) => (
+                  <tr key={c.scenario_id} style={{ borderBottom: '1px solid #e2e8f0', background: '#ffffff' }}>
+                    <td style={{ padding: '6px 8px', fontFamily: 'monospace', fontWeight: 600 }}>{c.scenario_id}</td>
+                    <td style={{ padding: '6px 8px' }}>
+                      <span style={{ color: VERDICT_COLORS[c.authored_expectation?.expected_outcome] ?? '#64748b', fontWeight: 600 }}>
+                        {c.authored_expectation?.expected_outcome}
+                      </span>
+                      <span style={{ color: '#64748b', fontSize: '0.7rem', display: 'block' }}>{c.authored_expectation?.rationale}</span>
+                    </td>
+                    <td style={{ padding: '6px 8px' }}>
+                      <span style={{ color: VERDICT_COLORS[c.sable?.verdict] ?? '#64748b', fontWeight: 600 }}>
+                        {c.sable?.verdict}
+                      </span>
+                      <span style={{ color: '#64748b', fontSize: '0.7rem', display: 'block' }}>{c.sable?.reason}</span>
+                    </td>
+                    <td style={{ padding: '6px 8px' }}>
+                      <span className="sable-badge" style={{ background: '#fef3c7', color: '#92400e', fontSize: '0.7rem' }}>
+                        {c.independent_review?.review_status ?? 'UNREVIEWED'}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
     </div>
   );
 };

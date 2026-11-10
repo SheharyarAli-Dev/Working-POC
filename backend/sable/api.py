@@ -224,6 +224,32 @@ else: REGRESSED
 def list_scenarios():
     return get_scenarios_list()
 
+@sable_router.get("/scenarios/{scenario_id}")
+def get_scenario_detail(scenario_id: str):
+    if scenario_id not in SCENARIOS:
+        raise HTTPException(404, f"Scenario '{scenario_id}' not found")
+    s = SCENARIOS[scenario_id]
+    return {
+        "id": s["id"],
+        "name": s["name"],
+        "family": s["family"],
+        "is_hard_case": s["is_hard_case"],
+        "notes": s["notes"],
+        "obligation": s.get("obligation", OBLIGATION),
+        "baseline_tf": s["baseline_tf"],
+        "candidate_tf": s["candidate_tf"],
+    }
+
+@sable_router.get("/research-eval")
+def get_research_evaluation():
+    from backend.sable.research_eval import run_experiment
+    return run_experiment()
+
+@sable_router.get("/research-eval/package")
+def get_research_evaluation_package():
+    from backend.sable.research_eval import generate_review_package
+    return generate_review_package()
+
 @sable_router.get("/obligations")
 def list_obligations():
     return storage.get_obligations()
@@ -545,6 +571,8 @@ async def execute_sable_pipeline(run_id: str, scenario: dict, obligation: dict):
                       "candidate_sha256": candidate_sha,
                       "baseline_files": list(baseline_tf.keys()),
                       "candidate_files": list(candidate_tf.keys()),
+                      "candidate_tf": candidate_tf,
+                      "baseline_tf": baseline_tf,
                       "diff": "".join(diff_lines[:100]),
                       "diff_lines": diff_lines[:100],
                       "message": f"Captured baseline ({baseline_sha[:8]}…) and candidate ({candidate_sha[:8]}…).",

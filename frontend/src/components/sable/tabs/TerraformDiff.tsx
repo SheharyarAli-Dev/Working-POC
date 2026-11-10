@@ -59,7 +59,13 @@ export const TerraformDiffTab: React.FC<Props> = ({ runState, explainSimply, onR
             style={{ fontSize: '0.75rem', padding: '5px 10px' }}
             onClick={() => {
               setEditorError(null);
-              if (!editMode) setCustomFiles(runState.candidateFiles.map(path => ({ path, content: '' })));
+              if (!editMode) {
+                if (runState.candidateTf && Object.keys(runState.candidateTf).length > 0) {
+                  setCustomFiles(Object.entries(runState.candidateTf).map(([path, content]) => ({ path, content })));
+                } else {
+                  setCustomFiles(runState.candidateFiles.map(path => ({ path, content: '' })));
+                }
+              }
               setEditMode(m => !m);
             }}
           >

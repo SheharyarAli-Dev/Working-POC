@@ -78,6 +78,8 @@ export interface SableRunState {
   diff: string | null;
   diffLines: string[];
   candidateFiles: string[];
+  baselineTf?: Record<string, string>;
+  candidateTf?: Record<string, string>;
   baselineResources: string[];
   candidateResources: string[];
   baselineGraph: { nodes: any[]; edges: any[] } | null;

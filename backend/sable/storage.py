@@ -81,7 +81,7 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     "arn:aws:s3:::customer-data/*",
                     "explicit benchmark policy + Terraform IAM policy document",
                     "baseline passes independent predicate",
-                    datetime.datetime.utcnow().isoformat()
+                    datetime.datetime.now(datetime.timezone.utc).isoformat()
                 ))
 
     # ---------- Obligations ----------
@@ -116,7 +116,7 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             c.execute("""
 INSERT OR IGNORE INTO runs (run_id, scenario_id, obligation_id, created_at)
 VALUES (?, ?, ?, ?)
-""", (run_id, scenario_id, obligation_id, datetime.datetime.utcnow().isoformat()))
+""", (run_id, scenario_id, obligation_id, datetime.datetime.now(datetime.timezone.utc).isoformat()))
 
     def complete_run(self, run_id: str, verdict: str, decision_hash: str,
                      evidence: dict, proof: dict, evidence_chain: list[dict] | None = None):
@@ -124,7 +124,7 @@ VALUES (?, ?, ?, ?)
             c.execute("""
 UPDATE runs SET verdict=?, decision_hash=?, completed_at=?, evidence_json=?, proof_json=?, evidence_chain_json=?
 WHERE run_id=?
-""", (verdict, decision_hash, datetime.datetime.utcnow().isoformat(),
+""", (verdict, decision_hash, datetime.datetime.now(datetime.timezone.utc).isoformat(),
       json.dumps(evidence), json.dumps(proof), json.dumps(evidence_chain or []), run_id))
 
     def get_run(self, run_id: str) -> dict | None:

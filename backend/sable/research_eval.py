@@ -20,6 +20,108 @@ DATASET_PROVENANCE = (
     "the implementation fixture catalog; authorship is not independent review."
 )
 
+# Architectural taxonomy distinguishing independent baselines from internal ablations.
+# B4 shares SABLE's correspondence ranker and authorization engine, and must never
+# be represented as an independent baseline or comparator.
+COMPARATOR_TAXONOMY: dict[str, dict[str, Any]] = {
+    "independent_moved_only": {
+        "classification": "INDEPENDENT_BASELINE",
+        "implementation_independence": "ZERO_SABLE_COUPLING",
+        "description": (
+            "Pure regex-based moved-block parser. Does not import or execute any SABLE "
+            "modules (HCL parser, correspondence, or authorization). Predicts PRESERVED "
+            "if a unique moved block targets the obligation asset; UNKNOWN otherwise."
+        ),
+        "limitations": (
+            "Cannot evaluate policy semantics or detect authorization regressions "
+            "(e.g., privilege widening, misbinding, or weakening)."
+        ),
+        "evaluates_policy": False,
+        "evaluates_correspondence": True,
+    },
+    "B0_candidate_only": {
+        "classification": "INTERNAL_ABLATION",
+        "implementation_independence": "REUSES_SABLE_CORE",
+        "description": (
+            "Ablation evaluating authorization on the candidate without correspondence "
+            "resolution (evaluates original asset address directly)."
+        ),
+        "limitations": "Reuses SABLE's evaluate_authorization engine; not an independent baseline.",
+        "evaluates_policy": True,
+        "evaluates_correspondence": False,
+    },
+    "B1_policy_scan_diff": {
+        "classification": "INTERNAL_ABLATION",
+        "implementation_independence": "REUSES_SABLE_CORE",
+        "description": (
+            "Ablation comparing before/after effective permission sets without structural "
+            "resource correspondence."
+        ),
+        "limitations": "Reuses SABLE's evaluate_authorization engine; not an independent baseline.",
+        "evaluates_policy": True,
+        "evaluates_correspondence": False,
+    },
+    "B2_moved_evidence": {
+        "classification": "INTERNAL_ABLATION",
+        "implementation_independence": "REUSES_SABLE_CORE",
+        "description": (
+            "Ablation using only HCL-parsed moves without correspondence scoring or policy check."
+        ),
+        "limitations": "Reuses SABLE's python-hcl2 wrapper; does not verify policy security.",
+        "evaluates_policy": False,
+        "evaluates_correspondence": True,
+    },
+    "B3_structural_correspondence": {
+        "classification": "INTERNAL_ABLATION",
+        "implementation_independence": "REUSES_SABLE_CORE",
+        "description": (
+            "Ablation executing SABLE correspondence ranking and selection without "
+            "obligation projection."
+        ),
+        "limitations": "Reuses SABLE's rank and choose algorithms; omits authorization projection.",
+        "evaluates_policy": False,
+        "evaluates_correspondence": True,
+    },
+    "B4_composite_ablation": {
+        "classification": "INTERNAL_ABLATION_COMPOSITE",
+        "implementation_independence": "REUSES_SABLE_CORE",
+        "description": (
+            "Composite internal ablation combining B0+B1+B2+B3 with policy-target relationships. "
+            "Must NOT be described as an independent comparator because it reuses SABLE's "
+            "correspondence ranker and authorization engine."
+        ),
+        "limitations": (
+            "Implementation leakage: shares identical AST/graph, correspondence scoring, "
+            "and authorization code with SABLE."
+        ),
+        "evaluates_policy": True,
+        "evaluates_correspondence": True,
+    },
+}
+
+REVIEW_PROTOCOL: dict[str, Any] = {
+    "version": "1.0",
+    "goal": (
+        "Independent expert validation of SABLE benchmark ground truth to determine: "
+        "(1) logical asset continuity, and (2) least-privilege obligation preservation."
+    ),
+    "attestation_fields": [
+        "reviewer",
+        "reviewed_at",
+        "reviewed_successor",
+        "reviewed_outcome",
+        "reviewed_rationale",
+    ],
+    "review_criteria": [
+        "Reviewer must not be an author or contributor to SABLE code.",
+        "Reviewer inspects raw baseline and candidate HCL files independently.",
+        "Reviewer independently determines whether a unique logical successor exists.",
+        "Reviewer independently determines whether the candidate IAM policy satisfies the least-privilege obligation.",
+        "Reviewer must provide explicit technical rationale for every reviewed case.",
+    ],
+    "current_status": "PENDING_INDEPENDENT_REVIEW",
+}
+
 # Logical successor is an evaluation annotation, never read by either predictor.
 CASES: tuple[dict[str, Any], ...] = (
     {"scenario_id": "rename_with_moved", "expected_successor": "aws_s3_bucket.cdata", "expected_outcome": "PRESERVED", "rationale": "Explicit moved block maps the protected bucket address to cdata; physical bucket identity and policy target are retained.", "review_status": "UNREVIEWED", "reviewer": None, "reviewed_at": None, "reviewed_successor": None, "reviewed_outcome": None, "reviewed_rationale": None},
@@ -50,6 +152,45 @@ def validate_dataset(cases: tuple[dict[str, Any], ...] = CASES) -> None:
         reviewed = case["review_status"] == "REVIEWED"
         if reviewed != bool(case["reviewer"] and case["reviewed_at"] and case["reviewed_outcome"] in _ALLOWED and case["reviewed_rationale"]):
             raise ValueError(f"Review attestation incomplete: {sid}")
+
+
+def generate_review_package(cases: tuple[dict[str, Any], ...] = CASES) -> dict[str, Any]:
+    """Generates a self-contained, review-ready package for independent reviewers.
+
+    Includes exact Terraform inputs, obligations, authored rationale, and an empty
+    attestation template for each case.
+    """
+    validate_dataset(cases)
+    dossier_cases = []
+    for case in cases:
+        scenario = SCENARIOS[case["scenario_id"]]
+        dossier_cases.append({
+            "scenario_id": case["scenario_id"],
+            "description": scenario.get("notes", ""),
+            "obligation": scenario["obligation"],
+            "baseline_tf": scenario["baseline_tf"],
+            "candidate_tf": scenario["candidate_tf"],
+            "authored_expectation": {
+                "expected_successor": case["expected_successor"],
+                "expected_outcome": case["expected_outcome"],
+                "rationale": case["rationale"],
+            },
+            "independent_attestation_template": {
+                "review_status": "UNREVIEWED",
+                "reviewer": "<Reviewer Name, Title, Institution>",
+                "reviewed_at": "<YYYY-MM-DD>",
+                "reviewed_successor": "<e.g. aws_s3_bucket.cdata or None>",
+                "reviewed_outcome": "<PRESERVED | REGRESSED | UNKNOWN>",
+                "reviewed_rationale": "<Detailed technical reasoning for verdict>",
+            },
+        })
+    return {
+        "dataset_id": DATASET_ID,
+        "provenance": DATASET_PROVENANCE,
+        "review_protocol": REVIEW_PROTOCOL,
+        "comparator_taxonomy": COMPARATOR_TAXONOMY,
+        "cases": dossier_cases,
+    }
 
 
 def independent_moved_only(baseline_files: dict[str, str], candidate_files: dict[str, str], obligation: dict[str, Any]) -> dict[str, Any]:
@@ -120,11 +261,11 @@ def run_experiment() -> dict[str, Any]:
     all_reviewed = all(c["review_status"] == "REVIEWED" for c in CASES)
     sable_rows = [(c, {"prediction": x["sable"]["verdict"]}) for c, x in zip(CASES, case_results)]
     moved_rows = [(c, {"prediction": x["moved_only"]["verdict"]}) for c, x in zip(CASES, case_results)]
-    status = "MEASURED_ON_REVIEWED_SET" if all_reviewed else "UNMEASURED"
-    reason = None if all_reviewed else "Authored expectations have not received independent review; prediction rows are diagnostic only."
     return {
         "dataset": {"id": DATASET_ID, "provenance": DATASET_PROVENANCE, "case_count": len(CASES), "reviewed_count": sum(c["review_status"] == "REVIEWED" for c in CASES)},
         "baseline": {"id": "moved_only_v1", "description": "Unique explicit moved-block target predicts PRESERVED; otherwise UNKNOWN. No policy/security check; cannot predict REGRESSED.", "independent_of_sable_core": True},
+        "comparator_taxonomy": COMPARATOR_TAXONOMY,
+        "review_protocol": REVIEW_PROTOCOL,
         "metrics": {
             "sable_outcomes": _metric_status(sable_rows, "prediction"),
             "moved_only_outcomes": _metric_status(moved_rows, "prediction"),
@@ -142,9 +283,29 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="Run the provenance-aware SABLE research evaluation.")
     parser.add_argument("--output", type=Path, help="Write JSON here; stdout is used if omitted.")
+    parser.add_argument("--package", action="store_true", help="Generate self-contained review package.")
+    parser.add_argument("--check-readiness", action="store_true", help="Check review attestation status.")
     args = parser.parse_args()
-    payload = json.dumps(run_experiment(), indent=2, sort_keys=True)
-    if args.output:
-        args.output.write_text(payload + "\n", encoding="utf-8")
+
+    if args.check_readiness:
+        reviewed = [c for c in CASES if c["review_status"] == "REVIEWED"]
+        unreviewed = [c for c in CASES if c["review_status"] != "REVIEWED"]
+        print(f"Dataset '{DATASET_ID}': {len(reviewed)}/{len(CASES)} cases reviewed.")
+        if unreviewed:
+            print("Unreviewed cases:")
+            for c in unreviewed:
+                print(f"  - {c['scenario_id']}: {c['rationale']}")
+            print("Status: UNMEASURED (awaiting independent expert review)")
+    elif args.package:
+        pkg = generate_review_package()
+        payload = json.dumps(pkg, indent=2, sort_keys=True)
+        if args.output:
+            args.output.write_text(payload + "\n", encoding="utf-8")
+        else:
+            print(payload)
     else:
-        print(payload)
+        payload = json.dumps(run_experiment(), indent=2, sort_keys=True)
+        if args.output:
+            args.output.write_text(payload + "\n", encoding="utf-8")
+        else:
+            print(payload)

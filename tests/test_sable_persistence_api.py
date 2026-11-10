@@ -71,3 +71,29 @@ def test_custom_bundle_determinism_after_restart_reports_missing_input(monkeypat
         api.verify_determinism(proof["run_id"])
     assert error.value.status_code == 409
     assert "Terraform input bundle was not persisted" in error.value.detail
+
+
+def test_scenario_detail_endpoint_returns_bundle_files():
+    detail = api.get_scenario_detail("rename_with_moved")
+    assert detail["id"] == "rename_with_moved"
+    assert "main.tf" in detail["baseline_tf"]
+    assert "main.tf" in detail["candidate_tf"]
+    assert "aws_s3_bucket" in detail["baseline_tf"]["main.tf"]
+
+    with pytest.raises(HTTPException) as err:
+        api.get_scenario_detail("nonexistent_scenario")
+    assert err.value.status_code == 404
+
+
+def test_research_eval_endpoints_return_honest_unmeasured_payloads():
+    exp = api.get_research_evaluation()
+    assert exp["dataset"]["case_count"] == 6
+    assert exp["metrics"]["sable_outcomes"]["status"] == "UNMEASURED"
+    assert exp["metrics"]["moved_only_outcomes"]["status"] == "UNMEASURED"
+    assert "comparator_taxonomy" in exp
+
+    pkg = api.get_research_evaluation_package()
+    assert pkg["dataset_id"] == "sable-independent-oracle-v1"
+    assert len(pkg["cases"]) == 6
+    for c in pkg["cases"]:
+        assert c["independent_attestation_template"]["review_status"] == "UNREVIEWED"
