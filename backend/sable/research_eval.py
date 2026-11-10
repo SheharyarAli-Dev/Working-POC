@@ -119,6 +119,20 @@ REVIEW_PROTOCOL: dict[str, Any] = {
         "Reviewer independently determines whether the candidate IAM policy satisfies the least-privilege obligation.",
         "Reviewer must provide explicit technical rationale for every reviewed case.",
     ],
+    "review_evidence_tiers": {
+        "independent_human_review": {
+            "definition": "External experts with no contribution to SABLE code, executing this protocol independently of the authors' expectations.",
+            "may_feed_metrics": True,
+        },
+        "author_review": {
+            "definition": "Evaluations performed by SABLE authors or contributors; recorded as provenance only and never used for metrics. Evidence record: reports/SABLE_AUTHOR_REVIEW_2026-11-10.md.",
+            "may_feed_metrics": False,
+        },
+        "ai_assisted_review": {
+            "definition": "Analyses produced with AI-tool assistance (including the SABLE engine itself); recorded as observations, never as review attestation.",
+            "may_feed_metrics": False,
+        },
+    },
     "current_status": "PENDING_INDEPENDENT_REVIEW",
 }
 
@@ -127,7 +141,7 @@ CASES: tuple[dict[str, Any], ...] = (
     {"scenario_id": "rename_with_moved", "expected_successor": "aws_s3_bucket.cdata", "expected_outcome": "PRESERVED", "rationale": "Explicit moved block maps the protected bucket address to cdata; physical bucket identity and policy target are retained.", "review_status": "UNREVIEWED", "reviewer": None, "reviewed_at": None, "reviewed_successor": None, "reviewed_outcome": None, "reviewed_rationale": None},
     {"scenario_id": "split_to_two", "expected_successor": None, "expected_outcome": "UNKNOWN", "rationale": "Two new bucket resources divide the prior logical asset; the case provides no unique logical successor rule.", "review_status": "UNREVIEWED", "reviewer": None, "reviewed_at": None, "reviewed_successor": None, "reviewed_outcome": None, "reviewed_rationale": None},
     {"scenario_id": "resource_wildened", "expected_successor": "aws_s3_bucket.customer_data", "expected_outcome": "REGRESSED", "rationale": "The original logical bucket remains, but the policy resource scope becomes wildcard rather than bucket-specific.", "review_status": "UNREVIEWED", "reviewer": None, "reviewed_at": None, "reviewed_successor": None, "reviewed_outcome": None, "reviewed_rationale": None},
-    {"scenario_id": "wrong_binding_regressed", "expected_successor": "aws_s3_bucket.customer_data_new", "expected_outcome": "REGRESSED", "rationale": "The obligation concerns customer data; granting the required actions to the unrelated logs bucket does not preserve that obligation.", "review_status": "UNREVIEWED", "reviewer": None, "reviewed_at": None, "reviewed_successor": None, "reviewed_outcome": None, "reviewed_rationale": None},
+    {"scenario_id": "wrong_binding_regressed", "expected_successor": None, "expected_outcome": "REGRESSED", "rationale": "REGRESSED: the required actions are re-bound to logs_bucket, whose Asset tag ('logs') is categorically incompatible with the customer-data obligation; the successor stays unresolved because customer_data_new shows no continuity evidence (different bucket name, different tag, no moved block, and no policy reference).", "review_status": "UNREVIEWED", "reviewer": None, "reviewed_at": None, "reviewed_successor": None, "reviewed_outcome": None, "reviewed_rationale": None},
     {"scenario_id": "ambiguous_set_three_candidates", "expected_successor": None, "expected_outcome": "UNKNOWN", "rationale": "Three candidates carry equivalent logical tags and no unique identity evidence selects one.", "review_status": "UNREVIEWED", "reviewer": None, "reviewed_at": None, "reviewed_successor": None, "reviewed_outcome": None, "reviewed_rationale": None},
     {"scenario_id": "replacement_wrong_bucket", "expected_successor": None, "expected_outcome": "UNKNOWN", "rationale": "Replacement has different physical identity and no continuity evidence; the intended successor cannot be established from this case.", "review_status": "UNREVIEWED", "reviewer": None, "reviewed_at": None, "reviewed_successor": None, "reviewed_outcome": None, "reviewed_rationale": None},
 )
