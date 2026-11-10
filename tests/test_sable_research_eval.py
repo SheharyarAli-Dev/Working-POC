@@ -6,8 +6,11 @@ import pytest
 
 from backend.sable.research_eval import (
     CASES,
+    COMPARATOR_TAXONOMY,
+    REVIEW_PROTOCOL,
     _confusion_metrics,
     _metric_status,
+    generate_review_package,
     independent_moved_only,
     run_experiment,
     validate_dataset,
@@ -79,3 +82,29 @@ def test_experiment_refuses_metrics_without_external_review():
     assert result["metrics"]["moved_only_outcomes"]["status"] == "UNMEASURED"
     assert result["metrics"]["correspondence_accuracy"]["status"] == "UNMEASURED"
     assert len(result["cases"]) == len(CASES)
+    assert "comparator_taxonomy" in result
+    assert "review_protocol" in result
+
+
+def test_comparator_taxonomy_distinguishes_independent_from_ablations():
+    assert "independent_moved_only" in COMPARATOR_TAXONOMY
+    assert COMPARATOR_TAXONOMY["independent_moved_only"]["classification"] == "INDEPENDENT_BASELINE"
+    assert COMPARATOR_TAXONOMY["independent_moved_only"]["implementation_independence"] == "ZERO_SABLE_COUPLING"
+    assert COMPARATOR_TAXONOMY["independent_moved_only"]["evaluates_policy"] is False
+
+    assert "B4_composite_ablation" in COMPARATOR_TAXONOMY
+    assert COMPARATOR_TAXONOMY["B4_composite_ablation"]["classification"] == "INTERNAL_ABLATION_COMPOSITE"
+    assert COMPARATOR_TAXONOMY["B4_composite_ablation"]["implementation_independence"] == "REUSES_SABLE_CORE"
+
+
+def test_generate_review_package_structure():
+    pkg = generate_review_package()
+    assert pkg["dataset_id"] == "sable-independent-oracle-v1"
+    assert len(pkg["cases"]) == len(CASES)
+    for c in pkg["cases"]:
+        assert "baseline_tf" in c
+        assert "candidate_tf" in c
+        assert "obligation" in c
+        assert "authored_expectation" in c
+        assert c["independent_attestation_template"]["review_status"] == "UNREVIEWED"
+        assert c["independent_attestation_template"]["reviewer"] == "<Reviewer Name, Title, Institution>"

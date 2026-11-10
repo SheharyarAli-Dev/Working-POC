@@ -1,0 +1,280 @@
+{
+  "dataset_id": "sable-independent-oracle-v1",
+  "provenance": "Authored as a separate evaluation specification from the stated Terraform refactor and authorization obligation. Scenario Terraform is reused from the implementation fixture catalog; authorship is not independent review.",
+  "review_protocol": {
+    "version": "1.0",
+    "goal": "Independent expert validation of SABLE benchmark ground truth to determine: (1) logical asset continuity, and (2) least-privilege obligation preservation.",
+    "attestation_fields": [
+      "reviewer",
+      "reviewed_at",
+      "reviewed_successor",
+      "reviewed_outcome",
+      "reviewed_rationale"
+    ],
+    "review_criteria": [
+      "Reviewer must not be an author or contributor to SABLE code.",
+      "Reviewer inspects raw baseline and candidate HCL files independently.",
+      "Reviewer independently determines whether a unique logical successor exists.",
+      "Reviewer independently determines whether the candidate IAM policy satisfies the least-privilege obligation.",
+      "Reviewer must provide explicit technical rationale for every reviewed case."
+    ],
+    "current_status": "PENDING_INDEPENDENT_REVIEW"
+  },
+  "comparator_taxonomy": {
+    "independent_moved_only": {
+      "classification": "INDEPENDENT_BASELINE",
+      "implementation_independence": "ZERO_SABLE_COUPLING",
+      "description": "Pure regex-based moved-block parser. Does not import or execute any SABLE modules (HCL parser, correspondence, or authorization). Predicts PRESERVED if a unique moved block targets the obligation asset; UNKNOWN otherwise.",
+      "limitations": "Cannot evaluate policy semantics or detect authorization regressions (e.g., privilege widening, misbinding, or weakening).",
+      "evaluates_policy": false,
+      "evaluates_correspondence": true
+    },
+    "B0_candidate_only": {
+      "classification": "INTERNAL_ABLATION",
+      "implementation_independence": "REUSES_SABLE_CORE",
+      "description": "Ablation evaluating authorization on the candidate without correspondence resolution (evaluates original asset address directly).",
+      "limitations": "Reuses SABLE's evaluate_authorization engine; not an independent baseline.",
+      "evaluates_policy": true,
+      "evaluates_correspondence": false
+    },
+    "B1_policy_scan_diff": {
+      "classification": "INTERNAL_ABLATION",
+      "implementation_independence": "REUSES_SABLE_CORE",
+      "description": "Ablation comparing before/after effective permission sets without structural resource correspondence.",
+      "limitations": "Reuses SABLE's evaluate_authorization engine; not an independent baseline.",
+      "evaluates_policy": true,
+      "evaluates_correspondence": false
+    },
+    "B2_moved_evidence": {
+      "classification": "INTERNAL_ABLATION",
+      "implementation_independence": "REUSES_SABLE_CORE",
+      "description": "Ablation using only HCL-parsed moves without correspondence scoring or policy check.",
+      "limitations": "Reuses SABLE's python-hcl2 wrapper; does not verify policy security.",
+      "evaluates_policy": false,
+      "evaluates_correspondence": true
+    },
+    "B3_structural_correspondence": {
+      "classification": "INTERNAL_ABLATION",
+      "implementation_independence": "REUSES_SABLE_CORE",
+      "description": "Ablation executing SABLE correspondence ranking and selection without obligation projection.",
+      "limitations": "Reuses SABLE's rank and choose algorithms; omits authorization projection.",
+      "evaluates_policy": false,
+      "evaluates_correspondence": true
+    },
+    "B4_composite_ablation": {
+      "classification": "INTERNAL_ABLATION_COMPOSITE",
+      "implementation_independence": "REUSES_SABLE_CORE",
+      "description": "Composite internal ablation combining B0+B1+B2+B3 with policy-target relationships. Must NOT be described as an independent comparator because it reuses SABLE's correspondence ranker and authorization engine.",
+      "limitations": "Implementation leakage: shares identical AST/graph, correspondence scoring, and authorization code with SABLE.",
+      "evaluates_policy": true,
+      "evaluates_correspondence": true
+    }
+  },
+  "cases": [
+    {
+      "scenario_id": "rename_with_moved",
+      "description": "aws_s3_bucket.customer_data renamed to aws_s3_bucket.cdata with a moved{} block. Policy updated. Strongest signal set \u2192 PRESERVED.",
+      "obligation": {
+        "principal": "aws_iam_role.app",
+        "actions": [
+          "s3:GetObject",
+          "s3:PutObject"
+        ],
+        "protected_asset": "aws_s3_bucket.customer_data",
+        "resource_scope": "arn:aws:s3:::customer-data/*",
+        "obligation_id": "S3-APPROLE-CUSTOMERDATA",
+        "authority_source": "explicit benchmark policy + Terraform IAM policy document"
+      },
+      "baseline_tf": {
+        "main.tf": "\nresource \"aws_iam_role\" \"app\" {\n  name = \"app-role\"\n  assume_role_policy = jsonencode({\n    Version = \"2012-10-17\"\n    Statement = [{\n      Effect    = \"Allow\"\n      Principal = { Service = \"ec2.amazonaws.com\" }\n      Action    = \"sts:AssumeRole\"\n    }]\n  })\n}\n\nresource \"aws_s3_bucket\" \"customer_data\" {\n  bucket = \"customer-data\"\n  tags = {\n    Asset = \"customer-data\"\n    Stage = \"production\"\n  }\n}\n\nresource \"aws_iam_role_policy\" \"app_policy\" {\n  name   = \"CustomerDataAccess\"\n  role   = aws_iam_role.app.id\n  policy = jsonencode({\n    Version = \"2012-10-17\"\n    Statement = [{\n      Effect   = \"Allow\"\n      Action   = [\"s3:GetObject\", \"s3:PutObject\"]\n      Resource = \"${aws_s3_bucket.customer_data.arn}/*\"\n    }]\n  })\n}\n"
+      },
+      "candidate_tf": {
+        "main.tf": "\nresource \"aws_iam_role\" \"app\" {\n  name = \"app-role\"\n  assume_role_policy = jsonencode({\n    Version = \"2012-10-17\"\n    Statement = [{ Effect = \"Allow\" Principal = { Service = \"ec2.amazonaws.com\" } Action = \"sts:AssumeRole\" }]\n  })\n}\nresource \"aws_s3_bucket\" \"cdata\" {\n  bucket = \"customer-data\"\n  tags = { Asset = \"customer-data\" Stage = \"production\" }\n}\nresource \"aws_iam_role_policy\" \"app_policy\" {\n  name   = \"CustomerDataAccess\"\n  role   = aws_iam_role.app.id\n  policy = jsonencode({\n    Version = \"2012-10-17\"\n    Statement = [{ Effect = \"Allow\" Action = [\"s3:GetObject\", \"s3:PutObject\"] Resource = \"${aws_s3_bucket.cdata.arn}/*\" }]\n  })\n}\n",
+        "moved.tf": "\nmoved {\n  from = aws_s3_bucket.customer_data\n  to   = aws_s3_bucket.cdata\n}\n"
+      },
+      "authored_expectation": {
+        "expected_successor": "aws_s3_bucket.cdata",
+        "expected_outcome": "PRESERVED",
+        "rationale": "Explicit moved block maps the protected bucket address to cdata; physical bucket identity and policy target are retained."
+      },
+      "independent_attestation_template": {
+        "review_status": "UNREVIEWED",
+        "reviewer": "<Reviewer Name, Title, Institution>",
+        "reviewed_at": "<YYYY-MM-DD>",
+        "reviewed_successor": "<e.g. aws_s3_bucket.cdata or None>",
+        "reviewed_outcome": "<PRESERVED | REGRESSED | UNKNOWN>",
+        "reviewed_rationale": "<Detailed technical reasoning for verdict>"
+      }
+    },
+    {
+      "scenario_id": "split_to_two",
+      "description": "customer_data split into customer_data_hot and customer_data_cold. No unique successor \u2192 UNKNOWN.",
+      "obligation": {
+        "principal": "aws_iam_role.app",
+        "actions": [
+          "s3:GetObject",
+          "s3:PutObject"
+        ],
+        "protected_asset": "aws_s3_bucket.customer_data",
+        "resource_scope": "arn:aws:s3:::customer-data/*",
+        "obligation_id": "S3-APPROLE-CUSTOMERDATA",
+        "authority_source": "explicit benchmark policy + Terraform IAM policy document"
+      },
+      "baseline_tf": {
+        "main.tf": "\nresource \"aws_iam_role\" \"app\" {\n  name = \"app-role\"\n  assume_role_policy = jsonencode({\n    Version = \"2012-10-17\"\n    Statement = [{\n      Effect    = \"Allow\"\n      Principal = { Service = \"ec2.amazonaws.com\" }\n      Action    = \"sts:AssumeRole\"\n    }]\n  })\n}\n\nresource \"aws_s3_bucket\" \"customer_data\" {\n  bucket = \"customer-data\"\n  tags = {\n    Asset = \"customer-data\"\n    Stage = \"production\"\n  }\n}\n\nresource \"aws_iam_role_policy\" \"app_policy\" {\n  name   = \"CustomerDataAccess\"\n  role   = aws_iam_role.app.id\n  policy = jsonencode({\n    Version = \"2012-10-17\"\n    Statement = [{\n      Effect   = \"Allow\"\n      Action   = [\"s3:GetObject\", \"s3:PutObject\"]\n      Resource = \"${aws_s3_bucket.customer_data.arn}/*\"\n    }]\n  })\n}\n"
+      },
+      "candidate_tf": {
+        "main.tf": "\nresource \"aws_iam_role\" \"app\" {\n  name = \"app-role\"\n  assume_role_policy = jsonencode({\n    Version = \"2012-10-17\"\n    Statement = [{ Effect = \"Allow\" Principal = { Service = \"ec2.amazonaws.com\" } Action = \"sts:AssumeRole\" }]\n  })\n}\nresource \"aws_s3_bucket\" \"customer_data_hot\" {\n  bucket = \"customer-data-hot\"\n  tags = { Asset = \"customer-data\" Stage = \"production\" }\n}\nresource \"aws_s3_bucket\" \"customer_data_cold\" {\n  bucket = \"customer-data-cold\"\n  tags = { Asset = \"customer-data\" Stage = \"production\" }\n}\nresource \"aws_iam_role_policy\" \"app_policy\" {\n  name   = \"CustomerDataAccess\"\n  role   = aws_iam_role.app.id\n  policy = jsonencode({\n    Version = \"2012-10-17\"\n    Statement = [{ Effect = \"Allow\" Action = [\"s3:GetObject\", \"s3:PutObject\"] Resource = \"${aws_s3_bucket.customer_data_hot.arn}/*\" }]\n  })\n}\n"
+      },
+      "authored_expectation": {
+        "expected_successor": null,
+        "expected_outcome": "UNKNOWN",
+        "rationale": "Two new bucket resources divide the prior logical asset; the case provides no unique logical successor rule."
+      },
+      "independent_attestation_template": {
+        "review_status": "UNREVIEWED",
+        "reviewer": "<Reviewer Name, Title, Institution>",
+        "reviewed_at": "<YYYY-MM-DD>",
+        "reviewed_successor": "<e.g. aws_s3_bucket.cdata or None>",
+        "reviewed_outcome": "<PRESERVED | REGRESSED | UNKNOWN>",
+        "reviewed_rationale": "<Detailed technical reasoning for verdict>"
+      }
+    },
+    {
+      "scenario_id": "resource_wildened",
+      "description": "Actions correct but Resource changed from specific bucket to * \u2192 REGRESSED (widening).",
+      "obligation": {
+        "principal": "aws_iam_role.app",
+        "actions": [
+          "s3:GetObject",
+          "s3:PutObject"
+        ],
+        "protected_asset": "aws_s3_bucket.customer_data",
+        "resource_scope": "arn:aws:s3:::customer-data/*",
+        "obligation_id": "S3-APPROLE-CUSTOMERDATA",
+        "authority_source": "explicit benchmark policy + Terraform IAM policy document"
+      },
+      "baseline_tf": {
+        "main.tf": "\nresource \"aws_iam_role\" \"app\" {\n  name = \"app-role\"\n  assume_role_policy = jsonencode({\n    Version = \"2012-10-17\"\n    Statement = [{\n      Effect    = \"Allow\"\n      Principal = { Service = \"ec2.amazonaws.com\" }\n      Action    = \"sts:AssumeRole\"\n    }]\n  })\n}\n\nresource \"aws_s3_bucket\" \"customer_data\" {\n  bucket = \"customer-data\"\n  tags = {\n    Asset = \"customer-data\"\n    Stage = \"production\"\n  }\n}\n\nresource \"aws_iam_role_policy\" \"app_policy\" {\n  name   = \"CustomerDataAccess\"\n  role   = aws_iam_role.app.id\n  policy = jsonencode({\n    Version = \"2012-10-17\"\n    Statement = [{\n      Effect   = \"Allow\"\n      Action   = [\"s3:GetObject\", \"s3:PutObject\"]\n      Resource = \"${aws_s3_bucket.customer_data.arn}/*\"\n    }]\n  })\n}\n"
+      },
+      "candidate_tf": {
+        "main.tf": "\nresource \"aws_iam_role\" \"app\" {\n  name = \"app-role\"\n  assume_role_policy = jsonencode({\n    Version = \"2012-10-17\"\n    Statement = [{ Effect = \"Allow\" Principal = { Service = \"ec2.amazonaws.com\" } Action = \"sts:AssumeRole\" }]\n  })\n}\nresource \"aws_s3_bucket\" \"customer_data\" {\n  bucket = \"customer-data\"\n  tags = { Asset = \"customer-data\" Stage = \"production\" }\n}\nresource \"aws_iam_role_policy\" \"app_policy\" {\n  name   = \"CustomerDataAccess\"\n  role   = aws_iam_role.app.id\n  policy = jsonencode({\n    Version = \"2012-10-17\"\n    Statement = [{ Effect = \"Allow\" Action = [\"s3:GetObject\", \"s3:PutObject\"] Resource = \"*\" }]\n  })\n}\n"
+      },
+      "authored_expectation": {
+        "expected_successor": "aws_s3_bucket.customer_data",
+        "expected_outcome": "REGRESSED",
+        "rationale": "The original logical bucket remains, but the policy resource scope becomes wildcard rather than bucket-specific."
+      },
+      "independent_attestation_template": {
+        "review_status": "UNREVIEWED",
+        "reviewer": "<Reviewer Name, Title, Institution>",
+        "reviewed_at": "<YYYY-MM-DD>",
+        "reviewed_successor": "<e.g. aws_s3_bucket.cdata or None>",
+        "reviewed_outcome": "<PRESERVED | REGRESSED | UNKNOWN>",
+        "reviewed_rationale": "<Detailed technical reasoning for verdict>"
+      }
+    },
+    {
+      "scenario_id": "wrong_binding_regressed",
+      "description": "A different bucket (logs_bucket) satisfies the local policy predicate but is the wrong logical asset \u2192 REGRESSED.",
+      "obligation": {
+        "principal": "aws_iam_role.app",
+        "actions": [
+          "s3:GetObject",
+          "s3:PutObject"
+        ],
+        "protected_asset": "aws_s3_bucket.customer_data",
+        "resource_scope": "arn:aws:s3:::customer-data/*",
+        "obligation_id": "S3-APPROLE-CUSTOMERDATA",
+        "authority_source": "explicit benchmark policy + Terraform IAM policy document"
+      },
+      "baseline_tf": {
+        "main.tf": "\nresource \"aws_iam_role\" \"app\" {\n  name = \"app-role\"\n  assume_role_policy = jsonencode({\n    Version = \"2012-10-17\"\n    Statement = [{\n      Effect    = \"Allow\"\n      Principal = { Service = \"ec2.amazonaws.com\" }\n      Action    = \"sts:AssumeRole\"\n    }]\n  })\n}\n\nresource \"aws_s3_bucket\" \"customer_data\" {\n  bucket = \"customer-data\"\n  tags = {\n    Asset = \"customer-data\"\n    Stage = \"production\"\n  }\n}\n\nresource \"aws_iam_role_policy\" \"app_policy\" {\n  name   = \"CustomerDataAccess\"\n  role   = aws_iam_role.app.id\n  policy = jsonencode({\n    Version = \"2012-10-17\"\n    Statement = [{\n      Effect   = \"Allow\"\n      Action   = [\"s3:GetObject\", \"s3:PutObject\"]\n      Resource = \"${aws_s3_bucket.customer_data.arn}/*\"\n    }]\n  })\n}\n"
+      },
+      "candidate_tf": {
+        "main.tf": "\nresource \"aws_iam_role\" \"app\" {\n  name = \"app-role\"\n  assume_role_policy = jsonencode({\n    Version = \"2012-10-17\"\n    Statement = [{ Effect = \"Allow\" Principal = { Service = \"ec2.amazonaws.com\" } Action = \"sts:AssumeRole\" }]\n  })\n}\nresource \"aws_s3_bucket\" \"logs_bucket\" {\n  bucket = \"logs-storage\"\n  tags = { Asset = \"logs\" Stage = \"production\" }\n}\nresource \"aws_s3_bucket\" \"customer_data_new\" {\n  bucket = \"customer-data-new\"\n  tags = { Asset = \"customer-data-new\" Stage = \"production\" }\n}\nresource \"aws_iam_role_policy\" \"app_policy\" {\n  name   = \"CustomerDataAccess\"\n  role   = aws_iam_role.app.id\n  policy = jsonencode({\n    Version = \"2012-10-17\"\n    Statement = [{ Effect = \"Allow\" Action = [\"s3:GetObject\", \"s3:PutObject\"] Resource = \"${aws_s3_bucket.logs_bucket.arn}/*\" }]\n  })\n}\n"
+      },
+      "authored_expectation": {
+        "expected_successor": "aws_s3_bucket.customer_data_new",
+        "expected_outcome": "REGRESSED",
+        "rationale": "The obligation concerns customer data; granting the required actions to the unrelated logs bucket does not preserve that obligation."
+      },
+      "independent_attestation_template": {
+        "review_status": "UNREVIEWED",
+        "reviewer": "<Reviewer Name, Title, Institution>",
+        "reviewed_at": "<YYYY-MM-DD>",
+        "reviewed_successor": "<e.g. aws_s3_bucket.cdata or None>",
+        "reviewed_outcome": "<PRESERVED | REGRESSED | UNKNOWN>",
+        "reviewed_rationale": "<Detailed technical reasoning for verdict>"
+      }
+    },
+    {
+      "scenario_id": "ambiguous_set_three_candidates",
+      "description": "Three S3 buckets with matching Asset tag and Stage, scores too close \u2192 UNKNOWN.",
+      "obligation": {
+        "principal": "aws_iam_role.app",
+        "actions": [
+          "s3:GetObject",
+          "s3:PutObject"
+        ],
+        "protected_asset": "aws_s3_bucket.customer_data",
+        "resource_scope": "arn:aws:s3:::customer-data/*",
+        "obligation_id": "S3-APPROLE-CUSTOMERDATA",
+        "authority_source": "explicit benchmark policy + Terraform IAM policy document"
+      },
+      "baseline_tf": {
+        "main.tf": "\nresource \"aws_iam_role\" \"app\" {\n  name = \"app-role\"\n  assume_role_policy = jsonencode({\n    Version = \"2012-10-17\"\n    Statement = [{\n      Effect    = \"Allow\"\n      Principal = { Service = \"ec2.amazonaws.com\" }\n      Action    = \"sts:AssumeRole\"\n    }]\n  })\n}\n\nresource \"aws_s3_bucket\" \"customer_data\" {\n  bucket = \"customer-data\"\n  tags = {\n    Asset = \"customer-data\"\n    Stage = \"production\"\n  }\n}\n\nresource \"aws_iam_role_policy\" \"app_policy\" {\n  name   = \"CustomerDataAccess\"\n  role   = aws_iam_role.app.id\n  policy = jsonencode({\n    Version = \"2012-10-17\"\n    Statement = [{\n      Effect   = \"Allow\"\n      Action   = [\"s3:GetObject\", \"s3:PutObject\"]\n      Resource = \"${aws_s3_bucket.customer_data.arn}/*\"\n    }]\n  })\n}\n"
+      },
+      "candidate_tf": {
+        "main.tf": "\nresource \"aws_iam_role\" \"app\" {\n  name = \"app-role\"\n  assume_role_policy = jsonencode({\n    Version = \"2012-10-17\"\n    Statement = [{ Effect = \"Allow\" Principal = { Service = \"ec2.amazonaws.com\" } Action = \"sts:AssumeRole\" }]\n  })\n}\nresource \"aws_s3_bucket\" \"candidate_1\" {\n  bucket = \"candidate-data-1\"\n  tags = { Asset = \"customer-data\" Stage = \"production\" }\n}\nresource \"aws_s3_bucket\" \"candidate_2\" {\n  bucket = \"candidate-data-2\"\n  tags = { Asset = \"customer-data\" Stage = \"production\" }\n}\nresource \"aws_s3_bucket\" \"candidate_3\" {\n  bucket = \"candidate-data-3\"\n  tags = { Asset = \"customer-data\" Stage = \"production\" }\n}\nresource \"aws_iam_role_policy\" \"app_policy\" {\n  name   = \"CustomerDataAccess\"\n  role   = aws_iam_role.app.id\n  policy = jsonencode({\n    Version = \"2012-10-17\"\n    Statement = [{ Effect = \"Allow\" Action = [\"s3:GetObject\", \"s3:PutObject\"] Resource = \"${aws_s3_bucket.candidate_1.arn}/*\" }]\n  })\n}\n"
+      },
+      "authored_expectation": {
+        "expected_successor": null,
+        "expected_outcome": "UNKNOWN",
+        "rationale": "Three candidates carry equivalent logical tags and no unique identity evidence selects one."
+      },
+      "independent_attestation_template": {
+        "review_status": "UNREVIEWED",
+        "reviewer": "<Reviewer Name, Title, Institution>",
+        "reviewed_at": "<YYYY-MM-DD>",
+        "reviewed_successor": "<e.g. aws_s3_bucket.cdata or None>",
+        "reviewed_outcome": "<PRESERVED | REGRESSED | UNKNOWN>",
+        "reviewed_rationale": "<Detailed technical reasoning for verdict>"
+      }
+    },
+    {
+      "scenario_id": "replacement_wrong_bucket",
+      "description": "New bucket has different physical identity and no moved, tag, or application-reference evidence; successor is unresolved \u2192 UNKNOWN.",
+      "obligation": {
+        "principal": "aws_iam_role.app",
+        "actions": [
+          "s3:GetObject",
+          "s3:PutObject"
+        ],
+        "protected_asset": "aws_s3_bucket.customer_data",
+        "resource_scope": "arn:aws:s3:::customer-data/*",
+        "obligation_id": "S3-APPROLE-CUSTOMERDATA",
+        "authority_source": "explicit benchmark policy + Terraform IAM policy document"
+      },
+      "baseline_tf": {
+        "main.tf": "\nresource \"aws_iam_role\" \"app\" {\n  name = \"app-role\"\n  assume_role_policy = jsonencode({\n    Version = \"2012-10-17\"\n    Statement = [{\n      Effect    = \"Allow\"\n      Principal = { Service = \"ec2.amazonaws.com\" }\n      Action    = \"sts:AssumeRole\"\n    }]\n  })\n}\n\nresource \"aws_s3_bucket\" \"customer_data\" {\n  bucket = \"customer-data\"\n  tags = {\n    Asset = \"customer-data\"\n    Stage = \"production\"\n  }\n}\n\nresource \"aws_iam_role_policy\" \"app_policy\" {\n  name   = \"CustomerDataAccess\"\n  role   = aws_iam_role.app.id\n  policy = jsonencode({\n    Version = \"2012-10-17\"\n    Statement = [{\n      Effect   = \"Allow\"\n      Action   = [\"s3:GetObject\", \"s3:PutObject\"]\n      Resource = \"${aws_s3_bucket.customer_data.arn}/*\"\n    }]\n  })\n}\n"
+      },
+      "candidate_tf": {
+        "main.tf": "\nresource \"aws_iam_role\" \"app\" {\n  name = \"app-role\"\n  assume_role_policy = jsonencode({\n    Version = \"2012-10-17\"\n    Statement = [{ Effect = \"Allow\" Principal = { Service = \"ec2.amazonaws.com\" } Action = \"sts:AssumeRole\" }]\n  })\n}\nresource \"aws_s3_bucket\" \"new_storage\" {\n  bucket = \"new-application-storage\"\n  tags = { Asset = \"new-storage\" Stage = \"production\" }\n}\nresource \"aws_iam_role_policy\" \"app_policy\" {\n  name   = \"CustomerDataAccess\"\n  role   = aws_iam_role.app.id\n  policy = jsonencode({\n    Version = \"2012-10-17\"\n    Statement = [{ Effect = \"Allow\" Action = [\"s3:GetObject\", \"s3:PutObject\"] Resource = \"${aws_s3_bucket.new_storage.arn}/*\" }]\n  })\n}\n"
+      },
+      "authored_expectation": {
+        "expected_successor": null,
+        "expected_outcome": "UNKNOWN",
+        "rationale": "Replacement has different physical identity and no continuity evidence; the intended successor cannot be established from this case."
+      },
+      "independent_attestation_template": {
+        "review_status": "UNREVIEWED",
+        "reviewer": "<Reviewer Name, Title, Institution>",
+        "reviewed_at": "<YYYY-MM-DD>",
+        "reviewed_successor": "<e.g. aws_s3_bucket.cdata or None>",
+        "reviewed_outcome": "<PRESERVED | REGRESSED | UNKNOWN>",
+        "reviewed_rationale": "<Detailed technical reasoning for verdict>"
+      }
+    }
+  ]
+}

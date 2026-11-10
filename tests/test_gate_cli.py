@@ -164,6 +164,45 @@ def test_sable_regression_is_block(tmp_path):
     assert summary.startswith("# ASENT gate: BLOCK")
 
 
+def test_terraform_only_change_keeps_satra_active_and_routes_surfaces(tmp_path, monkeypatch):
+    """Applicability is project-surface + base-config based, never changed-file based.
+
+    The candidate keeps its application .py code and the base config enables SATRA, so a
+    Terraform-only rename of the protected bucket still assesses SATRA (here INCONCLUSIVE,
+    because a container engine is unavailable) and the gate stays REVIEW even though SABLE
+    preserves the obligation through the rename. The .tf changes alone are routed to SABLE
+    in changed_surfaces. Disabling a module in changed files must not happen by routing.
+    """
+    monkeypatch.setattr(pytest_runner, "availability", lambda: {"docker": {"available": False}, "podman": {"available": False}})
+    repo = GateRepo(tmp_path / "repo")
+    contract = {"rule_id": "AUTHZ.IDOR.001", "route": "GET /x", "expected_status": 403, "authority_sources": ["README"],
+                "scope": ["app/security.py"], "counterfactual": {"operator": "RETURN_TRUE", "target": "app/security.py::f"}}
+    base = repo.commit({"app/security.py": "def f():\n    return False\n", ".asent/config.json": config(SATRA={"enabled": True}, SABLE={"enabled": True}, CAVR=DISABLED),
+                        ".asent/satra/contract.json": json.dumps(contract),
+                        ".asent/satra/trusted_tests/test_x.py": "def test_x():\n    assert 1 + 1 == 2\n",
+                        ".asent/sable/obligations.json": OBLIGATIONS, **infra_files()})
+    refactor = {}
+    for name, text in infra_files().items():
+        # A well-formed rename: restate the resource block address AND every reference.
+        text = text.replace('resource "aws_s3_bucket" "invoice_data"', 'resource "aws_s3_bucket" "ledger_store"')
+        refactor[name] = text.replace("aws_s3_bucket.invoice_data", "aws_s3_bucket.ledger_store")
+    refactor["infra/moved.tf"] = "moved {\n  from = aws_s3_bucket.invoice_data\n  to   = aws_s3_bucket.ledger_store\n}\n"
+    head = repo.commit(refactor)
+    changed = set(infra_files()) | {"infra/moved.tf"}
+
+    code, report, summary = run_cli(repo, base, head, tmp_path / "out")
+    assert code == 2 and report["decision"] == "REVIEW", report["reasons"]
+    sable = report["modules"]["SABLE"]
+    assert sable["result"] == "pass" and sable["status"] == "PRESERVED" and sable["assessed"] is True
+    satra = report["modules"]["SATRA"]
+    assert satra["status"] == "INCONCLUSIVE" and satra["assessed"] is True
+    cavr = report["modules"]["CAVR"]
+    assert cavr["result"] == NOT_ASSESSED and cavr["assessed"] is False
+    assert report["coverage"]["SATRA"]["assessed"] is True and report["coverage"]["SABLE"]["assessed"] is True
+    assert report["assurance"]["run"]["changed_surfaces"] == {"SABLE": sorted(changed)}
+    assert not any(line.startswith("| SABLE |") and "| pass |" not in line for line in summary.splitlines())
+
+
 def test_denied_package_added_in_head_is_block(tmp_path, monkeypatch):
     index, _ = recorded_pypi(monkeypatch, tmp_path)
     repo = GateRepo(tmp_path / "repo")
