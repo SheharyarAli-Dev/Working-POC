@@ -20,10 +20,19 @@
 
 ## Review method
 
-The reviewer explicitly re-examined all six benchmark cases on 2026-11-10 and agreed with all six
-authored case assessments (outcomes and successor attributions below). Technical rationale for each
-case is recorded here verbatim as the reviewer's accepted reasoning, cross-checked against the
-deterministic engine output recorded in this document.
+On 2026-11-10 the reviewer, Muhammad Ali Sajjad, reviewed the six proposed case summaries and the
+AI-assisted assessments presented to him (including the deterministic engine outputs recorded in
+this document) and **explicitly agreed with all six** authored case assessments (outcomes and
+successor attributions below).
+
+Accuracy limits of this record:
+- The technical rationales below are the authored case rationales that the reviewer read and
+  accepted; they were **not independently produced by the reviewer**, and this review does not claim
+  that he independently examined all raw HCL files or performed the review protocol unaided.
+- The review was supported by AI-assisted analyses; those are treated as observations, not as the
+  reviewer's own independent conclusions.
+- This remains a **HUMAN AUTHOR-REVIEW** (provenance only) and is **not independent external
+  validation**; see the disclosure above.
 
 ## Agreed case assessments (author-review)
 

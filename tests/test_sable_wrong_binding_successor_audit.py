@@ -54,9 +54,10 @@ def test_wrong_binding_candidate_has_no_continuity_evidence_for_the_disclaimed_s
 def test_review_package_on_disk_matches_the_corrected_oracle():
     disk = json.loads((REPO_ROOT / "reports" / "SABLE_INDEPENDENT_REVIEW_PACKAGE.json").read_text(encoding="utf-8"))
     generated = generate_review_package()
+    # Full-package equality: the committed evidence file must stay in sync with
+    # the source metadata (protocol, taxonomy, cases, attestation templates).
+    assert disk == generated
     disk_case = next(c for c in disk["cases"] if c["scenario_id"] == WRONG_BINDING)
-    gen_case = next(c for c in generated["cases"] if c["scenario_id"] == WRONG_BINDING)
-    assert disk_case == gen_case
     assert disk_case["authored_expectation"]["expected_successor"] is None
     assert disk_case["authored_expectation"]["expected_outcome"] == "REGRESSED"
 
@@ -82,6 +83,83 @@ def test_review_protocol_records_evidence_tiers_with_metric_exclusivity():
     assert (REPO_ROOT / "reports" / "SABLE_AUTHOR_REVIEW_2026-11-10.md").is_file()
     # Only the independent tier may feed metrics.
     assert [k for k, v in tiers.items() if v["may_feed_metrics"]] == ["independent_human_review"]
+    # The independent attestation template declares its tier explicitly.
+    for c in generate_review_package()["cases"]:
+        assert c["independent_attestation_template"]["evidence_tier"] == "independent_human_review"
+
+
+# ── Review-tier metric safeguards (Task: enforce at validation/metric boundary) ──
+
+
+def _attested_case(scenario_id: str, tier: str):
+    from backend.sable.research_eval import CASES
+
+    base = next(c for c in CASES if c["scenario_id"] == scenario_id)
+    return dict(
+        base,
+        review_status="REVIEWED",
+        evidence_tier=tier,
+        reviewer="Test Reviewer",
+        reviewed_at="2026-11-11",
+        reviewed_successor="aws_s3_bucket.cdata",
+        reviewed_outcome="PRESERVED",
+        reviewed_rationale="Detailed technical reasoning for verdict.",
+    )
+
+
+def test_author_review_evidence_is_rejected_and_excluded_from_metrics():
+    from backend.sable.research_eval import _metric_status, validate_dataset
+
+    author_case = _attested_case("rename_with_moved", "author_review")
+    # Dataset boundary: rejected outright.
+    with pytest.raises(ValueError, match="Only independent-human-review attestations may feed metrics"):
+        validate_dataset((author_case,))
+    # Metric boundary: excluded even if a caller bypasses validate_dataset.
+    status = _metric_status([(author_case, {"prediction": "PRESERVED"})], "prediction")
+    assert status["status"] == "UNMEASURED"
+    assert "not independently reviewed" in status["reason"]
+
+
+def test_ai_assisted_review_evidence_is_rejected_and_excluded_from_metrics():
+    from backend.sable.research_eval import _metric_status, validate_dataset
+
+    ai_case = _attested_case("rename_with_moved", "ai_assisted_review")
+    with pytest.raises(ValueError, match="Only independent-human-review attestations may feed metrics"):
+        validate_dataset((ai_case,))
+    status = _metric_status([(ai_case, {"prediction": "PRESERVED"})], "prediction")
+    assert status["status"] == "UNMEASURED"
+
+
+def test_unreviewed_case_must_not_carry_an_evidence_tier():
+    from backend.sable.research_eval import CASES, validate_dataset
+
+    stray = dict(next(c for c in CASES if c["scenario_id"] == "split_to_two"), evidence_tier="independent_human_review")
+    with pytest.raises(ValueError, match="Unreviewed case must not carry an evidence tier"):
+        validate_dataset((stray,))
+
+
+def test_valid_independent_human_attestation_passes_and_feeds_metrics():
+    from backend.sable.research_eval import _metric_status, validate_dataset
+
+    ok_case = _attested_case("rename_with_moved", "independent_human_review")
+    validate_dataset((ok_case,))  # must not raise
+    status = _metric_status([(ok_case, {"prediction": "PRESERVED"})], "prediction")
+    assert status["status"] == "MEASURED_ON_REVIEWED_SET"
+    assert status["n"] == 1
+    assert status["confusion"]["PRESERVED"]["PRESERVED"] == 1
+
+
+def test_current_six_cases_stay_unreviewed_with_null_tier_and_unmeasured_metrics():
+    from backend.sable.research_eval import CASES, run_experiment
+
+    assert all(c["review_status"] == "UNREVIEWED" for c in CASES)
+    assert all(c["evidence_tier"] is None for c in CASES)
+    result = run_experiment()
+    assert result["dataset"]["reviewed_count"] == 0
+    assert result["metrics"]["sable_outcomes"]["status"] == "UNMEASURED"
+    assert result["metrics"]["moved_only_outcomes"]["status"] == "UNMEASURED"
+    for c in result["cases"]:
+        assert c["independent_review"]["evidence_tier"] is None
 
 
 def test_wrong_binding_engine_discrepancy_is_documented_not_resolved():

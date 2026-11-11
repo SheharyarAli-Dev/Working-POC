@@ -6,6 +6,7 @@
     "goal": "Independent expert validation of SABLE benchmark ground truth to determine: (1) logical asset continuity, and (2) least-privilege obligation preservation.",
     "attestation_fields": [
       "reviewer",
+      "evidence_tier",
       "reviewed_at",
       "reviewed_successor",
       "reviewed_outcome",
@@ -18,6 +19,20 @@
       "Reviewer independently determines whether the candidate IAM policy satisfies the least-privilege obligation.",
       "Reviewer must provide explicit technical rationale for every reviewed case."
     ],
+    "review_evidence_tiers": {
+      "independent_human_review": {
+        "definition": "External experts with no contribution to SABLE code, executing this protocol independently of the authors' expectations.",
+        "may_feed_metrics": true
+      },
+      "author_review": {
+        "definition": "Evaluations performed by SABLE authors or contributors; recorded as provenance only and never used for metrics. Evidence record: reports/SABLE_AUTHOR_REVIEW_2026-11-10.md.",
+        "may_feed_metrics": false
+      },
+      "ai_assisted_review": {
+        "definition": "Analyses produced with AI-tool assistance (including the SABLE engine itself); recorded as observations, never as review attestation.",
+        "may_feed_metrics": false
+      }
+    },
     "current_status": "PENDING_INDEPENDENT_REVIEW"
   },
   "comparator_taxonomy": {
@@ -99,6 +114,7 @@
       },
       "independent_attestation_template": {
         "review_status": "UNREVIEWED",
+        "evidence_tier": "independent_human_review",
         "reviewer": "<Reviewer Name, Title, Institution>",
         "reviewed_at": "<YYYY-MM-DD>",
         "reviewed_successor": "<e.g. aws_s3_bucket.cdata or None>",
@@ -133,6 +149,7 @@
       },
       "independent_attestation_template": {
         "review_status": "UNREVIEWED",
+        "evidence_tier": "independent_human_review",
         "reviewer": "<Reviewer Name, Title, Institution>",
         "reviewed_at": "<YYYY-MM-DD>",
         "reviewed_successor": "<e.g. aws_s3_bucket.cdata or None>",
@@ -167,6 +184,7 @@
       },
       "independent_attestation_template": {
         "review_status": "UNREVIEWED",
+        "evidence_tier": "independent_human_review",
         "reviewer": "<Reviewer Name, Title, Institution>",
         "reviewed_at": "<YYYY-MM-DD>",
         "reviewed_successor": "<e.g. aws_s3_bucket.cdata or None>",
@@ -201,6 +219,7 @@
       },
       "independent_attestation_template": {
         "review_status": "UNREVIEWED",
+        "evidence_tier": "independent_human_review",
         "reviewer": "<Reviewer Name, Title, Institution>",
         "reviewed_at": "<YYYY-MM-DD>",
         "reviewed_successor": "<e.g. aws_s3_bucket.cdata or None>",
@@ -235,6 +254,7 @@
       },
       "independent_attestation_template": {
         "review_status": "UNREVIEWED",
+        "evidence_tier": "independent_human_review",
         "reviewer": "<Reviewer Name, Title, Institution>",
         "reviewed_at": "<YYYY-MM-DD>",
         "reviewed_successor": "<e.g. aws_s3_bucket.cdata or None>",
@@ -269,6 +289,7 @@
       },
       "independent_attestation_template": {
         "review_status": "UNREVIEWED",
+        "evidence_tier": "independent_human_review",
         "reviewer": "<Reviewer Name, Title, Institution>",
         "reviewed_at": "<YYYY-MM-DD>",
         "reviewed_successor": "<e.g. aws_s3_bucket.cdata or None>",
