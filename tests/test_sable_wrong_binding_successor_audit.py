@@ -162,16 +162,23 @@ def test_current_six_cases_stay_unreviewed_with_null_tier_and_unmeasured_metrics
         assert c["independent_review"]["evidence_tier"] is None
 
 
-def test_wrong_binding_engine_discrepancy_is_documented_not_resolved():
-    """The engine intentionally still fails closed to UNKNOWN; the discrepancy is
-    recorded in the author-review evidence document, and the oracle keeps REGRESSED.
-    The fix must be encoded in the engine later, not painted over here."""
+def test_wrong_binding_engine_discrepancy_was_fixed_with_the_documented_amendment():
+    """The engine now implements the misbinding amendment proposed in the
+    author-review record: ``wrong_binding_regressed`` and ``hard_wrong_binding``
+    are REGRESSED with an unresolved successor, while the oracle is unchanged.
+    The historical record stays intact; the addendum documents the fix."""
     from backend.sable.benchmark import _run_sable_engine
 
     result = _run_sable_engine(SCENARIOS[WRONG_BINDING])
-    assert result["verdict"] == "UNKNOWN"  # engine discrepancy stays honest and visible
+    assert result["verdict"] == "REGRESSED"
+    assert result["details"]["successor"] is None  # successor is never fabricated
+    assert result["details"]["misbinding"]["misbound_target"] == "aws_s3_bucket.logs_bucket"
     case = _case(WRONG_BINDING)
     assert case["expected_outcome"] == "REGRESSED"  # oracle is not weakened to match the engine
+    assert case["expected_successor"] is None
     doc = (REPO_ROOT / "reports" / "SABLE_AUTHOR_REVIEW_2026-11-10.md").read_text(encoding="utf-8")
+    # The original honest audit record is preserved (not rewritten).
     assert "Proposed smallest defensible engine fix" in doc
     assert "NOT implemented in this task" in doc
+    # A dated addendum records that the proposed amendment is now implemented.
+    assert "Addendum (2026-11-11)" in doc

@@ -175,6 +175,47 @@ resolved successor (case 4). It does not claim repair, does not fabricate a succ
 within the supported IAM/S3 subset (fails closed to UNKNOWN whenever the discriminator evidence is
 absent). It must never be used to raise `false_safe_rate` defenses.
 
+## Addendum (2026-11-11): the proposed misbinding amendment is now implemented
+
+The engine fix proposed above was subsequently implemented on branch
+`sable-misbinding-fix` as a principled, scenario-agnostic amendment in
+`backend/sable/correspondence.py` (`unambiguous_misbinding`), wired into both
+engine paths (standalone `_run_sable_engine` and the integrated
+`analyzer._evaluate`). The historical sections above are preserved unchanged.
+
+How the implemented rule decides (REGRESSED **only** when all hold):
+
+1. Successor resolution already failed closed and there is no conflicting
+   continuity evidence (`moved {}` vs physical identity conflicts stay UNKNOWN).
+2. The principal's statically-linked inline role policies Allow the required
+   actions on exactly one concrete candidate resource.
+3. Exactly one candidate resource of the protected asset's type carries the
+   protected asset's identity family — an equal or token-superset bucket name or
+   `Asset` tag (e.g. `customer-data` ⊆ `customer-data-new`) — and that family
+   candidate is *not* the policy-bound one.
+4. The policy-bound resource carries none of the protected asset's identity
+   family and no continuity signal (moved block, shared identity, exported
+   reference, unchanged address) connects it to the protected asset.
+
+Outcomes on the fixture set (33 scenarios, engine sweep):
+
+- `wrong_binding_regressed` and `hard_wrong_binding`: UNKNOWN → **REGRESSED**
+  with the logical successor still unresolved (`successor: null`) and the
+  misbound resource named in the evidence; the oracle is unchanged.
+- Every other verdict is unchanged: `split_to_two`,
+  `ambiguous_set_three_candidates`, `parallel_similar_names` and
+  `hard_module_split_ambiguous` (multiple family candidates) stay UNKNOWN;
+  `replacement_wrong_bucket` and `no_successor_found` (no family candidate)
+  stay UNKNOWN; `conflicting_move_and_physical` and
+  `hard_conflicting_evidence` (conflicting evidence) stay UNKNOWN;
+  `rename_with_moved` stays PRESERVED; `Resource = "*"` semantics stay
+  REGRESSED on resolved successors.
+- Standalone and integrated paths are asserted equal per scenario by
+  `tests/test_sable_misbinding_detection.py` and the pre-existing per-scenario
+  consistency test in `tests/test_sable_policy_shapes.py`.
+- The pre-existing `merge_into_one` oracle mismatch (engine PRESERVED vs oracle
+  UNKNOWN) predates this change and is deliberately not touched here.
+
 ## Review-tier status after this record (Task C)
 
 | Tier | Status | Feeds metrics? |
