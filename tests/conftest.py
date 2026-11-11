@@ -52,10 +52,21 @@ def scenario(service):
 @pytest.fixture(scope='session')
 def integration_runs(tmp_path_factory):
     # Session-scoped: freeze only while the runs are built. Tests that re-analyse request `advisory_clock`.
+    # The committed evidence artifact reports/scenario-validation.json is protected: snapshot it and
+    # prove at teardown that this session did not touch it.
+    artifact=Path(__file__).resolve().parents[1]/'reports'/'scenario-validation.json'
+    artifact_before=artifact.read_bytes() if artifact.is_file() else None
     svc=Service(tmp_path_factory.mktemp('integration')/'runtime');runs={}
     with fixed_advisory_clock():
         for name in ('safe','satra_weak','satra_bypass','cross_module'):
             run=svc.create(name);svc.analyze(run.run_id,auto_repair=name=='cross_module');runs[name]=svc.store.run(run.run_id)
     yield svc,runs
     report={'note':'Actual executions from pytest; historical validation only, never dashboard seed data.','runs':{name:svc.report(run.run_id) for name,run in runs.items()}}
-    (Path(__file__).resolve().parents[1]/'reports/scenario-validation.json').write_text(json.dumps(report,indent=2))
+    # Write the executed-run report to the pytest session temp directory: ordinary
+    # test execution must not rewrite the committed evidence artifact.
+    out=tmp_path_factory.mktemp('scenario_validation')/'scenario-validation.json'
+    out.write_text(json.dumps(report,indent=2))
+    artifact_after=artifact.read_bytes() if artifact.is_file() else None
+    assert artifact_after==artifact_before,(
+        'tests/conftest.py::integration_runs rewrote the committed evidence artifact '
+        'reports/scenario-validation.json; test execution must write only to the pytest temp directory')
