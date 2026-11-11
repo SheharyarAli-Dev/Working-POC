@@ -6,6 +6,7 @@ reviewer records a review attestation for every included case.
 """
 from __future__ import annotations
 
+import json
 import re
 import time
 from typing import Any
@@ -221,6 +222,133 @@ def generate_review_package(cases: tuple[dict[str, Any], ...] = CASES) -> dict[s
     }
 
 
+# ── Blinded reviewer copy (answer-revealing material removed) ────────────────
+
+BLINDED_CASE_INSTRUCTION = (
+    "For this case, independently assess the registered obligation below against "
+    "the baseline and candidate Terraform configurations below: determine whether "
+    "a unique logical successor of the protected asset exists, and whether the "
+    "candidate IAM policy preserves the least-privilege obligation. Record your "
+    "outcome, successor attribution and technical rationale in the reviewer "
+    "assessment fields. Do not assume any expected answer exists."
+)
+
+_BLINDED_REVIEWER_FIELDS = (
+    "review_status",
+    "reviewer",
+    "reviewed_at",
+    "reviewed_successor",
+    "reviewed_outcome",
+    "reviewed_rationale",
+)
+
+def blinded_case_ids() -> list[str]:
+    """Neutral identifiers for the blinded copy, in a deterministic presentation
+    order that is NOT the dataset order (reversed), so a case's position does not
+    reveal its dataset identity."""
+    return [f"BLIND-{i}" for i in range(1, len(CASES) + 1)]
+
+
+def generate_blinded_review_package() -> dict[str, Any]:
+    """Blinded reviewer copy of the independent-review package.
+
+    Each case appears under a neutral identifier with the raw material a reviewer
+    genuinely needs (the registered obligation and both Terraform configurations)
+    and blank reviewer assessment fields. Everything answer-revealing is removed:
+    expected outcomes and successors, author rationales, SABLE/evaluator outputs,
+    scenario identifiers, outcome-hinting fixture notes and classification flags.
+    The identifier-to-scenario mapping lives only in ``generate_blinded_answer_key``
+    and must never be stored in, or shared with, the blinded copy."""
+    validate_dataset()
+    blinded_cases = []
+    for blind_id, case in zip(blinded_case_ids(), reversed(CASES)):
+        scenario = SCENARIOS[case["scenario_id"]]
+        blinded_cases.append({
+            "blind_id": blind_id,
+            "instruction": BLINDED_CASE_INSTRUCTION,
+            "obligation": scenario["obligation"],
+            "baseline_tf": scenario["baseline_tf"],
+            "candidate_tf": scenario["candidate_tf"],
+            "reviewer_assessment": {field: "" for field in _BLINDED_REVIEWER_FIELDS},
+        })
+    package = {
+        "dataset_id": f"{DATASET_ID}-blinded",
+        "provenance": (
+            "Blinded reviewer copy of the SABLE independent-review package: neutral "
+            "case identifiers; expected outcomes, successors, author rationales, "
+            "engine predictions and scenario identifiers are deliberately excluded. "
+            "The identifier mapping is kept separately in the answer key, which must "
+            "not be shared with reviewers. Complete one reviewer_assessment per case."
+        ),
+        "review_protocol": REVIEW_PROTOCOL,
+        "cases": blinded_cases,
+    }
+    _assert_blinded_package_leaks_nothing(package)
+    return package
+
+
+def _assert_blinded_package_leaks_nothing(package: dict[str, Any]) -> None:
+    """Structural guard: no authored answer material may appear in the blinded copy.
+
+    Checks the actual leaked values — authored expectations, successors, author
+    rationales, scenario identifiers and outcome-hinting fixture names/notes —
+    against the package metadata (Terraform content is raw reviewer material and
+    is not substring-checked). Also pins the exact blinded case structure so no
+    answer-bearing field can be added silently."""
+    allowed_case_keys = {"blind_id", "instruction", "obligation", "baseline_tf", "candidate_tf", "reviewer_assessment"}
+    # Authored answer material that must not appear anywhere in the blinded copy.
+    # Authored successor *values* are excluded from the substring sweep because a
+    # successor address can legitimately coincide with the obligation's
+    # protected_asset (reviewer material); the structural case-key check above is
+    # what guarantees no authored successor claim is carried.
+    forbidden_values: list[str] = []
+    for case in CASES:
+        scenario = SCENARIOS[case["scenario_id"]]
+        forbidden_values += [
+            case["scenario_id"], scenario["id"], scenario["name"], scenario.get("notes", ""),
+            case["rationale"], case["expected_outcome"],
+        ]
+    for case in package["cases"]:
+        assert set(case) == allowed_case_keys, f"blinded case has unexpected fields: {sorted(set(case) - allowed_case_keys)}"
+        assert case["reviewer_assessment"] == {field: "" for field in _BLINDED_REVIEWER_FIELDS}, "reviewer assessment fields must be blank"
+    blob = json.dumps(
+        {k: v for k, v in package.items() if k != "cases"},
+        sort_keys=True,
+    ).lower()
+    for case in package["cases"]:
+        blob += json.dumps(
+            {k: v for k, v in case.items() if k not in ("baseline_tf", "candidate_tf", "reviewer_assessment")},
+            sort_keys=True,
+        ).lower()
+    for value in forbidden_values:
+        if value:
+            assert value.lower() not in blob, f"blinded package leaks authored material: {value[:60]!r}"
+
+
+def generate_blinded_answer_key() -> dict[str, Any]:
+    """Separate answer key for the blinded reviewer copy.
+
+    Reviewers must receive only ``generate_blinded_review_package`` output; this
+    mapping (and the authored expectations it reveals) stays in a separate file
+    that is never part of the blinded package."""
+    validate_dataset()
+    mapping: dict[str, dict[str, Any]] = {}
+    for blind_id, case in zip(blinded_case_ids(), reversed(CASES)):
+        mapping[blind_id] = {
+            "scenario_id": case["scenario_id"],
+            "expected_successor": case["expected_successor"],
+            "expected_outcome": case["expected_outcome"],
+            "author_rationale": case["rationale"],
+            "review_status": case["review_status"],
+        }
+    return {
+        "dataset_id": DATASET_ID,
+        "blinded_dataset_id": f"{DATASET_ID}-blinded",
+        "warning": "REVIEWERS MUST NOT RECEIVE THIS FILE: it maps blinded cases to dataset scenarios and authored answers.",
+        "mapping": mapping,
+    }
+
+
 def independent_moved_only(baseline_files: dict[str, str], candidate_files: dict[str, str], obligation: dict[str, Any]) -> dict[str, Any]:
     """Tiny, transparent comparator: explicit moved{} evidence only.
 
@@ -321,8 +449,18 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run the provenance-aware SABLE research evaluation.")
     parser.add_argument("--output", type=Path, help="Write JSON here; stdout is used if omitted.")
     parser.add_argument("--package", action="store_true", help="Generate self-contained review package.")
+    parser.add_argument("--blinded-package", type=Path, help="Write the blinded reviewer package JSON here.")
+    parser.add_argument("--blinded-answer-key", type=Path, help="Write the blinded answer key JSON here (reviewers must not receive it).")
     parser.add_argument("--check-readiness", action="store_true", help="Check review attestation status.")
     args = parser.parse_args()
+
+    if args.blinded_package:
+        args.blinded_package.write_text(json.dumps(generate_blinded_review_package(), indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    if args.blinded_answer_key:
+        args.blinded_answer_key.write_text(json.dumps(generate_blinded_answer_key(), indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    if args.blinded_package or args.blinded_answer_key:
+        if not (args.check_readiness or args.package):
+            raise SystemExit(0)
 
     if args.check_readiness:
         reviewed = [c for c in CASES if c["review_status"] == "REVIEWED"]

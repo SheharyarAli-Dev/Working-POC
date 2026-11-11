@@ -1,0 +1,49 @@
+{
+  "blinded_dataset_id": "sable-independent-oracle-v1-blinded",
+  "dataset_id": "sable-independent-oracle-v1",
+  "mapping": {
+    "BLIND-1": {
+      "author_rationale": "Replacement has different physical identity and no continuity evidence; the intended successor cannot be established from this case.",
+      "expected_outcome": "UNKNOWN",
+      "expected_successor": null,
+      "review_status": "UNREVIEWED",
+      "scenario_id": "replacement_wrong_bucket"
+    },
+    "BLIND-2": {
+      "author_rationale": "Three candidates carry equivalent logical tags and no unique identity evidence selects one.",
+      "expected_outcome": "UNKNOWN",
+      "expected_successor": null,
+      "review_status": "UNREVIEWED",
+      "scenario_id": "ambiguous_set_three_candidates"
+    },
+    "BLIND-3": {
+      "author_rationale": "REGRESSED: the required actions are re-bound to logs_bucket, whose Asset tag ('logs') is categorically incompatible with the customer-data obligation; the successor stays unresolved because customer_data_new shows no continuity evidence (different bucket name, different tag, no moved block, and no policy reference).",
+      "expected_outcome": "REGRESSED",
+      "expected_successor": null,
+      "review_status": "UNREVIEWED",
+      "scenario_id": "wrong_binding_regressed"
+    },
+    "BLIND-4": {
+      "author_rationale": "The original logical bucket remains, but the policy resource scope becomes wildcard rather than bucket-specific.",
+      "expected_outcome": "REGRESSED",
+      "expected_successor": "aws_s3_bucket.customer_data",
+      "review_status": "UNREVIEWED",
+      "scenario_id": "resource_wildened"
+    },
+    "BLIND-5": {
+      "author_rationale": "Two new bucket resources divide the prior logical asset; the case provides no unique logical successor rule.",
+      "expected_outcome": "UNKNOWN",
+      "expected_successor": null,
+      "review_status": "UNREVIEWED",
+      "scenario_id": "split_to_two"
+    },
+    "BLIND-6": {
+      "author_rationale": "Explicit moved block maps the protected bucket address to cdata; physical bucket identity and policy target are retained.",
+      "expected_outcome": "PRESERVED",
+      "expected_successor": "aws_s3_bucket.cdata",
+      "review_status": "UNREVIEWED",
+      "scenario_id": "rename_with_moved"
+    }
+  },
+  "warning": "REVIEWERS MUST NOT RECEIVE THIS FILE: it maps blinded cases to dataset scenarios and authored answers."
+}

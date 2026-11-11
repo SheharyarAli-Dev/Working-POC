@@ -1,0 +1,215 @@
+{
+  "cases": [
+    {
+      "baseline_tf": {
+        "main.tf": "\nresource \"aws_iam_role\" \"app\" {\n  name = \"app-role\"\n  assume_role_policy = jsonencode({\n    Version = \"2012-10-17\"\n    Statement = [{\n      Effect    = \"Allow\"\n      Principal = { Service = \"ec2.amazonaws.com\" }\n      Action    = \"sts:AssumeRole\"\n    }]\n  })\n}\n\nresource \"aws_s3_bucket\" \"customer_data\" {\n  bucket = \"customer-data\"\n  tags = {\n    Asset = \"customer-data\"\n    Stage = \"production\"\n  }\n}\n\nresource \"aws_iam_role_policy\" \"app_policy\" {\n  name   = \"CustomerDataAccess\"\n  role   = aws_iam_role.app.id\n  policy = jsonencode({\n    Version = \"2012-10-17\"\n    Statement = [{\n      Effect   = \"Allow\"\n      Action   = [\"s3:GetObject\", \"s3:PutObject\"]\n      Resource = \"${aws_s3_bucket.customer_data.arn}/*\"\n    }]\n  })\n}\n"
+      },
+      "blind_id": "BLIND-1",
+      "candidate_tf": {
+        "main.tf": "\nresource \"aws_iam_role\" \"app\" {\n  name = \"app-role\"\n  assume_role_policy = jsonencode({\n    Version = \"2012-10-17\"\n    Statement = [{ Effect = \"Allow\" Principal = { Service = \"ec2.amazonaws.com\" } Action = \"sts:AssumeRole\" }]\n  })\n}\nresource \"aws_s3_bucket\" \"new_storage\" {\n  bucket = \"new-application-storage\"\n  tags = { Asset = \"new-storage\" Stage = \"production\" }\n}\nresource \"aws_iam_role_policy\" \"app_policy\" {\n  name   = \"CustomerDataAccess\"\n  role   = aws_iam_role.app.id\n  policy = jsonencode({\n    Version = \"2012-10-17\"\n    Statement = [{ Effect = \"Allow\" Action = [\"s3:GetObject\", \"s3:PutObject\"] Resource = \"${aws_s3_bucket.new_storage.arn}/*\" }]\n  })\n}\n"
+      },
+      "instruction": "For this case, independently assess the registered obligation below against the baseline and candidate Terraform configurations below: determine whether a unique logical successor of the protected asset exists, and whether the candidate IAM policy preserves the least-privilege obligation. Record your outcome, successor attribution and technical rationale in the reviewer assessment fields. Do not assume any expected answer exists.",
+      "obligation": {
+        "actions": [
+          "s3:GetObject",
+          "s3:PutObject"
+        ],
+        "authority_source": "explicit benchmark policy + Terraform IAM policy document",
+        "obligation_id": "S3-APPROLE-CUSTOMERDATA",
+        "principal": "aws_iam_role.app",
+        "protected_asset": "aws_s3_bucket.customer_data",
+        "resource_scope": "arn:aws:s3:::customer-data/*"
+      },
+      "reviewer_assessment": {
+        "review_status": "",
+        "reviewed_at": "",
+        "reviewed_outcome": "",
+        "reviewed_rationale": "",
+        "reviewed_successor": "",
+        "reviewer": ""
+      }
+    },
+    {
+      "baseline_tf": {
+        "main.tf": "\nresource \"aws_iam_role\" \"app\" {\n  name = \"app-role\"\n  assume_role_policy = jsonencode({\n    Version = \"2012-10-17\"\n    Statement = [{\n      Effect    = \"Allow\"\n      Principal = { Service = \"ec2.amazonaws.com\" }\n      Action    = \"sts:AssumeRole\"\n    }]\n  })\n}\n\nresource \"aws_s3_bucket\" \"customer_data\" {\n  bucket = \"customer-data\"\n  tags = {\n    Asset = \"customer-data\"\n    Stage = \"production\"\n  }\n}\n\nresource \"aws_iam_role_policy\" \"app_policy\" {\n  name   = \"CustomerDataAccess\"\n  role   = aws_iam_role.app.id\n  policy = jsonencode({\n    Version = \"2012-10-17\"\n    Statement = [{\n      Effect   = \"Allow\"\n      Action   = [\"s3:GetObject\", \"s3:PutObject\"]\n      Resource = \"${aws_s3_bucket.customer_data.arn}/*\"\n    }]\n  })\n}\n"
+      },
+      "blind_id": "BLIND-2",
+      "candidate_tf": {
+        "main.tf": "\nresource \"aws_iam_role\" \"app\" {\n  name = \"app-role\"\n  assume_role_policy = jsonencode({\n    Version = \"2012-10-17\"\n    Statement = [{ Effect = \"Allow\" Principal = { Service = \"ec2.amazonaws.com\" } Action = \"sts:AssumeRole\" }]\n  })\n}\nresource \"aws_s3_bucket\" \"candidate_1\" {\n  bucket = \"candidate-data-1\"\n  tags = { Asset = \"customer-data\" Stage = \"production\" }\n}\nresource \"aws_s3_bucket\" \"candidate_2\" {\n  bucket = \"candidate-data-2\"\n  tags = { Asset = \"customer-data\" Stage = \"production\" }\n}\nresource \"aws_s3_bucket\" \"candidate_3\" {\n  bucket = \"candidate-data-3\"\n  tags = { Asset = \"customer-data\" Stage = \"production\" }\n}\nresource \"aws_iam_role_policy\" \"app_policy\" {\n  name   = \"CustomerDataAccess\"\n  role   = aws_iam_role.app.id\n  policy = jsonencode({\n    Version = \"2012-10-17\"\n    Statement = [{ Effect = \"Allow\" Action = [\"s3:GetObject\", \"s3:PutObject\"] Resource = \"${aws_s3_bucket.candidate_1.arn}/*\" }]\n  })\n}\n"
+      },
+      "instruction": "For this case, independently assess the registered obligation below against the baseline and candidate Terraform configurations below: determine whether a unique logical successor of the protected asset exists, and whether the candidate IAM policy preserves the least-privilege obligation. Record your outcome, successor attribution and technical rationale in the reviewer assessment fields. Do not assume any expected answer exists.",
+      "obligation": {
+        "actions": [
+          "s3:GetObject",
+          "s3:PutObject"
+        ],
+        "authority_source": "explicit benchmark policy + Terraform IAM policy document",
+        "obligation_id": "S3-APPROLE-CUSTOMERDATA",
+        "principal": "aws_iam_role.app",
+        "protected_asset": "aws_s3_bucket.customer_data",
+        "resource_scope": "arn:aws:s3:::customer-data/*"
+      },
+      "reviewer_assessment": {
+        "review_status": "",
+        "reviewed_at": "",
+        "reviewed_outcome": "",
+        "reviewed_rationale": "",
+        "reviewed_successor": "",
+        "reviewer": ""
+      }
+    },
+    {
+      "baseline_tf": {
+        "main.tf": "\nresource \"aws_iam_role\" \"app\" {\n  name = \"app-role\"\n  assume_role_policy = jsonencode({\n    Version = \"2012-10-17\"\n    Statement = [{\n      Effect    = \"Allow\"\n      Principal = { Service = \"ec2.amazonaws.com\" }\n      Action    = \"sts:AssumeRole\"\n    }]\n  })\n}\n\nresource \"aws_s3_bucket\" \"customer_data\" {\n  bucket = \"customer-data\"\n  tags = {\n    Asset = \"customer-data\"\n    Stage = \"production\"\n  }\n}\n\nresource \"aws_iam_role_policy\" \"app_policy\" {\n  name   = \"CustomerDataAccess\"\n  role   = aws_iam_role.app.id\n  policy = jsonencode({\n    Version = \"2012-10-17\"\n    Statement = [{\n      Effect   = \"Allow\"\n      Action   = [\"s3:GetObject\", \"s3:PutObject\"]\n      Resource = \"${aws_s3_bucket.customer_data.arn}/*\"\n    }]\n  })\n}\n"
+      },
+      "blind_id": "BLIND-3",
+      "candidate_tf": {
+        "main.tf": "\nresource \"aws_iam_role\" \"app\" {\n  name = \"app-role\"\n  assume_role_policy = jsonencode({\n    Version = \"2012-10-17\"\n    Statement = [{ Effect = \"Allow\" Principal = { Service = \"ec2.amazonaws.com\" } Action = \"sts:AssumeRole\" }]\n  })\n}\nresource \"aws_s3_bucket\" \"logs_bucket\" {\n  bucket = \"logs-storage\"\n  tags = { Asset = \"logs\" Stage = \"production\" }\n}\nresource \"aws_s3_bucket\" \"customer_data_new\" {\n  bucket = \"customer-data-new\"\n  tags = { Asset = \"customer-data-new\" Stage = \"production\" }\n}\nresource \"aws_iam_role_policy\" \"app_policy\" {\n  name   = \"CustomerDataAccess\"\n  role   = aws_iam_role.app.id\n  policy = jsonencode({\n    Version = \"2012-10-17\"\n    Statement = [{ Effect = \"Allow\" Action = [\"s3:GetObject\", \"s3:PutObject\"] Resource = \"${aws_s3_bucket.logs_bucket.arn}/*\" }]\n  })\n}\n"
+      },
+      "instruction": "For this case, independently assess the registered obligation below against the baseline and candidate Terraform configurations below: determine whether a unique logical successor of the protected asset exists, and whether the candidate IAM policy preserves the least-privilege obligation. Record your outcome, successor attribution and technical rationale in the reviewer assessment fields. Do not assume any expected answer exists.",
+      "obligation": {
+        "actions": [
+          "s3:GetObject",
+          "s3:PutObject"
+        ],
+        "authority_source": "explicit benchmark policy + Terraform IAM policy document",
+        "obligation_id": "S3-APPROLE-CUSTOMERDATA",
+        "principal": "aws_iam_role.app",
+        "protected_asset": "aws_s3_bucket.customer_data",
+        "resource_scope": "arn:aws:s3:::customer-data/*"
+      },
+      "reviewer_assessment": {
+        "review_status": "",
+        "reviewed_at": "",
+        "reviewed_outcome": "",
+        "reviewed_rationale": "",
+        "reviewed_successor": "",
+        "reviewer": ""
+      }
+    },
+    {
+      "baseline_tf": {
+        "main.tf": "\nresource \"aws_iam_role\" \"app\" {\n  name = \"app-role\"\n  assume_role_policy = jsonencode({\n    Version = \"2012-10-17\"\n    Statement = [{\n      Effect    = \"Allow\"\n      Principal = { Service = \"ec2.amazonaws.com\" }\n      Action    = \"sts:AssumeRole\"\n    }]\n  })\n}\n\nresource \"aws_s3_bucket\" \"customer_data\" {\n  bucket = \"customer-data\"\n  tags = {\n    Asset = \"customer-data\"\n    Stage = \"production\"\n  }\n}\n\nresource \"aws_iam_role_policy\" \"app_policy\" {\n  name   = \"CustomerDataAccess\"\n  role   = aws_iam_role.app.id\n  policy = jsonencode({\n    Version = \"2012-10-17\"\n    Statement = [{\n      Effect   = \"Allow\"\n      Action   = [\"s3:GetObject\", \"s3:PutObject\"]\n      Resource = \"${aws_s3_bucket.customer_data.arn}/*\"\n    }]\n  })\n}\n"
+      },
+      "blind_id": "BLIND-4",
+      "candidate_tf": {
+        "main.tf": "\nresource \"aws_iam_role\" \"app\" {\n  name = \"app-role\"\n  assume_role_policy = jsonencode({\n    Version = \"2012-10-17\"\n    Statement = [{ Effect = \"Allow\" Principal = { Service = \"ec2.amazonaws.com\" } Action = \"sts:AssumeRole\" }]\n  })\n}\nresource \"aws_s3_bucket\" \"customer_data\" {\n  bucket = \"customer-data\"\n  tags = { Asset = \"customer-data\" Stage = \"production\" }\n}\nresource \"aws_iam_role_policy\" \"app_policy\" {\n  name   = \"CustomerDataAccess\"\n  role   = aws_iam_role.app.id\n  policy = jsonencode({\n    Version = \"2012-10-17\"\n    Statement = [{ Effect = \"Allow\" Action = [\"s3:GetObject\", \"s3:PutObject\"] Resource = \"*\" }]\n  })\n}\n"
+      },
+      "instruction": "For this case, independently assess the registered obligation below against the baseline and candidate Terraform configurations below: determine whether a unique logical successor of the protected asset exists, and whether the candidate IAM policy preserves the least-privilege obligation. Record your outcome, successor attribution and technical rationale in the reviewer assessment fields. Do not assume any expected answer exists.",
+      "obligation": {
+        "actions": [
+          "s3:GetObject",
+          "s3:PutObject"
+        ],
+        "authority_source": "explicit benchmark policy + Terraform IAM policy document",
+        "obligation_id": "S3-APPROLE-CUSTOMERDATA",
+        "principal": "aws_iam_role.app",
+        "protected_asset": "aws_s3_bucket.customer_data",
+        "resource_scope": "arn:aws:s3:::customer-data/*"
+      },
+      "reviewer_assessment": {
+        "review_status": "",
+        "reviewed_at": "",
+        "reviewed_outcome": "",
+        "reviewed_rationale": "",
+        "reviewed_successor": "",
+        "reviewer": ""
+      }
+    },
+    {
+      "baseline_tf": {
+        "main.tf": "\nresource \"aws_iam_role\" \"app\" {\n  name = \"app-role\"\n  assume_role_policy = jsonencode({\n    Version = \"2012-10-17\"\n    Statement = [{\n      Effect    = \"Allow\"\n      Principal = { Service = \"ec2.amazonaws.com\" }\n      Action    = \"sts:AssumeRole\"\n    }]\n  })\n}\n\nresource \"aws_s3_bucket\" \"customer_data\" {\n  bucket = \"customer-data\"\n  tags = {\n    Asset = \"customer-data\"\n    Stage = \"production\"\n  }\n}\n\nresource \"aws_iam_role_policy\" \"app_policy\" {\n  name   = \"CustomerDataAccess\"\n  role   = aws_iam_role.app.id\n  policy = jsonencode({\n    Version = \"2012-10-17\"\n    Statement = [{\n      Effect   = \"Allow\"\n      Action   = [\"s3:GetObject\", \"s3:PutObject\"]\n      Resource = \"${aws_s3_bucket.customer_data.arn}/*\"\n    }]\n  })\n}\n"
+      },
+      "blind_id": "BLIND-5",
+      "candidate_tf": {
+        "main.tf": "\nresource \"aws_iam_role\" \"app\" {\n  name = \"app-role\"\n  assume_role_policy = jsonencode({\n    Version = \"2012-10-17\"\n    Statement = [{ Effect = \"Allow\" Principal = { Service = \"ec2.amazonaws.com\" } Action = \"sts:AssumeRole\" }]\n  })\n}\nresource \"aws_s3_bucket\" \"customer_data_hot\" {\n  bucket = \"customer-data-hot\"\n  tags = { Asset = \"customer-data\" Stage = \"production\" }\n}\nresource \"aws_s3_bucket\" \"customer_data_cold\" {\n  bucket = \"customer-data-cold\"\n  tags = { Asset = \"customer-data\" Stage = \"production\" }\n}\nresource \"aws_iam_role_policy\" \"app_policy\" {\n  name   = \"CustomerDataAccess\"\n  role   = aws_iam_role.app.id\n  policy = jsonencode({\n    Version = \"2012-10-17\"\n    Statement = [{ Effect = \"Allow\" Action = [\"s3:GetObject\", \"s3:PutObject\"] Resource = \"${aws_s3_bucket.customer_data_hot.arn}/*\" }]\n  })\n}\n"
+      },
+      "instruction": "For this case, independently assess the registered obligation below against the baseline and candidate Terraform configurations below: determine whether a unique logical successor of the protected asset exists, and whether the candidate IAM policy preserves the least-privilege obligation. Record your outcome, successor attribution and technical rationale in the reviewer assessment fields. Do not assume any expected answer exists.",
+      "obligation": {
+        "actions": [
+          "s3:GetObject",
+          "s3:PutObject"
+        ],
+        "authority_source": "explicit benchmark policy + Terraform IAM policy document",
+        "obligation_id": "S3-APPROLE-CUSTOMERDATA",
+        "principal": "aws_iam_role.app",
+        "protected_asset": "aws_s3_bucket.customer_data",
+        "resource_scope": "arn:aws:s3:::customer-data/*"
+      },
+      "reviewer_assessment": {
+        "review_status": "",
+        "reviewed_at": "",
+        "reviewed_outcome": "",
+        "reviewed_rationale": "",
+        "reviewed_successor": "",
+        "reviewer": ""
+      }
+    },
+    {
+      "baseline_tf": {
+        "main.tf": "\nresource \"aws_iam_role\" \"app\" {\n  name = \"app-role\"\n  assume_role_policy = jsonencode({\n    Version = \"2012-10-17\"\n    Statement = [{\n      Effect    = \"Allow\"\n      Principal = { Service = \"ec2.amazonaws.com\" }\n      Action    = \"sts:AssumeRole\"\n    }]\n  })\n}\n\nresource \"aws_s3_bucket\" \"customer_data\" {\n  bucket = \"customer-data\"\n  tags = {\n    Asset = \"customer-data\"\n    Stage = \"production\"\n  }\n}\n\nresource \"aws_iam_role_policy\" \"app_policy\" {\n  name   = \"CustomerDataAccess\"\n  role   = aws_iam_role.app.id\n  policy = jsonencode({\n    Version = \"2012-10-17\"\n    Statement = [{\n      Effect   = \"Allow\"\n      Action   = [\"s3:GetObject\", \"s3:PutObject\"]\n      Resource = \"${aws_s3_bucket.customer_data.arn}/*\"\n    }]\n  })\n}\n"
+      },
+      "blind_id": "BLIND-6",
+      "candidate_tf": {
+        "main.tf": "\nresource \"aws_iam_role\" \"app\" {\n  name = \"app-role\"\n  assume_role_policy = jsonencode({\n    Version = \"2012-10-17\"\n    Statement = [{ Effect = \"Allow\" Principal = { Service = \"ec2.amazonaws.com\" } Action = \"sts:AssumeRole\" }]\n  })\n}\nresource \"aws_s3_bucket\" \"cdata\" {\n  bucket = \"customer-data\"\n  tags = { Asset = \"customer-data\" Stage = \"production\" }\n}\nresource \"aws_iam_role_policy\" \"app_policy\" {\n  name   = \"CustomerDataAccess\"\n  role   = aws_iam_role.app.id\n  policy = jsonencode({\n    Version = \"2012-10-17\"\n    Statement = [{ Effect = \"Allow\" Action = [\"s3:GetObject\", \"s3:PutObject\"] Resource = \"${aws_s3_bucket.cdata.arn}/*\" }]\n  })\n}\n",
+        "moved.tf": "\nmoved {\n  from = aws_s3_bucket.customer_data\n  to   = aws_s3_bucket.cdata\n}\n"
+      },
+      "instruction": "For this case, independently assess the registered obligation below against the baseline and candidate Terraform configurations below: determine whether a unique logical successor of the protected asset exists, and whether the candidate IAM policy preserves the least-privilege obligation. Record your outcome, successor attribution and technical rationale in the reviewer assessment fields. Do not assume any expected answer exists.",
+      "obligation": {
+        "actions": [
+          "s3:GetObject",
+          "s3:PutObject"
+        ],
+        "authority_source": "explicit benchmark policy + Terraform IAM policy document",
+        "obligation_id": "S3-APPROLE-CUSTOMERDATA",
+        "principal": "aws_iam_role.app",
+        "protected_asset": "aws_s3_bucket.customer_data",
+        "resource_scope": "arn:aws:s3:::customer-data/*"
+      },
+      "reviewer_assessment": {
+        "review_status": "",
+        "reviewed_at": "",
+        "reviewed_outcome": "",
+        "reviewed_rationale": "",
+        "reviewed_successor": "",
+        "reviewer": ""
+      }
+    }
+  ],
+  "dataset_id": "sable-independent-oracle-v1-blinded",
+  "provenance": "Blinded reviewer copy of the SABLE independent-review package: neutral case identifiers; expected outcomes, successors, author rationales, engine predictions and scenario identifiers are deliberately excluded. The identifier mapping is kept separately in the answer key, which must not be shared with reviewers. Complete one reviewer_assessment per case.",
+  "review_protocol": {
+    "attestation_fields": [
+      "reviewer",
+      "evidence_tier",
+      "reviewed_at",
+      "reviewed_successor",
+      "reviewed_outcome",
+      "reviewed_rationale"
+    ],
+    "current_status": "PENDING_INDEPENDENT_REVIEW",
+    "goal": "Independent expert validation of SABLE benchmark ground truth to determine: (1) logical asset continuity, and (2) least-privilege obligation preservation.",
+    "review_criteria": [
+      "Reviewer must not be an author or contributor to SABLE code.",
+      "Reviewer inspects raw baseline and candidate HCL files independently.",
+      "Reviewer independently determines whether a unique logical successor exists.",
+      "Reviewer independently determines whether the candidate IAM policy satisfies the least-privilege obligation.",
+      "Reviewer must provide explicit technical rationale for every reviewed case."
+    ],
+    "review_evidence_tiers": {
+      "ai_assisted_review": {
+        "definition": "Analyses produced with AI-tool assistance (including the SABLE engine itself); recorded as observations, never as review attestation.",
+        "may_feed_metrics": false
+      },
+      "author_review": {
+        "definition": "Evaluations performed by SABLE authors or contributors; recorded as provenance only and never used for metrics. Evidence record: reports/SABLE_AUTHOR_REVIEW_2026-11-10.md.",
+        "may_feed_metrics": false
+      },
+      "independent_human_review": {
+        "definition": "External experts with no contribution to SABLE code, executing this protocol independently of the authors' expectations.",
+        "may_feed_metrics": true
+      }
+    },
+    "version": "1.0"
+  }
+}
