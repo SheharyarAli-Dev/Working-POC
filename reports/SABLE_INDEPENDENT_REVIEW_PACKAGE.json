@@ -6,6 +6,7 @@
     "goal": "Independent expert validation of SABLE benchmark ground truth to determine: (1) logical asset continuity, and (2) least-privilege obligation preservation.",
     "attestation_fields": [
       "reviewer",
+      "evidence_tier",
       "reviewed_at",
       "reviewed_successor",
       "reviewed_outcome",
@@ -18,6 +19,20 @@
       "Reviewer independently determines whether the candidate IAM policy satisfies the least-privilege obligation.",
       "Reviewer must provide explicit technical rationale for every reviewed case."
     ],
+    "review_evidence_tiers": {
+      "independent_human_review": {
+        "definition": "External experts with no contribution to SABLE code, executing this protocol independently of the authors' expectations.",
+        "may_feed_metrics": true
+      },
+      "author_review": {
+        "definition": "Evaluations performed by SABLE authors or contributors; recorded as provenance only and never used for metrics. Evidence record: reports/SABLE_AUTHOR_REVIEW_2026-11-10.md.",
+        "may_feed_metrics": false
+      },
+      "ai_assisted_review": {
+        "definition": "Analyses produced with AI-tool assistance (including the SABLE engine itself); recorded as observations, never as review attestation.",
+        "may_feed_metrics": false
+      }
+    },
     "current_status": "PENDING_INDEPENDENT_REVIEW"
   },
   "comparator_taxonomy": {
@@ -99,6 +114,7 @@
       },
       "independent_attestation_template": {
         "review_status": "UNREVIEWED",
+        "evidence_tier": "independent_human_review",
         "reviewer": "<Reviewer Name, Title, Institution>",
         "reviewed_at": "<YYYY-MM-DD>",
         "reviewed_successor": "<e.g. aws_s3_bucket.cdata or None>",
@@ -133,6 +149,7 @@
       },
       "independent_attestation_template": {
         "review_status": "UNREVIEWED",
+        "evidence_tier": "independent_human_review",
         "reviewer": "<Reviewer Name, Title, Institution>",
         "reviewed_at": "<YYYY-MM-DD>",
         "reviewed_successor": "<e.g. aws_s3_bucket.cdata or None>",
@@ -167,6 +184,7 @@
       },
       "independent_attestation_template": {
         "review_status": "UNREVIEWED",
+        "evidence_tier": "independent_human_review",
         "reviewer": "<Reviewer Name, Title, Institution>",
         "reviewed_at": "<YYYY-MM-DD>",
         "reviewed_successor": "<e.g. aws_s3_bucket.cdata or None>",
@@ -195,12 +213,13 @@
         "main.tf": "\nresource \"aws_iam_role\" \"app\" {\n  name = \"app-role\"\n  assume_role_policy = jsonencode({\n    Version = \"2012-10-17\"\n    Statement = [{ Effect = \"Allow\" Principal = { Service = \"ec2.amazonaws.com\" } Action = \"sts:AssumeRole\" }]\n  })\n}\nresource \"aws_s3_bucket\" \"logs_bucket\" {\n  bucket = \"logs-storage\"\n  tags = { Asset = \"logs\" Stage = \"production\" }\n}\nresource \"aws_s3_bucket\" \"customer_data_new\" {\n  bucket = \"customer-data-new\"\n  tags = { Asset = \"customer-data-new\" Stage = \"production\" }\n}\nresource \"aws_iam_role_policy\" \"app_policy\" {\n  name   = \"CustomerDataAccess\"\n  role   = aws_iam_role.app.id\n  policy = jsonencode({\n    Version = \"2012-10-17\"\n    Statement = [{ Effect = \"Allow\" Action = [\"s3:GetObject\", \"s3:PutObject\"] Resource = \"${aws_s3_bucket.logs_bucket.arn}/*\" }]\n  })\n}\n"
       },
       "authored_expectation": {
-        "expected_successor": "aws_s3_bucket.customer_data_new",
+        "expected_successor": null,
         "expected_outcome": "REGRESSED",
-        "rationale": "The obligation concerns customer data; granting the required actions to the unrelated logs bucket does not preserve that obligation."
+        "rationale": "REGRESSED: the required actions are re-bound to logs_bucket, whose Asset tag ('logs') is categorically incompatible with the customer-data obligation; the successor stays unresolved because customer_data_new shows no continuity evidence (different bucket name, different tag, no moved block, and no policy reference)."
       },
       "independent_attestation_template": {
         "review_status": "UNREVIEWED",
+        "evidence_tier": "independent_human_review",
         "reviewer": "<Reviewer Name, Title, Institution>",
         "reviewed_at": "<YYYY-MM-DD>",
         "reviewed_successor": "<e.g. aws_s3_bucket.cdata or None>",
@@ -235,6 +254,7 @@
       },
       "independent_attestation_template": {
         "review_status": "UNREVIEWED",
+        "evidence_tier": "independent_human_review",
         "reviewer": "<Reviewer Name, Title, Institution>",
         "reviewed_at": "<YYYY-MM-DD>",
         "reviewed_successor": "<e.g. aws_s3_bucket.cdata or None>",
@@ -269,6 +289,7 @@
       },
       "independent_attestation_template": {
         "review_status": "UNREVIEWED",
+        "evidence_tier": "independent_human_review",
         "reviewer": "<Reviewer Name, Title, Institution>",
         "reviewed_at": "<YYYY-MM-DD>",
         "reviewed_successor": "<e.g. aws_s3_bucket.cdata or None>",

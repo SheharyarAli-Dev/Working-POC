@@ -65,7 +65,8 @@ def test_metric_calculation_and_review_gate():
 
 def test_metrics_use_separate_reviewer_label_not_authored_expectation():
     authored = dict(CASES[0], expected_outcome="PRESERVED")
-    authored.update(review_status="REVIEWED", reviewer="reviewer-1", reviewed_at="2026-10-24",
+    authored.update(review_status="REVIEWED", evidence_tier="independent_human_review",
+                    reviewer="reviewer-1", reviewed_at="2026-10-24",
                     reviewed_successor="aws_s3_bucket.cdata", reviewed_outcome="REGRESSED",
                     reviewed_rationale="Independent reviewer found the policy scope unsafe.")
     validate_dataset((authored,))

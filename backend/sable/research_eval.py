@@ -107,6 +107,7 @@ REVIEW_PROTOCOL: dict[str, Any] = {
     ),
     "attestation_fields": [
         "reviewer",
+        "evidence_tier",
         "reviewed_at",
         "reviewed_successor",
         "reviewed_outcome",
@@ -119,26 +120,47 @@ REVIEW_PROTOCOL: dict[str, Any] = {
         "Reviewer independently determines whether the candidate IAM policy satisfies the least-privilege obligation.",
         "Reviewer must provide explicit technical rationale for every reviewed case.",
     ],
+    "review_evidence_tiers": {
+        "independent_human_review": {
+            "definition": "External experts with no contribution to SABLE code, executing this protocol independently of the authors' expectations.",
+            "may_feed_metrics": True,
+        },
+        "author_review": {
+            "definition": "Evaluations performed by SABLE authors or contributors; recorded as provenance only and never used for metrics. Evidence record: reports/SABLE_AUTHOR_REVIEW_2026-11-10.md.",
+            "may_feed_metrics": False,
+        },
+        "ai_assisted_review": {
+            "definition": "Analyses produced with AI-tool assistance (including the SABLE engine itself); recorded as observations, never as review attestation.",
+            "may_feed_metrics": False,
+        },
+    },
     "current_status": "PENDING_INDEPENDENT_REVIEW",
 }
 
 # Logical successor is an evaluation annotation, never read by either predictor.
 CASES: tuple[dict[str, Any], ...] = (
-    {"scenario_id": "rename_with_moved", "expected_successor": "aws_s3_bucket.cdata", "expected_outcome": "PRESERVED", "rationale": "Explicit moved block maps the protected bucket address to cdata; physical bucket identity and policy target are retained.", "review_status": "UNREVIEWED", "reviewer": None, "reviewed_at": None, "reviewed_successor": None, "reviewed_outcome": None, "reviewed_rationale": None},
-    {"scenario_id": "split_to_two", "expected_successor": None, "expected_outcome": "UNKNOWN", "rationale": "Two new bucket resources divide the prior logical asset; the case provides no unique logical successor rule.", "review_status": "UNREVIEWED", "reviewer": None, "reviewed_at": None, "reviewed_successor": None, "reviewed_outcome": None, "reviewed_rationale": None},
-    {"scenario_id": "resource_wildened", "expected_successor": "aws_s3_bucket.customer_data", "expected_outcome": "REGRESSED", "rationale": "The original logical bucket remains, but the policy resource scope becomes wildcard rather than bucket-specific.", "review_status": "UNREVIEWED", "reviewer": None, "reviewed_at": None, "reviewed_successor": None, "reviewed_outcome": None, "reviewed_rationale": None},
-    {"scenario_id": "wrong_binding_regressed", "expected_successor": "aws_s3_bucket.customer_data_new", "expected_outcome": "REGRESSED", "rationale": "The obligation concerns customer data; granting the required actions to the unrelated logs bucket does not preserve that obligation.", "review_status": "UNREVIEWED", "reviewer": None, "reviewed_at": None, "reviewed_successor": None, "reviewed_outcome": None, "reviewed_rationale": None},
-    {"scenario_id": "ambiguous_set_three_candidates", "expected_successor": None, "expected_outcome": "UNKNOWN", "rationale": "Three candidates carry equivalent logical tags and no unique identity evidence selects one.", "review_status": "UNREVIEWED", "reviewer": None, "reviewed_at": None, "reviewed_successor": None, "reviewed_outcome": None, "reviewed_rationale": None},
-    {"scenario_id": "replacement_wrong_bucket", "expected_successor": None, "expected_outcome": "UNKNOWN", "rationale": "Replacement has different physical identity and no continuity evidence; the intended successor cannot be established from this case.", "review_status": "UNREVIEWED", "reviewer": None, "reviewed_at": None, "reviewed_successor": None, "reviewed_outcome": None, "reviewed_rationale": None},
+    {"scenario_id": "rename_with_moved", "expected_successor": "aws_s3_bucket.cdata", "expected_outcome": "PRESERVED", "rationale": "Explicit moved block maps the protected bucket address to cdata; physical bucket identity and policy target are retained.", "review_status": "UNREVIEWED", "evidence_tier": None, "reviewer": None, "reviewed_at": None, "reviewed_successor": None, "reviewed_outcome": None, "reviewed_rationale": None},
+    {"scenario_id": "split_to_two", "expected_successor": None, "expected_outcome": "UNKNOWN", "rationale": "Two new bucket resources divide the prior logical asset; the case provides no unique logical successor rule.", "review_status": "UNREVIEWED", "evidence_tier": None, "reviewer": None, "reviewed_at": None, "reviewed_successor": None, "reviewed_outcome": None, "reviewed_rationale": None},
+    {"scenario_id": "resource_wildened", "expected_successor": "aws_s3_bucket.customer_data", "expected_outcome": "REGRESSED", "rationale": "The original logical bucket remains, but the policy resource scope becomes wildcard rather than bucket-specific.", "review_status": "UNREVIEWED", "evidence_tier": None, "reviewer": None, "reviewed_at": None, "reviewed_successor": None, "reviewed_outcome": None, "reviewed_rationale": None},
+    {"scenario_id": "wrong_binding_regressed", "expected_successor": None, "expected_outcome": "REGRESSED", "rationale": "REGRESSED: the required actions are re-bound to logs_bucket, whose Asset tag ('logs') is categorically incompatible with the customer-data obligation; the successor stays unresolved because customer_data_new shows no continuity evidence (different bucket name, different tag, no moved block, and no policy reference).", "review_status": "UNREVIEWED", "evidence_tier": None, "reviewer": None, "reviewed_at": None, "reviewed_successor": None, "reviewed_outcome": None, "reviewed_rationale": None},
+    {"scenario_id": "ambiguous_set_three_candidates", "expected_successor": None, "expected_outcome": "UNKNOWN", "rationale": "Three candidates carry equivalent logical tags and no unique identity evidence selects one.", "review_status": "UNREVIEWED", "evidence_tier": None, "reviewer": None, "reviewed_at": None, "reviewed_successor": None, "reviewed_outcome": None, "reviewed_rationale": None},
+    {"scenario_id": "replacement_wrong_bucket", "expected_successor": None, "expected_outcome": "UNKNOWN", "rationale": "Replacement has different physical identity and no continuity evidence; the intended successor cannot be established from this case.", "review_status": "UNREVIEWED", "evidence_tier": None, "reviewer": None, "reviewed_at": None, "reviewed_successor": None, "reviewed_outcome": None, "reviewed_rationale": None},
 )
 
 _ALLOWED = {"PRESERVED", "REGRESSED", "UNKNOWN"}
 
 
 def validate_dataset(cases: tuple[dict[str, Any], ...] = CASES) -> None:
+    """Validates the oracle dataset, including the review-evidence-tier safeguard.
+
+    Only ``independent_human_review`` attestations may ever be marked REVIEWED and
+    only they can feed metrics. Author-review and AI-assisted evidence are rejected
+    here at the dataset boundary and excluded again by ``_metric_status`` at the
+    metric boundary.
+    """
     ids: set[str] = set()
     for case in cases:
-        required = {"scenario_id", "expected_successor", "expected_outcome", "rationale", "review_status", "reviewer", "reviewed_at", "reviewed_successor", "reviewed_outcome", "reviewed_rationale"}
+        required = {"scenario_id", "expected_successor", "expected_outcome", "rationale", "review_status", "evidence_tier", "reviewer", "reviewed_at", "reviewed_successor", "reviewed_outcome", "reviewed_rationale"}
         if set(case) != required:
             raise ValueError(f"Invalid case fields for {case.get('scenario_id')}: expected {sorted(required)}")
         sid = case["scenario_id"]
@@ -152,6 +174,11 @@ def validate_dataset(cases: tuple[dict[str, Any], ...] = CASES) -> None:
         reviewed = case["review_status"] == "REVIEWED"
         if reviewed != bool(case["reviewer"] and case["reviewed_at"] and case["reviewed_outcome"] in _ALLOWED and case["reviewed_rationale"]):
             raise ValueError(f"Review attestation incomplete: {sid}")
+        if reviewed:
+            if case["evidence_tier"] != "independent_human_review":
+                raise ValueError(f"Only independent-human-review attestations may feed metrics: {sid} (got {case['evidence_tier']!r})")
+        elif case["evidence_tier"] is not None:
+            raise ValueError(f"Unreviewed case must not carry an evidence tier: {sid}")
 
 
 def generate_review_package(cases: tuple[dict[str, Any], ...] = CASES) -> dict[str, Any]:
@@ -177,6 +204,7 @@ def generate_review_package(cases: tuple[dict[str, Any], ...] = CASES) -> dict[s
             },
             "independent_attestation_template": {
                 "review_status": "UNREVIEWED",
+                "evidence_tier": "independent_human_review",
                 "reviewer": "<Reviewer Name, Title, Institution>",
                 "reviewed_at": "<YYYY-MM-DD>",
                 "reviewed_successor": "<e.g. aws_s3_bucket.cdata or None>",
@@ -230,7 +258,16 @@ def _confusion_metrics(rows: list[dict[str, Any]], expected_key: str, predicted_
 
 
 def _metric_status(rows: list[dict[str, Any]], prediction_key: str) -> dict[str, Any]:
-    if not rows or any(case["review_status"] != "REVIEWED" for case, _ in rows):
+    """Metric gate: excludes everything that is not an independent-human attestation.
+
+    This is enforced at the metric boundary even if a caller bypasses
+    ``validate_dataset``: author-review and AI-assisted evidence can never feed
+    metrics because they are excluded alongside UNREVIEWED cases.
+    """
+    if not rows or any(
+        case["review_status"] != "REVIEWED" or case.get("evidence_tier") != "independent_human_review"
+        for case, _ in rows
+    ):
         return {"status": "UNMEASURED", "reason": "Expected outcomes are not independently reviewed."}
     metric_rows = [{"expected": c["reviewed_outcome"], "predicted": r[prediction_key]} for c, r in rows]
     return {"status": "MEASURED_ON_REVIEWED_SET", **_confusion_metrics(metric_rows, "expected", "predicted")}
@@ -253,7 +290,7 @@ def run_experiment() -> dict[str, Any]:
         case_results.append({
             "scenario_id": case["scenario_id"],
             "authored_expectation": {k: case[k] for k in ("expected_successor", "expected_outcome", "rationale")},
-            "independent_review": {k: case[k] for k in ("review_status", "reviewer", "reviewed_at", "reviewed_successor", "reviewed_outcome", "reviewed_rationale")},
+            "independent_review": {k: case[k] for k in ("review_status", "evidence_tier", "reviewer", "reviewed_at", "reviewed_successor", "reviewed_outcome", "reviewed_rationale")},
             "sable": {"verdict": sable["verdict"], "successor": sable.get("details", {}).get("successor"), "reason": sable.get("reason")},
             "moved_only": moved,
         })
