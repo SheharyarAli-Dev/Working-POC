@@ -18,7 +18,7 @@ from backend.sable.fixtures.scenarios import SCENARIOS
 from backend.sable.baselines import run_b0, run_b1, run_b2, run_b3, run_b4
 from backend.sable.authorization import evaluate_authorization
 from backend.sable.hcl_parser import parse as hcl_parse
-from backend.sable.correspondence import rank, choose
+from backend.sable.correspondence import rank, choose, unambiguous_misbinding
 
 
 # Load ground truth via loader (only here, never in engine modules)
@@ -102,6 +102,12 @@ def _run_sable_engine(scenario: dict, ablation_flags: dict | None = None) -> dic
     target, why = choose(hyp, conflicts, config_threshold, margin)
 
     if not target:
+        # Misbinding amendment: REGRESSED only for an unambiguous obligation
+        # misbinding; every other unresolved-successor situation stays UNKNOWN.
+        misbinding = unambiguous_misbinding(bm, cm, asset, principal, actions, hyp, conflicts)
+        if misbinding:
+            return {"verdict": "REGRESSED", "reason": misbinding["reason"],
+                    "details": {"successor": None, "misbinding": misbinding, "hypotheses": hyp[:5]}}
         return {"verdict": "UNKNOWN", "reason": why, "details": {"hypotheses": hyp[:5]}}
 
     # Ablation: no obligation projection

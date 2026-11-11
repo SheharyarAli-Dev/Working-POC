@@ -2,7 +2,7 @@
 from pathlib import Path
 from backend.sable.hcl_parser import parse
 from backend.sable.policy_semantics import evaluate
-from backend.sable.correspondence import rank,choose
+from backend.sable.correspondence import rank,choose,unambiguous_misbinding
 from backend.integrations.tooling import optional_scan
 from backend.threat_repo.sable_rules import rules
 from backend.orchestrator.hashing import files
@@ -66,7 +66,15 @@ def _evaluate(context,emit,knowledge,cfg,baseline_dir,candidate_dir):
     if role not in c['resources']:
         successors=[m['to'] for m in c['moves'] if m['from']==role]
         principal=successors[0] if len(successors)==1 else None
-    if not target or not principal:return 'UNKNOWN',{**details,'reason':why if not target else 'Principal continuity unresolved'},[why]
+    if not target or not principal:
+        # Misbinding amendment: REGRESSED only for an unambiguous obligation
+        # misbinding; every other unresolved-successor situation stays UNKNOWN.
+        if not target and principal:
+            misbinding=unambiguous_misbinding(b,c,asset,role,actions,hyp,conflicts)
+            if misbinding:
+                emit('sable.unambiguous_misbinding',misbinding)
+                return 'REGRESSED',{**details,'reason':misbinding['reason'],'successor':None,'misbinding':misbinding},['Bounded inline IAM role/S3 object model; no deployed AWS state']
+        return 'UNKNOWN',{**details,'reason':why if not target else 'Principal continuity unresolved'},[why]
     # Apply the registered baseline obligation to the selected successor in the candidate graph.
     security=evaluate(c,principal,target,actions);details['projected_authorization']=security
     emit('sable.obligation_projected',{'successor':target,**security})
