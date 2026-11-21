@@ -146,6 +146,13 @@ Install it from the VSIX: Actions → "VS Code extension" → artifact `asent-vs
 `…` → Install from VSIX (in WSL/Remote, install it from the connected window). Details:
 [vscode-asent/README.md](vscode-asent/README.md).
 
+**Allowed hosts.** The dashboard answers only requests whose `Host` is `127.0.0.1`, `localhost` or `[::1]`
+(any port, so the Vite dev proxy on 5173 works). Any other or missing `Host` gets 400 on every route, including
+the event stream. This stops a web page from reaching the dashboard through DNS rebinding. To reach it under
+another name (for example a Docker container opened by LAN IP or service name), list the names explicitly:
+`ASENT_ALLOWED_HOSTS=asent.internal,192.168.1.20` (comma-separated, no `*`, port or scheme; IPv6 as `[addr]`;
+empty by default). An invalid entry stops the server at startup.
+
 `asent report --run RUN_ID` reads a dashboard run's report from the server (it used to be `asent report RUN_ID`).
 An installed `asent` keeps its run data, advisory cache and SATRA workspace in `~/.local/share/asent`
 (`$XDG_DATA_HOME/asent`; `ASENT_DATA` overrides the run data folder); a checkout keeps using the repository.

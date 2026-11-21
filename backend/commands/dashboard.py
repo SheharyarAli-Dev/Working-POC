@@ -3,6 +3,8 @@
 The address is fixed to 127.0.0.1 and there is deliberately no --host option: the dashboard has no
 authentication, so it must not be reachable from other machines. Only the port can be chosen. With
 --json one line {"url", "api", "ui_bundled", "data_dir"} is printed before serving, for editors.
+The server also refuses any Host header other than 127.0.0.1, localhost or [::1] (backend/host_check.py);
+extra names only through ASENT_ALLOWED_HOSTS.
 """
 from __future__ import annotations
 

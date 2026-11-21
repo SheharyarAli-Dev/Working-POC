@@ -38,6 +38,9 @@ async def local_origin(request:Request,call_next):
         from fastapi.responses import JSONResponse
         return JSONResponse({'detail':'Untrusted origin'},status_code=403)
     return await call_next(request)
+# Added last so it runs first: a Host other than loopback (or ASENT_ALLOWED_HOSTS) gets 400 on every route.
+from backend.host_check import protect
+protect(app,os.environ)
 
 class Intake(BaseModel):
     scenario:str='safe'
