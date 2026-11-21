@@ -30,16 +30,28 @@ needed.
 Before a file is written, `neutral()` in the generator replaces the paths of the machine that ran it with
 placeholders. Nothing else is changed: same keys, same order, same numbers, booleans, SHAs and digests.
 
+The paths are taken from the environment of the run (`machine_paths()`), so the same generator works on a
+developer machine and on a GitHub runner (`/home/runner/work/...`, `$RUNNER_TEMP`, `$GITHUB_WORKSPACE`):
+
 | Real path | Placeholder |
 |---|---|
 | the scenario's throwaway repository (`/tmp/asent-fixture-<name>-<random>/repo`) | `/workspace/project` |
 | the scenario's temp folder itself | `/workspace` |
-| asent's own temp folders (`/tmp/asent-gate-<random>`, any `tempfile.mkdtemp` name) | `/tmp/asent-gate-run` (same prefix + `run`) |
-| the ASENT checkout or install (`ASENT_HOME`) | `/opt/asent` |
+| the ASENT checkout or install (`ASENT_HOME`), and `$GITHUB_WORKSPACE` when set | `/opt/asent` |
+| `$RUNNER_TEMP` when set | `/tmp/runner-temp` |
+| the temp folder (`tempfile.gettempdir()`, `$TMPDIR`, `$TEMP`, `$TMP`) | `/tmp` |
+| asent's own temp folders inside a temp folder (`/tmp/asent-gate-<random>`, any `tempfile.mkdtemp` name) | that folder's placeholder + `/<prefix>run`, e.g. `/tmp/asent-gate-run` |
 | the home folder | `/home/user` |
 
-Only whole path segments are replaced, inside JSON string values and keys. If any machine path (or the user
-name) is still found afterwards the generator writes nothing. `test/unit/fixtures.test.ts` checks the
-committed files. One consequence: hashes that asent computed over a record that contains a path (for example
-an evidence record's `content_hash`) were computed over the original path and do not re-verify against the
-edited text. The extension never verifies them; it only displays the report.
+Unset, empty, relative or `/` values are ignored. A path ends on a whole segment (`/home/runner2` is not
+`/home/runner`) but may start anywhere, so `-I/home/runner/include` is replaced too. The mkdtemp rule
+matches any `<prefix>-<8 lowercase characters>` name directly in a temp folder, so an ordinary folder such as
+`/tmp/my-project-database` would also become `/tmp/my-project-run`. Paths are replaced, inside JSON string
+values and keys, in one pass. If any of these machine paths, or the user name as a path segment (`/runner/`),
+is still found afterwards the generator writes nothing. The user name as a plain word does not count: SATRA's
+report has a `runner` key (`sandbox_image.runner`) and a GitHub runner's user is `runner`. A key that
+would become the same as another key, or a value that is not JSON, is refused as well.
+
+One consequence: hashes that asent computed over a record that contains a path (for example an evidence
+record's `content_hash`) were computed over the original path and do not re-verify against the edited text.
+The extension never verifies them; it only displays the report.
