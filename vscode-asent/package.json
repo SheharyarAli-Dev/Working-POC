@@ -1,0 +1,94 @@
+{
+  "name": "asent-vscode",
+  "displayName": "ASENT",
+  "description": "Shows the ASENT gate decision (ACCEPT / REVIEW / BLOCK) of the installed asent CLI inside VS Code.",
+  "version": "0.1.0",
+  "publisher": "asent-fyp",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/SheharyarAli-Dev/Working-POC.git",
+    "directory": "vscode-asent"
+  },
+  "engines": {
+    "vscode": "^1.95.0"
+  },
+  "categories": [
+    "Linters",
+    "Other"
+  ],
+  "extensionKind": [
+    "workspace"
+  ],
+  "main": "./out/src/extension.js",
+  "activationEvents": [
+    "workspaceContains:.asent/**",
+    "workspaceContains:asent-report.json"
+  ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": "limited",
+      "description": "In an untrusted folder ASENT only shows an existing asent-report.json. Init, Run gate and the dashboard need a trusted folder, and the workspace's asent.path and asent.baseBranch settings are ignored.",
+      "restrictedConfigurations": [
+        "asent.path",
+        "asent.baseBranch"
+      ]
+    }
+  },
+  "contributes": {
+    "commands": [
+      {
+        "command": "asent.init",
+        "title": "ASENT: Init project"
+      },
+      {
+        "command": "asent.gate",
+        "title": "ASENT: Run gate on this branch"
+      },
+      {
+        "command": "asent.showReport",
+        "title": "ASENT: Show report"
+      },
+      {
+        "command": "asent.doctor",
+        "title": "ASENT: Doctor"
+      },
+      {
+        "command": "asent.dashboard",
+        "title": "ASENT: Open web dashboard"
+      }
+    ],
+    "configuration": {
+      "title": "ASENT",
+      "properties": {
+        "asent.path": {
+          "type": "string",
+          "default": "asent",
+          "scope": "machine-overridable",
+          "markdownDescription": "The `asent` command to run (a name on PATH or an absolute path). It is run directly with an argument list, never through a shell."
+        },
+        "asent.baseBranch": {
+          "type": "string",
+          "default": "",
+          "scope": "resource",
+          "markdownDescription": "Base branch for **ASENT: Run gate on this branch**. Empty: `asent gate` picks the repository's default branch itself (origin/HEAD, else `main`, else `master`)."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p .",
+    "test": "npm run compile && mocha",
+    "test:extension": "npm run compile && node ./out/test/extension/runTest.js",
+    "package": "vsce package --skip-license --out asent-vscode.vsix"
+  },
+  "devDependencies": {
+    "@types/mocha": "10.0.10",
+    "@types/node": "20.17.6",
+    "@types/vscode": "1.95.0",
+    "@vscode/test-electron": "2.4.1",
+    "@vscode/vsce": "3.2.1",
+    "mocha": "10.8.2",
+    "typescript": "5.6.3"
+  }
+}

@@ -1,0 +1,7 @@
+# Only out/src, package.json, README.md and LICENSE go into the .vsix.
+**
+!out/src/**
+!package.json
+!README.md
+!LICENSE
+out/src/**/*.map
