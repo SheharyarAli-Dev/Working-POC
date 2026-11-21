@@ -1,9 +1,11 @@
-"""vscode-asent/scripts/make_fixtures.py: neutral() on a GitHub runner.
+"""vscode-asent/scripts/make_fixtures.py: neutral() on a GitHub runner, and the SATRA scenario's CAVR result.
 
 The runner tests simulate the paths of an ubuntu-latest runner (user `runner`, home /home/runner,
 checkout under /home/runner/work, $RUNNER_TEMP, $GITHUB_WORKSPACE) without being on one: the
 environment is passed to neutral() and the checkout and temp folder are patched.
 """
+import json
+import socket
 import sys
 import tempfile
 from pathlib import Path
@@ -14,6 +16,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "vscode-asent" / "scripts"))
 
 import make_fixtures as mf  # noqa: E402
+from backend.satra import pytest_runner  # noqa: E402
+from gate_support import DISABLED, GateRepo, config, run_cli  # noqa: E402
 
 HOME = "/home/runner"
 CHECKOUT = "/home/runner/work/Working-POC/Working-POC"
@@ -156,3 +160,46 @@ def test_two_keys_that_become_one_placeholder_are_refused(runner):
 def test_a_value_that_is_not_json_is_refused(runner, value):
     with pytest.raises(mf.ScenarioError, match="not a JSON value"):
         mf.neutral({"v": value}, WORK, env=runner)
+
+
+# --- the SATRA scenario's CAVR result (no Docker needed: SATRA is inconclusive without an engine) ---
+
+@pytest.fixture
+def offline(monkeypatch):
+    """No container engine and no network: CAVR's answer here must not need either."""
+    monkeypatch.setattr(pytest_runner, "availability", lambda: {"docker": {"available": False}, "podman": {"available": False}})
+
+    def refuse(*args, **kwargs):
+        raise OSError("network used in an offline test")
+    monkeypatch.setattr(socket.socket, "connect", refuse)
+    monkeypatch.setattr(socket.socket, "connect_ex", refuse)
+
+
+def satra_run(tmp_path, files):
+    repo = GateRepo(tmp_path / "repo")
+    base = repo.commit(files, message="secure access check")
+    from test_satra_config import BROKEN
+    head = repo.commit({"app/security.py": BROKEN}, message="access check always allows")
+    return run_cli(repo, base, head, tmp_path / "out")[1]
+
+
+def test_satra_scenario_cavr_verifies_the_unchanged_requirements_edit(tmp_path, offline):
+    report = satra_run(tmp_path, mf.satra_files())
+    cavr = report["modules"]["CAVR"]
+    assert (cavr["result"], cavr["status"]) == ("pass", "VERIFIED")
+    assert cavr["reason"] == "requirements.txt: no requirement was added or changed"
+    assert report["modules"]["SATRA"]["status"] == "INCONCLUSIVE"   # no engine here; the workflow has Docker
+
+
+def test_with_verify_all_the_empty_requirements_file_stays_unresolved(tmp_path, offline):
+    files = mf.satra_files()
+    files[".asent/config.json"] = config(SATRA={"enabled": True, "pytest_ini": "satra/pytest.ini", "source_dirs": ["app"]},
+                                         CAVR={"enabled": True}, SABLE=DISABLED)
+    cavr = satra_run(tmp_path, files)["modules"]["CAVR"]
+    assert (cavr["result"], cavr["status"]) == ("review", "UNRESOLVED")
+    assert "CAPTURE_INCOMPLETE" in cavr["reason"] and "not fully captured" in cavr["reason"]
+
+
+def test_the_scenario_config_asks_cavr_for_the_edit_only():
+    section = json.loads(mf.satra_files()[".asent/config.json"])["modules"]["CAVR"]
+    assert section == {"enabled": True, "verify": "changed"}

@@ -113,19 +113,31 @@ def sable_block(work, monkeypatch):
     return _expect(run_cli(repo, base, head, work / "out")[1], "BLOCK", "SABLE", "block")
 
 
+# The head only edits app/security.py, so CAVR is asked to verify the base -> head edit of requirements.txt
+# (nothing added or changed: VERIFIED NOTHING_TO_VERIFY, no network). With the default "all", the empty
+# requirements file is `pip install -r requirements.txt` naming nothing, which CAVR fails closed on
+# (UNRESOLVED CAPTURE_INCOMPLETE) and the gate would REVIEW instead of BLOCK on SATRA alone.
+SATRA_SCENARIO_CAVR = {"enabled": True, "verify": "changed"}
+
+
+def satra_files():
+    """Base commit of the SATRA scenario: a project with no third-party dependencies and a trusted contract."""
+    from test_satra_config import CONTRACT, NO_DEPENDENCIES, SECURE, TRUSTED
+    return {**NO_DEPENDENCIES, "app/__init__.py": "", "app/security.py": SECURE,
+            "app/main.py": "from app.security import can_access\n",
+            ".asent/config.json": config(SATRA={"enabled": True, "pytest_ini": "satra/pytest.ini", "source_dirs": ["app"]},
+                                         CAVR=SATRA_SCENARIO_CAVR, SABLE=DISABLED),
+            ".asent/satra/contract.json": json.dumps(CONTRACT),
+            ".asent/satra/pytest.ini": "[pytest]\npythonpath = .\n",
+            ".asent/satra/trusted_tests/test_contract.py": TRUSTED}
+
+
 def satra_block(work, monkeypatch):
     if shutil.which("docker") is None:
         raise ScenarioError("Docker is not installed; SATRA cannot run the trusted tests (see the manual fixtures workflow)")
-    from test_satra_config import BROKEN, CONTRACT, NO_DEPENDENCIES, SECURE, TRUSTED
+    from test_satra_config import BROKEN
     repo = GateRepo(work / "repo")
-    files = {**NO_DEPENDENCIES, "app/__init__.py": "", "app/security.py": SECURE,
-             "app/main.py": "from app.security import can_access\n",
-             ".asent/config.json": config(SATRA={"enabled": True, "pytest_ini": "satra/pytest.ini", "source_dirs": ["app"]},
-                                          CAVR={"enabled": True}, SABLE=DISABLED),
-             ".asent/satra/contract.json": json.dumps(CONTRACT),
-             ".asent/satra/pytest.ini": "[pytest]\npythonpath = .\n",
-             ".asent/satra/trusted_tests/test_contract.py": TRUSTED}
-    base = repo.commit(files, message="secure access check")
+    base = repo.commit(satra_files(), message="secure access check")
     head = repo.commit({"app/security.py": BROKEN}, message="access check always allows")
     return _expect(run_cli(repo, base, head, work / "out")[1], "BLOCK", "SATRA", "block")
 

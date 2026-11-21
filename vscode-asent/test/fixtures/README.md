@@ -17,6 +17,11 @@ hand-written or edited. To regenerate (from the repository root):
 | `init/init.json` | `asent init --json` | starter `.asent/` written |
 | `dashboard/dashboard.json` | the line `asent dashboard --json` prints | the server itself was not started |
 
+The SATRA scenario's CAVR section is `verify: "changed"`: the head edits only `app/security.py`, so CAVR
+checks an edit of `requirements.txt` that asks for nothing and is VERIFIED (`NOTHING_TO_VERIFY`). The BLOCK in
+`satra-block.json` is SATRA's alone. With the default `"all"`, the empty requirements file is UNRESOLVED
+(`CAPTURE_INCOMPLETE`) and the gate would answer REVIEW.
+
 `asent gate --json` prints exactly the report it writes to `asent-report.json`
 (`tests/test_cli_gate.py::test_gate_json_prints_exactly_the_written_report`), so the report fixtures
 serve for both `gate --json` and `report --json`.
