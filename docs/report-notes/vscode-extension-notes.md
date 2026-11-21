@@ -747,3 +747,55 @@ Claude Code wrote `neutral()`, regenerated the fixtures and wrote the test. Mary
 ### Supervisor Q&A prep
 
 - *Are the fixtures still real output?* Yes: they come from real CLI runs; the only edit is the documented path placeholders, and a check showed every other value is unchanged.
+
+## Step 13 — Untrusted extension test really runs untrusted (2026-11-21)
+
+Commit `fix(vscode): run the untrusted extension test with workspace trust on`.
+Unit tests on the staged tree: 66 passing, 6 pending. Extension test on the staged tree (first run on this machine, after Maryam
+installed the libraries): trusted 11 passing, untrusted 3 passing. Python suite: run once after step 14 (result there).
+Review: no reviewer pass was run for this step.
+
+### Ch 6 Implementation
+
+| File | Function | What it does |
+|---|---|---|
+| `vscode-asent/test/extension/runTest.ts` | `runTrusted` | Unchanged behaviour: `runTests` on VS Code 1.95.3. |
+| | `runUntrusted` | `downloadAndUnzipVSCode(1.95.3)`, then starts VS Code itself with `runTests`' other arguments (`--no-sandbox`, `--disable-gpu-sandbox`, `--disable-updates`, `--skip-welcome`, `--skip-release-notes`, `--extensionTestsPath`, `--extensionDevelopmentPath`, own `--extensions-dir`) but **without** `--disable-workspace-trust`; fails on a non-zero exit. |
+| | `env` | The per-suite environment for both runs. |
+
+### Design decisions
+
+| Decision | Alternatives considered | Why |
+|---|---|---|
+| Start VS Code directly for the untrusted run | An option of `runTests` | `@vscode/test-electron` 2.4.1 `runTests` always adds `--disable-workspace-trust` (`out/runTest.js` line 53) and has no option to drop it. |
+
+### Requirements covered
+
+| Req | Acceptance check |
+|---|---|
+| V11 | In VS Code with trust on: `isTrusted` is false, Show report works with the user's `asent.path`, and gate/init/dashboard start nothing (VS-E12–E14 pass). |
+
+### Ch 7 Test cases
+
+| Test ID | Purpose | Expected | Result |
+|---|---|---|---|
+| VS-E1–E11 | Trusted suite (step 9) | as in step 9 | pass (11) |
+| VS-E12 | Folder untrusted, extension active | `isTrusted` false | pass |
+| VS-E13 | Report via user `asent.path` | status BLOCK, `report --json --file=` | pass |
+| VS-E14 | Refused commands | no gate/init/dashboard call | pass |
+
+### Defects found and fixed
+
+- The first run of the extension test failed 3 of 3 untrusted tests: the folder was trusted (`true !== false`), because `runTests` adds `--disable-workspace-trust` itself. In that trusted run VS Code used the workspace's bogus `asent.path`, so the report could not be read; this is the restriction working as designed, not an extension bug. Fixed by `runUntrusted`. (One earlier attempt failed before VS Code started: `ETIMEDOUT` downloading VS Code 1.95.3 from update.code.visualstudio.com; the retry downloaded it.)
+
+### Known limitations / deferred
+
+- `runUntrusted` repeats `runTests`' argument list for 2.4.1; a different `@vscode/test-electron` version may change it.
+
+### Tool disclosure (Ch 8.7)
+
+Claude Code found the cause in `node_modules/@vscode/test-electron/out/runTest.js` and wrote the fix. Verified by the extension test on exactly the staged tree.
+
+### Supervisor Q&A prep
+
+- *How did you notice?* The first real run asserted `isTrusted === false` and got `true`; the test was written to check the precondition, not to assume it.
