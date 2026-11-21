@@ -1051,3 +1051,71 @@ Claude Code rewrote `locate` and its tests to Maryam's specification (workspace 
 
 - *Why ignore the repository field the report gives?* The extension also reads reports in untrusted folders and `asent report` does not check that field, so it is attacker input; only the folder VS Code opened is trusted as a root.
 - *What does realpath add?* A symlink inside the repository can point anywhere; comparing real paths stops it.
+
+## Step 18 — Notification text cannot carry links (2026-11-21)
+
+Commit `fix(vscode): clean report and error text before it goes into a notification`.
+Unit tests: 89 passing, 6 pending. Extension test: trusted 16 passing, untrusted 5 passing.
+Python suite: not run for this step (change only under `vscode-asent/`; Maryam's instruction).
+Review: found by an independent security review of `master...asent-vscode-extension` (rated a hardening item); no reviewer pass was run on the fix.
+
+### Ch 6 Implementation
+
+| File | Function | What it does |
+|---|---|---|
+| `src/notify.ts` (new, no vscode import) | `notificationText(text, max = 160)` | Control characters → space; then, until nothing changes: remove `[ ] ( )`, remove `scheme://...`, `command:`/`vscode:`/`file:`/`https?:`/`javascript:`/`vbscript:`/`data:`/`mailto:` + non-space, `www.` + non-space; collapse whitespace; cut to `max` with `…`. |
+| | `gateNotification(report)` | `ASENT gate: <decision>: <first reason>`, cleaned. |
+| | `errorNotification(e)` | One cleaned line per error type; for `AsentNotFound` only the configured path is cleaned (capped at 60) inside the extension's own sentence. |
+| `src/extension.ts` | `reportError`, `runGate`, `initProject`, `openDashboard` | Use the functions above. Init errors are now also written in full to the ASENT output. The dashboard "already running" text is built in a `where` variable (no nested template). |
+| `test/unit/security.test.ts` | | `notify.ts` added to the module list; new static check of every `show*Message` call in `extension.ts`. |
+| `README.md` | What you see | Notifications line. |
+
+### Design decisions
+
+| Decision | Alternatives considered | Why |
+|---|---|---|
+| Repeat the removals until nothing changes | One pass | Removing brackets can join pieces into a link again (`comm[]and:x`, `ht[t]ps:/(/)x`). |
+| Remove known dangerous schemes even inside a word, but only with text after the colon | Word boundary; any `word:` | `xcommand:y` is still caught; ordinary asent text such as `data: 3 files` or `DENYLIST: reqeusts` is unchanged. |
+| Clean only the report/asent parts of the extension's own sentences where it helps reading | Clean the whole sentence everywhere | The not-found message keeps its wording; the extension's fixed text has no brackets or links. |
+| Static check on `extension.ts` | Expose the last notification through `AsentApi` | No test seam in shipped code (as in Step 15); the check fails if a notification interpolates anything other than `notificationText(...)`, `url`, `where`, `title`, or mentions `.message`, `.reasons`, `json`, `error`, `files`, `stderr` outside it. |
+| 160 characters | No limit | "One short line" (Maryam); the full text stays in the panel and the output. |
+
+### Requirements covered
+
+| Req | Acceptance check |
+|---|---|
+| V7 (messages) | No notification can contain `[`, `]`, `(`, `)`, a link or a `command:` URI from report or asent text; it is one line of at most 160 characters. |
+
+### Ch 7 Test cases
+
+| Test ID | Purpose | Input | Expected | Result |
+|---|---|---|---|---|
+| VS-N1 | Command link | `Blocked [Fix it](command:...sendSequence?...) now` | `Blocked Fix it now` | pass |
+| VS-N2 | Other links | 11 forms (https with parentheses, 127.0.0.1, vscode://, vscode-insiders://, file:///, javascript:, data:, mailto:, www., ftp://, `COMMAND:`) | `see here` | pass |
+| VS-N3 | Links that re-form | `comm[]and:`, `[a](ht)(tps://…)`, `x[command:y]`, `c(o)mmand:z`, `ht[t]ps:/(/)evil` | no bracket, no link | pass |
+| VS-N4 | One short line | newlines, tab, BEL; 1000 × `x`; `abcdef` with max 4 | one line; 160 with `…`; `abc…` | pass |
+| VS-N5 | Ordinary text kept | DENYLIST reason, `reqeusts==2.31.0`, `C:\Users\...`, `data: 3 files`, `ASENT_CONFIG_MISSING` | unchanged | pass |
+| VS-N6 | Gate | real CAVR BLOCK report with a malicious first reason | `ASENT gate: BLOCK: CAVR: Fix it second line`; panel has the full text, no `<a`/`href` | pass |
+| VS-N7 | Gate, real reason / none | real report; `reasons: []` | cleaned reason; `ASENT gate: BLOCK` | pass |
+| VS-N8 | Errors | `AsentOutputError` with link in stderr, `Error`, `AsentNotFound` (link in path; NOT_ABSOLUTE), `AsentCancelled`, a string | all cleaned, start `ASENT: ` | pass |
+| VS-S7 | Static check | `extension.ts` before the change | fails on `ASENT: ${e.message}. Install asent…` | confirmed (test-first run) |
+| VS-S7' | Static check | `extension.ts` after | passes (≥ 10 calls checked) | pass |
+
+### Defects found and fixed
+
+- Independent review: report reasons and asent error text went into notifications unchanged; VS Code renders `[label](command:...)` there as a clickable link.
+- While writing `notify.ts`, the control-character regex was saved with literal U+2028/U+2029 characters, which TypeScript reads as line breaks (compile error); replaced with `\u2028\u2029` escapes.
+
+### Known limitations / deferred
+
+- The static check reads `show*Message(` calls one line at a time; a notification built in a variable is covered only through `gateNotification`/`errorNotification`.
+- Status bar tooltips (plain strings, no link rendering) are unchanged.
+
+### Tool disclosure (Ch 8.7)
+
+Claude Code wrote `notify.ts`, its tests and the static check to Maryam's specification (remove brackets, parentheses, links and command: URIs; one short line; panel keeps the full text). Verified by the unit and extension tests; the static check was seen failing on the old code first.
+
+### Supervisor Q&A prep
+
+- *Why not escape the text instead of removing characters?* Notifications have no escaping for their link syntax; removing the characters that make a link is the only reliable option, and the full text is still in the panel.
+- *Could removing brackets create a new link?* The removals repeat until nothing changes, and tests cover pieces that join into `command:` and `https://`.

@@ -11,6 +11,7 @@ import { fromJson, GateReport, ReportError, Decision } from "./report";
 import { readDoctor, doctorLines, notFoundLines, dockerMissing, DoctorError } from "./doctor";
 import { locate } from "./diagnostics";
 import { ReportPanel } from "./panel";
+import { notificationText, gateNotification, errorNotification } from "./notify";
 
 const LOCAL_DASHBOARD = /^http:\/\/127\.0\.0\.1:\d{1,5}\/$/;
 const GATE_TIMEOUT_MS = 30 * 60 * 1000;
@@ -126,16 +127,16 @@ function reportError(e: unknown): void {
   if (e instanceof AsentNotFound) {
     const lines = notFoundLines(e.asentPath);
     show(e.code === "ENOENT" ? lines : [e.message, ...lines.slice(1)]);
-    void vscode.window.showErrorMessage(`ASENT: ${e.message}. Install asent, or set asent.path.`, "Show details", "Open settings")
+    void vscode.window.showErrorMessage(errorNotification(e), "Show details", "Open settings")
       .then((choice) => {
         if (choice === "Show details") output.show(true);
         if (choice === "Open settings") void vscode.commands.executeCommand("workbench.action.openSettings", "asent.path");
       });
   } else if (e instanceof AsentCancelled) {
-    void vscode.window.showWarningMessage(`ASENT: ${e.message}.`);
+    void vscode.window.showWarningMessage(errorNotification(e));
   } else if (e instanceof AsentOutputError) {
     show([e.message]);
-    void vscode.window.showErrorMessage(`ASENT: ${e.message.split("\n")[0]}`, "Show details", "Run Doctor")
+    void vscode.window.showErrorMessage(errorNotification(e), "Show details", "Run Doctor")
       .then((choice) => {
         if (choice === "Show details") output.show(true);
         if (choice === "Run Doctor") void vscode.commands.executeCommand("asent.doctor");
@@ -143,7 +144,7 @@ function reportError(e: unknown): void {
   } else {
     const message = e instanceof Error ? e.message : String(e);
     show([message]);
-    void vscode.window.showErrorMessage(`ASENT: ${message}`);
+    void vscode.window.showErrorMessage(errorNotification(e));
   }
 }
 
@@ -267,10 +268,9 @@ async function runGate(): Promise<void> {
   }
   useReport(cwd, report);
   panel.show(report);
-  const text = `ASENT gate: ${report.decision}` + (report.reasons.length ? ` (${report.reasons[0]})` : "");
   const notify = report.decision === "ACCEPT" ? vscode.window.showInformationMessage
     : report.decision === "REVIEW" ? vscode.window.showWarningMessage : vscode.window.showErrorMessage;
-  void notify(text);
+  void notify(gateNotification(report)); // the panel shows every reason in full
   await warnIfDockerMissing(report, folder);
 }
 
@@ -311,7 +311,8 @@ async function initProject(): Promise<void> {
   const result = await runAsent(asentCommand(folder), initArgs(folder.uri.fsPath), { cwd: folder.uri.fsPath, timeoutMs: SHORT_TIMEOUT_MS });
   const error = errorOf(result);
   if (error) {
-    void vscode.window.showErrorMessage(`ASENT init: ${error}`);
+    show([`asent init: ${error}`]); // the full text; the notification gets one cleaned line
+    void vscode.window.showErrorMessage(`ASENT init: ${notificationText(error)}`);
     return;
   }
   const json = result.json as { files?: unknown; not_copied?: unknown };
@@ -319,14 +320,15 @@ async function initProject(): Promise<void> {
   const notCopied = Array.isArray(json.not_copied) ? json.not_copied.map(String) : [];
   show(["asent init wrote:", ...files.map((f) => "  " + f),
     ...(notCopied.length ? ["Not approved (not an exact pin): " + notCopied.join(", ")] : [])]);
-  void vscode.window.showInformationMessage(`ASENT: starter written (${files.join(", ")}). Review every file in .asent/, then remove ` +
+  void vscode.window.showInformationMessage(`ASENT: starter written: ${notificationText(files.join(", "))}. Review every file in .asent/, then remove ` +
     `"_starter" from .asent/config.json; until then every gate decision is REVIEW.`);
 }
 
 async function openDashboard(): Promise<void> {
   if (dashboard || dashboardStarting) {
     const url = dashboard?.url;
-    void vscode.window.showInformationMessage(`ASENT: the dashboard is already running${url ? ` at ${url}` : " (starting)"}.`, ...(url ? ["Open"] : []))
+    const where = url ? ` at ${url}` : " (starting)"; // url passed LOCAL_DASHBOARD
+    void vscode.window.showInformationMessage(`ASENT: the dashboard is already running${where}.`, ...(url ? ["Open"] : []))
       .then((choice) => { if (choice && url) void openLocal(url); });
     return;
   }

@@ -43,6 +43,9 @@ Needs VS Code 1.95 or newer.
   not used), and an entry is made only for an existing file inside the folder, after following symlinks; so when
   the folder is a subfolder of the gated repository, findings in other parts of the repository are left out.
   SATRA and SABLE gate reports name tests and Terraform resources, not file lines, so they appear only in the panel.
+- **Notifications**: one short line. Text from the report or from asent (the first reason, error messages) is
+  shown without brackets, parentheses or links, so it cannot add a clickable link; the panel and the **ASENT**
+  output keep the full text.
 - **asent or Docker missing**: "asent was not found" with the install commands and the `asent.path` setting; when
   a gate ran SATRA without Docker, a warning with `asent doctor`'s fix lines in the ASENT output.
 

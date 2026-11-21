@@ -11,7 +11,7 @@ const all = files.map((f) => [f, code(f)] as const);
 
 describe("security properties of src/", () => {
   it("has the expected modules", () => {
-    assert.deepStrictEqual(files.sort(), ["args.ts", "cli.ts", "diagnostics.ts", "doctor.ts", "extension.ts", "html.ts", "panel.ts", "report.ts"]);
+    assert.deepStrictEqual(files.sort(), ["args.ts", "cli.ts", "diagnostics.ts", "doctor.ts", "extension.ts", "html.ts", "notify.ts", "panel.ts", "report.ts"]);
   });
 
   it("processes are started only in cli.ts, only with spawn, and never through a shell", () => {
@@ -42,6 +42,21 @@ describe("security properties of src/", () => {
     assert.match(panel, /enableCommandUris:\s*false/);
     assert.match(panel, /localResourceRoots:\s*\[\]/);
     for (const [f, text] of all) assert.doesNotMatch(text, /enableScripts:\s*true|postMessage|onDidReceiveMessage/, f);
+  });
+
+  it("notifications put report and error text in only through notify.ts (no raw [label](uri) links)", () => {
+    const text = code("extension.ts");
+    const calls = [...text.matchAll(/show(?:Error|Warning|Information)Message\(([^\n]*)/g)].map((m) => m[1]);
+    assert.ok(calls.length >= 10, `found ${calls.length} notification calls`);
+    // Interpolations allowed in a notification template: cleaned text, or values the extension itself built or checked.
+    const allowed = /^(notificationText\(|url$|where$|title$)/;
+    for (const call of calls) {
+      const template = call.match(/^`([^`]*)`/);
+      for (const [, expr] of template ? template[1].matchAll(/\$\{([^}]*)\}/g) : []) assert.match(expr, allowed, call);
+      const outsideCleaning = call.replace(/\$\{notificationText\([^}]*\)\}/g, "");
+      assert.doesNotMatch(outsideCleaning, /\.message\b|\.reasons\b|\bjson\b|\berror\b|\bfiles\b|\bstderr\b/, call);
+    }
+    assert.match(text, /notify\(gateNotification\(report\)\)/);
   });
 
   it("only one place opens a URL, and only the dashboard's 127.0.0.1 address", () => {
