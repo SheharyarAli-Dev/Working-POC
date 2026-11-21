@@ -516,3 +516,75 @@ Claude Code wrote `extension.ts`, `panel.ts` and the security test. Verified by 
 
 - *What can an untrusted repository make the extension do?* Read its own `asent-report.json` with the user's asent; Init, Run gate and the dashboard refuse before starting anything, and its settings cannot change `asent.path`.
 - *Why is the status bar not stored between sessions?* Nothing is stored; on activation it is read again from `asent-report.json`.
+
+## Step 9 — Extension test in a real VS Code (2026-11-21)
+
+Commit `test(vscode): extension test with @vscode/test-electron`.
+Unit tests on the staged tree: 63 passing, 6 pending. Full Python suite: 2201 passed, 20 skipped, 1 xfailed.
+Extension test: **not run on this machine** (the downloaded VS Code needs `libnspr4.so` and other libraries that are not installed; installing them needs sudo). It runs in the CI workflow of step 10.
+Review: no reviewer pass was run for this step.
+
+### Ch 6 Implementation
+
+| File | What it does |
+|---|---|
+| `test/extension/runTest.ts` | Runs VS Code 1.95.3 twice: (1) trusted (`--disable-workspace-trust`), `asent.path` = stub in workspace settings; (2) untrusted (trust on, no prompt), workspace `asent.path` = a nonexistent path, user `asent.path` = stub, a real `cavr-block.json` as `asent-report.json`. |
+| `test/extension/suite/index.ts` | Mocha in the extension host; `ASENT_SUITE` picks the file. |
+| `test/extension/suite/helpers.ts` | Stub argv log, stub control file, `until` polling. |
+| `test/extension/suite/trusted.test.ts` | 11 tests (below). |
+| `test/extension/suite/untrusted.test.ts` | 3 tests (below). |
+| `test/stub/asent` | `ASENT_STUB_CONTROL` file to switch scenarios without restarting VS Code. |
+| `test/unit/manifest.test.ts` | New test: the pinned VS Code version matches the minimum in `engines` and `@types/vscode`. |
+
+### Design decisions
+
+| Decision | Alternatives considered | Why |
+|---|---|---|
+| Pin VS Code 1.95.3 | Default `stable` (it downloaded 1.147.0) | Tests the oldest version the manifest allows and does not drift. |
+| Untrusted run with a bogus workspace `asent.path` | Same settings as trusted | If VS Code used the workspace value, Show report would fail; it passing shows the restriction works. |
+
+### Requirements covered
+
+| Req | Acceptance check (in VS Code) |
+|---|---|
+| V1 | All five commands registered. |
+| V3 | Status bar `$(shield) ASENT: BLOCK` after a BLOCK gate; `gate running` during a run; updates from a file written outside the extension. |
+| V4 | `requirements.txt` has one Error diagnostic on line 0 from source ASENT; cleared after a REVIEW report. |
+| V6 | `asent.baseBranch = develop` → `--base=develop`. |
+| V11 | Untrusted: no gate/init/dashboard call is made; Show report works with the user's asent. |
+| V12 | Activates with no command because the folder has `.asent/`; no asent call before a command. |
+| V13 | Second gate during a run and second dashboard click start nothing. |
+
+### Ch 7 Test cases
+
+| Test ID | Purpose | Expected | Result |
+|---|---|---|---|
+| VS-E1 | Activation by `.asent/` | active, no asent call, status `$(shield) ASENT` | not run locally (CI) |
+| VS-E2 | Commands | five registered | not run locally (CI) |
+| VS-E3 | Gate BLOCK | argv, cwd, status, diagnostic, panel CSP | not run locally (CI) |
+| VS-E4 | One gate | one call for two clicks | not run locally (CI) |
+| VS-E5 | Base setting | `--base=develop` | not run locally (CI) |
+| VS-E6 | Show report | `report --json --file=` | not run locally (CI) |
+| VS-E7 | Watcher | BLOCK after the file changes | not run locally (CI) |
+| VS-E8 | Doctor cwd | home directory | not run locally (CI) |
+| VS-E9 | Init argv | `--repository=<folder>` | not run locally (CI) |
+| VS-E10 | One dashboard | one process for two clicks | not run locally (CI) |
+| VS-E11 | asent missing | command returns, no call | not run locally (CI) |
+| VS-E12–E14 | Untrusted | not trusted; report shown via user path; gate/init/dashboard refused | not run locally (CI) |
+
+### Defects found and fixed
+
+- `runTests` without a version downloaded the latest stable (1.147.0); pinned to 1.95.3 with a check in `manifest.test.ts`.
+
+### Known limitations / deferred
+
+- The results of VS-E1–E14 are known only after the first CI run of step 10.
+- The dashboard test lets the extension call `openExternal` on the stub's `http://127.0.0.1:8000/`; on a headless runner nothing is listening.
+
+### Tool disclosure (Ch 8.7)
+
+Claude Code wrote the extension test. It compiles; it has not been run yet (see above).
+
+### Supervisor Q&A prep
+
+- *How is Workspace Trust tested?* A second VS Code run with trust enabled and the folder untrusted; the stub's argv log proves no gate, init or dashboard was started.

@@ -48,3 +48,13 @@ describe("package.json manifest", () => {
     assert.deepStrictEqual(manifest.dependencies ?? {}, {});
   });
 });
+
+describe("extension test target", () => {
+  it("runs VS Code at the lowest version engines allows", () => {
+    const source = fs.readFileSync(path.join(__dirname, "..", "..", "..", "test", "extension", "runTest.ts"), "utf8");
+    const pinned = source.match(/VSCODE_VERSION = "(\d+\.\d+\.\d+)"/)![1];
+    const minimum = manifest.engines.vscode.replace(/^\^/, "");
+    assert.strictEqual(pinned.split(".").slice(0, 2).join("."), minimum.split(".").slice(0, 2).join("."));
+    assert.strictEqual(manifest.devDependencies["@types/vscode"], minimum, "types match the oldest supported API");
+  });
+});
