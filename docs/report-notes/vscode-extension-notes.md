@@ -397,3 +397,55 @@ Claude Code wrote the renderer and tests. Verified by `npm test`.
 ### Supervisor Q&A prep
 
 - *What if a report contains HTML?* It is escaped (VS-H5), and even unescaped it could not run: the CSP allows no script.
+
+## Step 7 — Problems locations (2026-11-21)
+
+Commit `feat(vscode): place report findings in the Problems tab`.
+Unit tests on the staged tree: 56 passing, 6 pending. Full Python suite: 2201 passed, 20 skipped, 1 xfailed.
+Review: no reviewer pass was run for this step.
+
+### Ch 6 Implementation
+
+| File | Function | What it does |
+|---|---|---|
+| `src/diagnostics.ts` | `diagnosticRoot(folder, repository)` | The report's paths are relative to the gated repository's top level: use `repository` when it is absolute and contains the folder, else the folder (a report from another machine). |
+| | `locate(findings, folder, repository)` | Absolute 0-based locations; null line → line 0 with "(file-level: the report gives no line)"; absolute paths, Windows drive paths, NUL, empty names and anything resolving outside the root dropped. |
+
+### Design decisions
+
+| Decision | Alternatives considered | Why |
+|---|---|---|
+| Drop paths outside the root | Show them anyway | A report is input; it must not place markers on arbitrary files such as `/etc/passwd`. |
+| File-level entry on line 1 with a note | Skip findings without a line | The report does name the file (e.g. `requirements.txt`); the note keeps it honest that no line was given. |
+
+### Requirements covered
+
+| Req | Acceptance check |
+|---|---|
+| V4 | Real CAVR BLOCK → `requirements.txt` line 0 (shown as 1), message says the report gives no line; a 1-based line 7 → 0-based 6. |
+
+### Ch 7 Test cases
+
+| Test ID | Purpose | Input | Expected | Result |
+|---|---|---|---|---|
+| VS-P1 | Real CAVR BLOCK | `cavr-block.json` | one error at `requirements.txt` line 0 with the note | pass |
+| VS-P2 | Line conversion | line 7 | 6, message unchanged | pass |
+| VS-P3 | Escapes | `../`, `a/../../`, `/etc/passwd`, `C:\x.txt`, NUL, empty | none | pass |
+| VS-P4 | Folder inside repository | folder `/w/repo/sub`, repo `/w/repo` | root `/w/repo` | pass |
+| VS-P5 | Report from elsewhere | `/tmp/...`, null, relative | root = folder | pass |
+
+### Defects found and fixed
+
+None in this step.
+
+### Known limitations / deferred
+
+- Only CAVR produces Problems entries (see step 3).
+
+### Tool disclosure (Ch 8.7)
+
+Claude Code wrote the module and tests. Verified by `npm test`.
+
+### Supervisor Q&A prep
+
+- *Can a malicious report mark files outside the project?* No; anything resolving outside the root is dropped (VS-P3).
