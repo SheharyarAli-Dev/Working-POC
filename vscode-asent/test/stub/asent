@@ -1,0 +1,99 @@
+#!/usr/bin/env node
+// TEST STUB, never shipped (.vscodeignore): stands in for the real `asent` CLI in the unit and extension
+// tests. It decides nothing. It replays the real `asent ... --json` outputs in test/fixtures (see
+// test/fixtures/README.md), behaves like the real CLI's file handling (gate writes asent-report.json to
+// --output-dir; report reads --file), and records every argv it was given, so the tests can check that
+// the extension passes an argument array and which arguments.
+//
+// Environment (set by the tests):
+//   ASENT_STUB_LOG       append {"argv": [...], "cwd": "..."} per call (JSON lines)
+//   ASENT_STUB_GATE      report fixture that `gate` replays (default accept.json)
+//   ASENT_STUB_MODE      not-json | stderr-crash | hang | slow-gate | init-exists | dashboard-busy | doctor-ready
+//   ASENT_STUB_CONTROL   a JSON file {"gate": ..., "mode": ...} read on every call; overrides the two above
+//                        (the extension test changes scenarios without restarting VS Code)
+"use strict";
+const fs = require("fs");
+const path = require("path");
+
+const FIXTURES = path.join(__dirname, "..", "fixtures");
+const argv = process.argv.slice(2);
+let control = {};
+try { control = JSON.parse(fs.readFileSync(process.env.ASENT_STUB_CONTROL, "utf8")); } catch { /* no control file */ }
+const mode = control.mode || process.env.ASENT_STUB_MODE || "";
+const gateFixture = control.gate || process.env.ASENT_STUB_GATE || "accept.json";
+if (process.env.ASENT_STUB_LOG) {
+  fs.appendFileSync(process.env.ASENT_STUB_LOG, JSON.stringify({ argv, cwd: process.cwd() }) + "\n");
+}
+const option = (name) => {
+  const hit = argv.find((a) => a.startsWith(name + "="));
+  return hit === undefined ? undefined : hit.slice(name.length + 1);
+};
+const fixture = (...parts) => JSON.parse(fs.readFileSync(path.join(FIXTURES, ...parts), "utf8"));
+const print = (value) => process.stdout.write(JSON.stringify(value, null, 2) + "\n");
+
+if (mode === "not-json") { process.stdout.write("Traceback (most recent call last):\n  oops\n"); process.exit(2); }
+if (mode === "stderr-crash") { process.stderr.write("ModuleNotFoundError: No module named 'httpx'\n"); process.exit(2); }
+if (mode === "hang") { setInterval(() => {}, 1000); return; }
+
+switch (argv[0]) {
+  case "gate": {
+    const report = fixture("reports", gateFixture);
+    const finish = () => {
+      const out = option("--output-dir") || process.cwd();
+      fs.writeFileSync(path.join(out, "asent-report.json"), JSON.stringify(report, null, 2) + "\n");
+      print(report);
+      process.exit(report.exit_code);
+    };
+    if (mode === "slow-gate") setTimeout(finish, 1500); else finish();
+    break;
+  }
+  case "report": {
+    const file = option("--file");
+    let text;
+    try { text = fs.readFileSync(file, "utf8"); } catch {
+      print({ error: `No ASENT report at ${file}. Run \`asent gate\` first, or pass --file PATH.` });
+      process.exit(2);
+    }
+    let report;
+    try { report = JSON.parse(text); } catch { report = null; }
+    if (!report || report.schema !== "asent.gate.v1") {
+      print({ error: `${file} is not an ASENT gate report (expected schema asent.gate.v1).` });
+      process.exit(2);
+    }
+    print(report);
+    process.exit(0);
+    break;
+  }
+  case "doctor": {
+    const result = fixture("doctor", "doctor.json");
+    if (mode === "doctor-ready") {
+      result.ready = true;
+      result.checks = result.checks.filter((c) => c.status === "ok");
+    }
+    print(result);
+    process.exit(result.ready ? 0 : 1);
+    break;
+  }
+  case "init": {
+    const target = path.join(option("--repository") || ".", ".asent");
+    if (mode === "init-exists" || fs.existsSync(target)) {
+      print({ error: `${target} already exists; review it, or pass --force to replace it` });
+      process.exit(2);
+    }
+    print({ ...fixture("init", "init.json"), asent_dir: target });
+    process.exit(0);
+    break;
+  }
+  case "dashboard": {
+    if (mode === "dashboard-busy") {
+      print({ error: "port 8000 on 127.0.0.1 is already in use (another dashboard?); choose one with --port" });
+      process.exit(2);
+    }
+    process.stdout.write(JSON.stringify(fixture("dashboard", "dashboard.json")) + "\n");
+    setInterval(() => {}, 1000); // serves until it is stopped, like the real one
+    break;
+  }
+  default:
+    process.stderr.write(`asent stub: unknown command ${JSON.stringify(argv)}\n`);
+    process.exit(2);
+}

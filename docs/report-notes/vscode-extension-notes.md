@@ -219,3 +219,69 @@ Claude Code wrote the parser and tests. Maryam reviewed the field choices. Verif
 
 - *Could the extension show ACCEPT for a report that is not ACCEPT?* No. The decision is copied, and any value other than the three is refused.
 - *Why do SATRA/SABLE not appear in Problems?* Their gate reports contain no project file and line; inventing a location would be a fabricated result.
+
+## Step 4 — Start asent with an argument array (2026-11-21)
+
+Commit `feat(vscode): run asent with an argument array and read its JSON`.
+Unit tests on the staged tree: 38 passing, 6 pending. Full Python suite: 2201 passed, 20 skipped, 1 xfailed.
+Real CLI check: `ASENT_REAL=../scripts/asent ASENT_PYTHON=../.venv/bin/python npx mocha --grep "real asent"`: 5 passing.
+Review: no reviewer pass was run for this step.
+
+### Ch 6 Implementation
+
+| File | Function | What it does |
+|---|---|---|
+| `src/args.ts` | `gateArgs`, `reportArgs`, `initArgs`, `doctorArgs`, `dashboardArgs`, `reportFile` | The argument lists, each value as one `--name=value` element. Empty base → no `--base`. |
+| `src/cli.ts` | `runAsent(path, args, {cwd, env, timeoutMs, signal})` | `spawn(path, args, {shell: false})`; stdout parsed as one JSON document; any exit code is a result. Errors: `AsentNotFound` (ENOENT/EACCES/ENOTDIR), `AsentOutputError` (no JSON; carries exit code and stderr tail), `AsentCancelled` (cancel or timeout: SIGTERM, then SIGKILL after 3 s). Args with NUL refused before spawning; stdout capped at 64 MB. |
+| | `startDashboard` | Starts `asent dashboard --json`, resolves on its first line (`{"url", ...}`) and leaves it serving; an `{"error": ...}` document (port in use) or an early exit rejects. |
+| `test/stub/asent` | | Test-only stand-in for the CLI: replays the real fixtures, writes/reads `asent-report.json` like the real `gate`/`report`, logs argv. Never shipped (`.vscodeignore`). |
+| `test/unit/cli.test.ts` | | Argument lists, stub runs, and 5 tests against the real CLI when `ASENT_REAL` is set. |
+
+### Design decisions
+
+| Decision | Alternatives considered | Why |
+|---|---|---|
+| `--name=value` form | `--name value` | With `=`, argparse takes the value as-is, so a base branch like `--repository=/etc` cannot become another option; asent then refuses it as a ref (REVIEW). |
+| `--output-dir=<folder>` on gate | Let asent write to the repository top level | The panel, `report --file=` and the file watcher all look in the workspace folder. |
+| `report --file=<path>` | `asent report` default lookup | The default lookup runs git in the folder; `--file` only reads the file, which matters in untrusted folders. |
+| Non-zero exit is a result | Treat exit ≠ 0 as failure | gate exits 1 (BLOCK) / 2 (REVIEW), doctor 1 (not ready), all with valid JSON. |
+
+### Requirements covered
+
+| Req | Acceptance check |
+|---|---|
+| V5 | Missing executable → `AsentNotFound` with the configured path. |
+| V9 | Shell metacharacters arrive literally; a would-be `echo hacked > x` creates no file. |
+| V13 | Cancellation/timeout kill the process (used by the one-gate-at-a-time logic in step 8). |
+
+### Ch 7 Test cases
+
+| Test ID | Purpose | Input | Expected | Result |
+|---|---|---|---|---|
+| VS-C1–C4 | Argument lists | folders with spaces, `;`, `$(id)`; base `--repository=/etc` | one element each, `--base=--repository=/etc` | pass |
+| VS-C5 | No shell | folder `a b; echo hacked > x $(id)` | argv logged unchanged, no `x` created | pass |
+| VS-C6 | BLOCK is a result | stub gate `cavr-block.json` | exit 1, JSON equals fixture, cwd = folder | pass |
+| VS-C7 | Doctor not ready | stub doctor | exit 1, `ready: false` | pass |
+| VS-C8/C9 | Not found / not executable | missing path, name not on PATH, plain file | `AsentNotFound` (ENOENT / EACCES) | pass |
+| VS-C10 | No JSON | traceback on stdout; crash on stderr | `AsentOutputError` with exit 2 / stderr text | pass |
+| VS-C11/C12 | Cancel / timeout | hanging stub | `AsentCancelled` within 5 s | pass |
+| VS-C13 | NUL byte | `--file=a\0b` | refused, stub never started | pass |
+| VS-C14–C16 | Dashboard | stub dashboard; busy port; missing | URL line + still running; asent's port message; `AsentNotFound` | pass |
+| VS-C17–C21 | Real CLI (`ASENT_REAL`) | `doctor`, `report --file=` (real and missing), `gate --output-dir= --base=main` on a repo without `.asent/`, `init --repository=` | schema `asent.doctor.v1`; report equal; `No ASENT report at`; REVIEW with `ASENT_CONFIG_MISSING` and the file written; starter written | pass (run locally; skipped in CI) |
+
+### Defects found and fixed
+
+- The real `dashboard --json` prints its error as an indented multi-line document, but success as one line; reading only the first line would have shown "printed no JSON" instead of asent's "port … already in use". `startDashboard` now tries the first line, then the whole buffer, and again on exit (VS-C15).
+
+### Known limitations / deferred
+
+- The stub is a test double of the CLI contract; the real CLI is checked by VS-C17–C21 only when `ASENT_REAL` is set.
+
+### Tool disclosure (Ch 8.7)
+
+Claude Code wrote the runner, stub and tests. Verified by `npm test` and by the real-CLI tests against `scripts/asent`.
+
+### Supervisor Q&A prep
+
+- *How do you know there is no command injection?* `shell: false` with an array (static test in step 8), and VS-C5 shows a shell payload in a folder name arriving as plain text.
+- *Why a stub instead of the real CLI in CI?* The real gate needs Python, ASENT's dependencies and for SATRA Docker; the stub replays real outputs, and the real CLI is checked separately with `ASENT_REAL`.
