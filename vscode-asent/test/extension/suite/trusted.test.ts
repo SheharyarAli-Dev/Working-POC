@@ -4,13 +4,18 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import * as vscode from "vscode";
-import { api, calls, callsOf, stub, until, FOLDER, ID } from "./helpers";
+import { api, calls, callsOf, stub, stubOpenExternal, until, urlsThatReachedTheOs, FOLDER, ID } from "./helpers";
 
 const fixture = (name: string) => path.resolve(__dirname, "..", "..", "..", "..", "test", "fixtures", "reports", name);
 const requirements = vscode.Uri.file(path.join(FOLDER, "requirements.txt"));
 
 describe("ASENT extension (trusted folder)", () => {
-  before(() => stub({}));
+  let browser: ReturnType<typeof stubOpenExternal>;
+  before(() => {
+    stub({});
+    browser = stubOpenExternal(); // no test may open a real browser tab
+  });
+  after(() => browser.restore());
 
   it("activates on its own because the folder has .asent/ (no command run yet)", async () => {
     await until("activation", () => vscode.extensions.getExtension(ID)?.isActive === true);
@@ -96,11 +101,13 @@ describe("ASENT extension (trusted folder)", () => {
     assert.deepStrictEqual(callsOf("init").at(-1)!.argv, ["init", "--json", `--repository=${FOLDER}`]);
   });
 
-  it("Dashboard: one process; a second click says it is already running", async () => {
+  it("Dashboard: opens the URL asent printed; one process; a second click says it is already running", async () => {
     await vscode.commands.executeCommand("asent.dashboard");
     assert.strictEqual((await api()).state().dashboardRunning, true);
+    assert.deepStrictEqual(browser.opened, ["http://127.0.0.1:8000/"], "the fixture's url, through the stubbed openExternal");
     await vscode.commands.executeCommand("asent.dashboard");
     assert.deepStrictEqual(callsOf("dashboard").map((c) => c.argv), [["dashboard", "--json"]]);
+    assert.deepStrictEqual(browser.opened, ["http://127.0.0.1:8000/"], "the second click opens nothing (its Open button is not clicked)");
   });
 
   it("Stop dashboard ends the process it started", async () => {
@@ -124,6 +131,7 @@ describe("ASENT extension (trusted folder)", () => {
     await vscode.commands.executeCommand("asent.dashboard");
     assert.strictEqual((await api()).state().dashboardRunning, true);
     assert.strictEqual(callsOf("dashboard").length, 2);
+    assert.deepStrictEqual(browser.opened, ["http://127.0.0.1:8000/", "http://127.0.0.1:8000/"]);
     await vscode.commands.executeCommand("asent.stopDashboard");
     assert.strictEqual((await api()).state().dashboardRunning, false);
   });
@@ -138,5 +146,11 @@ describe("ASENT extension (trusted folder)", () => {
     } finally {
       await config.update("path", (await import("./helpers")).STUB, vscode.ConfigurationTarget.Workspace);
     }
+  });
+
+  it("no URL reached the operating system's browser opener", async () => {
+    await new Promise((r) => setTimeout(r, 500)); // an open would be asynchronous
+    assert.ok(process.env.ASENT_TEST_OPEN_LOG, "runTest.ts sets up the opener shims");
+    assert.deepStrictEqual(urlsThatReachedTheOs(), []);
   });
 });

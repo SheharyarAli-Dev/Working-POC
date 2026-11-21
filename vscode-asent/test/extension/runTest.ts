@@ -31,10 +31,27 @@ function userData(name: string, settings: object): string {
   return dir;
 }
 
+// Safety net under the tests' openExternal stub: the programs a desktop uses to open a URL are replaced, for
+// the test VS Code only, by shims that log the URL instead. A real browser tab can then never open, and the
+// last trusted test checks that the log stayed empty (the stub caught every open).
+const OPENERS = ["xdg-open", "wslview", "sensible-browser", "x-www-browser", "www-browser", "gnome-open", "kde-open", "open"];
+
+function openerShims(): { bin: string; log: string } {
+  const bin = fs.mkdtempSync(path.join(os.tmpdir(), "asent-ext-openers-"));
+  const log = path.join(bin, "opened-urls.log");
+  for (const name of OPENERS) {
+    fs.writeFileSync(path.join(bin, name), `#!/bin/sh\nprintf '%s\\n' "$*" >> '${log}'\n`, { mode: 0o755 });
+  }
+  return { bin, log };
+}
+
+const SHIMS = openerShims();
+
 function env(suite: string, folder: string): Record<string, string> {
   const base = path.join(folder, "..", path.basename(folder));
   return { ASENT_SUITE: suite, ASENT_STUB_LOG: base + "-argv.jsonl", ASENT_STUB_CONTROL: base + "-control.json",
-    ASENT_TEST_FOLDER: folder, ASENT_TEST_STUB: STUB };
+    ASENT_TEST_FOLDER: folder, ASENT_TEST_STUB: STUB, ASENT_TEST_OPEN_LOG: SHIMS.log,
+    PATH: `${SHIMS.bin}${path.delimiter}${process.env.PATH ?? ""}`, BROWSER: path.join(SHIMS.bin, "xdg-open") };
 }
 
 const TESTS = path.join(__dirname, "suite", "index");

@@ -38,3 +38,28 @@ export async function until(what: string, test: () => boolean | Promise<boolean>
   }
   assert.fail(`timed out waiting for: ${what}`);
 }
+
+/**
+ * Replaces vscode.env.openExternal with a recorder, so a test never opens a real browser tab.
+ * VS Code leaves vscode.env writable only while extension tests run (it is frozen otherwise), and the
+ * extension under test gets the same `vscode` API object as these test files.
+ */
+export function stubOpenExternal(): { opened: string[]; restore(): void } {
+  const env = vscode.env as { openExternal: typeof vscode.env.openExternal };
+  const original = env.openExternal;
+  const opened: string[] = [];
+  const recorder = async (target: vscode.Uri) => {
+    opened.push(target.toString(true));
+    return true;
+  };
+  env.openExternal = recorder;
+  assert.strictEqual(vscode.env.openExternal, recorder, "vscode.env.openExternal could not be stubbed");
+  return { opened, restore: () => { env.openExternal = original; } };
+}
+
+/** URLs that reached the operating system's opener anyway (the PATH shims of runTest.ts log them). */
+export function urlsThatReachedTheOs(): string[] {
+  const log = process.env.ASENT_TEST_OPEN_LOG;
+  if (!log || !fs.existsSync(log)) return [];
+  return fs.readFileSync(log, "utf8").split("\n").filter(Boolean);
+}

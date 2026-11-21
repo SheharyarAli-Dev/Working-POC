@@ -857,3 +857,57 @@ Claude Code wrote the command and tests; Maryam asked for it. Verified by the un
 ### Supervisor Q&A prep
 
 - *What happens to the dashboard when VS Code closes?* It is stopped on deactivate; Stop dashboard does the same on request.
+
+## Step 15 — Tests never open a browser (2026-11-21)
+
+Commit `test(vscode): stub openExternal so the extension test opens no browser`.
+Unit tests on the staged tree: 66 passing, 6 pending. Extension test on the staged tree: trusted 14 passing, untrusted 4 passing.
+Python suite: not run for this step (test-only change under `vscode-asent/test/extension/`; Maryam's instruction).
+Review: no reviewer pass was run for this step.
+
+### Ch 6 Implementation
+
+| File | Function | What it does |
+|---|---|---|
+| `test/extension/suite/helpers.ts` | `stubOpenExternal()` | Replaces `vscode.env.openExternal` with a recorder (returns `true`), asserts the replacement took, and gives `restore()`. |
+| | `urlsThatReachedTheOs()` | Reads the shim log (below). |
+| `test/extension/suite/trusted.test.ts` | | Stub installed in `before`, restored in `after`. Dashboard test asserts `opened` is exactly `["http://127.0.0.1:8000/"]` (the fixture's URL) and that the second click opens nothing; Stop/start test asserts the second open. New last test: nothing reached the OS opener. |
+| `test/extension/runTest.ts` | `openerShims()`, `env()` | For both test runs, `xdg-open`, `wslview`, `sensible-browser`, `x-www-browser`, `www-browser`, `gnome-open`, `kde-open`, `open` are no-op shims placed first on the test VS Code's `PATH` (and `BROWSER`), logging the URL to `ASENT_TEST_OPEN_LOG`. |
+
+### Design decisions
+
+| Decision | Alternatives considered | Why |
+|---|---|---|
+| Patch `vscode.env.openExternal` in the test | A test hook in `src/extension.ts` | Maryam's choice; no test seam in shipped code. VS Code 1.95.3 freezes `vscode.env` only when no extension tests run (`extensionTestsLocationURI \|\| Object.freeze(env)` in `extensionHostProcess.js`), so the patch is possible exactly in tests. |
+| PATH shims as a second layer | Only the stub | If the stub ever stopped reaching the extension, a URL would be logged and the last test would fail, instead of a tab opening. |
+
+### Requirements covered
+
+| Req | Acceptance check |
+|---|---|
+| V2/V9 (dashboard) | The URL opened is exactly the one `asent dashboard --json` printed; no test opens a real browser. |
+
+### Ch 7 Test cases
+
+| Test ID | Purpose | Expected | Result |
+|---|---|---|---|
+| VS-E10' | Dashboard open | `opened` = `["http://127.0.0.1:8000/"]`; second click adds nothing | pass |
+| VS-E16' | Start after stop | two recorded opens | pass |
+| VS-E19 | Nothing reached the OS | shim log empty | pass |
+| VS-K4 | Shim works (manual) | `xdg-open http://127.0.0.1:9/shim-check` with the shim dir first on PATH | URL logged, nothing opened | pass |
+
+### Defects found and fixed
+
+- The dashboard tests opened real browser tabs on Maryam's machine (WSLg display; the stub's `http://127.0.0.1:8000/` has no server). Step 9's notes said nothing would open on a headless runner, which did not hold for a desktop machine. Fixed by the stub and the shims.
+
+### Known limitations / deferred
+
+- The shims cover the usual Linux/WSL openers; on macOS or Windows the test would rely on the stub alone (CI and this machine are Linux).
+
+### Tool disclosure (Ch 8.7)
+
+Claude Code wrote the stub, shims and assertions after Maryam reported the tabs and chose the approach. Verified by the extension test on the staged tree and a manual shim check.
+
+### Supervisor Q&A prep
+
+- *How do you know the test no longer opens a browser?* The stub records the URL and the test asserts it; a second layer logs any URL that reaches the system opener, and a test asserts that log is empty.
