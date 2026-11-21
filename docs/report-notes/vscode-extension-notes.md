@@ -911,3 +911,80 @@ Claude Code wrote the stub, shims and assertions after Maryam reported the tabs 
 ### Supervisor Q&A prep
 
 - *How do you know the test no longer opens a browser?* The stub records the URL and the test asserts it; a second layer logs any URL that reaches the system opener, and a test asserts that log is empty.
+
+## Step 16 — asent is resolved on PATH, never in the workspace (2026-11-21)
+
+Commit `fix(vscode): resolve a bare asent.path on PATH outside the workspace`.
+Unit tests: 77 passing, 6 pending (66 before). Extension test: trusted 15 passing, untrusted 5 passing (14 and 4 before).
+Python suite: not run for this step (change only under `vscode-asent/`; Maryam's instruction).
+Review: found by an independent security review of `master...asent-vscode-extension`; no reviewer pass was run on the fix.
+
+### Ch 6 Implementation
+
+| File | Function | What it does |
+|---|---|---|
+| `src/cli.ts` | `resolveAsent(configured, options)` | Returns the absolute path to start. Absolute `asent.path`: used as it is. Relative path with a separator (or `C:x` on Windows): `AsentNotFound(..., "NOT_ABSOLUTE")`. Bare name: walks PATH (`Path` key on Windows) itself. |
+| | `AsentNotFound` | New code `NOT_ABSOLUTE` with its own message. |
+| `src/extension.ts` | `asentCommand(folder)` (was `asentPath`) | Reads `asent.path` and calls `resolveAsent` with every workspace folder as `excluded`; used by all six spawn sites. `runGate` resolves before it sets "gate running". |
+| | `loadReport` | `asent report` now runs with `cwd: os.homedir()` (the report is passed by absolute path). Doctor already did. |
+| `README.md` | Commands, Settings | Show report runs in the home folder; how a bare name is looked up. |
+
+Algorithm (bare name): for each PATH entry (Windows: surrounding quotes removed) skip it if empty, not absolute (covers `.`), or equal to/inside a workspace folder, lexically or after `realpath`; try `name` (POSIX) or `name.com`, `name.exe` (Windows, no extension given); accept the first executable file whose `realpath` is not in a workspace folder; none → `AsentNotFound(name, "ENOENT")`, which shows the existing "asent was not found" message.
+
+### Design decisions
+
+| Decision | Alternatives considered | Why |
+|---|---|---|
+| Resolve in the extension, spawn the absolute path | Keep spawn's own lookup and only change `cwd` | libuv on Windows searches the child's `cwd` before PATH; Init, Run gate and Dashboard need `cwd` = the folder, so only an absolute path closes it for every command. |
+| Skip every relative PATH entry, not only `""` and `.` | Exactly `""` and `.` | `tools` or `.\bin` also mean "relative to the working directory". |
+| `realpath` on the entry and on the found file | Lexical check only | A PATH entry or an `asent` symlink pointing into the workspace would pass a lexical check. |
+| Exclude all workspace folders | Only the current one | A multi-root window has several repositories. |
+| Refuse a relative `asent.path` with a separator | Resolve it against the folder | The documented values are a name or an absolute path; a relative one would depend on `cwd`, which now differs per command. |
+| `platform`, `env`, `isExecutable`, `realpath` injectable | Test on Windows only | The Windows rules (`;`, `Path`, `.com`/`.exe`, case, drive-relative) are tested on Linux CI with a fake file system. |
+| Unique stub name `asent-test-stub` in the extension test | Bare `asent` | VS Code puts the login shell's PATH (here `~/.local/bin` with a real pipx `asent`) before the test's own, so `asent` resolved to the real CLI on this machine. |
+
+### Requirements covered
+
+| Req | Acceptance check |
+|---|---|
+| V3 (asent only, argument array) / Workspace Trust | A fake `asent` in the workspace folder, first on PATH, never runs: on activation, Show report and Doctor in the untrusted folder, and with a bare `asent.path` in the trusted one. |
+
+### Ch 7 Test cases
+
+| Test ID | Purpose | Input | Expected | Result |
+|---|---|---|---|---|
+| VS-R1 | Skip rules (POSIX) | PATH = workspace, `""`, `.`, `tools`, `./tools`, workspace/tools, bin | `bin/asent` | pass |
+| VS-R2 | Fake never runs | resolve + `runAsent` with `cwd` = workspace | stub answered, no HIJACKED | pass |
+| VS-R3 | Only bad entries | workspace, `""`, `.` (process cwd = workspace) | `AsentNotFound` ENOENT | pass |
+| VS-R4 | Symlinked PATH entry | entry → workspace | ENOENT | pass |
+| VS-R5 | Symlinked file | other/asent → workspace/asent | skipped; next entry used | pass |
+| VS-R6 | Not executable / directory | 0644 file, directory `asent` | passed over | pass |
+| VS-R7 | Absolute / relative | absolute stub; `./asent`, `tools/asent`, `../asent` | as is; NOT_ABSOLUTE | pass |
+| VS-R8 | Windows skip rules | workspace, `""`, `.`, `.\tools`, `tools`, other-case workspace\tools, quoted `C:\Program Files\asent`, `Path` key | `C:\Program Files\asent\asent.exe` | pass |
+| VS-R9 | Windows only bad entries | workspace, workspace\bin, `.` | ENOENT | pass |
+| VS-R10 | Windows extensions | `.com` and `.exe` present; `asent.exe`; extension-less file only | `.com`; exact; ENOENT | pass |
+| VS-R11 | Windows absolute / relative | `D:\asent\asent.exe`; `tools\asent.exe`, `.\asent.exe`, `C:asent.exe`, `tools/asent` | as is; NOT_ABSOLUTE | pass |
+| VS-E20 | Trusted, bare name | `asent.path` = `asent-test-stub`, fake first on PATH; Show report, Doctor | stub called, report `cwd` = home, no HIJACKED | pass |
+| VS-E6' | Show report `cwd` | Show report | `cwd` = home | pass |
+| VS-U5 | Untrusted, planted program | user `asent.path` = bare name, fake in folder first on PATH | every report/doctor call by the stub, `cwd` = home, no HIJACKED | pass |
+| VS-M1 | Test catches the bug (manual mutation) | `asentCommand` returns the bare name unresolved | VS-E20 fails ("the stub read the report"); file restored | pass |
+
+### Defects found and fixed
+
+- Independent review: on Windows a bare `asent.path` let a repository's own `asent.exe` run (spawn searches `cwd` first), including on activation in an untrusted folder. Fixed by `resolveAsent` and `cwd` = home for report.
+- First run of VS-E20 failed: `~/.local/bin/asent` (real pipx install) answered before the stub. The resolver was right; the test now uses a unique stub name.
+
+### Known limitations / deferred
+
+- An `asent` in a virtual environment inside the workspace (e.g. `.venv/bin` on PATH) is no longer found by name; set its absolute path in user settings (README).
+- The Windows rules are tested with a fake file system on Linux; the extension has not been run on Windows.
+- Init, Run gate and Dashboard still run with `cwd` = the folder (asent needs it); safe now because the program path is absolute.
+
+### Tool disclosure (Ch 8.7)
+
+Claude Code wrote `resolveAsent`, the tests and the extension-test fakes from Maryam's specification (skip rules, home `cwd`, not-found message). Verified by the unit and extension tests and the manual mutation VS-M1.
+
+### Supervisor Q&A prep
+
+- *Why not just run asent in the home folder?* Run gate, Init and the dashboard must run in the repository, and Windows looks in the working folder before PATH; spawning an absolute path is the only fix that covers every command.
+- *What if PATH itself points into the repository?* That entry is skipped, lexically and after following symlinks; the found file is checked the same way.

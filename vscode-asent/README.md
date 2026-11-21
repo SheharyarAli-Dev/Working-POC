@@ -24,7 +24,7 @@ Needs VS Code 1.95 or newer.
 |---|---|---|
 | ASENT: Init project | `asent init --json --repository=<folder>` | Writes a starter `.asent/` (every gate decision is REVIEW until it is reviewed). Trusted folders only. |
 | ASENT: Run gate on this branch | `asent gate --json --output-dir=<folder> [--base=<asent.baseBranch>]` | Head is `HEAD`. Shows the panel, status bar and Problems. One run at a time; cancellable. Trusted folders only. |
-| ASENT: Show report | `asent report --json --file=<folder>/asent-report.json` | Opens the panel. Works in untrusted folders. |
+| ASENT: Show report | `asent report --json --file=<folder>/asent-report.json` (in your home folder) | Opens the panel. Works in untrusted folders. |
 | ASENT: Doctor | `asent doctor --json` (in your home folder) | Lists what is missing, with asent's own `fix:` lines, in the **ASENT** output. |
 | ASENT: Open web dashboard | `asent dashboard --json` | Opens the `http://127.0.0.1:PORT/` it prints (nothing else). One process at a time; it stops with **ASENT: Stop dashboard** or when the window closes. Trusted folders only. |
 | ASENT: Stop dashboard | (stops the process above) | Stops only the dashboard this window started. Works in untrusted folders. |
@@ -48,7 +48,7 @@ Needs VS Code 1.95 or newer.
 
 | Setting | Default | Meaning |
 |---|---|---|
-| `asent.path` | `asent` | The `asent` executable (name on PATH or absolute path). |
+| `asent.path` | `asent` | The `asent` executable: a name on PATH or an absolute path (a relative path is refused). The extension looks a name up on PATH itself and skips empty, `.` and relative entries and every entry in a workspace folder, so a repository's own `asent` / `asent.exe` is never run. An `asent` installed in a virtual environment inside the workspace is therefore not found: set its absolute path in your user settings. |
 | `asent.baseBranch` | empty | Base for Run gate. Empty: asent picks the repository's default branch (origin/HEAD, else `main`, else `master`). |
 
 ## Workspace Trust and activation

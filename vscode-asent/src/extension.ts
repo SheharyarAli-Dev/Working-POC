@@ -5,7 +5,7 @@
 import * as vscode from "vscode";
 import * as fs from "fs";
 import * as os from "os";
-import { runAsent, startDashboard, AsentNotFound, AsentOutputError, AsentCancelled, Dashboard, RunResult } from "./cli";
+import { runAsent, startDashboard, resolveAsent, AsentNotFound, AsentOutputError, AsentCancelled, Dashboard, RunResult } from "./cli";
 import { gateArgs, reportArgs, initArgs, doctorArgs, dashboardArgs, reportFile } from "./args";
 import { fromJson, GateReport, ReportError, Decision } from "./report";
 import { readDoctor, doctorLines, notFoundLines, dockerMissing, DoctorError } from "./doctor";
@@ -83,9 +83,14 @@ function currentFolder(): vscode.WorkspaceFolder | undefined {
   return (active && vscode.workspace.getWorkspaceFolder(active)) || vscode.workspace.workspaceFolders?.[0];
 }
 
-function asentPath(folder?: vscode.WorkspaceFolder): string {
+/**
+ * The absolute path of the asent to start (cli.resolveAsent): a bare name is looked up on PATH here, never in a
+ * workspace folder, so a repository cannot put its own asent in its place. Throws AsentNotFound.
+ */
+function asentCommand(folder?: vscode.WorkspaceFolder): string {
   // In an untrusted folder VS Code ignores the workspace's value (restrictedConfigurations).
-  return vscode.workspace.getConfiguration("asent", folder?.uri).get<string>("path", "asent").trim() || "asent";
+  const configured = vscode.workspace.getConfiguration("asent", folder?.uri).get<string>("path", "asent").trim() || "asent";
+  return resolveAsent(configured, { excluded: (vscode.workspace.workspaceFolders ?? []).map((f) => f.uri.fsPath) });
 }
 
 async function guarded(command: () => Promise<void>): Promise<void> {
@@ -191,12 +196,15 @@ function clearReport(): void {
   panel.refresh(null, "asent-report.json was removed from this folder.");
 }
 
-/** `asent report --json --file=<folder>/asent-report.json`; returns the error text when there is no usable report. */
+/**
+ * `asent report --json --file=<folder>/asent-report.json`, run in the home folder (the file is named by its
+ * absolute path, so the folder is not needed); returns the error text when there is no usable report.
+ */
 async function loadReport(folder: string, loud: boolean): Promise<string | null> {
   let result: RunResult;
   try {
-    result = await runAsent(asentPath(vscode.workspace.getWorkspaceFolder(vscode.Uri.file(folder))), reportArgs(reportFile(folder)),
-      { cwd: folder, timeoutMs: SHORT_TIMEOUT_MS });
+    result = await runAsent(asentCommand(vscode.workspace.getWorkspaceFolder(vscode.Uri.file(folder))), reportArgs(reportFile(folder)),
+      { cwd: os.homedir(), timeoutMs: SHORT_TIMEOUT_MS });
   } catch (e) {
     if (loud) throw e;
     show([`Reading the report failed: ${e instanceof Error ? e.message : String(e)}`]);
@@ -238,6 +246,7 @@ async function runGate(): Promise<void> {
   if (!folder || !needTrust("Run gate on this branch")) return;
   const base = vscode.workspace.getConfiguration("asent", folder.uri).get<string>("baseBranch", "");
   const cwd = folder.uri.fsPath;
+  const asent = asentCommand(folder);
   gateRunning = true;
   setStatus(null, true);
   let report: GateReport;
@@ -247,7 +256,7 @@ async function runGate(): Promise<void> {
       (_progress, token) => {
         const controller = new AbortController();
         token.onCancellationRequested(() => controller.abort());
-        return runAsent(asentPath(folder), gateArgs(cwd, base), { cwd, timeoutMs: GATE_TIMEOUT_MS, signal: controller.signal });
+        return runAsent(asent, gateArgs(cwd, base), { cwd, timeoutMs: GATE_TIMEOUT_MS, signal: controller.signal });
       });
     report = fromJson(result.json);
   } catch (e) {
@@ -270,7 +279,7 @@ async function warnIfDockerMissing(report: GateReport, folder: vscode.WorkspaceF
   const satra = report.modules.find((m) => m.key === "SATRA");
   const engine = report.tools.docker === true || report.tools.podman === true;
   if (engine || !satra || NOT_RUN_FOR.has(satra.result ?? "")) return;
-  const result = await runAsent(asentPath(folder), doctorArgs(), { cwd: os.homedir(), timeoutMs: SHORT_TIMEOUT_MS });
+  const result = await runAsent(asentCommand(folder), doctorArgs(), { cwd: os.homedir(), timeoutMs: SHORT_TIMEOUT_MS });
   const doc = readDoctor(result.json);
   if (!dockerMissing(doc)) return;
   show(doctorLines(doc));
@@ -282,7 +291,7 @@ async function warnIfDockerMissing(report: GateReport, folder: vscode.WorkspaceF
 async function doctor(): Promise<void> {
   const folder = currentFolder();
   // doctor checks this machine, not the folder: it runs in the home directory.
-  const result = await runAsent(asentPath(folder), doctorArgs(), { cwd: os.homedir(), timeoutMs: SHORT_TIMEOUT_MS });
+  const result = await runAsent(asentCommand(folder), doctorArgs(), { cwd: os.homedir(), timeoutMs: SHORT_TIMEOUT_MS });
   let doc;
   try {
     doc = readDoctor(result.json);
@@ -299,7 +308,7 @@ async function doctor(): Promise<void> {
 async function initProject(): Promise<void> {
   const folder = needFolder();
   if (!folder || !needTrust("Init project")) return;
-  const result = await runAsent(asentPath(folder), initArgs(folder.uri.fsPath), { cwd: folder.uri.fsPath, timeoutMs: SHORT_TIMEOUT_MS });
+  const result = await runAsent(asentCommand(folder), initArgs(folder.uri.fsPath), { cwd: folder.uri.fsPath, timeoutMs: SHORT_TIMEOUT_MS });
   const error = errorOf(result);
   if (error) {
     void vscode.window.showErrorMessage(`ASENT init: ${error}`);
@@ -326,7 +335,7 @@ async function openDashboard(): Promise<void> {
   dashboardStarting = true;
   let started: Dashboard;
   try {
-    started = await startDashboard(asentPath(folder), dashboardArgs(), { cwd: folder.uri.fsPath });
+    started = await startDashboard(asentCommand(folder), dashboardArgs(), { cwd: folder.uri.fsPath });
   } finally {
     dashboardStarting = false;
   }

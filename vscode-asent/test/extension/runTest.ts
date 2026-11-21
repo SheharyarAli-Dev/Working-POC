@@ -1,9 +1,13 @@
 // Runs the extension tests inside a real VS Code (downloaded by @vscode/test-electron), twice:
 //   1. trusted:   workspace trust disabled (every folder trusted), asent.path set in the WORKSPACE settings
 //   2. untrusted: workspace trust on, the folder not trusted; the workspace's asent.path points at a path that
-//                 does not exist and the USER settings point at the stub, so the run shows that VS Code
+//                 does not exist and the USER setting is the stub's bare name, so the run shows that VS Code
 //                 ignores the workspace value (restrictedConfigurations) and the extension still reads reports.
 // `asent` is test/stub/asent, which replays the real CLI outputs in test/fixtures and logs every argv.
+// For bare names the stub is on PATH as `asent-test-stub` (a unique name: VS Code puts the login shell's PATH,
+// e.g. ~/.local/bin with a real pipx asent, in front of ours). Both workspace folders hold fakes named `asent`
+// and `asent-test-stub` that only write HIJACKED, and the folder comes FIRST on the test VS Code's PATH (then
+// "."): the extension must skip them and find the stub further down PATH.
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
@@ -12,6 +16,9 @@ import { runTests, downloadAndUnzipVSCode } from "@vscode/test-electron";
 
 const ROOT = path.resolve(__dirname, "..", "..", "..");
 const STUB = path.join(ROOT, "test", "stub", "asent");
+const STUB_NAME = "asent-test-stub";
+const STUB_BIN = fs.mkdtempSync(path.join(os.tmpdir(), "asent-ext-stub-bin-"));
+fs.symlinkSync(STUB, path.join(STUB_BIN, STUB_NAME));
 export const VSCODE_VERSION = "1.95.3";
 
 function workspace(name: string, workspaceSettings: object): string {
@@ -21,6 +28,9 @@ function workspace(name: string, workspaceSettings: object): string {
   fs.writeFileSync(path.join(dir, "requirements.txt"), "pypdf==6.19.0\nreqeusts==2.31.0\n");
   fs.mkdirSync(path.join(dir, ".vscode"));
   fs.writeFileSync(path.join(dir, ".vscode", "settings.json"), JSON.stringify(workspaceSettings, null, 2));
+  for (const name of ["asent", STUB_NAME]) {
+    fs.writeFileSync(path.join(dir, name), `#!/bin/sh\necho hijacked > "$(dirname "$0")/HIJACKED"\nexit 2\n`, { mode: 0o755 });
+  }
   return dir;
 }
 
@@ -50,8 +60,9 @@ const SHIMS = openerShims();
 function env(suite: string, folder: string): Record<string, string> {
   const base = path.join(folder, "..", path.basename(folder));
   return { ASENT_SUITE: suite, ASENT_STUB_LOG: base + "-argv.jsonl", ASENT_STUB_CONTROL: base + "-control.json",
-    ASENT_TEST_FOLDER: folder, ASENT_TEST_STUB: STUB, ASENT_TEST_OPEN_LOG: SHIMS.log,
-    PATH: `${SHIMS.bin}${path.delimiter}${process.env.PATH ?? ""}`, BROWSER: path.join(SHIMS.bin, "xdg-open") };
+    ASENT_TEST_FOLDER: folder, ASENT_TEST_STUB: STUB, ASENT_TEST_STUB_NAME: STUB_NAME, ASENT_TEST_OPEN_LOG: SHIMS.log,
+    PATH: [folder, ".", SHIMS.bin, STUB_BIN, process.env.PATH ?? ""].join(path.delimiter),
+    BROWSER: path.join(SHIMS.bin, "xdg-open") };
 }
 
 const TESTS = path.join(__dirname, "suite", "index");
@@ -91,7 +102,7 @@ async function main(): Promise<void> {
   const untrusted = workspace("untrusted", { "asent.path": "/nonexistent/asent-from-the-repository" });
   fs.copyFileSync(path.join(ROOT, "test", "fixtures", "reports", "cavr-block.json"), path.join(untrusted, "asent-report.json"));
   await runUntrusted(untrusted, userData("untrusted", {
-    "asent.path": STUB,
+    "asent.path": STUB_NAME,
     "security.workspace.trust.enabled": true,
     "security.workspace.trust.startupPrompt": "never",
     "security.workspace.trust.emptyWindow": false,

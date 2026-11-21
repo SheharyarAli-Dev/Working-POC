@@ -1,10 +1,13 @@
 import * as assert from "assert";
 import * as fs from "fs";
+import * as path from "path";
 import * as vscode from "vscode";
 import type { AsentApi } from "../../../src/extension";
 
 export const FOLDER = process.env.ASENT_TEST_FOLDER!;
 export const STUB = process.env.ASENT_TEST_STUB!;
+/** The bare command name runTest.ts gives the stub on PATH (unique, so an asent installed on the machine cannot answer). */
+export const STUB_NAME = process.env.ASENT_TEST_STUB_NAME!;
 const LOG = process.env.ASENT_STUB_LOG!;
 const CONTROL = process.env.ASENT_STUB_CONTROL!;
 export const ID = "asent-fyp.asent-vscode";
@@ -18,6 +21,11 @@ export function calls(): Call[] {
 
 export function callsOf(command: string): Call[] {
   return calls().filter((c) => c.argv[0] === command);
+}
+
+/** A fake asent that runTest.ts put in the workspace folder (first on PATH) ran: it writes HIJACKED. */
+export function hijacked(): boolean {
+  return fs.existsSync(path.join(FOLDER, "HIJACKED"));
 }
 
 export function stub(control: { gate?: string; mode?: string }): void {

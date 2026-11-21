@@ -4,7 +4,7 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import * as vscode from "vscode";
-import { api, calls, callsOf, stub, stubOpenExternal, until, urlsThatReachedTheOs, FOLDER, ID } from "./helpers";
+import { api, calls, callsOf, hijacked, stub, stubOpenExternal, until, urlsThatReachedTheOs, FOLDER, ID, STUB, STUB_NAME } from "./helpers";
 
 const fixture = (name: string) => path.resolve(__dirname, "..", "..", "..", "..", "test", "fixtures", "reports", name);
 const requirements = vscode.Uri.file(path.join(FOLDER, "requirements.txt"));
@@ -77,9 +77,10 @@ describe("ASENT extension (trusted folder)", () => {
     }
   });
 
-  it("Show report reads asent-report.json through asent report --json --file=", async () => {
+  it("Show report reads asent-report.json through asent report --json --file=, in the home folder", async () => {
     await vscode.commands.executeCommand("asent.showReport");
     assert.deepStrictEqual(callsOf("report").at(-1)!.argv, ["report", "--json", `--file=${path.join(FOLDER, "asent-report.json")}`]);
+    assert.strictEqual(fs.realpathSync(callsOf("report").at(-1)!.cwd), fs.realpathSync(os.homedir()));
     assert.match((await api()).state().panelHtml ?? "", /<h1>ACCEPT<\/h1>/);
   });
 
@@ -144,7 +145,23 @@ describe("ASENT extension (trusted folder)", () => {
       await vscode.commands.executeCommand("asent.doctor");
       assert.strictEqual(calls().length, before);
     } finally {
-      await config.update("path", (await import("./helpers")).STUB, vscode.ConfigurationTarget.Workspace);
+      await config.update("path", STUB, vscode.ConfigurationTarget.Workspace);
+    }
+  });
+
+  it("asent.path = a bare name: the stub further down PATH runs, never the folder's own one (first on PATH)", async () => {
+    const config = vscode.workspace.getConfiguration("asent");
+    await config.update("path", STUB_NAME, vscode.ConfigurationTarget.Workspace);
+    try {
+      const before = { report: callsOf("report").length, doctor: callsOf("doctor").length };
+      await vscode.commands.executeCommand("asent.showReport");
+      await vscode.commands.executeCommand("asent.doctor");
+      assert.strictEqual(callsOf("report").length, before.report + 1, "the stub read the report");
+      assert.strictEqual(callsOf("doctor").length, before.doctor + 1, "the stub ran doctor");
+      assert.strictEqual(fs.realpathSync(callsOf("report").at(-1)!.cwd), fs.realpathSync(os.homedir()), "report runs in the home folder");
+      assert.strictEqual(hijacked(), false, "the workspace folder's asent ran");
+    } finally {
+      await config.update("path", STUB, vscode.ConfigurationTarget.Workspace);
     }
   });
 

@@ -4,6 +4,8 @@
 // so no value from a setting, a path or a report can become a command. No vscode import, so the
 // unit tests run it in plain Node against test/stub/asent.
 import { spawn, ChildProcess, SpawnOptions } from "child_process";
+import * as fs from "fs";
+import * as path from "path";
 
 const MAX_OUTPUT = 64 * 1024 * 1024; // a gate report with full evidence is well under 1 MB
 const STDERR_TAIL = 2000;
@@ -21,13 +23,87 @@ export interface RunResult {
   stderr: string;
 }
 
-/** The executable could not be started (ENOENT: not found; EACCES: not executable). */
+/**
+ * The executable could not be started (ENOENT: not found; EACCES: not executable; NOT_ABSOLUTE: asent.path
+ * is a relative path, which would depend on the working directory).
+ */
 export class AsentNotFound extends Error {
   constructor(public readonly asentPath: string, public readonly code: string) {
     super(code === "ENOENT"
       ? `asent was not found: "${asentPath}" (setting asent.path)`
-      : `asent could not be started: "${asentPath}" (${code}; setting asent.path)`);
+      : code === "NOT_ABSOLUTE"
+        ? `asent.path must be a command name on PATH or an absolute path, not "${asentPath}"`
+        : `asent could not be started: "${asentPath}" (${code}; setting asent.path)`);
   }
+}
+
+export interface ResolveOptions {
+  platform?: NodeJS.Platform; // default process.platform
+  env?: NodeJS.ProcessEnv; // where PATH is read (default process.env)
+  excluded?: string[]; // the workspace folders: PATH entries equal to or inside one are skipped
+  isExecutable?: (file: string) => boolean;
+  realpath?: (p: string) => string; // throws when the path does not exist
+}
+
+function defaultIsExecutable(platform: NodeJS.Platform) {
+  return (file: string): boolean => {
+    try {
+      if (!fs.statSync(file).isFile()) return false;
+      if (platform !== "win32") fs.accessSync(file, fs.constants.X_OK);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+}
+
+/**
+ * The absolute path of the asent to start. An absolute asent.path is used as it is. A bare name is looked up
+ * here, on PATH, instead of by spawn: on Windows spawn searches the child's working directory before PATH, so a
+ * repository's own asent.exe would run. Empty, "." and other relative PATH entries are skipped (they mean the
+ * working directory), and so is every entry that is, or after realpath lies in, a workspace folder; a found
+ * file whose realpath lies in a workspace folder is skipped too. A relative path with a separator is refused.
+ */
+export function resolveAsent(configured: string, options: ResolveOptions = {}): string {
+  const platform = options.platform ?? process.platform;
+  const win = platform === "win32";
+  const p = win ? path.win32 : path.posix;
+  const env = options.env ?? process.env;
+  const isExecutable = options.isExecutable ?? defaultIsExecutable(platform);
+  const realpath = options.realpath ?? ((x: string) => fs.realpathSync.native(x));
+  const real = (x: string): string | null => {
+    try {
+      return realpath(x);
+    } catch {
+      return null;
+    }
+  };
+  if (p.isAbsolute(configured)) return configured;
+  if (configured.includes("/") || (win && (configured.includes("\\") || configured.includes(":")))) {
+    throw new AsentNotFound(configured, "NOT_ABSOLUTE");
+  }
+  const inside = (root: string, target: string) => {
+    const rel = p.relative(root, target);
+    return rel === "" || (rel !== ".." && !rel.startsWith(".." + p.sep) && !p.isAbsolute(rel));
+  };
+  const roots = (options.excluded ?? []).flatMap((r) => [p.resolve(r), real(r)]).filter((r): r is string => r !== null);
+  const inWorkspace = (x: string) => roots.some((r) => inside(r, x));
+  const key = win ? Object.keys(env).find((k) => k.toUpperCase() === "PATH") : "PATH";
+  const entries = ((key && env[key]) || "").split(win ? ";" : ":");
+  const names = win && !p.extname(configured) ? [configured + ".com", configured + ".exe"] : [configured];
+  for (const raw of entries) {
+    const entry = win ? raw.replace(/^"(.*)"$/, "$1") : raw;
+    if (!entry || !p.isAbsolute(entry) || inWorkspace(entry)) continue;
+    const realEntry = real(entry);
+    if (realEntry === null || inWorkspace(realEntry)) continue;
+    for (const name of names) {
+      const file = p.join(entry, name);
+      if (!isExecutable(file)) continue;
+      const realFile = real(file);
+      if (realFile !== null && !inWorkspace(realFile)) return file;
+    }
+  }
+  throw new AsentNotFound(configured, "ENOENT");
 }
 
 /** asent ran but did not print one JSON document on stdout (e.g. a crash with a Python traceback). */
