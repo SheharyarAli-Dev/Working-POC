@@ -153,3 +153,69 @@ Claude Code wrote the generator and ran it; Maryam chose the SATRA approach. Ver
 
 - *Are the fixtures real?* Yes: each is the output of the real `asent` CLI on a real git repository; only PyPI/OSV answers are the recorded real responses the project's own gate tests use.
 - *Why is SATRA BLOCK missing?* SATRA runs tests in Docker, which this machine does not have; the manual workflow produces it on a GitHub runner.
+
+## Step 3 — Read gate reports (2026-11-21)
+
+Commit `feat(vscode): read asent gate reports`.
+Unit tests on the staged tree: 22 passing, 1 pending. Full Python suite: 2201 passed, 20 skipped, 1 xfailed.
+Review: no reviewer pass was run for this step.
+
+### Ch 6 Implementation
+
+| File | Function | What it does |
+|---|---|---|
+| `src/report.ts` | `parseReport(text)`, `fromJson(value)` | Refuses anything that is not schema `asent.gate.v1` with one of ACCEPT/REVIEW/BLOCK, both `base`/`head` objects and all three module rows (`ReportError`). Returns decision, exit code, commits, config digest/source/changed-in-head/problems, reasons, three `ModuleCard`s and CAVR `Finding`s. Wrong-typed fields become `null`/empty, never a guess. |
+| | `EVIDENCE.CAVR/SATRA/SABLE` | Key evidence lines from the module's own evidence record (`assurance.evidence[evidence_id]`): CAVR pipeline entries and packages with SHA-256; SATRA findings, counterfactual, test-run counts (`backend/satra/gate_mode.py` fields); SABLE obligation status, successor, `projected_authorization.holds`, unexpected resources. At most 12 lines per card. |
+| | `cavrFindings` | Problems entries: every CAVR pipeline entry not VERIFIED at its `file` (no line), and for every package not VERIFIED each `contract.call_sites` entry (file + 1-based line). REJECTED → error, anything else → warning. |
+| `test/unit/fixtures.ts` | | Loads `test/fixtures`. |
+| `test/unit/report.test.ts` | | 16 tests (one skipped until `satra-block.json` exists). |
+
+### Design decisions
+
+| Decision | Alternatives considered | Why |
+|---|---|---|
+| Copy decision/results/reasons, never compute | Recompute pass/block from statuses | V9: no re-implemented checks; `backend/gate/summary.py` already decides each row. |
+| Unknown decision → error | Map unknown text to REVIEW | Showing REVIEW for something asent did not say would still be a claim; the user gets "not an ASENT gate report". |
+| Problems only for CAVR | Also SATRA/SABLE via `affected_files` | The real SATRA/SABLE gate evidence names tests and Terraform resources, not finding locations; `affected_files` lists changed files, not where a problem is. |
+| Call-site test uses a derived input | A real rejected-and-called package | No recorded real run rejects a package the project calls; the test takes the real ACCEPT report and changes only the status fields, and says so in a comment. |
+
+### Requirements covered
+
+| Req | Acceptance check |
+|---|---|
+| V2 | Cards, commits, digest extracted from real reports (`report.test.ts`). |
+| V4 | CAVR BLOCK → one finding at `requirements.txt`, no line. |
+| V7 | ACCEPT, CAVR BLOCK, REVIEW parsed from real reports; SATRA BLOCK test present and skipped with its reason. |
+| V9 | Values copied from the report; refusal tests for every malformed shape. |
+
+### Ch 7 Test cases
+
+| Test ID | Purpose | Input | Expected | Result |
+|---|---|---|---|---|
+| VS-R1 | ACCEPT | `accept.json` | ACCEPT, exit 0, digest 64 hex, CAVR pass, SATRA/SABLE not assessed, no findings | pass |
+| VS-R2 | CAVR evidence | `accept.json` | `pypdf==6.19.0: VERIFIED, sha256 7e5d6e730e7d` | pass |
+| VS-R3 | CAVR BLOCK | `cavr-block.json` | BLOCK, exit 1, DENYLIST evidence, one finding at `requirements.txt` line null | pass |
+| VS-R4 | REVIEW | `review.json` | REVIEW, exit 2, config changed in head, CAVR pass | pass |
+| VS-R5 | SABLE BLOCK | `sable-block.json` | REGRESSED, successor, unexpected resource, no findings | pass |
+| VS-R6 | SATRA BLOCK | `satra-block.json` | REJECT, failing test, candidate counts | skipped (fixture needs Docker) |
+| VS-R7–R13 | Refusals | bad JSON, non-object, doctor schema, unknown decision, missing module, missing base, odd types | `ReportError` / nulls | pass |
+| VS-R14 | Call sites | derived from `accept.json` | requirements.txt + lines 7 and 8 | pass |
+| VS-R15 | UNRESOLVED | derived from `cavr-block.json` | warning | pass |
+| VS-R16 | Bad locations | file not a string, line 0 / 2.5 / empty file | dropped or file-level | pass |
+
+### Defects found and fixed
+
+None in this step.
+
+### Known limitations / deferred
+
+- SATRA's evidence lines are written against `gate_mode.py`'s field names; VS-R6 checks them once the real fixture is committed.
+
+### Tool disclosure (Ch 8.7)
+
+Claude Code wrote the parser and tests. Maryam reviewed the field choices. Verified by `npm test`.
+
+### Supervisor Q&A prep
+
+- *Could the extension show ACCEPT for a report that is not ACCEPT?* No. The decision is copied, and any value other than the three is refused.
+- *Why do SATRA/SABLE not appear in Problems?* Their gate reports contain no project file and line; inventing a location would be a fabricated result.
