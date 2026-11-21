@@ -285,3 +285,57 @@ Claude Code wrote the runner, stub and tests. Verified by `npm test` and by the 
 
 - *How do you know there is no command injection?* `shell: false` with an array (static test in step 8), and VS-C5 shows a shell payload in a folder name arriving as plain text.
 - *Why a stub instead of the real CLI in CI?* The real gate needs Python, ASENT's dependencies and for SATRA Docker; the stub replays real outputs, and the real CLI is checked separately with `ASENT_REAL`.
+
+## Step 5 — Doctor and "asent not found" messages (2026-11-21)
+
+Commit `feat(vscode): doctor fix lines and the asent-not-found message`.
+Unit tests on the staged tree: 43 passing, 6 pending. Full Python suite: 2201 passed, 20 skipped, 1 xfailed.
+Review: no reviewer pass was run for this step.
+
+### Ch 6 Implementation
+
+| File | Function | What it does |
+|---|---|---|
+| `src/doctor.ts` | `readDoctor` | Accepts only schema `asent.doctor.v1` with boolean `ready` and a `checks` list; keeps the checks that are not `ok`, required first. |
+| | `doctorLines` | First line ready / not ready with the count of required problems, then per check `MARK label: detail` and `fix: <asent's fix>` copied unchanged. |
+| | `dockerMissing` | True when check `docker` or `docker-daemon` is not ok. |
+| | `notFoundLines`, `INSTALL_LINES` | asent not found: the configured path, the install commands of README §4.0, and the `asent.path` setting. |
+
+### Design decisions
+
+| Decision | Alternatives considered | Why |
+|---|---|---|
+| Fix text copied from doctor | Extension's own advice | V5 asks for doctor's fix lines; doctor knows the installed package's Dockerfile paths. |
+| Install lines from README §4.0 | A URL only | The same commands the project documents, so the two cannot disagree silently (the test names the pipx line). |
+
+### Requirements covered
+
+| Req | Acceptance check |
+|---|---|
+| V5 | Real not-ready doctor output → Docker, daemon and both images listed with their exact fix lines. |
+
+### Ch 7 Test cases
+
+| Test ID | Purpose | Input | Expected | Result |
+|---|---|---|---|---|
+| VS-D1 | Not ready | `doctor.json` (real, no Docker) | 5 problems, Docker fix `Install Docker: https://docs.docker.com/get-docker/`, `dockerMissing` | pass |
+| VS-D2 | Lines | same | header with 4 required, every fix line present, required before optional | pass |
+| VS-D3 | Ready | derived: only the ok checks, `ready: true` | no problems, "ready" line | pass |
+| VS-D4 | Refusal | null, array, string, gate schema, bad `ready`, bad `checks` | `DoctorError` | pass |
+| VS-D5 | Not found | `/opt/bin/asent` | path, both install lines, `asent.path` | pass |
+
+### Defects found and fixed
+
+None in this step.
+
+### Known limitations / deferred
+
+- VS-D3 is a derived input (the real output with its failing checks removed); a real "ready" output comes from the manual fixtures workflow (it also runs `doctor` on a runner with Docker).
+
+### Tool disclosure (Ch 8.7)
+
+Claude Code wrote the module and tests. Verified by `npm test`.
+
+### Supervisor Q&A prep
+
+- *Does the extension install Docker or build images?* No; it shows the commands doctor prints, and doctor itself only looks.
