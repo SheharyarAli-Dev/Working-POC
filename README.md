@@ -140,6 +140,12 @@ stdout: `gate --json` the gate report (same content as `asent-report.json`), `re
 "data_dir"}` before serving, `init --json` the files written, `--version --json` `{"name", "version"}`.
 Errors under `--json` are `{"error": "..."}` with exit 2.
 
+**VS Code extension (optional).** `vscode-asent/` shows these results in VS Code: a report panel, the last
+decision in the status bar and CAVR findings in the Problems tab. It only runs the installed `asent --json`.
+Install it from the VSIX: Actions → "VS Code extension" → artifact `asent-vscode-vsix`, then Extensions view →
+`…` → Install from VSIX (in WSL/Remote, install it from the connected window). Details:
+[vscode-asent/README.md](vscode-asent/README.md).
+
 `asent report --run RUN_ID` reads a dashboard run's report from the server (it used to be `asent report RUN_ID`).
 An installed `asent` keeps its run data, advisory cache and SATRA workspace in `~/.local/share/asent`
 (`$XDG_DATA_HOME/asent`; `ASENT_DATA` overrides the run data folder); a checkout keeps using the repository.

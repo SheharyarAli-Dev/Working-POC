@@ -642,3 +642,50 @@ Claude Code wrote both workflows and fixed `.vscodeignore`. Verified locally by 
 ### Supervisor Q&A prep
 
 - *Why a separate workflow for the SATRA fixture?* It needs Docker images and Python; keeping it manual keeps the extension's CI fast and free of them.
+
+## Step 11 — Install from VSIX documentation (2026-11-21)
+
+Commit `docs(vscode): install the extension from the VSIX`.
+Unit tests on the staged tree: 63 passing, 6 pending. Full Python suite: 2201 passed, 20 skipped, 1 xfailed.
+Review: no reviewer pass was run for this step.
+
+### Ch 6 Implementation
+
+| File | What it does |
+|---|---|
+| `vscode-asent/README.md` | Install from the VSIX (artifact or `npm run package`; Extensions view → Install from VSIX or `code --install-extension`; WSL/Remote note), the commands and the exact `asent` argument lists, what the panel/status bar/Problems show, settings, trust and activation, development commands. Shipped inside the `.vsix`. |
+| `README.md` (§4.0) | One paragraph: what the extension does and how to install it from the VSIX, linking to `vscode-asent/README.md`. |
+
+### Design decisions
+
+| Decision | Alternatives considered | Why |
+|---|---|---|
+| Root README gets one paragraph under §4.0 | A new top-level section | Scope rule: only the install section; details live next to the code. |
+
+### Requirements covered
+
+| Req | Acceptance check |
+|---|---|
+| V8 | README explains installing from the VSIX, including WSL/Remote. |
+
+### Ch 7 Test cases
+
+| Test ID | Purpose | Input | Expected | Result |
+|---|---|---|---|---|
+| VS-K3 | README shipped | `npm run package` | `extension/readme.md` in the `.vsix` | pass |
+
+### Defects found and fixed
+
+None in this step.
+
+### Known limitations / deferred
+
+- The extension is not published to the Marketplace; installation is from the VSIX only.
+
+### Tool disclosure (Ch 8.7)
+
+Claude Code wrote both texts. Verified by packaging (README included) and by checking that every command and argument list in the table matches `src/args.ts`.
+
+### Supervisor Q&A prep
+
+- *How does someone install it?* Download the `asent-vscode-vsix` artifact and use "Install from VSIX"; in WSL, from the connected window.
