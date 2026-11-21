@@ -90,6 +90,16 @@ describe("ASENT extension (trusted folder)", () => {
     assert.match((await api()).state().panelHtml ?? "", /invoice-data: REGRESSED/);
   });
 
+  it('a report with "repository": "/" and file home/user/.ssh/config creates no Problems entry anywhere', async () => {
+    const json = JSON.parse(fs.readFileSync(fixture("cavr-block.json"), "utf8"));
+    json.repository = "/";
+    json.assurance.evidence.find((e: any) => e.evidence_id === json.modules.CAVR.evidence_id).details.pipeline[0].file = "home/user/.ssh/config";
+    fs.writeFileSync(path.join(FOLDER, "asent-report.json"), JSON.stringify(json));
+    await until("the panel shows the new report", async () => /<dt>Repository<\/dt><dd class="mono">\/<\/dd>/.test((await api()).state().panelHtml ?? ""));
+    const asent = vscode.languages.getDiagnostics().filter(([, list]) => list.some((d) => d.source === "ASENT"));
+    assert.deepStrictEqual(asent.map(([uri]) => uri.fsPath), []);
+  });
+
   it("Doctor runs asent doctor --json in the home directory, not in the folder", async () => {
     await vscode.commands.executeCommand("asent.doctor");
     const doctor = callsOf("doctor").at(-1)!;

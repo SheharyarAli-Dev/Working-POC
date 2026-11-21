@@ -39,8 +39,10 @@ Needs VS Code 1.95 or newer.
   it to open the panel. It also updates when `asent gate` in a terminal rewrites `asent-report.json`.
 - **Problems**: CAVR findings at the file the report names (e.g. `requirements.txt`). Where the report also gives
   a line (call sites of a rejected package) the entry is on that line; otherwise it is on line 1 and says the
-  report gives no line. SATRA and SABLE gate reports name tests and Terraform resources, not file lines, so they
-  appear only in the panel.
+  report gives no line. Paths are taken relative to the workspace folder (the report's `repository` field is
+  not used), and an entry is made only for an existing file inside the folder, after following symlinks; so when
+  the folder is a subfolder of the gated repository, findings in other parts of the repository are left out.
+  SATRA and SABLE gate reports name tests and Terraform resources, not file lines, so they appear only in the panel.
 - **asent or Docker missing**: "asent was not found" with the install commands and the `asent.path` setting; when
   a gate ran SATRA without Docker, a warning with `asent doctor`'s fix lines in the ASENT output.
 

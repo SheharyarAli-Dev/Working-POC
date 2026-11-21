@@ -178,7 +178,7 @@ function useReport(folder: string, report: GateReport): void {
   setStatus(report);
   problems.clear();
   const byFile = new Map<string, vscode.Diagnostic[]>();
-  for (const f of locate(report.findings, folder, report.repository)) {
+  for (const f of locate(report.findings, folder)) {
     const line = Math.max(0, f.line);
     const d = new vscode.Diagnostic(new vscode.Range(line, 0, line, Number.MAX_SAFE_INTEGER), f.message,
       f.severity === "error" ? vscode.DiagnosticSeverity.Error : vscode.DiagnosticSeverity.Warning);

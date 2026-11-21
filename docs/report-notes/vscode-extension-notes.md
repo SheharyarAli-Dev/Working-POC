@@ -988,3 +988,66 @@ Claude Code wrote `resolveAsent`, the tests and the extension-test fakes from Ma
 
 - *Why not just run asent in the home folder?* Run gate, Init and the dashboard must run in the repository, and Windows looks in the working folder before PATH; spawning an absolute path is the only fix that covers every command.
 - *What if PATH itself points into the repository?* That entry is skipped, lexically and after following symlinks; the found file is checked the same way.
+
+## Step 17 — Problems entries only inside the workspace folder (2026-11-21)
+
+Commit `fix(vscode): place Problems entries only on real files inside the folder`.
+Unit tests: 80 passing, 6 pending. Extension test: trusted 16 passing, untrusted 5 passing.
+Python suite: not run for this step (change only under `vscode-asent/`; Maryam's instruction).
+Review: found by an independent security review of `master...asent-vscode-extension`; no reviewer pass was run on the fix.
+
+### Ch 6 Implementation
+
+| File | Function | What it does |
+|---|---|---|
+| `src/diagnostics.ts` | `locate(findings, folder)` | No `repository` argument any more. Resolves each finding's path against the folder; drops absolute, NUL, outside and folder-itself paths; then `realpath` + `isFile`; keeps the entry only if the real path is inside the folder's real path. The entry's `file` stays the path under the folder as VS Code opened it. |
+| | `diagnosticRoot` | Removed (it trusted the report's `repository` when it contained the folder). |
+| `src/extension.ts` | `useReport` | Calls `locate(report.findings, folder)`. |
+| `README.md` | What you see → Problems | How paths are placed, and the subfolder limitation. |
+
+### Design decisions
+
+| Decision | Alternatives considered | Why |
+|---|---|---|
+| Never use `repository` as a root | Accept it only if it is the git top level | `asent report` passes the file's JSON through unchecked, so in an untrusted folder the field is attacker-controlled; finding the real top level would mean running git there. |
+| `realpath` both the folder and the file | Lexical check only | A symlink in the repository pointing outside passed the old lexical check. Comparing real paths also keeps a folder opened through a symlink working. |
+| A missing file gets no entry | Place it lexically | Fail closed: `realpath` needs the file; an entry for a file that is not there helps nobody. |
+| Directories get no entry | Allow them | Problems entries belong on files. |
+
+### Requirements covered
+
+| Req | Acceptance check |
+|---|---|
+| V6 (Problems) | An entry exists only for an existing file whose real path is inside the workspace folder; a report saying `"repository": "/"` cannot place one on `home/user/.ssh/config`. |
+
+### Ch 7 Test cases
+
+| Test ID | Purpose | Input | Expected | Result |
+|---|---|---|---|---|
+| VS-D1' | Real report still placed | `cavr-block.json` | `requirements.txt` line 0, file-level message | pass |
+| VS-D6 | Root `/` | fixture with `"repository": "/"`, file `home/user/.ssh/config` | no entry | pass |
+| VS-D7 | Root that contains the folder, file exists there | `repository` = parent of the folder, `home/user/.ssh/config` exists under it | no entry | pass |
+| VS-D8 | Symlink out | `link/secret.txt`, `secret-link.txt` → outside | no entry | pass |
+| VS-D9 | Symlinks that stay inside | file link inside; folder opened via a symlink | entry; path under the opened folder | pass |
+| VS-D2' | Line numbers | line 7 | line 6 | pass |
+| VS-D3' | Bad paths | `../`, `a/../../`, absolute, `C:\`, NUL, `""`, `.`, directory `app` | none | pass |
+| VS-D10 | Missing file | `no-such-file.txt`, `sub/requirements.txt` | none | pass |
+| VS-E21 | End to end (trusted) | report with `"repository": "/"` written to the folder; watcher loads it | no ASENT diagnostics on any URI | pass |
+| VS-M2 | Old code had the bug (manual) | old `out/src/diagnostics.js`, `locate([home/user/.ssh/config], folder, "/")` | entry on `/home/user/.ssh/config` | confirmed |
+
+### Defects found and fixed
+
+- Independent review: `diagnosticRoot` used the report's `repository` as the root when it was absolute and contained the folder, so `"repository": "/"` put entries on any file; symlinks were only checked lexically. Fixed as above.
+
+### Known limitations / deferred
+
+- When the workspace folder is a subfolder of the gated repository, the report's paths (relative to the repository top level) usually do not exist under the folder and are left out; open the repository's top-level folder to see them.
+
+### Tool disclosure (Ch 8.7)
+
+Claude Code rewrote `locate` and its tests to Maryam's specification (workspace folder only, realpath, the `"repository": "/"` test). Verified by the unit and extension tests and VS-M2.
+
+### Supervisor Q&A prep
+
+- *Why ignore the repository field the report gives?* The extension also reads reports in untrusted folders and `asent report` does not check that field, so it is attacker input; only the folder VS Code opened is trusted as a root.
+- *What does realpath add?* A symlink inside the repository can point anywhere; comparing real paths stops it.
