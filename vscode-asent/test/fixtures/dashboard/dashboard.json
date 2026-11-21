@@ -1,0 +1,6 @@
+{
+  "url": "http://127.0.0.1:8000/",
+  "api": "http://127.0.0.1:8000/api",
+  "ui_bundled": false,
+  "data_dir": "/home/dell/Working-POC/runtime"
+}

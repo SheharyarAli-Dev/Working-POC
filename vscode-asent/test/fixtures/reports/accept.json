@@ -1,0 +1,1072 @@
+{
+  "schema": "asent.gate.v1",
+  "asent_version": "1.0.0",
+  "generated_at": "2026-11-21T09:52:19.186369+00:00",
+  "repository": "/tmp/asent-fixture-accept-6eptq2q4/repo",
+  "base": {
+    "ref": "d3b2f75ac057b057c2f6bbbbd8f98b83df3b3abb",
+    "sha": "d3b2f75ac057b057c2f6bbbbd8f98b83df3b3abb"
+  },
+  "head": {
+    "ref": "3d281973ce263a4aea8c20a45536a1ef87f7af93",
+    "sha": "3d281973ce263a4aea8c20a45536a1ef87f7af93"
+  },
+  "decision": "ACCEPT",
+  "exit_code": 0,
+  "reasons": [
+    "Every applicable module has current acceptable evidence for this exact candidate"
+  ],
+  "modules": {
+    "CAVR": {
+      "result": "pass",
+      "status": "VERIFIED",
+      "assessed": true,
+      "label": "assessed",
+      "state": "enabled",
+      "inputs_present": true,
+      "reason": "requirements.txt: 1 requested packages verified: pypdf==6.19.0",
+      "evidence_id": "be1f04f02bb34dda96fdf8af13d75c13"
+    },
+    "SATRA": {
+      "result": "not assessed (disabled by base config)",
+      "status": null,
+      "assessed": false,
+      "label": "not assessed (disabled by base config)",
+      "state": "disabled",
+      "inputs_present": true,
+      "reason": "not part of this test",
+      "evidence_id": null
+    },
+    "SABLE": {
+      "result": "not assessed (disabled by base config)",
+      "status": null,
+      "assessed": false,
+      "label": "not assessed (disabled by base config)",
+      "state": "disabled",
+      "inputs_present": false,
+      "reason": "not part of this test",
+      "evidence_id": null
+    }
+  },
+  "config": {
+    "digest": "f42117f159cbaf6be16670d6275f30bad0723e7b55ea47f6d099e3868c6901d8",
+    "source": "base commit d3b2f75ac057b057c2f6bbbbd8f98b83df3b3abb: .asent/",
+    "problems": [],
+    "changed_in_head": false
+  },
+  "coverage": {
+    "CAVR": {
+      "inputs_present": true,
+      "state": "enabled",
+      "assessed": true,
+      "label": "assessed",
+      "reason": null
+    },
+    "SATRA": {
+      "inputs_present": true,
+      "state": "disabled",
+      "assessed": false,
+      "label": "not assessed (disabled by base config)",
+      "reason": "not part of this test"
+    },
+    "SABLE": {
+      "inputs_present": false,
+      "state": "disabled",
+      "assessed": false,
+      "label": "not assessed (disabled by base config)",
+      "reason": "not part of this test"
+    }
+  },
+  "tools": {
+    "git": true,
+    "strace": false,
+    "docker": false,
+    "podman": false,
+    "terraform": false,
+    "checkov": false,
+    "bandit": true,
+    "semgrep": false,
+    "ollama": false,
+    "bpftrace": false
+  },
+  "data_dir": null,
+  "run_id": "481cdc7021e3",
+  "assurance": {
+    "schema": "asent.assurance.v1",
+    "run": {
+      "run_id": "481cdc7021e3",
+      "created_at": "2026-11-21T09:52:19.366565+00:00",
+      "title": "ASENT gate d3b2f75ac057b057c2f6bbbbd8f98b83df3b3abb -> 3d281973ce263a4aea8c20a45536a1ef87f7af93",
+      "scenario": "gate",
+      "mode": "gate",
+      "evidence_source": "GATE: base -> head",
+      "agent_metadata": {},
+      "srs_digest": "12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126",
+      "approved_plan_digest": "12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126",
+      "policy_digest": "c52ae07167b75abf844bb24b932e10a17a61bd970607be42a5fe3314b6be6a2c",
+      "threat_repo_version": "TR-2026.11.21.001",
+      "threat_repo_digest": "392eb4455aa9fa6f7079d73988f3992918abdb75252f2c1d812d54f9829e5d00",
+      "baseline_commit": "08e7619557a560527cb56b7a833cbfd70b7be7f9",
+      "candidate_snapshot": "adee5a06777a31b8051cb052d4898ebb51eb475660b4704f16290896949b52c3",
+      "candidate_workspace": "/tmp/asent-gate-3bte1o9i/runtime/workspaces/481cdc7021e3/candidate",
+      "baseline_workspace": "/tmp/asent-gate-3bte1o9i/runtime/workspaces/481cdc7021e3/baseline",
+      "changed_surfaces": {},
+      "module_evidence_ids": {
+        "CAVR": "be1f04f02bb34dda96fdf8af13d75c13"
+      },
+      "applicable": [
+        "CAVR"
+      ],
+      "final_decision": "ACCEPT",
+      "reasons": [
+        "Every applicable module has current acceptable evidence for this exact candidate"
+      ],
+      "lifecycle": "COMPLETE",
+      "revision": 1,
+      "clean_commit": "c9ed43a6c8fd12ea0e72b798b892b50894334069",
+      "clean_workspace": "/tmp/asent-gate-3bte1o9i/runtime/workspaces/481cdc7021e3/trusted-1",
+      "error": null,
+      "config_digest": "f42117f159cbaf6be16670d6275f30bad0723e7b55ea47f6d099e3868c6901d8",
+      "config_source": "/tmp/asent-gate-3bte1o9i/exports/44a6f24d4515/base/.asent",
+      "config_problems": [],
+      "config_changed_in_head": false,
+      "coverage": {
+        "CAVR": {
+          "inputs_present": true,
+          "state": "enabled",
+          "assessed": true,
+          "label": "assessed",
+          "reason": null
+        },
+        "SATRA": {
+          "inputs_present": true,
+          "state": "disabled",
+          "assessed": false,
+          "label": "not assessed (disabled by base config)",
+          "reason": "not part of this test"
+        },
+        "SABLE": {
+          "inputs_present": false,
+          "state": "disabled",
+          "assessed": false,
+          "label": "not assessed (disabled by base config)",
+          "reason": "not part of this test"
+        }
+      },
+      "gate": {
+        "repository": "/tmp/asent-fixture-accept-6eptq2q4/repo",
+        "base": {
+          "ref": "d3b2f75ac057b057c2f6bbbbd8f98b83df3b3abb",
+          "sha": "d3b2f75ac057b057c2f6bbbbd8f98b83df3b3abb"
+        },
+        "head": {
+          "ref": "3d281973ce263a4aea8c20a45536a1ef87f7af93",
+          "sha": "3d281973ce263a4aea8c20a45536a1ef87f7af93"
+        }
+      }
+    },
+    "project_candidate_snapshot": "adee5a06777a31b8051cb052d4898ebb51eb475660b4704f16290896949b52c3",
+    "evidence": [
+      {
+        "evidence_id": "be1f04f02bb34dda96fdf8af13d75c13",
+        "run_id": "481cdc7021e3",
+        "analyzer": "CAVR",
+        "analyzer_version": "1.0.0",
+        "threat_repo_version": "TR-2026.11.21.001",
+        "threat_repo_digest": "392eb4455aa9fa6f7079d73988f3992918abdb75252f2c1d812d54f9829e5d00",
+        "threat_module_digest": "fddee57c3f5c1ea75ecdc48d3419f1142648aa90b9960f2ff04f814badd385cf",
+        "candidate_snapshot": "adee5a06777a31b8051cb052d4898ebb51eb475660b4704f16290896949b52c3",
+        "input_hash": "57b042962393bf3265fea93e0080eff94e9d48bbb05b4927099726c7e77b40e4",
+        "status": "VERIFIED",
+        "blocking": false,
+        "residual_uncertainty": [
+          "M1 fast gate: artifact hash, dependency tree, advisories, capability contract and AST sink scan; no deep runtime analysis (M2)"
+        ],
+        "affected_files": [
+          "requirements.txt",
+          "app/__init__.py",
+          "app/main.py",
+          "app/pdf_adapter.py",
+          "app/security.py"
+        ],
+        "evidence_refs": [
+          "/tmp/asent-gate-3bte1o9i/runtime/evidence/481cdc7021e3/1-analysis-CAVR"
+        ],
+        "details": {
+          "engine": "pipeline",
+          "reason": "requirements.txt: 1 requested packages verified: pypdf==6.19.0",
+          "pipeline": [
+            {
+              "file": "requirements.txt",
+              "request": "pip install -r requirements.txt",
+              "status": "VERIFIED",
+              "mapped": "VERIFIED",
+              "stage": "verdict",
+              "rule": "ALL_CHECKS_PASSED",
+              "reason": "1 requested packages verified: pypdf==6.19.0",
+              "policy_version": "5b1b398d8c62ffbcde1e0a8a8a5e4f9b32e356a32e272761a1c0364ffe1276be",
+              "analyzer_version": "cavr-pipeline/2;cavr-ast-scan/1;rules:8cdeeb8c9095ca6e0a988b8450f64903b869c120bd90bd6375faa30a2bf59d1e",
+              "packages": [
+                {
+                  "name": "pypdf",
+                  "version": "6.19.0",
+                  "status": "VERIFIED",
+                  "mapped": "VERIFIED",
+                  "stage": "verdict",
+                  "rule": "ALL_CHECKS_PASSED",
+                  "reason": "hash, tree, advisories and contract checked; 2 sink calls found; none is both denied by the contract and reachable from the project",
+                  "cache_hit": false,
+                  "key_fields": {
+                    "ecosystem": "PyPI",
+                    "name": "pypdf",
+                    "version": "6.19.0",
+                    "artifact_sha256": "7e5d6e730e7dae87d560a2cee218b852f6498c8be61966f3cd02ead971e48d14",
+                    "subtree_digest": "00e26bfd4d0fac2afad4f9e7816f9615e090a2d65e3ffdeacadc8d477762238d",
+                    "contract_digest": "521a5585c1fe4814625dc766d357cb3d4b2b9c92272842bb7f3c42cfa7d47645",
+                    "policy_version": "5b1b398d8c62ffbcde1e0a8a8a5e4f9b32e356a32e272761a1c0364ffe1276be",
+                    "analyzer_version": "cavr-pipeline/2;cavr-ast-scan/1;rules:8cdeeb8c9095ca6e0a988b8450f64903b869c120bd90bd6375faa30a2bf59d1e"
+                  },
+                  "cache": {
+                    "lookup": "MISS",
+                    "key": "8494aa4ff95b5e519598429b447a56afd7268b050a8c3e630dd3a870ed7f4059",
+                    "stored": true,
+                    "reason": "VERIFIED verdict stored"
+                  },
+                  "sha256": "7e5d6e730e7dae87d560a2cee218b852f6498c8be61966f3cd02ead971e48d14",
+                  "contract": {
+                    "result": "OK",
+                    "rule": "CONTRACT_INFERRED",
+                    "reason": "2 call sites and 0 other uses of pypdf; 2 capabilities allowed, 8 denied",
+                    "package": "pypdf",
+                    "version": "6.19.0",
+                    "import_names": [
+                      "pypdf"
+                    ],
+                    "import_names_source": "RECORD",
+                    "imports": [
+                      {
+                        "file": "app/pdf_adapter.py",
+                        "line": 2,
+                        "module": "pypdf",
+                        "name": "PdfReader",
+                        "bound_as": "PdfReader"
+                      },
+                      {
+                        "file": "app/pdf_adapter.py",
+                        "line": 2,
+                        "module": "pypdf",
+                        "name": "apply_configuration",
+                        "bound_as": "apply_configuration"
+                      }
+                    ],
+                    "call_sites": [
+                      {
+                        "file": "app/pdf_adapter.py",
+                        "line": 7,
+                        "symbol": "pypdf.apply_configuration",
+                        "expression": "apply_configuration",
+                        "kind": "call"
+                      },
+                      {
+                        "file": "app/pdf_adapter.py",
+                        "line": 8,
+                        "symbol": "pypdf.PdfReader",
+                        "expression": "PdfReader",
+                        "kind": "call"
+                      }
+                    ],
+                    "references": [],
+                    "star_imports": [],
+                    "entry_modules": [
+                      "pypdf",
+                      "pypdf.PdfReader",
+                      "pypdf.apply_configuration"
+                    ],
+                    "allowed": [
+                      {
+                        "capability": "FILE_READ",
+                        "scope": "invoice_documents",
+                        "status": "REQUIRED",
+                        "source": "policy allowed_scopes: FILE_READ:invoice_documents",
+                        "justification": "Granted by the policy and required by rule CAP-PDF-001 (Local PDF extraction)"
+                      },
+                      {
+                        "capability": "FILE_WRITE",
+                        "scope": "scratch_tmp",
+                        "status": "REQUIRED",
+                        "source": "policy allowed_scopes: FILE_WRITE:scratch_tmp",
+                        "justification": "Granted by the policy and required by rule CAP-PDF-001 (Local PDF extraction)"
+                      }
+                    ],
+                    "denied": [
+                      {
+                        "capability": "DYNAMIC_DOWNLOAD",
+                        "source": "not granted by the policy (default deny)"
+                      },
+                      {
+                        "capability": "DYNAMIC_EXECUTION",
+                        "source": "not granted by the policy (default deny)"
+                      },
+                      {
+                        "capability": "NATIVE_EXEC",
+                        "source": "rule CAP-PDF-001 denies it for the task 'pdf extraction'"
+                      },
+                      {
+                        "capability": "NETWORK_CONNECT",
+                        "source": "policy allowed_scopes: NETWORK_CONNECT:none"
+                      },
+                      {
+                        "capability": "PERSISTENCE_WRITE",
+                        "source": "rule CAP-PDF-001 denies it for the task 'pdf extraction'"
+                      },
+                      {
+                        "capability": "PROCESS_EXEC",
+                        "source": "policy allowed_scopes: PROCESS_EXEC:none"
+                      },
+                      {
+                        "capability": "SECRET_READ",
+                        "source": "rule CAP-PDF-001 denies it for the task 'pdf extraction'"
+                      },
+                      {
+                        "capability": "SENSITIVE_FILE_READ",
+                        "source": "not granted by the policy (default deny)"
+                      }
+                    ],
+                    "conflicts": [],
+                    "capability_rules": [
+                      {
+                        "id": "CAP-PDF-001",
+                        "version": 1,
+                        "task": "pdf extraction"
+                      }
+                    ],
+                    "task_description": "Invoice PDF text extraction",
+                    "vocabulary": [
+                      "DYNAMIC_DOWNLOAD",
+                      "DYNAMIC_EXECUTION",
+                      "FILE_READ",
+                      "FILE_WRITE",
+                      "NATIVE_EXEC",
+                      "NETWORK_CONNECT",
+                      "PERSISTENCE_WRITE",
+                      "PROCESS_EXEC",
+                      "SECRET_READ",
+                      "SENSITIVE_FILE_READ"
+                    ],
+                    "sources_digest": "28e988aca5b23ddef2cec71cc100e9d4d6fbbc946204c7c8c43fac5ab8aee92b",
+                    "authority": "project call sites + policy allowed_scopes + threat-repository capability rules",
+                    "contract_rows": [
+                      {
+                        "capability": "FILE_READ(invoice_documents)",
+                        "status": "REQUIRED",
+                        "evidence": "policy allowed_scopes: FILE_READ:invoice_documents",
+                        "justification": "Granted by the policy and required by rule CAP-PDF-001 (Local PDF extraction)"
+                      },
+                      {
+                        "capability": "FILE_WRITE(scratch_tmp)",
+                        "status": "REQUIRED",
+                        "evidence": "policy allowed_scopes: FILE_WRITE:scratch_tmp",
+                        "justification": "Granted by the policy and required by rule CAP-PDF-001 (Local PDF extraction)"
+                      },
+                      {
+                        "capability": "DYNAMIC_DOWNLOAD",
+                        "status": "DENIED",
+                        "evidence": "not granted by the policy (default deny)",
+                        "justification": "Not allowed for code reached from this project's call sites"
+                      },
+                      {
+                        "capability": "DYNAMIC_EXECUTION",
+                        "status": "DENIED",
+                        "evidence": "not granted by the policy (default deny)",
+                        "justification": "Not allowed for code reached from this project's call sites"
+                      },
+                      {
+                        "capability": "NATIVE_EXEC",
+                        "status": "DENIED",
+                        "evidence": "rule CAP-PDF-001 denies it for the task 'pdf extraction'",
+                        "justification": "Not allowed for code reached from this project's call sites"
+                      },
+                      {
+                        "capability": "NETWORK_CONNECT",
+                        "status": "DENIED",
+                        "evidence": "policy allowed_scopes: NETWORK_CONNECT:none",
+                        "justification": "Not allowed for code reached from this project's call sites"
+                      },
+                      {
+                        "capability": "PERSISTENCE_WRITE",
+                        "status": "DENIED",
+                        "evidence": "rule CAP-PDF-001 denies it for the task 'pdf extraction'",
+                        "justification": "Not allowed for code reached from this project's call sites"
+                      },
+                      {
+                        "capability": "PROCESS_EXEC",
+                        "status": "DENIED",
+                        "evidence": "policy allowed_scopes: PROCESS_EXEC:none",
+                        "justification": "Not allowed for code reached from this project's call sites"
+                      },
+                      {
+                        "capability": "SECRET_READ",
+                        "status": "DENIED",
+                        "evidence": "rule CAP-PDF-001 denies it for the task 'pdf extraction'",
+                        "justification": "Not allowed for code reached from this project's call sites"
+                      },
+                      {
+                        "capability": "SENSITIVE_FILE_READ",
+                        "status": "DENIED",
+                        "evidence": "not granted by the policy (default deny)",
+                        "justification": "Not allowed for code reached from this project's call sites"
+                      }
+                    ],
+                    "summary": {
+                      "required_count": 2,
+                      "optional_count": 0,
+                      "denied_count": 8
+                    },
+                    "digest": "521a5585c1fe4814625dc766d357cb3d4b2b9c92272842bb7f3c42cfa7d47645"
+                  }
+                }
+              ]
+            }
+          ],
+          "nodes": [
+            {
+              "name": "pypdf",
+              "version": "6.19.0",
+              "status": "VERIFIED",
+              "mapped": "VERIFIED",
+              "stage": "verdict",
+              "rule": "ALL_CHECKS_PASSED",
+              "reason": "hash, tree, advisories and contract checked; 2 sink calls found; none is both denied by the contract and reachable from the project",
+              "cache_hit": false,
+              "key_fields": {
+                "ecosystem": "PyPI",
+                "name": "pypdf",
+                "version": "6.19.0",
+                "artifact_sha256": "7e5d6e730e7dae87d560a2cee218b852f6498c8be61966f3cd02ead971e48d14",
+                "subtree_digest": "00e26bfd4d0fac2afad4f9e7816f9615e090a2d65e3ffdeacadc8d477762238d",
+                "contract_digest": "521a5585c1fe4814625dc766d357cb3d4b2b9c92272842bb7f3c42cfa7d47645",
+                "policy_version": "5b1b398d8c62ffbcde1e0a8a8a5e4f9b32e356a32e272761a1c0364ffe1276be",
+                "analyzer_version": "cavr-pipeline/2;cavr-ast-scan/1;rules:8cdeeb8c9095ca6e0a988b8450f64903b869c120bd90bd6375faa30a2bf59d1e"
+              },
+              "cache": {
+                "lookup": "MISS",
+                "key": "8494aa4ff95b5e519598429b447a56afd7268b050a8c3e630dd3a870ed7f4059",
+                "stored": true,
+                "reason": "VERIFIED verdict stored"
+              },
+              "sha256": "7e5d6e730e7dae87d560a2cee218b852f6498c8be61966f3cd02ead971e48d14",
+              "contract": {
+                "result": "OK",
+                "rule": "CONTRACT_INFERRED",
+                "reason": "2 call sites and 0 other uses of pypdf; 2 capabilities allowed, 8 denied",
+                "package": "pypdf",
+                "version": "6.19.0",
+                "import_names": [
+                  "pypdf"
+                ],
+                "import_names_source": "RECORD",
+                "imports": [
+                  {
+                    "file": "app/pdf_adapter.py",
+                    "line": 2,
+                    "module": "pypdf",
+                    "name": "PdfReader",
+                    "bound_as": "PdfReader"
+                  },
+                  {
+                    "file": "app/pdf_adapter.py",
+                    "line": 2,
+                    "module": "pypdf",
+                    "name": "apply_configuration",
+                    "bound_as": "apply_configuration"
+                  }
+                ],
+                "call_sites": [
+                  {
+                    "file": "app/pdf_adapter.py",
+                    "line": 7,
+                    "symbol": "pypdf.apply_configuration",
+                    "expression": "apply_configuration",
+                    "kind": "call"
+                  },
+                  {
+                    "file": "app/pdf_adapter.py",
+                    "line": 8,
+                    "symbol": "pypdf.PdfReader",
+                    "expression": "PdfReader",
+                    "kind": "call"
+                  }
+                ],
+                "references": [],
+                "star_imports": [],
+                "entry_modules": [
+                  "pypdf",
+                  "pypdf.PdfReader",
+                  "pypdf.apply_configuration"
+                ],
+                "allowed": [
+                  {
+                    "capability": "FILE_READ",
+                    "scope": "invoice_documents",
+                    "status": "REQUIRED",
+                    "source": "policy allowed_scopes: FILE_READ:invoice_documents",
+                    "justification": "Granted by the policy and required by rule CAP-PDF-001 (Local PDF extraction)"
+                  },
+                  {
+                    "capability": "FILE_WRITE",
+                    "scope": "scratch_tmp",
+                    "status": "REQUIRED",
+                    "source": "policy allowed_scopes: FILE_WRITE:scratch_tmp",
+                    "justification": "Granted by the policy and required by rule CAP-PDF-001 (Local PDF extraction)"
+                  }
+                ],
+                "denied": [
+                  {
+                    "capability": "DYNAMIC_DOWNLOAD",
+                    "source": "not granted by the policy (default deny)"
+                  },
+                  {
+                    "capability": "DYNAMIC_EXECUTION",
+                    "source": "not granted by the policy (default deny)"
+                  },
+                  {
+                    "capability": "NATIVE_EXEC",
+                    "source": "rule CAP-PDF-001 denies it for the task 'pdf extraction'"
+                  },
+                  {
+                    "capability": "NETWORK_CONNECT",
+                    "source": "policy allowed_scopes: NETWORK_CONNECT:none"
+                  },
+                  {
+                    "capability": "PERSISTENCE_WRITE",
+                    "source": "rule CAP-PDF-001 denies it for the task 'pdf extraction'"
+                  },
+                  {
+                    "capability": "PROCESS_EXEC",
+                    "source": "policy allowed_scopes: PROCESS_EXEC:none"
+                  },
+                  {
+                    "capability": "SECRET_READ",
+                    "source": "rule CAP-PDF-001 denies it for the task 'pdf extraction'"
+                  },
+                  {
+                    "capability": "SENSITIVE_FILE_READ",
+                    "source": "not granted by the policy (default deny)"
+                  }
+                ],
+                "conflicts": [],
+                "capability_rules": [
+                  {
+                    "id": "CAP-PDF-001",
+                    "version": 1,
+                    "task": "pdf extraction"
+                  }
+                ],
+                "task_description": "Invoice PDF text extraction",
+                "vocabulary": [
+                  "DYNAMIC_DOWNLOAD",
+                  "DYNAMIC_EXECUTION",
+                  "FILE_READ",
+                  "FILE_WRITE",
+                  "NATIVE_EXEC",
+                  "NETWORK_CONNECT",
+                  "PERSISTENCE_WRITE",
+                  "PROCESS_EXEC",
+                  "SECRET_READ",
+                  "SENSITIVE_FILE_READ"
+                ],
+                "sources_digest": "28e988aca5b23ddef2cec71cc100e9d4d6fbbc946204c7c8c43fac5ab8aee92b",
+                "authority": "project call sites + policy allowed_scopes + threat-repository capability rules",
+                "contract_rows": [
+                  {
+                    "capability": "FILE_READ(invoice_documents)",
+                    "status": "REQUIRED",
+                    "evidence": "policy allowed_scopes: FILE_READ:invoice_documents",
+                    "justification": "Granted by the policy and required by rule CAP-PDF-001 (Local PDF extraction)"
+                  },
+                  {
+                    "capability": "FILE_WRITE(scratch_tmp)",
+                    "status": "REQUIRED",
+                    "evidence": "policy allowed_scopes: FILE_WRITE:scratch_tmp",
+                    "justification": "Granted by the policy and required by rule CAP-PDF-001 (Local PDF extraction)"
+                  },
+                  {
+                    "capability": "DYNAMIC_DOWNLOAD",
+                    "status": "DENIED",
+                    "evidence": "not granted by the policy (default deny)",
+                    "justification": "Not allowed for code reached from this project's call sites"
+                  },
+                  {
+                    "capability": "DYNAMIC_EXECUTION",
+                    "status": "DENIED",
+                    "evidence": "not granted by the policy (default deny)",
+                    "justification": "Not allowed for code reached from this project's call sites"
+                  },
+                  {
+                    "capability": "NATIVE_EXEC",
+                    "status": "DENIED",
+                    "evidence": "rule CAP-PDF-001 denies it for the task 'pdf extraction'",
+                    "justification": "Not allowed for code reached from this project's call sites"
+                  },
+                  {
+                    "capability": "NETWORK_CONNECT",
+                    "status": "DENIED",
+                    "evidence": "policy allowed_scopes: NETWORK_CONNECT:none",
+                    "justification": "Not allowed for code reached from this project's call sites"
+                  },
+                  {
+                    "capability": "PERSISTENCE_WRITE",
+                    "status": "DENIED",
+                    "evidence": "rule CAP-PDF-001 denies it for the task 'pdf extraction'",
+                    "justification": "Not allowed for code reached from this project's call sites"
+                  },
+                  {
+                    "capability": "PROCESS_EXEC",
+                    "status": "DENIED",
+                    "evidence": "policy allowed_scopes: PROCESS_EXEC:none",
+                    "justification": "Not allowed for code reached from this project's call sites"
+                  },
+                  {
+                    "capability": "SECRET_READ",
+                    "status": "DENIED",
+                    "evidence": "rule CAP-PDF-001 denies it for the task 'pdf extraction'",
+                    "justification": "Not allowed for code reached from this project's call sites"
+                  },
+                  {
+                    "capability": "SENSITIVE_FILE_READ",
+                    "status": "DENIED",
+                    "evidence": "not granted by the policy (default deny)",
+                    "justification": "Not allowed for code reached from this project's call sites"
+                  }
+                ],
+                "summary": {
+                  "required_count": 2,
+                  "optional_count": 0,
+                  "denied_count": 8
+                },
+                "digest": "521a5585c1fe4814625dc766d357cb3d4b2b9c92272842bb7f3c42cfa7d47645"
+              }
+            }
+          ],
+          "cache_key_fields": [
+            "ecosystem",
+            "name",
+            "version",
+            "artifact_sha256",
+            "subtree_digest",
+            "contract_digest",
+            "policy_version",
+            "analyzer_version"
+          ],
+          "knowledge": {
+            "threat_repo_version": "TR-2026.11.21.001",
+            "digest": "392eb4455aa9fa6f7079d73988f3992918abdb75252f2c1d812d54f9829e5d00",
+            "module_digest": "fddee57c3f5c1ea75ecdc48d3419f1142648aa90b9960f2ff04f814badd385cf",
+            "rules": [
+              {
+                "id": "BEH-DYNAMIC_DOWNLOAD",
+                "version": 1,
+                "source_id": "SRC-ASENT",
+                "description": "Security-sensitive capability; compare scope and project justification before deciding.",
+                "severity": "HIGH"
+              },
+              {
+                "id": "BEH-DYNAMIC_EXECUTION",
+                "version": 1,
+                "source_id": "SRC-ASENT",
+                "description": "Security-sensitive capability; compare scope and project justification before deciding.",
+                "severity": "HIGH"
+              },
+              {
+                "id": "BEH-FILE_READ",
+                "version": 1,
+                "source_id": "SRC-ASENT",
+                "description": "Security-sensitive capability; compare scope and project justification before deciding.",
+                "severity": "LOW"
+              },
+              {
+                "id": "BEH-FILE_WRITE",
+                "version": 1,
+                "source_id": "SRC-ASENT",
+                "description": "Security-sensitive capability; compare scope and project justification before deciding.",
+                "severity": "MEDIUM"
+              },
+              {
+                "id": "BEH-NATIVE_EXEC",
+                "version": 1,
+                "source_id": "SRC-ASENT",
+                "description": "Security-sensitive capability; compare scope and project justification before deciding.",
+                "severity": "HIGH"
+              },
+              {
+                "id": "BEH-NETWORK_CONNECT",
+                "version": 1,
+                "source_id": "SRC-ASENT",
+                "description": "Security-sensitive capability; compare scope and project justification before deciding.",
+                "severity": "MEDIUM"
+              },
+              {
+                "id": "BEH-PERSISTENCE_WRITE",
+                "version": 1,
+                "source_id": "SRC-ASENT",
+                "description": "Security-sensitive capability; compare scope and project justification before deciding.",
+                "severity": "HIGH"
+              },
+              {
+                "id": "BEH-PROCESS_EXEC",
+                "version": 1,
+                "source_id": "SRC-ASENT",
+                "description": "Security-sensitive capability; compare scope and project justification before deciding.",
+                "severity": "HIGH"
+              },
+              {
+                "id": "BEH-SECRET_READ",
+                "version": 1,
+                "source_id": "SRC-ASENT",
+                "description": "Security-sensitive capability; compare scope and project justification before deciding.",
+                "severity": "HIGH"
+              },
+              {
+                "id": "BEH-SENSITIVE_FILE_READ",
+                "version": 1,
+                "source_id": "SRC-ASENT",
+                "description": "Security-sensitive capability; compare scope and project justification before deciding.",
+                "severity": "HIGH"
+              },
+              {
+                "id": "CAP-HTTP-001",
+                "version": 1,
+                "source_id": "SRC-ASENT",
+                "description": "A justified HTTP client may connect to approved endpoints. Network use alone is not a maliciousness decision.",
+                "severity": "MEDIUM"
+              },
+              {
+                "id": "CAP-PDF-001",
+                "version": 1,
+                "source_id": "SRC-ASENT",
+                "description": "Reading supplied PDFs and temporary files is justified. Secrets, persistence and arbitrary subprocess/network access are not.",
+                "severity": "MEDIUM"
+              },
+              {
+                "id": "PKG-LAB-001",
+                "version": 1,
+                "source_id": "SRC-LAB",
+                "description": "This is an inert controlled reproduction, not a real malicious package. A name match is supporting context only.",
+                "severity": "MEDIUM"
+              },
+              {
+                "id": "BEH-CRED-PROC-001",
+                "version": 1,
+                "source_id": "SRC-ASENT",
+                "description": "Correlate source and sink with causal evidence and project permissions; co-occurrence alone is not malware.",
+                "severity": "HIGH"
+              },
+              {
+                "id": "BEH-DOWNLOAD-PROC-001",
+                "version": 1,
+                "source_id": "SRC-ASENT",
+                "description": "Correlate source and sink with causal evidence and project permissions; co-occurrence alone is not malware.",
+                "severity": "HIGH"
+              },
+              {
+                "id": "BEH-FILE-NET-001",
+                "version": 1,
+                "source_id": "SRC-ASENT",
+                "description": "Correlate source and sink with causal evidence and project permissions; co-occurrence alone is not malware.",
+                "severity": "HIGH"
+              },
+              {
+                "id": "BEH-SECRET-NET-001",
+                "version": 1,
+                "source_id": "SRC-ASENT",
+                "description": "Correlate source and sink with causal evidence and project permissions; co-occurrence alone is not malware.",
+                "severity": "HIGH"
+              },
+              {
+                "id": "BEH-SSH-NET-001",
+                "version": 1,
+                "source_id": "SRC-ASENT",
+                "description": "Correlate source and sink with causal evidence and project permissions; co-occurrence alone is not malware.",
+                "severity": "HIGH"
+              },
+              {
+                "id": "TRIG-CLOUD",
+                "version": 1,
+                "source_id": "SRC-ASENT",
+                "description": "Prioritize when predicate controls a security-sensitive sink. Unsupported activation remains unresolved.",
+                "severity": "HIGH"
+              },
+              {
+                "id": "TRIG-DELAY",
+                "version": 1,
+                "source_id": "SRC-ASENT",
+                "description": "Prioritize when predicate controls a security-sensitive sink. Unsupported activation remains unresolved.",
+                "severity": "HIGH"
+              },
+              {
+                "id": "TRIG-ENV",
+                "version": 1,
+                "source_id": "SRC-ASENT",
+                "description": "Prioritize when predicate controls a security-sensitive sink. Unsupported activation remains unresolved.",
+                "severity": "HIGH"
+              },
+              {
+                "id": "TRIG-FILE",
+                "version": 1,
+                "source_id": "SRC-ASENT",
+                "description": "Prioritize when predicate controls a security-sensitive sink. Unsupported activation remains unresolved.",
+                "severity": "HIGH"
+              },
+              {
+                "id": "TRIG-HOST",
+                "version": 1,
+                "source_id": "SRC-ASENT",
+                "description": "Prioritize when predicate controls a security-sensitive sink. Unsupported activation remains unresolved.",
+                "severity": "HIGH"
+              },
+              {
+                "id": "TRIG-METADATA",
+                "version": 1,
+                "source_id": "SRC-ASENT",
+                "description": "Prioritize when predicate controls a security-sensitive sink. Unsupported activation remains unresolved.",
+                "severity": "HIGH"
+              },
+              {
+                "id": "TRIG-PLATFORM",
+                "version": 1,
+                "source_id": "SRC-ASENT",
+                "description": "Prioritize when predicate controls a security-sensitive sink. Unsupported activation remains unresolved.",
+                "severity": "HIGH"
+              },
+              {
+                "id": "TRIG-RESPONSE",
+                "version": 1,
+                "source_id": "SRC-ASENT",
+                "description": "Prioritize when predicate controls a security-sensitive sink. Unsupported activation remains unresolved.",
+                "severity": "HIGH"
+              },
+              {
+                "id": "TRIG-SANDBOX",
+                "version": 1,
+                "source_id": "SRC-ASENT",
+                "description": "Prioritize when predicate controls a security-sensitive sink. Unsupported activation remains unresolved.",
+                "severity": "HIGH"
+              },
+              {
+                "id": "TRIG-TIME",
+                "version": 1,
+                "source_id": "SRC-ASENT",
+                "description": "Prioritize when predicate controls a security-sensitive sink. Unsupported activation remains unresolved.",
+                "severity": "HIGH"
+              },
+              {
+                "id": "TRIG-USER",
+                "version": 1,
+                "source_id": "SRC-ASENT",
+                "description": "Prioritize when predicate controls a security-sensitive sink. Unsupported activation remains unresolved.",
+                "severity": "HIGH"
+              },
+              {
+                "id": "PYSEC-2026-3005.0",
+                "version": 1,
+                "source_id": "SRC-OSV",
+                "description": "Crafted PDF cross-reference metadata can prevent the reader from terminating. Fixed in 6.7.2.",
+                "severity": "LOW"
+              }
+            ],
+            "sources": [
+              {
+                "id": "SRC-ASENT",
+                "category": "sources",
+                "name": "ASENT curated program-analysis knowledge",
+                "severity": "INFO",
+                "description": "Bounded patterns and policies from the supplied project designs. Research hypotheses, not validated prevalence claims.",
+                "source_id": "SRC-ASENT",
+                "enabled": true,
+                "version": 1,
+                "updated_at": "2026-09-26T00:00:00+00:00",
+                "data": {
+                  "source_type": "ASENT curated rule",
+                  "reference": "docs/implementation-notes.md",
+                  "trust_class": "curated",
+                  "license_note": "Project-authored knowledge; inspect and evaluate",
+                  "retrieved_at": "2026-09-26T00:00:00+00:00"
+                }
+              },
+              {
+                "id": "SRC-LAB",
+                "category": "sources",
+                "name": "InvoiceHub controlled reproduction",
+                "severity": "INFO",
+                "description": "Only synthetic conditions and fake canary bytes; not evidence of an observed malicious package selection.",
+                "source_id": "SRC-LAB",
+                "enabled": true,
+                "version": 1,
+                "updated_at": "2026-09-26T00:00:00+00:00",
+                "data": {
+                  "source_type": "controlled reproduction",
+                  "reference": "scenarios/cavr_controlled/invoice_pdf_lab.py",
+                  "trust_class": "controlled",
+                  "license_note": "Project-authored inert fixture",
+                  "retrieved_at": "2026-09-26T00:00:00+00:00"
+                }
+              },
+              {
+                "id": "SRC-OSV",
+                "category": "sources",
+                "name": "OSV public vulnerability data",
+                "severity": "INFO",
+                "description": "Imported responses retain query, source URL, retrieval date and digest.",
+                "source_id": "SRC-OSV",
+                "enabled": true,
+                "version": 1,
+                "updated_at": "2026-09-26T00:00:00+00:00",
+                "data": {
+                  "source_type": "OSV",
+                  "reference": "https://google.github.io/osv.dev/api/",
+                  "trust_class": "public advisory",
+                  "license_note": "Advisories retain upstream source/license; attribution preserved",
+                  "retrieved_at": "2026-09-26T00:00:00+00:00"
+                }
+              }
+            ],
+            "role": "Supporting reusable knowledge, combined with observed evidence and independent project obligations"
+          }
+        },
+        "created_at": "2026-11-21T09:52:21.115248+00:00",
+        "duration_ms": 1697.34,
+        "reused_from": null,
+        "content_hash": "43bcb69595bf91aef71b9eb68cb626d80edd9e0fba4eb051ed7b97ced734883d",
+        "integrity_valid": true,
+        "stale": false
+      }
+    ],
+    "evidence_state": [
+      {
+        "evidence_id": "be1f04f02bb34dda96fdf8af13d75c13",
+        "module": "CAVR",
+        "snapshot": "adee5a06777a31b8051cb052d4898ebb51eb475660b4704f16290896949b52c3",
+        "stale": false,
+        "integrity_valid": true
+      }
+    ],
+    "obligations_evaluated": [
+      {
+        "module": "CAVR",
+        "status": "VERIFIED",
+        "candidate_snapshot": "adee5a06777a31b8051cb052d4898ebb51eb475660b4704f16290896949b52c3",
+        "input_hash": "57b042962393bf3265fea93e0080eff94e9d48bbb05b4927099726c7e77b40e4",
+        "stale": false
+      }
+    ],
+    "capability_obligations": [
+      {
+        "package": "pypdf",
+        "required": [],
+        "denied": [
+          {
+            "capability": "DYNAMIC_DOWNLOAD",
+            "source": "not granted by the policy (default deny)"
+          },
+          {
+            "capability": "DYNAMIC_EXECUTION",
+            "source": "not granted by the policy (default deny)"
+          },
+          {
+            "capability": "NATIVE_EXEC",
+            "source": "rule CAP-PDF-001 denies it for the task 'pdf extraction'"
+          },
+          {
+            "capability": "NETWORK_CONNECT",
+            "source": "policy allowed_scopes: NETWORK_CONNECT:none"
+          },
+          {
+            "capability": "PERSISTENCE_WRITE",
+            "source": "rule CAP-PDF-001 denies it for the task 'pdf extraction'"
+          },
+          {
+            "capability": "PROCESS_EXEC",
+            "source": "policy allowed_scopes: PROCESS_EXEC:none"
+          },
+          {
+            "capability": "SECRET_READ",
+            "source": "rule CAP-PDF-001 denies it for the task 'pdf extraction'"
+          },
+          {
+            "capability": "SENSITIVE_FILE_READ",
+            "source": "not granted by the policy (default deny)"
+          }
+        ],
+        "confidence": null,
+        "authority": "project call sites + policy allowed_scopes + threat-repository capability rules"
+      }
+    ],
+    "dependency_use_attributions": [],
+    "discovered_triggers": [],
+    "triggered_conditions": [],
+    "exercised_conditions": [],
+    "unresolved_conditions": [],
+    "artifact_identifiers": [
+      {
+        "package": "pypdf",
+        "version": "6.19.0",
+        "sha256": "7e5d6e730e7dae87d560a2cee218b852f6498c8be61966f3cd02ead971e48d14",
+        "artifact": null,
+        "snapshot": "adee5a06777a31b8051cb052d4898ebb51eb475660b4704f16290896949b52c3"
+      }
+    ],
+    "execution_modes": [],
+    "observed_security_events": [],
+    "causal_evidence": [],
+    "repair_outcomes": [],
+    "verification_result": "ACCEPT",
+    "residual_uncertainty": [
+      "M1 fast gate: artifact hash, dependency tree, advisories, capability contract and AST sink scan; no deep runtime analysis (M2)"
+    ],
+    "threat_repository": {
+      "schema_version": "asent.threat-repository.v1",
+      "revision": 1,
+      "version": "TR-2026.11.21.001",
+      "digest": "392eb4455aa9fa6f7079d73988f3992918abdb75252f2c1d812d54f9829e5d00",
+      "rule_set_digest": "54ae0e81c0d295fd2fb75819a2fec186e5f8fb33543ce416e8cb1967ae2bf76d",
+      "updated_at": "2026-11-21T09:52:19.365562+00:00",
+      "module_digests": {
+        "CAVR": "fddee57c3f5c1ea75ecdc48d3419f1142648aa90b9960f2ff04f814badd385cf",
+        "SATRA": "7cc9d41b731f4be959a93d82ac194f66b6015b3aef8df98b4a45b29d6bff5686",
+        "SABLE": "527350add0b27d0d176dc7e839c85f27945ec07c76ffa26e4e33e09301c0cb31"
+      }
+    },
+    "config": {
+      "digest": "f42117f159cbaf6be16670d6275f30bad0723e7b55ea47f6d099e3868c6901d8",
+      "source": "/tmp/asent-gate-3bte1o9i/exports/44a6f24d4515/base/.asent",
+      "problems": [],
+      "changed_in_head": false
+    },
+    "coverage": {
+      "CAVR": {
+        "inputs_present": true,
+        "state": "enabled",
+        "assessed": true,
+        "label": "assessed",
+        "reason": null
+      },
+      "SATRA": {
+        "inputs_present": true,
+        "state": "disabled",
+        "assessed": false,
+        "label": "not assessed (disabled by base config)",
+        "reason": "not part of this test"
+      },
+      "SABLE": {
+        "inputs_present": false,
+        "state": "disabled",
+        "assessed": false,
+        "label": "not assessed (disabled by base config)",
+        "reason": "not part of this test"
+      }
+    },
+    "chain_valid": true,
+    "event_count": 10,
+    "bounded_claim": "Applicable supported obligations only. Source labels distinguish controlled demonstrations from observed agent events. No benchmark superiority or universal safety claim."
+  }
+}
