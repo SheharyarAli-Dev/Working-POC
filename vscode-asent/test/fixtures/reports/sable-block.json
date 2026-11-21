@@ -1,15 +1,15 @@
 {
   "schema": "asent.gate.v1",
   "asent_version": "1.0.0",
-  "generated_at": "2026-11-21T09:52:52.768152+00:00",
-  "repository": "/tmp/asent-fixture-sable-block-chnn7igs/repo",
+  "generated_at": "2026-11-21T10:37:40.849735+00:00",
+  "repository": "/workspace/project",
   "base": {
-    "ref": "c2c58bed5fa5439c5885380cb1b4c63c8b808468",
-    "sha": "c2c58bed5fa5439c5885380cb1b4c63c8b808468"
+    "ref": "9a48083b257692f2ab708683c7fd4bf85122bd96",
+    "sha": "9a48083b257692f2ab708683c7fd4bf85122bd96"
   },
   "head": {
-    "ref": "a25d875a146f78d5cce2177dc33f6bc81832c51f",
-    "sha": "a25d875a146f78d5cce2177dc33f6bc81832c51f"
+    "ref": "396dae12a6a6709fcb1c04aabffadd235792e947",
+    "sha": "396dae12a6a6709fcb1c04aabffadd235792e947"
   },
   "decision": "BLOCK",
   "exit_code": 1,
@@ -45,12 +45,12 @@
       "state": "enabled",
       "inputs_present": true,
       "reason": "invoice-data: REGRESSED: Missing, widened or misbound role-to-asset authorization",
-      "evidence_id": "fb08f9c4caad461ab67ef87d621e7e2f"
+      "evidence_id": "4f5715382fc64ecea01019674a6ef908"
     }
   },
   "config": {
     "digest": "b48498d840cc7ca79eecc702aaef2e5faabc9eec0bd68f89c06f287ad951ff6a",
-    "source": "base commit c2c58bed5fa5439c5885380cb1b4c63c8b808468: .asent/",
+    "source": "base commit 9a48083b257692f2ab708683c7fd4bf85122bd96: .asent/",
     "problems": [],
     "changed_in_head": false
   },
@@ -90,13 +90,13 @@
     "bpftrace": false
   },
   "data_dir": null,
-  "run_id": "b80e78cc8b74",
+  "run_id": "b0c98da23f4a",
   "assurance": {
     "schema": "asent.assurance.v1",
     "run": {
-      "run_id": "b80e78cc8b74",
-      "created_at": "2026-11-21T09:52:52.789778+00:00",
-      "title": "ASENT gate c2c58bed5fa5439c5885380cb1b4c63c8b808468 -> a25d875a146f78d5cce2177dc33f6bc81832c51f",
+      "run_id": "b0c98da23f4a",
+      "created_at": "2026-11-21T10:37:40.889162+00:00",
+      "title": "ASENT gate 9a48083b257692f2ab708683c7fd4bf85122bd96 -> 396dae12a6a6709fcb1c04aabffadd235792e947",
       "scenario": "gate",
       "mode": "gate",
       "evidence_source": "GATE: base -> head",
@@ -106,10 +106,10 @@
       "policy_digest": "25e5971f569010ef94902ea45d02ede196b76f82ffbbafb146715612b50247d7",
       "threat_repo_version": "TR-2026.11.21.001",
       "threat_repo_digest": "392eb4455aa9fa6f7079d73988f3992918abdb75252f2c1d812d54f9829e5d00",
-      "baseline_commit": "a8e1567178587368686fa23bca54f31e7373c392",
+      "baseline_commit": "b28ccdc94b0915d8b7d7826644b8b67ad5de240e",
       "candidate_snapshot": "f266fba258c771c52791f4b2195ade44ac2a60b9a78484afef53cedca447dc41",
-      "candidate_workspace": "/tmp/asent-gate-xrffhwzz/runtime/workspaces/b80e78cc8b74/candidate",
-      "baseline_workspace": "/tmp/asent-gate-xrffhwzz/runtime/workspaces/b80e78cc8b74/baseline",
+      "candidate_workspace": "/tmp/asent-gate-run/runtime/workspaces/b0c98da23f4a/candidate",
+      "baseline_workspace": "/tmp/asent-gate-run/runtime/workspaces/b0c98da23f4a/baseline",
       "changed_surfaces": {
         "SABLE": [
           "infra/main.tf",
@@ -117,7 +117,7 @@
         ]
       },
       "module_evidence_ids": {
-        "SABLE": "fb08f9c4caad461ab67ef87d621e7e2f"
+        "SABLE": "4f5715382fc64ecea01019674a6ef908"
       },
       "applicable": [
         "SABLE"
@@ -132,7 +132,7 @@
       "clean_workspace": null,
       "error": null,
       "config_digest": "b48498d840cc7ca79eecc702aaef2e5faabc9eec0bd68f89c06f287ad951ff6a",
-      "config_source": "/tmp/asent-gate-xrffhwzz/exports/37827c159886/base/.asent",
+      "config_source": "/tmp/asent-gate-run/exports/f272ec6dbcda/base/.asent",
       "config_problems": [],
       "config_changed_in_head": false,
       "coverage": {
@@ -159,22 +159,22 @@
         }
       },
       "gate": {
-        "repository": "/tmp/asent-fixture-sable-block-chnn7igs/repo",
+        "repository": "/workspace/project",
         "base": {
-          "ref": "c2c58bed5fa5439c5885380cb1b4c63c8b808468",
-          "sha": "c2c58bed5fa5439c5885380cb1b4c63c8b808468"
+          "ref": "9a48083b257692f2ab708683c7fd4bf85122bd96",
+          "sha": "9a48083b257692f2ab708683c7fd4bf85122bd96"
         },
         "head": {
-          "ref": "a25d875a146f78d5cce2177dc33f6bc81832c51f",
-          "sha": "a25d875a146f78d5cce2177dc33f6bc81832c51f"
+          "ref": "396dae12a6a6709fcb1c04aabffadd235792e947",
+          "sha": "396dae12a6a6709fcb1c04aabffadd235792e947"
         }
       }
     },
     "project_candidate_snapshot": "f266fba258c771c52791f4b2195ade44ac2a60b9a78484afef53cedca447dc41",
     "evidence": [
       {
-        "evidence_id": "fb08f9c4caad461ab67ef87d621e7e2f",
-        "run_id": "b80e78cc8b74",
+        "evidence_id": "4f5715382fc64ecea01019674a6ef908",
+        "run_id": "b0c98da23f4a",
         "analyzer": "SABLE",
         "analyzer_version": "1.0.0",
         "threat_repo_version": "TR-2026.11.21.001",
@@ -192,7 +192,7 @@
           "infra/modules/storage/main.tf"
         ],
         "evidence_refs": [
-          "/tmp/asent-gate-xrffhwzz/runtime/evidence/b80e78cc8b74/1-analysis-SABLE"
+          "/tmp/asent-gate-run/runtime/evidence/b0c98da23f4a/1-analysis-SABLE"
         ],
         "details": {
           "mode": "configured",
@@ -482,17 +482,17 @@
             "role": "Supporting reusable knowledge, combined with observed evidence and independent project obligations"
           }
         },
-        "created_at": "2026-11-21T09:52:53.123633+00:00",
-        "duration_ms": 294.12,
+        "created_at": "2026-11-21T10:37:41.304265+00:00",
+        "duration_ms": 361.83,
         "reused_from": null,
-        "content_hash": "ca184094be2cd705a9b564d8a929ea9976ebb9f5b53c76814d3434d395af9f02",
+        "content_hash": "662ba61283b23f9aad23120ff4107350619da0032cd21a87877e251f05677e4f",
         "integrity_valid": true,
         "stale": false
       }
     ],
     "evidence_state": [
       {
-        "evidence_id": "fb08f9c4caad461ab67ef87d621e7e2f",
+        "evidence_id": "4f5715382fc64ecea01019674a6ef908",
         "module": "SABLE",
         "snapshot": "f266fba258c771c52791f4b2195ade44ac2a60b9a78484afef53cedca447dc41",
         "stale": false,
@@ -529,7 +529,7 @@
       "version": "TR-2026.11.21.001",
       "digest": "392eb4455aa9fa6f7079d73988f3992918abdb75252f2c1d812d54f9829e5d00",
       "rule_set_digest": "54ae0e81c0d295fd2fb75819a2fec186e5f8fb33543ce416e8cb1967ae2bf76d",
-      "updated_at": "2026-11-21T09:52:52.788723+00:00",
+      "updated_at": "2026-11-21T10:37:40.885534+00:00",
       "module_digests": {
         "CAVR": "fddee57c3f5c1ea75ecdc48d3419f1142648aa90b9960f2ff04f814badd385cf",
         "SATRA": "7cc9d41b731f4be959a93d82ac194f66b6015b3aef8df98b4a45b29d6bff5686",
@@ -538,7 +538,7 @@
     },
     "config": {
       "digest": "b48498d840cc7ca79eecc702aaef2e5faabc9eec0bd68f89c06f287ad951ff6a",
-      "source": "/tmp/asent-gate-xrffhwzz/exports/37827c159886/base/.asent",
+      "source": "/tmp/asent-gate-run/exports/f272ec6dbcda/base/.asent",
       "problems": [],
       "changed_in_head": false
     },

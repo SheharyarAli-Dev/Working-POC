@@ -23,5 +23,23 @@ serve for both `gate --json` and `report --json`.
 
 CAVR's PyPI and OSV answers in these runs are the recorded real answers the gate tests use
 (`tests/test_cavr_support.py`: the real pypdf 6.19.0 wheel and registry response), so no network was
-needed. Paths inside the files (`/tmp/asent-fixture-…`, the ASENT checkout) are those of the machine
-that ran the generator.
+needed.
+
+## Neutral paths (the only edit)
+
+Before a file is written, `neutral()` in the generator replaces the paths of the machine that ran it with
+placeholders. Nothing else is changed: same keys, same order, same numbers, booleans, SHAs and digests.
+
+| Real path | Placeholder |
+|---|---|
+| the scenario's throwaway repository (`/tmp/asent-fixture-<name>-<random>/repo`) | `/workspace/project` |
+| the scenario's temp folder itself | `/workspace` |
+| asent's own temp folders (`/tmp/asent-gate-<random>`, any `tempfile.mkdtemp` name) | `/tmp/asent-gate-run` (same prefix + `run`) |
+| the ASENT checkout or install (`ASENT_HOME`) | `/opt/asent` |
+| the home folder | `/home/user` |
+
+Only whole path segments are replaced, inside JSON string values and keys. If any machine path (or the user
+name) is still found afterwards the generator writes nothing. `test/unit/fixtures.test.ts` checks the
+committed files. One consequence: hashes that asent computed over a record that contains a path (for example
+an evidence record's `content_hash`) were computed over the original path and do not re-verify against the
+edited text. The extension never verifies them; it only displays the report.

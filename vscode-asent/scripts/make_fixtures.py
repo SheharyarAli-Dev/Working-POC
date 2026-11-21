@@ -21,6 +21,13 @@ CAVR's PyPI and OSV answers are the recorded real answers the gate tests use (re
 and registry response, `tests/test_cavr_support.py`), so these runs need no network. SATRA runs the
 trusted tests in real containers. A scenario whose result is not the expected one is an error and
 writes nothing, so a fixture can never carry a decision its name does not say.
+
+Machine paths are replaced by neutral placeholders before writing (`neutral`), and nothing else is
+changed: the scenario's repository -> /workspace/project, its temp folder -> /workspace, asent's own temp
+folders (`/tmp/asent-gate-<random>` and the like) -> `/tmp/asent-gate-run`, the ASENT checkout ->
+/opt/asent, the home folder -> /home/user. Only JSON string values (and keys) are edited, on path-segment
+boundaries; numbers, booleans, structure, digests and SHAs stay exactly as asent wrote them. A file in
+which a machine path is still found afterwards is not written.
 """
 from __future__ import annotations
 
@@ -28,6 +35,8 @@ import argparse
 import contextlib
 import io
 import json
+import os
+import re
 import shutil
 import sys
 import tempfile
@@ -139,6 +148,53 @@ def dashboard(work, monkeypatch):
     return json.loads(json.dumps(dash.info(dash.DEFAULT_PORT)))  # cli.dashboard_command prints json.dumps(info(port))
 
 
+def _placeholders(work: Path):
+    """(regex, placeholder) pairs, longest original first, each matching only a whole path segment."""
+    pairs = {}
+    for path in {work, work.resolve()}:
+        pairs[str(path / "repo")] = "/workspace/project"
+        pairs[str(path)] = "/workspace"
+    for path in {ROOT, ROOT.resolve()}:
+        pairs[str(path)] = "/opt/asent"
+    home = Path.home()
+    for path in {home, home.resolve()}:
+        pairs[str(path)] = "/home/user"
+    ordered = sorted(pairs.items(), key=lambda item: len(item[0]), reverse=True)
+    rules = [(re.compile(re.escape(old) + r"(?=/|$|[^\w.-])"), new) for old, new in ordered]
+    # tempfile.mkdtemp folders that asent itself makes (prefix + 8 random characters), e.g. /tmp/asent-gate-ab12cd_3
+    tmp = re.escape(tempfile.gettempdir())
+    rules.append((re.compile(tmp + r"/([A-Za-z][\w.]*(?:-[A-Za-z][\w.]*)*-)[a-z0-9_]{8}(?=/|$|[^\w.-])"),
+                  tempfile.gettempdir() + r"/\1run"))
+    return rules
+
+
+def neutral(value, work: Path):
+    """The same JSON value with machine paths replaced by placeholders (see the module docstring)."""
+    rules = _placeholders(work)
+
+    def text(s: str) -> str:
+        for pattern, new in rules:
+            s = pattern.sub(new, s)
+        return s
+
+    def walk(v):
+        if isinstance(v, str):
+            return text(v)
+        if isinstance(v, list):
+            return [walk(x) for x in v]
+        if isinstance(v, dict):
+            return {text(k): walk(x) for k, x in v.items()}
+        return v
+
+    result = walk(value)
+    dump = json.dumps(result)
+    left = [s for s in {str(work), str(work.resolve()), str(ROOT), str(Path.home()), os.environ.get("USER") or "\0"}
+            if s and re.search(r"(?<![\w.-])" + re.escape(s) + r"(?=/|$|[^\w.-])", dump)]
+    if left:
+        raise ScenarioError(f"machine paths still present after neutral(): {left}")
+    return result
+
+
 SCENARIOS = {"accept": accept, "cavr-block": cavr_block, "review": review, "sable-block": sable_block, "satra-block": satra_block,
              "doctor": doctor, "init": init, "dashboard": dashboard}
 FOLDER = {"doctor": "doctor", "init": "init", "dashboard": "dashboard"}
@@ -153,7 +209,7 @@ def main(argv=None):
     for name in args.only or [n for n in SCENARIOS if n != "satra-block"]:
         with tempfile.TemporaryDirectory(prefix=f"asent-fixture-{name}-") as work, pytest.MonkeyPatch.context() as mp:
             try:
-                value = SCENARIOS[name](Path(work), mp)
+                value = neutral(SCENARIOS[name](Path(work), mp), Path(work))
             except ScenarioError as exc:
                 print(f"{name}: NOT WRITTEN: {exc}", file=sys.stderr)
                 failed = True

@@ -1,5 +1,5 @@
 {
-  "asent_dir": "/tmp/asent-fixture-init-fepw1thj/repo/.asent",
+  "asent_dir": "/workspace/project/.asent",
   "files": [
     ".asent/config.json",
     ".asent/cavr/policy.json",

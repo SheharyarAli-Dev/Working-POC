@@ -2,15 +2,15 @@
   "schema": "asent.doctor.v1",
   "version": "1.0.0",
   "ready": false,
-  "assets": "/home/dell/Working-POC",
-  "data_dir": "/home/dell/Working-POC/runtime",
+  "assets": "/opt/asent",
+  "data_dir": "/opt/asent/runtime",
   "checks": [
     {
       "id": "python",
       "label": "Python",
       "status": "ok",
       "required": true,
-      "detail": "Python 3.14.4 (/home/dell/Working-POC/.venv/bin/python)",
+      "detail": "Python 3.14.4 (/opt/asent/.venv/bin/python)",
       "fix": null
     },
     {
@@ -18,7 +18,7 @@
       "label": "ASENT files (Dockerfiles, seccomp profile, lockfile, default policies)",
       "status": "ok",
       "required": true,
-      "detail": "ASENT 1.0.0 at /home/dell/Working-POC/backend (source checkout)",
+      "detail": "ASENT 1.0.0 at /opt/asent/backend (source checkout)",
       "fix": null
     },
     {
@@ -51,7 +51,7 @@
       "status": "skipped",
       "required": true,
       "detail": "not checked: the Docker daemon is not reachable",
-      "fix": "When Docker works, build it: docker build -t asent-sandbox:local -f /home/dell/Working-POC/docker/sandbox.Dockerfile /home/dell/Working-POC"
+      "fix": "When Docker works, build it: docker build -t asent-sandbox:local -f /opt/asent/docker/sandbox.Dockerfile /opt/asent"
     },
     {
       "id": "image:asent-satra-runner:local",
@@ -59,7 +59,7 @@
       "status": "skipped",
       "required": true,
       "detail": "not checked: the Docker daemon is not reachable",
-      "fix": "When Docker works, build it: docker build -t asent-satra-runner:local -f /home/dell/Working-POC/docker/satra-runner.Dockerfile /home/dell/Working-POC/docker"
+      "fix": "When Docker works, build it: docker build -t asent-satra-runner:local -f /opt/asent/docker/satra-runner.Dockerfile /opt/asent/docker"
     },
     {
       "id": "dashboard-ui",

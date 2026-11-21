@@ -1,15 +1,15 @@
 {
   "schema": "asent.gate.v1",
   "asent_version": "1.0.0",
-  "generated_at": "2026-11-21T09:52:22.028089+00:00",
-  "repository": "/tmp/asent-fixture-cavr-block-1qee90_6/repo",
+  "generated_at": "2026-11-21T10:37:35.717669+00:00",
+  "repository": "/workspace/project",
   "base": {
-    "ref": "a1c8c1d3fe951e9cee0de100d58ca4f075a6b46b",
-    "sha": "a1c8c1d3fe951e9cee0de100d58ca4f075a6b46b"
+    "ref": "7718bd845147a57e92f9ff822219bc401cdb527f",
+    "sha": "7718bd845147a57e92f9ff822219bc401cdb527f"
   },
   "head": {
-    "ref": "8b9617eadac2085dda0543c5c172803ea86941a9",
-    "sha": "8b9617eadac2085dda0543c5c172803ea86941a9"
+    "ref": "802f193b395b181c74d66e5e6ad8b35032076beb",
+    "sha": "802f193b395b181c74d66e5e6ad8b35032076beb"
   },
   "decision": "BLOCK",
   "exit_code": 1,
@@ -25,7 +25,7 @@
       "state": "enabled",
       "inputs_present": true,
       "reason": "requirements.txt: BLOCK DENYLIST: reqeusts is on the project denylist: typosquat of requests",
-      "evidence_id": "b89a682791d84efe9ca47374d5bd105f"
+      "evidence_id": "0fed31fe72c54aacb9ddc37cf1ebde7f"
     },
     "SATRA": {
       "result": "not assessed (disabled by base config)",
@@ -50,7 +50,7 @@
   },
   "config": {
     "digest": "f42117f159cbaf6be16670d6275f30bad0723e7b55ea47f6d099e3868c6901d8",
-    "source": "base commit a1c8c1d3fe951e9cee0de100d58ca4f075a6b46b: .asent/",
+    "source": "base commit 7718bd845147a57e92f9ff822219bc401cdb527f: .asent/",
     "problems": [],
     "changed_in_head": false
   },
@@ -90,13 +90,13 @@
     "bpftrace": false
   },
   "data_dir": null,
-  "run_id": "430846c978af",
+  "run_id": "594de2af1f8e",
   "assurance": {
     "schema": "asent.assurance.v1",
     "run": {
-      "run_id": "430846c978af",
-      "created_at": "2026-11-21T09:52:22.053237+00:00",
-      "title": "ASENT gate a1c8c1d3fe951e9cee0de100d58ca4f075a6b46b -> 8b9617eadac2085dda0543c5c172803ea86941a9",
+      "run_id": "594de2af1f8e",
+      "created_at": "2026-11-21T10:37:35.753015+00:00",
+      "title": "ASENT gate 7718bd845147a57e92f9ff822219bc401cdb527f -> 802f193b395b181c74d66e5e6ad8b35032076beb",
       "scenario": "gate",
       "mode": "gate",
       "evidence_source": "GATE: base -> head",
@@ -106,10 +106,10 @@
       "policy_digest": "c52ae07167b75abf844bb24b932e10a17a61bd970607be42a5fe3314b6be6a2c",
       "threat_repo_version": "TR-2026.11.21.001",
       "threat_repo_digest": "392eb4455aa9fa6f7079d73988f3992918abdb75252f2c1d812d54f9829e5d00",
-      "baseline_commit": "9b35e22a5ba5fc121511fd90c02e3473b695c748",
+      "baseline_commit": "005cac4c39738d125277749691d6ca66e0c9666a",
       "candidate_snapshot": "7a2d2762d14be6dfb303f0323a73948c4020259152474ff6932c551b6e8d4b0a",
-      "candidate_workspace": "/tmp/asent-gate-_vhvg8tp/runtime/workspaces/430846c978af/candidate",
-      "baseline_workspace": "/tmp/asent-gate-_vhvg8tp/runtime/workspaces/430846c978af/baseline",
+      "candidate_workspace": "/tmp/asent-gate-run/runtime/workspaces/594de2af1f8e/candidate",
+      "baseline_workspace": "/tmp/asent-gate-run/runtime/workspaces/594de2af1f8e/baseline",
       "changed_surfaces": {
         "CAVR": [
           "requirements.txt"
@@ -119,7 +119,7 @@
         ]
       },
       "module_evidence_ids": {
-        "CAVR": "b89a682791d84efe9ca47374d5bd105f"
+        "CAVR": "0fed31fe72c54aacb9ddc37cf1ebde7f"
       },
       "applicable": [
         "CAVR"
@@ -134,7 +134,7 @@
       "clean_workspace": null,
       "error": null,
       "config_digest": "f42117f159cbaf6be16670d6275f30bad0723e7b55ea47f6d099e3868c6901d8",
-      "config_source": "/tmp/asent-gate-_vhvg8tp/exports/2b5fded54202/base/.asent",
+      "config_source": "/tmp/asent-gate-run/exports/4003abda2d82/base/.asent",
       "config_problems": [],
       "config_changed_in_head": false,
       "coverage": {
@@ -161,22 +161,22 @@
         }
       },
       "gate": {
-        "repository": "/tmp/asent-fixture-cavr-block-1qee90_6/repo",
+        "repository": "/workspace/project",
         "base": {
-          "ref": "a1c8c1d3fe951e9cee0de100d58ca4f075a6b46b",
-          "sha": "a1c8c1d3fe951e9cee0de100d58ca4f075a6b46b"
+          "ref": "7718bd845147a57e92f9ff822219bc401cdb527f",
+          "sha": "7718bd845147a57e92f9ff822219bc401cdb527f"
         },
         "head": {
-          "ref": "8b9617eadac2085dda0543c5c172803ea86941a9",
-          "sha": "8b9617eadac2085dda0543c5c172803ea86941a9"
+          "ref": "802f193b395b181c74d66e5e6ad8b35032076beb",
+          "sha": "802f193b395b181c74d66e5e6ad8b35032076beb"
         }
       }
     },
     "project_candidate_snapshot": "7a2d2762d14be6dfb303f0323a73948c4020259152474ff6932c551b6e8d4b0a",
     "evidence": [
       {
-        "evidence_id": "b89a682791d84efe9ca47374d5bd105f",
-        "run_id": "430846c978af",
+        "evidence_id": "0fed31fe72c54aacb9ddc37cf1ebde7f",
+        "run_id": "594de2af1f8e",
         "analyzer": "CAVR",
         "analyzer_version": "1.0.0",
         "threat_repo_version": "TR-2026.11.21.001",
@@ -198,7 +198,7 @@
           "app/security.py"
         ],
         "evidence_refs": [
-          "/tmp/asent-gate-_vhvg8tp/runtime/evidence/430846c978af/1-analysis-CAVR"
+          "/tmp/asent-gate-run/runtime/evidence/594de2af1f8e/1-analysis-CAVR"
         ],
         "details": {
           "engine": "pipeline",
@@ -503,17 +503,17 @@
             "role": "Supporting reusable knowledge, combined with observed evidence and independent project obligations"
           }
         },
-        "created_at": "2026-11-21T09:52:22.110321+00:00",
-        "duration_ms": 6.46,
+        "created_at": "2026-11-21T10:37:35.822917+00:00",
+        "duration_ms": 6.27,
         "reused_from": null,
-        "content_hash": "a2fdc11d5ff473b6f60961e13ade1ac25adfb729e46ab4c31d8369dce498bda1",
+        "content_hash": "f23273b63b37cc468fa088e2beb3efdb0df68e0c95cc0df2e1daa388f3bceaaf",
         "integrity_valid": true,
         "stale": false
       }
     ],
     "evidence_state": [
       {
-        "evidence_id": "b89a682791d84efe9ca47374d5bd105f",
+        "evidence_id": "0fed31fe72c54aacb9ddc37cf1ebde7f",
         "module": "CAVR",
         "snapshot": "7a2d2762d14be6dfb303f0323a73948c4020259152474ff6932c551b6e8d4b0a",
         "stale": false,
@@ -551,7 +551,7 @@
       "version": "TR-2026.11.21.001",
       "digest": "392eb4455aa9fa6f7079d73988f3992918abdb75252f2c1d812d54f9829e5d00",
       "rule_set_digest": "54ae0e81c0d295fd2fb75819a2fec186e5f8fb33543ce416e8cb1967ae2bf76d",
-      "updated_at": "2026-11-21T09:52:22.052241+00:00",
+      "updated_at": "2026-11-21T10:37:35.750861+00:00",
       "module_digests": {
         "CAVR": "fddee57c3f5c1ea75ecdc48d3419f1142648aa90b9960f2ff04f814badd385cf",
         "SATRA": "7cc9d41b731f4be959a93d82ac194f66b6015b3aef8df98b4a45b29d6bff5686",
@@ -560,7 +560,7 @@
     },
     "config": {
       "digest": "f42117f159cbaf6be16670d6275f30bad0723e7b55ea47f6d099e3868c6901d8",
-      "source": "/tmp/asent-gate-_vhvg8tp/exports/2b5fded54202/base/.asent",
+      "source": "/tmp/asent-gate-run/exports/4003abda2d82/base/.asent",
       "problems": [],
       "changed_in_head": false
     },

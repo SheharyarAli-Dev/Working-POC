@@ -689,3 +689,61 @@ Claude Code wrote both texts. Verified by packaging (README included) and by che
 ### Supervisor Q&A prep
 
 - *How does someone install it?* Download the `asent-vscode-vsix` artifact and use "Install from VSIX"; in WSL, from the connected window.
+
+## Step 12 — Neutral machine paths in the fixtures (2026-11-21)
+
+Commit `test(vscode): neutral machine paths in the fixtures`.
+Unit tests on the staged tree: 66 passing, 6 pending. Python suite: run once after step 13 (Maryam's instruction for the two extra steps; result under step 13).
+Review: no reviewer pass was run for this step.
+
+### Ch 6 Implementation
+
+| File | Function | What it does |
+|---|---|---|
+| `vscode-asent/scripts/make_fixtures.py` | `_placeholders(work)` | Regex rules, longest original first, each matching only a whole path segment: scenario repository → `/workspace/project`, scenario temp folder → `/workspace`, ASENT checkout (`ROOT`) → `/opt/asent`, home → `/home/user`, and any `tempfile.mkdtemp` folder (`<tmp>/<prefix>-<8 random>`) → `<tmp>/<prefix>-run`. Both the path and its resolved form are covered. |
+| | `neutral(value, work)` | Applies the rules to every JSON string value and key; everything else is returned unchanged. Afterwards, if the scenario folder, `ROOT`, home or `$USER` is still found, raises `ScenarioError` and the file is not written. |
+| | `main` | Writes `neutral(scenario(...))`. |
+| `vscode-asent/test/fixtures/**/*.json` | | Regenerated (new real runs, so new SHAs, IDs and timings). |
+| `vscode-asent/test/fixtures/README.md` | | "Neutral paths (the only edit)" table and the `content_hash` caveat. |
+| `vscode-asent/test/unit/fixtures.test.ts` | | 3 tests over every committed fixture. |
+
+### Design decisions
+
+| Decision | Alternatives considered | Why |
+|---|---|---|
+| Edit only string values, on segment boundaries | Text search-and-replace on the JSON file | Cannot break JSON escaping or touch numbers, SHAs or digests; `/home/dell` cannot match inside `/home/dellx`. |
+| Refuse to write if a machine path is left | Warn | A fixture must never carry the machine's paths again silently. |
+| Keep asent's own run IDs (`exports/c8cb108cfb45`, `workspaces/…`) | Replace them too | They are asent's identifiers, not machine paths; the request was to keep everything else exactly. |
+| Placeholder `/tmp/asent-gate-run` keeps the prefix | One generic `/tmp/run` | Shows which asent temp folder it was. |
+
+### Requirements covered
+
+| Req | Acceptance check |
+|---|---|
+| Extra 1 | No home folder, checkout, scenario temp folder, user name or random temp suffix in any fixture (`fixtures.test.ts`); the placeholders are the documented ones. |
+
+### Ch 7 Test cases
+
+| Test ID | Purpose | Input | Expected | Result |
+|---|---|---|---|---|
+| VS-N1 | Fixtures present | `test/fixtures` | at least 7 JSON files | pass |
+| VS-N2 | No machine paths | every fixture | no `/home/<x>` other than `/home/user`, no `Working-POC`, `asent-fixture-`, `pytest-of-`, `/Users/`, no mkdtemp suffix | pass |
+| VS-N3 | Placeholders | `accept`, `init`, `doctor` | `/workspace/project`, `/workspace/project/.asent`, `/opt/asent`, `/tmp/asent-gate-run/…` | pass |
+| VS-N4 | Only strings change (manual check) | one real run each of `accept`, `sable-block`, `doctor`, compared before and after `neutral()` | 693/325/53 values; 8/7/6 changed, all strings, same keys | pass |
+| VS-N5 | Leftover check | (code path) machine string after rules | `ScenarioError`, nothing written | not separately tested (no Python test in scope; exercised by every regeneration) |
+
+### Defects found and fixed
+
+None in this step.
+
+### Known limitations / deferred
+
+- Hashes asent computed over records that contain paths (evidence `content_hash`, computed in `backend/db/storage.py` over the record body, which includes `evidence_refs`) were computed over the original paths and do not re-verify against the edited fixture. The extension does not verify them.
+
+### Tool disclosure (Ch 8.7)
+
+Claude Code wrote `neutral()`, regenerated the fixtures and wrote the test. Maryam asked for the change and chose the placeholder style. Verified by VS-N1–N4 and the unit suite.
+
+### Supervisor Q&A prep
+
+- *Are the fixtures still real output?* Yes: they come from real CLI runs; the only edit is the documented path placeholders, and a check showed every other value is unchanged.
