@@ -1,0 +1,572 @@
+{
+  "schema": "asent.gate.v1",
+  "asent_version": "1.0.0",
+  "generated_at": "2026-11-21T10:37:40.849735+00:00",
+  "repository": "/workspace/project",
+  "base": {
+    "ref": "9a48083b257692f2ab708683c7fd4bf85122bd96",
+    "sha": "9a48083b257692f2ab708683c7fd4bf85122bd96"
+  },
+  "head": {
+    "ref": "396dae12a6a6709fcb1c04aabffadd235792e947",
+    "sha": "396dae12a6a6709fcb1c04aabffadd235792e947"
+  },
+  "decision": "BLOCK",
+  "exit_code": 1,
+  "reasons": [
+    "SABLE: REGRESSED"
+  ],
+  "modules": {
+    "CAVR": {
+      "result": "not assessed (disabled by base config)",
+      "status": null,
+      "assessed": false,
+      "label": "not assessed (disabled by base config)",
+      "state": "disabled",
+      "inputs_present": false,
+      "reason": "not part of this test",
+      "evidence_id": null
+    },
+    "SATRA": {
+      "result": "not assessed (disabled by base config)",
+      "status": null,
+      "assessed": false,
+      "label": "not assessed (disabled by base config)",
+      "state": "disabled",
+      "inputs_present": false,
+      "reason": "not part of this test",
+      "evidence_id": null
+    },
+    "SABLE": {
+      "result": "block",
+      "status": "REGRESSED",
+      "assessed": true,
+      "label": "assessed",
+      "state": "enabled",
+      "inputs_present": true,
+      "reason": "invoice-data: REGRESSED: Missing, widened or misbound role-to-asset authorization",
+      "evidence_id": "4f5715382fc64ecea01019674a6ef908"
+    }
+  },
+  "config": {
+    "digest": "b48498d840cc7ca79eecc702aaef2e5faabc9eec0bd68f89c06f287ad951ff6a",
+    "source": "base commit 9a48083b257692f2ab708683c7fd4bf85122bd96: .asent/",
+    "problems": [],
+    "changed_in_head": false
+  },
+  "coverage": {
+    "CAVR": {
+      "inputs_present": false,
+      "state": "disabled",
+      "assessed": false,
+      "label": "not assessed (disabled by base config)",
+      "reason": "not part of this test"
+    },
+    "SATRA": {
+      "inputs_present": false,
+      "state": "disabled",
+      "assessed": false,
+      "label": "not assessed (disabled by base config)",
+      "reason": "not part of this test"
+    },
+    "SABLE": {
+      "inputs_present": true,
+      "state": "enabled",
+      "assessed": true,
+      "label": "assessed",
+      "reason": null
+    }
+  },
+  "tools": {
+    "git": true,
+    "strace": false,
+    "docker": false,
+    "podman": false,
+    "terraform": false,
+    "checkov": false,
+    "bandit": true,
+    "semgrep": false,
+    "ollama": false,
+    "bpftrace": false
+  },
+  "data_dir": null,
+  "run_id": "b0c98da23f4a",
+  "assurance": {
+    "schema": "asent.assurance.v1",
+    "run": {
+      "run_id": "b0c98da23f4a",
+      "created_at": "2026-11-21T10:37:40.889162+00:00",
+      "title": "ASENT gate 9a48083b257692f2ab708683c7fd4bf85122bd96 -> 396dae12a6a6709fcb1c04aabffadd235792e947",
+      "scenario": "gate",
+      "mode": "gate",
+      "evidence_source": "GATE: base -> head",
+      "agent_metadata": {},
+      "srs_digest": "12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126",
+      "approved_plan_digest": "12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126",
+      "policy_digest": "25e5971f569010ef94902ea45d02ede196b76f82ffbbafb146715612b50247d7",
+      "threat_repo_version": "TR-2026.11.21.001",
+      "threat_repo_digest": "392eb4455aa9fa6f7079d73988f3992918abdb75252f2c1d812d54f9829e5d00",
+      "baseline_commit": "b28ccdc94b0915d8b7d7826644b8b67ad5de240e",
+      "candidate_snapshot": "f266fba258c771c52791f4b2195ade44ac2a60b9a78484afef53cedca447dc41",
+      "candidate_workspace": "/tmp/asent-gate-run/runtime/workspaces/b0c98da23f4a/candidate",
+      "baseline_workspace": "/tmp/asent-gate-run/runtime/workspaces/b0c98da23f4a/baseline",
+      "changed_surfaces": {
+        "SABLE": [
+          "infra/main.tf",
+          "infra/modules/storage/main.tf"
+        ]
+      },
+      "module_evidence_ids": {
+        "SABLE": "4f5715382fc64ecea01019674a6ef908"
+      },
+      "applicable": [
+        "SABLE"
+      ],
+      "final_decision": "BLOCK",
+      "reasons": [
+        "SABLE: REGRESSED"
+      ],
+      "lifecycle": "COMPLETE",
+      "revision": 1,
+      "clean_commit": null,
+      "clean_workspace": null,
+      "error": null,
+      "config_digest": "b48498d840cc7ca79eecc702aaef2e5faabc9eec0bd68f89c06f287ad951ff6a",
+      "config_source": "/tmp/asent-gate-run/exports/f272ec6dbcda/base/.asent",
+      "config_problems": [],
+      "config_changed_in_head": false,
+      "coverage": {
+        "CAVR": {
+          "inputs_present": false,
+          "state": "disabled",
+          "assessed": false,
+          "label": "not assessed (disabled by base config)",
+          "reason": "not part of this test"
+        },
+        "SATRA": {
+          "inputs_present": false,
+          "state": "disabled",
+          "assessed": false,
+          "label": "not assessed (disabled by base config)",
+          "reason": "not part of this test"
+        },
+        "SABLE": {
+          "inputs_present": true,
+          "state": "enabled",
+          "assessed": true,
+          "label": "assessed",
+          "reason": null
+        }
+      },
+      "gate": {
+        "repository": "/workspace/project",
+        "base": {
+          "ref": "9a48083b257692f2ab708683c7fd4bf85122bd96",
+          "sha": "9a48083b257692f2ab708683c7fd4bf85122bd96"
+        },
+        "head": {
+          "ref": "396dae12a6a6709fcb1c04aabffadd235792e947",
+          "sha": "396dae12a6a6709fcb1c04aabffadd235792e947"
+        }
+      }
+    },
+    "project_candidate_snapshot": "f266fba258c771c52791f4b2195ade44ac2a60b9a78484afef53cedca447dc41",
+    "evidence": [
+      {
+        "evidence_id": "4f5715382fc64ecea01019674a6ef908",
+        "run_id": "b0c98da23f4a",
+        "analyzer": "SABLE",
+        "analyzer_version": "1.0.0",
+        "threat_repo_version": "TR-2026.11.21.001",
+        "threat_repo_digest": "392eb4455aa9fa6f7079d73988f3992918abdb75252f2c1d812d54f9829e5d00",
+        "threat_module_digest": "527350add0b27d0d176dc7e839c85f27945ec07c76ffa26e4e33e09301c0cb31",
+        "candidate_snapshot": "f266fba258c771c52791f4b2195ade44ac2a60b9a78484afef53cedca447dc41",
+        "input_hash": "3e34c0f8790dd3bdb6a0c1cff3a32ced05525aebee44942ad2f94c0d607caa17",
+        "status": "REGRESSED",
+        "blocking": true,
+        "residual_uncertainty": [
+          "invoice-data: Bounded inline IAM role/S3 object model; no deployed AWS state"
+        ],
+        "affected_files": [
+          "infra/main.tf",
+          "infra/modules/storage/main.tf"
+        ],
+        "evidence_refs": [
+          "/tmp/asent-gate-run/runtime/evidence/b0c98da23f4a/1-analysis-SABLE"
+        ],
+        "details": {
+          "mode": "configured",
+          "reason": "invoice-data: REGRESSED: Missing, widened or misbound role-to-asset authorization",
+          "obligations": [
+            {
+              "id": "invoice-data",
+              "terraform_dir": "infra",
+              "status": "REGRESSED",
+              "reason": "Missing, widened or misbound role-to-asset authorization",
+              "details": {
+                "baseline_graph": {
+                  "nodes": [
+                    {
+                      "id": "aws_s3_bucket.invoice_data",
+                      "type": "aws_s3_bucket"
+                    },
+                    {
+                      "id": "aws_iam_role.app",
+                      "type": "aws_iam_role"
+                    },
+                    {
+                      "id": "aws_iam_role_policy.invoice_access",
+                      "type": "aws_iam_role_policy"
+                    }
+                  ],
+                  "edges": [
+                    {
+                      "source": "aws_iam_role_policy.invoice_access",
+                      "target": "aws_iam_role.app",
+                      "relation": "references"
+                    },
+                    {
+                      "source": "aws_iam_role_policy.invoice_access",
+                      "target": "aws_s3_bucket.invoice_data",
+                      "relation": "references"
+                    }
+                  ]
+                },
+                "candidate_graph": {
+                  "nodes": [
+                    {
+                      "id": "aws_iam_role.app",
+                      "type": "aws_iam_role"
+                    },
+                    {
+                      "id": "aws_iam_role_policy.invoice_access",
+                      "type": "aws_iam_role_policy"
+                    },
+                    {
+                      "id": "module.storage.aws_s3_bucket.active_invoices",
+                      "type": "aws_s3_bucket"
+                    },
+                    {
+                      "id": "module.storage.aws_s3_bucket.archive_invoices",
+                      "type": "aws_s3_bucket"
+                    }
+                  ],
+                  "edges": [
+                    {
+                      "source": "aws_iam_role_policy.invoice_access",
+                      "target": "aws_iam_role.app",
+                      "relation": "references"
+                    },
+                    {
+                      "source": "aws_iam_role_policy.invoice_access",
+                      "target": "module.storage.aws_s3_bucket.archive_invoices",
+                      "relation": "references"
+                    }
+                  ]
+                },
+                "moves": [
+                  {
+                    "from": "aws_s3_bucket.invoice_data",
+                    "to": "module.storage.aws_s3_bucket.active_invoices"
+                  }
+                ],
+                "hypotheses": [
+                  {
+                    "address": "module.storage.aws_s3_bucket.active_invoices",
+                    "score": 28,
+                    "signals": [
+                      {
+                        "signal": "resource type",
+                        "weight": 1
+                      },
+                      {
+                        "signal": "explicit moved block",
+                        "weight": 10
+                      },
+                      {
+                        "signal": "physical bucket identity",
+                        "weight": 7
+                      },
+                      {
+                        "signal": "stable Asset attribute",
+                        "weight": 4
+                      },
+                      {
+                        "signal": "lifecycle role",
+                        "weight": 2
+                      },
+                      {
+                        "signal": "same exported application reference",
+                        "weight": 4
+                      }
+                    ],
+                    "references": [],
+                    "module": "module.storage."
+                  },
+                  {
+                    "address": "module.storage.aws_s3_bucket.archive_invoices",
+                    "score": 5,
+                    "signals": [
+                      {
+                        "signal": "resource type",
+                        "weight": 1
+                      },
+                      {
+                        "signal": "stable Asset attribute",
+                        "weight": 4
+                      }
+                    ],
+                    "references": [
+                      "aws_iam_role_policy.invoice_access"
+                    ],
+                    "module": "module.storage."
+                  }
+                ],
+                "obligation": {
+                  "principal": "aws_iam_role.app",
+                  "protected_asset": "aws_s3_bucket.invoice_data",
+                  "actions": [
+                    "s3:GetObject",
+                    "s3:PutObject"
+                  ],
+                  "authority": "trusted baseline + registered policy"
+                },
+                "parse_errors": [],
+                "baseline_verification": {
+                  "known": true,
+                  "holds": true,
+                  "expected_actions": [
+                    "s3:GetObject",
+                    "s3:PutObject"
+                  ],
+                  "actual_actions": [
+                    "s3:GetObject",
+                    "s3:PutObject"
+                  ],
+                  "expected_resource": "${aws_s3_bucket.invoice_data.arn}/*",
+                  "unexpected_resources": [],
+                  "grants": [
+                    {
+                      "policy": "aws_iam_role_policy.invoice_access",
+                      "actions": [
+                        "s3:GetObject",
+                        "s3:PutObject"
+                      ],
+                      "resources": [
+                        "${aws_s3_bucket.invoice_data.arn}/*"
+                      ],
+                      "effect": "Allow"
+                    }
+                  ],
+                  "reason": "Exact modeled least privilege holds"
+                },
+                "conflicts": [],
+                "successor": "module.storage.aws_s3_bucket.active_invoices",
+                "correspondence_reason": "Unique supported successor; resource-name similarity is not used",
+                "projected_authorization": {
+                  "known": true,
+                  "holds": false,
+                  "expected_actions": [
+                    "s3:GetObject",
+                    "s3:PutObject"
+                  ],
+                  "actual_actions": [
+                    "s3:GetObject",
+                    "s3:PutObject"
+                  ],
+                  "expected_resource": "${module.storage.aws_s3_bucket.active_invoices.arn}/*",
+                  "unexpected_resources": [
+                    "${module.storage.aws_s3_bucket.archive_invoices.arn}/*"
+                  ],
+                  "grants": [
+                    {
+                      "policy": "aws_iam_role_policy.invoice_access",
+                      "actions": [
+                        "s3:GetObject",
+                        "s3:PutObject"
+                      ],
+                      "resources": [
+                        "${module.storage.aws_s3_bucket.archive_invoices.arn}/*"
+                      ],
+                      "effect": "Allow"
+                    }
+                  ],
+                  "reason": "Missing, widened or misbound role-to-asset authorization"
+                },
+                "candidate_only": [
+                  {
+                    "asset": "module.storage.aws_s3_bucket.active_invoices",
+                    "local_predicate": false,
+                    "known": true
+                  },
+                  {
+                    "asset": "module.storage.aws_s3_bucket.archive_invoices",
+                    "local_predicate": true,
+                    "known": true
+                  }
+                ],
+                "optional_tools": [
+                  {
+                    "available": false,
+                    "tool": "terraform",
+                    "reason": "Optional backend unavailable"
+                  },
+                  {
+                    "available": false,
+                    "tool": "checkov",
+                    "reason": "Optional backend unavailable"
+                  }
+                ],
+                "reason": "Missing, widened or misbound role-to-asset authorization"
+              }
+            }
+          ],
+          "knowledge": {
+            "threat_repo_version": "TR-2026.11.21.001",
+            "digest": "392eb4455aa9fa6f7079d73988f3992918abdb75252f2c1d812d54f9829e5d00",
+            "module_digest": "527350add0b27d0d176dc7e839c85f27945ec07c76ffa26e4e33e09301c0cb31",
+            "rules": [
+              {
+                "id": "SABLE-S3IAM-001",
+                "version": 1,
+                "source_id": "SRC-AWS",
+                "description": "The original action/resource obligation must hold on a uniquely supported successor.",
+                "severity": "HIGH"
+              },
+              {
+                "id": "SABLE-SUCCESSOR-001",
+                "version": 1,
+                "source_id": "SRC-TERRAFORM",
+                "description": "Use multiple structural signals and explicit moves; do not use resource-name similarity as proof.",
+                "severity": "HIGH"
+              }
+            ],
+            "sources": [
+              {
+                "id": "SRC-AWS",
+                "category": "sources",
+                "name": "AWS S3 least privilege guidance",
+                "severity": "INFO",
+                "description": "Principal, action and resource relationships motivate the bounded model.",
+                "source_id": "SRC-AWS",
+                "enabled": true,
+                "version": 1,
+                "updated_at": "2026-09-26T00:00:00+00:00",
+                "data": {
+                  "source_type": "official advisory",
+                  "reference": "https://docs.aws.amazon.com/AmazonS3/latest/userguide/security-best-practices.html",
+                  "trust_class": "official documentation",
+                  "license_note": "Paraphrased rule; no documentation text redistributed",
+                  "retrieved_at": "2026-09-26T00:00:00+00:00"
+                }
+              },
+              {
+                "id": "SRC-TERRAFORM",
+                "category": "sources",
+                "name": "Terraform refactoring documentation",
+                "severity": "INFO",
+                "description": "Explicit moved blocks are one correspondence signal.",
+                "source_id": "SRC-TERRAFORM",
+                "enabled": true,
+                "version": 1,
+                "updated_at": "2026-09-26T00:00:00+00:00",
+                "data": {
+                  "source_type": "public tool",
+                  "reference": "https://developer.hashicorp.com/terraform/language/modules/develop/refactoring",
+                  "trust_class": "official documentation",
+                  "license_note": "Paraphrased semantics",
+                  "retrieved_at": "2026-09-26T00:00:00+00:00"
+                }
+              }
+            ],
+            "role": "Supporting reusable knowledge, combined with observed evidence and independent project obligations"
+          }
+        },
+        "created_at": "2026-11-21T10:37:41.304265+00:00",
+        "duration_ms": 361.83,
+        "reused_from": null,
+        "content_hash": "662ba61283b23f9aad23120ff4107350619da0032cd21a87877e251f05677e4f",
+        "integrity_valid": true,
+        "stale": false
+      }
+    ],
+    "evidence_state": [
+      {
+        "evidence_id": "4f5715382fc64ecea01019674a6ef908",
+        "module": "SABLE",
+        "snapshot": "f266fba258c771c52791f4b2195ade44ac2a60b9a78484afef53cedca447dc41",
+        "stale": false,
+        "integrity_valid": true
+      }
+    ],
+    "obligations_evaluated": [
+      {
+        "module": "SABLE",
+        "status": "REGRESSED",
+        "candidate_snapshot": "f266fba258c771c52791f4b2195ade44ac2a60b9a78484afef53cedca447dc41",
+        "input_hash": "3e34c0f8790dd3bdb6a0c1cff3a32ced05525aebee44942ad2f94c0d607caa17",
+        "stale": false
+      }
+    ],
+    "capability_obligations": [],
+    "dependency_use_attributions": [],
+    "discovered_triggers": [],
+    "triggered_conditions": [],
+    "exercised_conditions": [],
+    "unresolved_conditions": [],
+    "artifact_identifiers": [],
+    "execution_modes": [],
+    "observed_security_events": [],
+    "causal_evidence": [],
+    "repair_outcomes": [],
+    "verification_result": "BLOCK",
+    "residual_uncertainty": [
+      "invoice-data: Bounded inline IAM role/S3 object model; no deployed AWS state"
+    ],
+    "threat_repository": {
+      "schema_version": "asent.threat-repository.v1",
+      "revision": 1,
+      "version": "TR-2026.11.21.001",
+      "digest": "392eb4455aa9fa6f7079d73988f3992918abdb75252f2c1d812d54f9829e5d00",
+      "rule_set_digest": "54ae0e81c0d295fd2fb75819a2fec186e5f8fb33543ce416e8cb1967ae2bf76d",
+      "updated_at": "2026-11-21T10:37:40.885534+00:00",
+      "module_digests": {
+        "CAVR": "fddee57c3f5c1ea75ecdc48d3419f1142648aa90b9960f2ff04f814badd385cf",
+        "SATRA": "7cc9d41b731f4be959a93d82ac194f66b6015b3aef8df98b4a45b29d6bff5686",
+        "SABLE": "527350add0b27d0d176dc7e839c85f27945ec07c76ffa26e4e33e09301c0cb31"
+      }
+    },
+    "config": {
+      "digest": "b48498d840cc7ca79eecc702aaef2e5faabc9eec0bd68f89c06f287ad951ff6a",
+      "source": "/tmp/asent-gate-run/exports/f272ec6dbcda/base/.asent",
+      "problems": [],
+      "changed_in_head": false
+    },
+    "coverage": {
+      "CAVR": {
+        "inputs_present": false,
+        "state": "disabled",
+        "assessed": false,
+        "label": "not assessed (disabled by base config)",
+        "reason": "not part of this test"
+      },
+      "SATRA": {
+        "inputs_present": false,
+        "state": "disabled",
+        "assessed": false,
+        "label": "not assessed (disabled by base config)",
+        "reason": "not part of this test"
+      },
+      "SABLE": {
+        "inputs_present": true,
+        "state": "enabled",
+        "assessed": true,
+        "label": "assessed",
+        "reason": null
+      }
+    },
+    "chain_valid": true,
+    "event_count": 11,
+    "bounded_claim": "Applicable supported obligations only. Source labels distinguish controlled demonstrations from observed agent events. No benchmark superiority or universal safety claim."
+  }
+}

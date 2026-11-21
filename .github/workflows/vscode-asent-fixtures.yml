@@ -1,0 +1,40 @@
+# Manual only: writes the VS Code extension's SATRA BLOCK test fixture (and a doctor output from a machine
+# with Docker) from real asent runs, and uploads them as an artifact. Nothing is committed or pushed by
+# this workflow: download the artifact and commit vscode-asent/test/fixtures/reports/satra-block.json
+# yourself. SATRA needs Docker and its images, which is why this is not part of the extension's own CI.
+name: VS Code extension fixtures
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  fixtures:
+    name: Generate the SATRA BLOCK fixture with Docker
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements.lock.txt
+      - name: Install ASENT's Python dependencies
+        run: pip install -r requirements.lock.txt
+      - name: Build the sandbox and SATRA runner images
+        run: bash scripts/satra_build_sandbox.sh
+      - name: Require Docker and both images
+        run: |
+          docker info >/dev/null
+          docker image inspect asent-sandbox:local asent-satra-runner:local >/dev/null
+      - name: Run the real gate (SATRA BLOCK) and doctor
+        run: python vscode-asent/scripts/make_fixtures.py --out fixtures-out --only satra-block doctor
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vscode-asent-fixtures
+          path: fixtures-out/
+          if-no-files-found: error

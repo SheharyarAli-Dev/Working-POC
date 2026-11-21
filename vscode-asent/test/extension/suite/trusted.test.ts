@@ -1,0 +1,183 @@
+// Extension test in a real VS Code, trusted folder, asent = test/stub/asent (replays real CLI outputs).
+import * as assert from "assert";
+import * as fs from "fs";
+import * as os from "os";
+import * as path from "path";
+import * as vscode from "vscode";
+import { api, calls, callsOf, hijacked, stub, stubOpenExternal, until, urlsThatReachedTheOs, FOLDER, ID, STUB, STUB_NAME } from "./helpers";
+
+const fixture = (name: string) => path.resolve(__dirname, "..", "..", "..", "..", "test", "fixtures", "reports", name);
+const requirements = vscode.Uri.file(path.join(FOLDER, "requirements.txt"));
+
+describe("ASENT extension (trusted folder)", () => {
+  let browser: ReturnType<typeof stubOpenExternal>;
+  before(() => {
+    stub({});
+    browser = stubOpenExternal(); // no test may open a real browser tab
+  });
+  after(() => browser.restore());
+
+  it("activates on its own because the folder has .asent/ (no command run yet)", async () => {
+    await until("activation", () => vscode.extensions.getExtension(ID)?.isActive === true);
+    assert.strictEqual(vscode.workspace.isTrusted, true);
+    assert.deepStrictEqual(calls(), [], "no asent call before a command, since there is no asent-report.json yet");
+    assert.strictEqual((await api()).state().statusText, "$(shield) ASENT");
+  });
+
+  it("contributes the six commands", async () => {
+    const all = await vscode.commands.getCommands(true);
+    for (const id of ["asent.init", "asent.gate", "asent.showReport", "asent.doctor", "asent.dashboard", "asent.stopDashboard"]) {
+      assert.ok(all.includes(id), id);
+    }
+  });
+
+  it("Run gate (CAVR BLOCK): argument array, status bar, Problems entry and panel", async () => {
+    stub({ gate: "cavr-block.json" });
+    await vscode.commands.executeCommand("asent.gate");
+    const gate = callsOf("gate").at(-1)!;
+    assert.deepStrictEqual(gate.argv, ["gate", "--json", `--output-dir=${FOLDER}`]);
+    assert.strictEqual(fs.realpathSync(gate.cwd), fs.realpathSync(FOLDER));
+    const state = (await api()).state();
+    assert.strictEqual(state.decision, "BLOCK");
+    assert.strictEqual(state.statusText, "$(shield) ASENT: BLOCK");
+    const diagnostics = vscode.languages.getDiagnostics(requirements);
+    assert.strictEqual(diagnostics.length, 1);
+    assert.strictEqual(diagnostics[0].severity, vscode.DiagnosticSeverity.Error);
+    assert.strictEqual(diagnostics[0].range.start.line, 0);
+    assert.strictEqual(diagnostics[0].source, "ASENT");
+    assert.match(diagnostics[0].message, /^CAVR BLOCK DENYLIST: reqeusts is on the project denylist/);
+    assert.match(state.panelHtml ?? "", /<h1>BLOCK<\/h1>/);
+    assert.match(state.panelHtml ?? "", /Content-Security-Policy" content="default-src 'none';/);
+    assert.ok(fs.existsSync(path.join(FOLDER, "asent-report.json")), "the stub wrote the report like asent does");
+  });
+
+  it("a second Run gate while one is running does not start another", async () => {
+    stub({ gate: "review.json", mode: "slow-gate" });
+    const before = callsOf("gate").length;
+    const first = vscode.commands.executeCommand("asent.gate");
+    await until("gate running", async () => (await api()).state().gateRunning);
+    assert.strictEqual((await api()).state().statusText, "$(sync~spin) ASENT: gate running");
+    await vscode.commands.executeCommand("asent.gate"); // returns at once: "already in progress"
+    await first;
+    assert.strictEqual(callsOf("gate").length, before + 1);
+    assert.strictEqual((await api()).state().decision, "REVIEW");
+    assert.deepStrictEqual(vscode.languages.getDiagnostics(requirements), [], "REVIEW report has no findings: old entries cleared");
+  });
+
+  it("the base branch setting becomes --base=<value>", async () => {
+    stub({ gate: "accept.json" });
+    const config = vscode.workspace.getConfiguration("asent");
+    await config.update("baseBranch", "develop", vscode.ConfigurationTarget.Workspace);
+    try {
+      await vscode.commands.executeCommand("asent.gate");
+      assert.deepStrictEqual(callsOf("gate").at(-1)!.argv, ["gate", "--json", `--output-dir=${FOLDER}`, "--base=develop"]);
+      assert.strictEqual((await api()).state().statusText, "$(shield) ASENT: ACCEPT");
+    } finally {
+      await config.update("baseBranch", undefined, vscode.ConfigurationTarget.Workspace);
+    }
+  });
+
+  it("Show report reads asent-report.json through asent report --json --file=, in the home folder", async () => {
+    await vscode.commands.executeCommand("asent.showReport");
+    assert.deepStrictEqual(callsOf("report").at(-1)!.argv, ["report", "--json", `--file=${path.join(FOLDER, "asent-report.json")}`]);
+    assert.strictEqual(fs.realpathSync(callsOf("report").at(-1)!.cwd), fs.realpathSync(os.homedir()));
+    assert.match((await api()).state().panelHtml ?? "", /<h1>ACCEPT<\/h1>/);
+  });
+
+  it("a report written by asent in a terminal updates the status bar (file watcher)", async () => {
+    fs.copyFileSync(fixture("sable-block.json"), path.join(FOLDER, "asent-report.json"));
+    await until("status bar shows BLOCK", async () => (await api()).state().statusText === "$(shield) ASENT: BLOCK");
+    assert.match((await api()).state().panelHtml ?? "", /invoice-data: REGRESSED/);
+  });
+
+  it('a report with "repository": "/" and file home/user/.ssh/config creates no Problems entry anywhere', async () => {
+    const json = JSON.parse(fs.readFileSync(fixture("cavr-block.json"), "utf8"));
+    json.repository = "/";
+    json.assurance.evidence.find((e: any) => e.evidence_id === json.modules.CAVR.evidence_id).details.pipeline[0].file = "home/user/.ssh/config";
+    fs.writeFileSync(path.join(FOLDER, "asent-report.json"), JSON.stringify(json));
+    await until("the panel shows the new report", async () => /<dt>Repository<\/dt><dd class="mono">\/<\/dd>/.test((await api()).state().panelHtml ?? ""));
+    const asent = vscode.languages.getDiagnostics().filter(([, list]) => list.some((d) => d.source === "ASENT"));
+    assert.deepStrictEqual(asent.map(([uri]) => uri.fsPath), []);
+  });
+
+  it("Doctor runs asent doctor --json in the home directory, not in the folder", async () => {
+    await vscode.commands.executeCommand("asent.doctor");
+    const doctor = callsOf("doctor").at(-1)!;
+    assert.deepStrictEqual(doctor.argv, ["doctor", "--json"]);
+    assert.strictEqual(fs.realpathSync(doctor.cwd), fs.realpathSync(os.homedir()));
+  });
+
+  it("Init passes the folder as --repository= (asent refuses: .asent/ exists)", async () => {
+    await vscode.commands.executeCommand("asent.init");
+    assert.deepStrictEqual(callsOf("init").at(-1)!.argv, ["init", "--json", `--repository=${FOLDER}`]);
+  });
+
+  it("Dashboard: opens the URL asent printed; one process; a second click says it is already running", async () => {
+    await vscode.commands.executeCommand("asent.dashboard");
+    assert.strictEqual((await api()).state().dashboardRunning, true);
+    assert.deepStrictEqual(browser.opened, ["http://127.0.0.1:8000/"], "the fixture's url, through the stubbed openExternal");
+    await vscode.commands.executeCommand("asent.dashboard");
+    assert.deepStrictEqual(callsOf("dashboard").map((c) => c.argv), [["dashboard", "--json"]]);
+    assert.deepStrictEqual(browser.opened, ["http://127.0.0.1:8000/"], "the second click opens nothing (its Open button is not clicked)");
+  });
+
+  it("Stop dashboard ends the process it started", async () => {
+    const pid = (await api()).state().dashboardPid;
+    assert.ok(pid, "the dashboard from the previous test is running");
+    await vscode.commands.executeCommand("asent.stopDashboard");
+    assert.strictEqual((await api()).state().dashboardRunning, false);
+    await until("the stub dashboard process exits", () => {
+      try {
+        process.kill(pid!, 0);
+        return false;
+      } catch {
+        return true;
+      }
+    });
+  });
+
+  it("Stop dashboard when none is running only says so; a new start works", async () => {
+    await vscode.commands.executeCommand("asent.stopDashboard");
+    assert.strictEqual((await api()).state().dashboardRunning, false);
+    await vscode.commands.executeCommand("asent.dashboard");
+    assert.strictEqual((await api()).state().dashboardRunning, true);
+    assert.strictEqual(callsOf("dashboard").length, 2);
+    assert.deepStrictEqual(browser.opened, ["http://127.0.0.1:8000/", "http://127.0.0.1:8000/"]);
+    await vscode.commands.executeCommand("asent.stopDashboard");
+    assert.strictEqual((await api()).state().dashboardRunning, false);
+  });
+
+  it("asent missing: the command ends with a message, it does not throw or hang", async () => {
+    const config = vscode.workspace.getConfiguration("asent");
+    await config.update("path", path.join(FOLDER, "no-such-asent"), vscode.ConfigurationTarget.Workspace);
+    try {
+      const before = calls().length;
+      await vscode.commands.executeCommand("asent.doctor");
+      assert.strictEqual(calls().length, before);
+    } finally {
+      await config.update("path", STUB, vscode.ConfigurationTarget.Workspace);
+    }
+  });
+
+  it("asent.path = a bare name: the stub further down PATH runs, never the folder's own one (first on PATH)", async () => {
+    const config = vscode.workspace.getConfiguration("asent");
+    await config.update("path", STUB_NAME, vscode.ConfigurationTarget.Workspace);
+    try {
+      const before = { report: callsOf("report").length, doctor: callsOf("doctor").length };
+      await vscode.commands.executeCommand("asent.showReport");
+      await vscode.commands.executeCommand("asent.doctor");
+      assert.strictEqual(callsOf("report").length, before.report + 1, "the stub read the report");
+      assert.strictEqual(callsOf("doctor").length, before.doctor + 1, "the stub ran doctor");
+      assert.strictEqual(fs.realpathSync(callsOf("report").at(-1)!.cwd), fs.realpathSync(os.homedir()), "report runs in the home folder");
+      assert.strictEqual(hijacked(), false, "the workspace folder's asent ran");
+    } finally {
+      await config.update("path", STUB, vscode.ConfigurationTarget.Workspace);
+    }
+  });
+
+  it("no URL reached the operating system's browser opener", async () => {
+    await new Promise((r) => setTimeout(r, 500)); // an open would be asynchronous
+    assert.ok(process.env.ASENT_TEST_OPEN_LOG, "runTest.ts sets up the opener shims");
+    assert.deepStrictEqual(urlsThatReachedTheOs(), []);
+  });
+});

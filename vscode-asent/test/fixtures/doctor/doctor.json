@@ -1,0 +1,73 @@
+{
+  "schema": "asent.doctor.v1",
+  "version": "1.0.0",
+  "ready": false,
+  "assets": "/opt/asent",
+  "data_dir": "/opt/asent/runtime",
+  "checks": [
+    {
+      "id": "python",
+      "label": "Python",
+      "status": "ok",
+      "required": true,
+      "detail": "Python 3.14.4 (/opt/asent/.venv/bin/python)",
+      "fix": null
+    },
+    {
+      "id": "resources",
+      "label": "ASENT files (Dockerfiles, seccomp profile, lockfile, default policies)",
+      "status": "ok",
+      "required": true,
+      "detail": "ASENT 1.0.0 at /opt/asent/backend (source checkout)",
+      "fix": null
+    },
+    {
+      "id": "git",
+      "label": "git",
+      "status": "ok",
+      "required": true,
+      "detail": "git version 2.53.0",
+      "fix": null
+    },
+    {
+      "id": "docker",
+      "label": "Docker",
+      "status": "missing",
+      "required": true,
+      "detail": "Docker is not installed (no `docker` on PATH). Without it SATRA cannot run the project's tests in its sandbox, so an enabled SATRA is INCONCLUSIVE and the gate decides REVIEW (CAVR and SABLE gate checks do not need Docker).",
+      "fix": "Install Docker: https://docs.docker.com/get-docker/"
+    },
+    {
+      "id": "docker-daemon",
+      "label": "Docker daemon",
+      "status": "skipped",
+      "required": true,
+      "detail": "not checked: Docker is not installed",
+      "fix": "Install Docker first."
+    },
+    {
+      "id": "image:asent-sandbox:local",
+      "label": "Docker image asent-sandbox:local",
+      "status": "skipped",
+      "required": true,
+      "detail": "not checked: the Docker daemon is not reachable",
+      "fix": "When Docker works, build it: docker build -t asent-sandbox:local -f /opt/asent/docker/sandbox.Dockerfile /opt/asent"
+    },
+    {
+      "id": "image:asent-satra-runner:local",
+      "label": "Docker image asent-satra-runner:local",
+      "status": "skipped",
+      "required": true,
+      "detail": "not checked: the Docker daemon is not reachable",
+      "fix": "When Docker works, build it: docker build -t asent-satra-runner:local -f /opt/asent/docker/satra-runner.Dockerfile /opt/asent/docker"
+    },
+    {
+      "id": "dashboard-ui",
+      "label": "Dashboard UI",
+      "status": "warning",
+      "required": false,
+      "detail": "frontend/dist is not built in this checkout, so `asent dashboard` serves the API only.",
+      "fix": "Install the wheel built by CI (artifact `asent-wheel`), which includes the UI; in a checkout run `npm ci --prefix frontend && npm run build --prefix frontend`."
+    }
+  ]
+}
