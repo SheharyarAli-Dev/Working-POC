@@ -588,3 +588,57 @@ Claude Code wrote the extension test. It compiles; it has not been run yet (see 
 ### Supervisor Q&A prep
 
 - *How is Workspace Trust tested?* A second VS Code run with trust enabled and the folder untrusted; the stub's argv log proves no gate, init or dashboard was started.
+
+## Step 10 — CI workflow, VSIX artifact and the manual fixtures workflow (2026-11-21)
+
+Commit `ci(vscode): test and package workflow, manual SATRA fixture workflow`.
+Unit tests on the staged tree: 63 passing, 6 pending. Full Python suite: 2201 passed, 20 skipped, 1 xfailed.
+Local packaging: `npm run package` → `asent-vscode.vsix` (12 files, 22.05 KB); the CI content check passes on it.
+Review: no reviewer pass was run for this step.
+
+### Ch 6 Implementation
+
+| File | What it does |
+|---|---|
+| `.github/workflows/vscode-asent.yml` | On push/PR touching `vscode-asent/**` (and manual): `npm ci`, `npm test`, `xvfb-run -a npm run test:extension`, `npm run package`, a check that the `.vsix` contains only `out/src/*.js`, `package.json`, `readme.md` and the two VSIX metadata files, and upload as artifact `asent-vscode-vsix`. `permissions: contents: read`, `persist-credentials: false`, actions pinned `@v4` like the existing workflows. No Python, no Docker. |
+| `.github/workflows/vscode-asent-fixtures.yml` | `workflow_dispatch` only, `contents: read`: Python 3.12 + `requirements.lock.txt`, `scripts/satra_build_sandbox.sh`, checks Docker and both images, `make_fixtures.py --only satra-block doctor`, uploads artifact `vscode-asent-fixtures`. Commits nothing. |
+| `vscode-asent/.vscodeignore` | Re-includes only `out/src/*.js`, `package.json`, `README.md`, `LICENSE`. |
+
+### Design decisions
+
+| Decision | Alternatives considered | Why |
+|---|---|---|
+| Fixtures workflow uploads, never commits | Commit from the workflow | Maryam's choice; read-only permissions; she reviews the file before it enters the repository. |
+| Tag pins (`@v4`, `@v5`) | Commit SHAs | V15: the same way the existing workflows pin. |
+| VSIX content check in CI | Trust `.vscodeignore` | The ignore file already had one wrong rule (below). |
+
+### Requirements covered
+
+| Req | Acceptance check |
+|---|---|
+| V8 | Workflow runs both test kinds and uploads the `.vsix`. |
+| V14 | Manual-only, read-only, uploads `satra-block.json`. |
+| V15 | `@v4`/`@v5` pins and `permissions: contents: read` in both. |
+
+### Ch 7 Test cases
+
+| Test ID | Purpose | Input | Expected | Result |
+|---|---|---|---|---|
+| VS-K1 | VSIX contents | local `npm run package` | 12 entries, only the allowed ones | pass |
+| VS-K2 | CI run | push of this branch | all steps green | not run (nothing is pushed) |
+
+### Defects found and fixed
+
+- `.vscodeignore` had `!out/src/**` and then `out/src/**/*.map`; vsce applies `!` re-includes after all excludes, so the source maps were still packaged (`vsce ls` listed 8 `.map` files). Now only `!out/src/*.js` is re-included, and CI checks the contents.
+
+### Known limitations / deferred
+
+- Neither workflow has run yet; the branch is not pushed.
+
+### Tool disclosure (Ch 8.7)
+
+Claude Code wrote both workflows and fixed `.vscodeignore`. Verified locally by `vsce ls`, `npm run package` and the same content check as CI.
+
+### Supervisor Q&A prep
+
+- *Why a separate workflow for the SATRA fixture?* It needs Docker images and Python; keeping it manual keeps the extension's CI fast and free of them.

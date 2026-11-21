@@ -1,0 +1,58 @@
+# The ASENT VS Code extension (vscode-asent/): unit tests, the extension test in a real VS Code
+# (@vscode/test-electron under xvfb), and the .vsix as an artifact. No Python and no Docker here: the
+# tests use the real asent outputs recorded in vscode-asent/test/fixtures, replayed by test/stub/asent.
+name: VS Code extension
+
+on:
+  push:
+    branches: ["**"]
+    paths: ["vscode-asent/**", ".github/workflows/vscode-asent.yml"]
+  pull_request:
+    branches: [master]
+    paths: ["vscode-asent/**", ".github/workflows/vscode-asent.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: vscode-asent-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    working-directory: vscode-asent
+
+jobs:
+  extension:
+    name: Test and package the extension
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: vscode-asent/package-lock.json
+      - name: Install (exact versions from package-lock.json)
+        run: npm ci
+      - name: Unit tests (real report fixtures; SATRA BLOCK is skipped until its fixture is committed)
+        run: npm test
+      - name: Extension test in VS Code 1.95.3 (trusted and untrusted folder)
+        run: xvfb-run -a npm run test:extension
+      - name: Build the .vsix
+        run: npm run package
+      - name: The .vsix holds only the compiled extension
+        run: |
+          unzip -Z1 asent-vscode.vsix | sort > contents.txt
+          cat contents.txt
+          if grep -vE '^(\[Content_Types\]\.xml|extension\.vsixmanifest|extension/package\.json|extension/readme\.md|extension/out/src/[a-z]+\.js)$' contents.txt; then
+            echo "::error::unexpected file in the .vsix (listed above)"; exit 1
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: asent-vscode-vsix
+          path: vscode-asent/asent-vscode.vsix
+          if-no-files-found: error

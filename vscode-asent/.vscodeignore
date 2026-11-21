@@ -1,7 +1,7 @@
-# Only out/src, package.json, README.md and LICENSE go into the .vsix.
+# Only the compiled extension (out/src/*.js), package.json, README.md and LICENSE go into the .vsix.
+# vsce applies the "!" re-includes after every exclude, so they name exactly what is shipped.
 **
-!out/src/**
+!out/src/*.js
 !package.json
 !README.md
 !LICENSE
-out/src/**/*.map
