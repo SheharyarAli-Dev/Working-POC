@@ -374,3 +374,18 @@ Two different reasons, one per test. Neither was a wrong verdict; both were plac
    event -> no "secret read, then network" pair -> no `causal_confirmed`. Now that one line is kept.
    Example: the trace has `openat("canary.txt", O_RDONLY) = 4`, then the connect to `127.0.0.1:18765`, and the
    harness receives the marker: that is the confirmed flow. The verdict was REJECTED before and after.
+
+## Batch G — the SATRA fixture scenario on a GitHub runner (2026-11-21)
+
+### Q1. Why was CAVR UNRESOLVED in the "VS Code extension fixtures" run, and why is that honest?
+
+The SATRA scenario has no third-party dependencies: `requirements.txt` is empty. CAVR's default `verify: "all"`
+makes the gate check `pip install -r requirements.txt` (`gate_adapter.analyze_pipeline`). An install command that
+names no requirement is recorded by `capture.parse_pip_command` as an error ("no requirement given"), so
+`complete` is False and `requirement_gate.evaluate_capture` answers UNRESOLVED `CAPTURE_INCOMPLETE`. That is fail
+closed: "I was asked to install nothing" is treated as "the request was not fully captured", never as safe.
+Example: same files, `verify: "all"` -> `requirements.txt: UNRESOLVED CAPTURE_INCOMPLETE: the request was not fully
+captured` (`test_with_verify_all_the_empty_requirements_file_stays_unresolved`).
+The scenario now sets `verify: "changed"`: CAVR checks the base -> head edit of `requirements.txt`, the head edits
+only `app/security.py`, so the edit asks for nothing -> VERIFIED `NOTHING_TO_VERIFY`, with no network
+(`test_satra_scenario_cavr_verifies_the_unchanged_requirements_edit` refuses any socket connect). No CAVR code changed.

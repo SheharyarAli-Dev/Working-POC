@@ -1119,3 +1119,156 @@ Claude Code wrote `notify.ts`, its tests and the static check to Maryam's specif
 
 - *Why not escape the text instead of removing characters?* Notifications have no escaping for their link syntax; removing the characters that make a link is the only reliable option, and the full text is still in the panel.
 - *Could removing brackets create a new link?* The removals repeat until nothing changes, and tests cover pieces that join into `command:` and `https://`.
+
+## Step 19 — Fixture paths from the environment; SATRA scenario CAVR (2026-11-21)
+
+Commits `fix(vscode): neutral() takes machine paths from the environment` and
+`fix(vscode): SATRA fixture scenario verifies only the CAVR edit`.
+Python suite: 2226 passed, 20 skipped, 1 xfailed (`.venv/bin/python -m pytest -q`, 494 s); `tests/test_vscode_make_fixtures.py` 25 passed.
+Review: 1 cavr-reviewer pass, OK to commit (0 BLOCKER, 0 MAJOR, 7 MINOR; 5 fixed, 2 open MINOR, documented below); no second pass on the fixes.
+
+Cause of the workflow failure (`machine paths still present after neutral(): ['runner']`): the leftover check searched for
+`$USER` as a bare word; SATRA's report always has the key `sandbox_image.runner` (`backend/satra/gate_mode.py:129`) and a GitHub
+runner's user is `runner`. Reproduced here with `USER=runner` and that one key. The paths themselves had been replaced.
+
+### Ch 6 Implementation
+
+| File | Function | What it does |
+|---|---|---|
+| `vscode-asent/scripts/make_fixtures.py` | `machine_paths(work, env)` | {path: placeholder} from the environment: scenario repo/folder, ASENT checkout and `$GITHUB_WORKSPACE` -> `/opt/asent`, `$RUNNER_TEMP` -> `/tmp/runner-temp`, `tempfile.gettempdir()`/`$TMPDIR`/`$TEMP`/`$TMP` -> `/tmp`, `$HOME` -> `/home/user`; given and resolved form; first source wins; unset/empty/relative/`/` ignored (`_usable`). |
+| | `_replacer(work, env)` | One regex, one pass: alternatives longest first, each temp folder's mkdtemp pattern just before the folder itself; `m.lastgroup` picks the replacement. A placeholder is never replaced again. |
+| | `leftovers(strings, table, env)` | Every machine path, and the user name (`$USER`/`$LOGNAME`/`$USERNAME`/home folder name) as a path segment, still present; a match wholly inside a placeholder is not counted. |
+| | `neutral(value, work, env=None)` | Walks the JSON; refuses two keys that become the same and any non-JSON value; runs `leftovers` on every key and string. |
+| | `satra_files()`, `SATRA_SCENARIO_CAVR` | SATRA scenario base files; CAVR section `{"enabled": true, "verify": "changed"}`. |
+| `tests/test_vscode_make_fixtures.py` (new) | 19 tests (25 with parameters) | Simulated runner environment; SATRA scenario with no engine and no sockets. |
+| `vscode-asent/test/fixtures/README.md` | | Placeholder table from the environment; scenario's CAVR mode. |
+
+Key algorithm: build the table from the environment -> sort machine paths by length -> one alternation regex
+(path + segment end) -> substitute in one pass over every JSON string and key -> scan the result for any machine
+path or `/<user>` segment not inside a placeholder -> refuse the file if one is found.
+
+### Design decisions
+
+| Decision | Alternatives considered | Why |
+|---|---|---|
+| User name counts only as a path segment | Keep the bare-word check; allowlist SATRA's keys | A bare word cannot tell SATRA's `runner` key from a leak; an allowlist breaks on the next new key. Nothing in `backend/` writes `getuser()` or a host name (reviewer grep). |
+| Paths from the environment, both given and resolved forms | Hard-coded `/home/runner/...` | Works on any machine; symlinked homes and temp folders are covered. |
+| One-pass regex, longest first | Sequential `re.sub` per path (old code) | `$RUNNER_TEMP` lies under `$HOME`; sequential subs would give `/home/user/work/_temp` and could re-replace placeholders. |
+| No start boundary on paths | Start boundary (`(?<![\w.-])`) | A path glued to text (`-I/home/runner/include`, `--root=/srv/asent`) is still replaced and still checked (reviewer MINOR 1). |
+| CAVR `verify: "changed"` in the SATRA scenario | pypdf + recorded PyPI answers; leave UNRESOLVED | The head edits no requirement, so verifying the edit is the true question; pypdf would need PyPI inside SATRA's image build and adds a dependency the scenario does not use. `"all"` stays fail-closed (tested). |
+
+### Requirements covered
+
+| Req | Acceptance check |
+|---|---|
+| Extra 1 (fixtures carry neutral paths) | A runner-like environment gives only documented placeholders; any leftover machine path or `/<user>` segment refuses the file. |
+| FR-6 Fail-Closed Security Policy (CAVR) | Empty `requirements.txt` with `verify: "all"` -> UNRESOLVED `CAPTURE_INCOMPLETE`; unchanged edit with `"changed"` -> VERIFIED `NOTHING_TO_VERIFY`, no network. |
+
+### Ch 7 Test cases
+
+| Test ID | Purpose | Input | Expected | Result |
+|---|---|---|---|---|
+| VS-F1 | Runner paths | report with scenario repo, checkout, `$RUNNER_TEMP` (+ mkdtemp in it), `/tmp/asent-gate-<random>`, home, SATRA `runner` key, numbers, digest | documented placeholders; everything else equal | pass |
+| VS-F2 | Bare user word | `{"runner": ..., "note": "runner"}`, `USER=runner` | unchanged | pass |
+| VS-F3 | User in a path (3 params) | `/srv/runner/cache`, `/srv/runner`, `C:\Users\runner\AppData` | refused | pass |
+| VS-F4 | Check finds every path | each machine path in a string; placeholders alone | each reported; `[]` | pass |
+| VS-F5 | From environment | runner env; other `GITHUB_WORKSPACE`/`HOME` | right placeholders; old home absent | pass |
+| VS-F6 | Ignored values (4 params) | `""`, `/`, `relative/tmp`, unset | not in table; unrelated paths unchanged | pass |
+| VS-F7 | Segment end | `/home/runner2/x`, `/home/runner.old`, `/home/runner:/usr/bin` | first two unchanged; third replaced | pass |
+| VS-F8 | Glued and two paths | `-I$HOME/include --root=$CHECKOUT`, `x$HOME/y`, two paths in one string | all replaced | pass |
+| VS-F9 | Placeholder does not hide | `<work>/repo/x`; USER=user, HOME=/opt | both paths reported; `/home/user`, `/opt/asent` not | pass |
+| VS-F10 | Temp folder outside /tmp | `TMPDIR=$HOME/tmp` with mkdtemp folder | `/tmp/asent-gate-run/x`, `/tmp/other` | pass |
+| VS-F11 | Symlinked home | HOME is a symlink; given and resolved paths | both `/home/user/.cache` | pass |
+| VS-F12 | No user variables | runner env without USER; `/srv/runner/cache` | refused (home folder name) | pass |
+| VS-F13 | Default env | `os.environ` set to the runner env | replaced | pass |
+| VS-F14 | Key collision | two `/tmp/asent-gate-<random>` keys | refused | pass |
+| VS-F15 | Non-JSON (3 params) | tuple, `Path`, set | refused | pass |
+| VS-F16 | SATRA scenario CAVR | `satra_files()`, no engine, socket connect raises | CAVR pass/VERIFIED, "no requirement was added or changed"; SATRA INCONCLUSIVE | pass |
+| VS-F17 | Fail-closed default | same, CAVR `verify` default | UNRESOLVED `CAPTURE_INCOMPLETE` | pass |
+| VS-F18 | Scenario config | `satra_files()` config | CAVR `{"enabled": true, "verify": "changed"}` | pass |
+| VS-F0 | Test first | VS-F1..F18 against the old code | 16 of 16 then-written tests failed; old `neutral()` with `USER=runner` raised the CI message | confirmed |
+| VS-F19 | No regression | all non-Docker fixtures regenerated here | same as committed after normalising timestamps, SHAs, ids | 7 of 7 same |
+
+### Defects found and fixed
+
+- The leftover check flagged `$USER` as a bare word (the CI failure); now path segments only.
+- My first leftover check masked placeholders before searching, so `/tmp` erased the start of `/tmp/asent-fixture-<random>/repo` and hid it; VS-F4 caught it; now matches are only excused when wholly inside a placeholder.
+- Reviewer MINORs fixed: start boundary dropped (glued paths), `\r` in a non-raw docstring, non-JSON values and key collisions now refused, home folder name as a user name fallback, more tests, README line wrap.
+
+### Known limitations / deferred
+
+- Open MINOR: an un-prefixed mkdtemp name (`/tmp/tmpab12cd_3`) is not neutralised (it carries no machine information; asent's own folders are prefixed).
+- Open MINOR: the mkdtemp rule also rewrites an ordinary `<prefix>-<8 lowercase>` folder in a temp folder (documented in the README).
+- `satra-block.json` itself still needs the manual workflow with Docker; not run here (no Docker on this machine).
+
+### Tool disclosure (Ch 8.7)
+
+Claude Code diagnosed both causes (reproduced locally), wrote the tests first, then the code and docs; the cavr-reviewer agent reviewed the diff. Maryam chose the approach from a short plan. Verified by the tests above, the full Python suite and regenerating the existing fixtures.
+
+### Supervisor Q&A prep
+
+- *Is accepting the user name as a plain word safe?* The check is for machine paths; every path form of the user name (`/runner`, `\runner`) is still refused, and no ASENT output writes the login name as text.
+- *Doesn't `verify: "changed"` just pick the passing config?* It is a documented CAVR mode that checks the base -> head edit; the head edits no requirement, so there is nothing to verify. The default `"all"` on an empty file stays UNRESOLVED, tested.
+- *How is a placeholder never replaced again?* One regex pass over the original string; substituted text is not scanned again.
+
+## Step 20 — Real SATRA BLOCK fixture from the GitHub runner (2026-11-21)
+
+Commit `test(vscode): add the real SATRA BLOCK fixture from the fixtures workflow`.
+Unit tests: 90 passing, 5 pending (Step 18: 89 / 6; the SATRA BLOCK test now runs). Extension test: trusted 16 passing, untrusted 5 passing.
+Python suite: 2226 passed, 20 skipped, 1 xfailed (`.venv/bin/python -m pytest -q`, 422 s; no Python code changed).
+Review: no reviewer pass (fixture import and docs only); checked by the scans below.
+
+### Ch 6 Implementation
+
+| File | What changed |
+|---|---|
+| `vscode-asent/test/fixtures/reports/satra-block.json` (new) | Copied unchanged from the artifact `vscode-asent-fixtures` of the manual workflow "VS Code extension fixtures" (ubuntu-latest, Docker, `make_fixtures.py --only satra-block doctor`). Only `reports/satra-block.json` was taken; the artifact's `doctor/doctor.json` was ignored and the committed one kept. |
+| `vscode-asent/test/fixtures/README.md`, `vscode-asent/README.md` | The SATRA row describes the real result and where it came from; how to regenerate it. |
+
+The report: decision BLOCK, exit code 1, reasons `["SATRA: REJECT"]`; SATRA `block`/`REJECT` "Candidate violates the trusted
+contract tests" (`test_other_user_denied` fails on the head's `return True`); CAVR `pass`/`VERIFIED` "requirements.txt: no
+requirement was added or changed" (Step 19); SABLE disabled by the base config.
+
+### Design decisions
+
+| Decision | Alternatives considered | Why |
+|---|---|---|
+| Keep the committed `doctor.json` | Take the runner's doctor output | Maryam's instruction; the existing one is the documented "not ready: no Docker" case the doctor tests use. |
+| Copy the file byte for byte | Re-run `neutral()` on it here | It was already neutralised by the generator on the runner; editing it here would break "nothing hand-edited". It is checked instead. |
+| Unzip outside the repository | Unzip into the fixtures folder | The zip is downloaded data; only the one checked file enters the repository. |
+
+### Requirements covered
+
+| Req | Acceptance check |
+|---|---|
+| V7 | A real SATRA BLOCK report is committed and the extension shows it as SATRA-RV REJECT with the failing trusted test as evidence (`report.test.ts`). |
+| Extra 1 | The committed SATRA report carries only the documented placeholders (`fixtures.test.ts`, plus the scans below). |
+
+### Ch 7 Test cases
+
+| Test ID | Purpose | Input | Expected | Result |
+|---|---|---|---|---|
+| VS-R6 | SATRA BLOCK | `satra-block.json` | BLOCK, exit 1, SATRA-RV block/REJECT, `APPLICATION_REGRESSION: failing test test_other_user_denied`, candidate counts | pass (was skipped) |
+| VS-X1 | Neutral paths (unit) | all fixtures incl. `satra-block.json` | no foreign home, checkout, scenario folder, mkdtemp suffix; documented placeholders | pass |
+| VS-X2 | Generator's check | all 1358 keys/strings of `satra-block.json`; `leftovers()` with a runner table (`/home/runner`, `RUNNER_TEMP`, `GITHUB_WORKSPACE`) and with this machine's table | `[]` | `[]` both |
+| VS-X3 | Manual scan | `/home/<not user>`, `Working-POC`, `hostedtoolcache`, `/runner/`, `GITHUB_`/`RUNNER_`, mkdtemp suffix | none | none (only `*_workspace` keys and SATRA's container path `/work` matched the loose `_work` pattern; container mounts' host side is `/tmp/asent-pytest-run/...`) |
+| VS-X4 | Extension test | trusted and untrusted suites | all pass | 16 + 5 pass |
+
+### Defects found and fixed
+
+- None in this step. Step 19's fixes made the workflow write the file (SATRA REJECT, gate BLOCK, CAVR VERIFIED).
+
+### Known limitations / deferred
+
+- The extension test (electron) does not read `satra-block.json`; the SATRA BLOCK display is checked by the unit test.
+- Hashes in the report computed over records with original paths do not re-verify against the neutral text (as for every fixture; README).
+
+### Tool disclosure (Ch 8.7)
+
+Maryam ran the workflow and supplied the artifact. Claude Code unzipped it outside the repository, copied the one file, scanned it,
+updated the READMEs and ran the tests. Nothing in the fixture was edited.
+
+### Supervisor Q&A prep
+
+- *How do you know the fixture is real?* It was written by `make_fixtures.py` on a GitHub runner from a real gate run in Docker; `_expect` refuses to write anything but BLOCK with SATRA `block`, and the file is committed byte for byte.
+- *Why does CAVR pass in a SATRA BLOCK report?* The head edits no requirement and the scenario verifies the edit (`verify: "changed"`), so CAVR has nothing to verify; the BLOCK is SATRA's alone (Step 19).

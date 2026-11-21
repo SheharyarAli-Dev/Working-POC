@@ -74,5 +74,6 @@ ASENT_REAL=../scripts/asent ASENT_PYTHON=../.venv/bin/python npx mocha --grep "r
 ```
 
 The fixtures are real `asent` outputs written by `scripts/make_fixtures.py` (see `test/fixtures/README.md`). The
-SATRA BLOCK report needs Docker: run the manual workflow **VS Code extension fixtures**, download its artifact
-and commit `reports/satra-block.json`; until then that one unit test is skipped and says why.
+SATRA BLOCK report needs Docker, so it comes from the manual workflow **VS Code extension fixtures**: to
+regenerate it, run the workflow, download its artifact and commit `reports/satra-block.json`. Without that
+file the one unit test that needs it is skipped and says why.

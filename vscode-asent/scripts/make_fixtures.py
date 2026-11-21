@@ -23,11 +23,18 @@ trusted tests in real containers. A scenario whose result is not the expected on
 writes nothing, so a fixture can never carry a decision its name does not say.
 
 Machine paths are replaced by neutral placeholders before writing (`neutral`), and nothing else is
-changed: the scenario's repository -> /workspace/project, its temp folder -> /workspace, asent's own temp
-folders (`/tmp/asent-gate-<random>` and the like) -> `/tmp/asent-gate-run`, the ASENT checkout ->
-/opt/asent, the home folder -> /home/user. Only JSON string values (and keys) are edited, on path-segment
-boundaries; numbers, booleans, structure, digests and SHAs stay exactly as asent wrote them. A file in
-which a machine path is still found afterwards is not written.
+changed. The paths are read from the environment of the run (`machine_paths`), not hard-coded: the
+scenario's repository -> /workspace/project, its temp folder -> /workspace, the ASENT checkout (and
+$GITHUB_WORKSPACE when set) -> /opt/asent, $RUNNER_TEMP when set -> /tmp/runner-temp, the temp folder
+(tempfile.gettempdir(), $TMPDIR/$TEMP/$TMP) -> /tmp, the home folder -> /home/user, and asent's own
+mkdtemp folders inside a temp folder (`/tmp/asent-gate-<random>`) -> `<that folder's placeholder>/asent-gate-run`.
+Unset, empty, relative or root (`/`) values are ignored. Only JSON string values (and keys) are edited, in one
+pass; a path must end on a segment boundary but may be glued to other text (`-I/home/runner/include`). Numbers,
+booleans, structure, digests and SHAs stay exactly as asent wrote them. A file in which one of those machine
+paths, or the user name ($USER, $LOGNAME, $USERNAME, the home folder's name) as a path segment (`/runner/`), is
+still found afterwards is not written; nor is one with two keys that become the same, or a value that is not
+JSON. The user name as a plain word is not a path: SATRA's report has a `runner` key, and a GitHub runner's
+user is called `runner`.
 """
 from __future__ import annotations
 
@@ -106,19 +113,31 @@ def sable_block(work, monkeypatch):
     return _expect(run_cli(repo, base, head, work / "out")[1], "BLOCK", "SABLE", "block")
 
 
+# The head only edits app/security.py, so CAVR is asked to verify the base -> head edit of requirements.txt
+# (nothing added or changed: VERIFIED NOTHING_TO_VERIFY, no network). With the default "all", the empty
+# requirements file is `pip install -r requirements.txt` naming nothing, which CAVR fails closed on
+# (UNRESOLVED CAPTURE_INCOMPLETE) and the gate would REVIEW instead of BLOCK on SATRA alone.
+SATRA_SCENARIO_CAVR = {"enabled": True, "verify": "changed"}
+
+
+def satra_files():
+    """Base commit of the SATRA scenario: a project with no third-party dependencies and a trusted contract."""
+    from test_satra_config import CONTRACT, NO_DEPENDENCIES, SECURE, TRUSTED
+    return {**NO_DEPENDENCIES, "app/__init__.py": "", "app/security.py": SECURE,
+            "app/main.py": "from app.security import can_access\n",
+            ".asent/config.json": config(SATRA={"enabled": True, "pytest_ini": "satra/pytest.ini", "source_dirs": ["app"]},
+                                         CAVR=SATRA_SCENARIO_CAVR, SABLE=DISABLED),
+            ".asent/satra/contract.json": json.dumps(CONTRACT),
+            ".asent/satra/pytest.ini": "[pytest]\npythonpath = .\n",
+            ".asent/satra/trusted_tests/test_contract.py": TRUSTED}
+
+
 def satra_block(work, monkeypatch):
     if shutil.which("docker") is None:
         raise ScenarioError("Docker is not installed; SATRA cannot run the trusted tests (see the manual fixtures workflow)")
-    from test_satra_config import BROKEN, CONTRACT, NO_DEPENDENCIES, SECURE, TRUSTED
+    from test_satra_config import BROKEN
     repo = GateRepo(work / "repo")
-    files = {**NO_DEPENDENCIES, "app/__init__.py": "", "app/security.py": SECURE,
-             "app/main.py": "from app.security import can_access\n",
-             ".asent/config.json": config(SATRA={"enabled": True, "pytest_ini": "satra/pytest.ini", "source_dirs": ["app"]},
-                                          CAVR={"enabled": True}, SABLE=DISABLED),
-             ".asent/satra/contract.json": json.dumps(CONTRACT),
-             ".asent/satra/pytest.ini": "[pytest]\npythonpath = .\n",
-             ".asent/satra/trusted_tests/test_contract.py": TRUSTED}
-    base = repo.commit(files, message="secure access check")
+    base = repo.commit(satra_files(), message="secure access check")
     head = repo.commit({"app/security.py": BROKEN}, message="access check always allows")
     return _expect(run_cli(repo, base, head, work / "out")[1], "BLOCK", "SATRA", "block")
 
@@ -148,34 +167,112 @@ def dashboard(work, monkeypatch):
     return json.loads(json.dumps(dash.info(dash.DEFAULT_PORT)))  # cli.dashboard_command prints json.dumps(info(port))
 
 
-def _placeholders(work: Path):
-    """(regex, placeholder) pairs, longest original first, each matching only a whole path segment."""
-    pairs = {}
-    for path in {work, work.resolve()}:
-        pairs[str(path / "repo")] = "/workspace/project"
-        pairs[str(path)] = "/workspace"
-    for path in {ROOT, ROOT.resolve()}:
-        pairs[str(path)] = "/opt/asent"
-    home = Path.home()
-    for path in {home, home.resolve()}:
-        pairs[str(path)] = "/home/user"
-    ordered = sorted(pairs.items(), key=lambda item: len(item[0]), reverse=True)
-    rules = [(re.compile(re.escape(old) + r"(?=/|$|[^\w.-])"), new) for old, new in ordered]
-    # tempfile.mkdtemp folders that asent itself makes (prefix + 8 random characters), e.g. /tmp/asent-gate-ab12cd_3
-    tmp = re.escape(tempfile.gettempdir())
-    rules.append((re.compile(tmp + r"/([A-Za-z][\w.]*(?:-[A-Za-z][\w.]*)*-)[a-z0-9_]{8}(?=/|$|[^\w.-])"),
-                  tempfile.gettempdir() + r"/\1run"))
-    return rules
+# A machine path ends on a separator or a character no file name segment has (so /home/runner2 is not
+# /home/runner). There is no start boundary on purpose: a path glued to other text (`-I/home/runner/include`,
+# `--root=/srv/asent`) is still replaced, and still found by the check.
+SEGMENT_END = r"(?=[/\\]|$|[^\w.-])"
+# tempfile.mkdtemp folder name: a prefix that ends in "-" plus 8 random characters, e.g. asent-gate-ab12cd_3
+MKDTEMP = r"[/\\](?P<prefix>[A-Za-z][\w.]*(?:-[A-Za-z][\w.]*)*-)[a-z0-9_]{8}"
+TEMP_VARS = ("TMPDIR", "TEMP", "TMP")
+USER_VARS = ("USER", "LOGNAME", "USERNAME")
 
 
-def neutral(value, work: Path):
+def _usable(raw):
+    """`raw` as an absolute path with at least one segment, else None: "" or "/" would match every path."""
+    if not raw:
+        return None
+    path = Path(raw)
+    return path if path.is_absolute() and path != Path(path.anchor) else None
+
+
+def machine_paths(work: Path, env=None) -> dict:
+    """{machine path: placeholder} of this run, read from the real environment (both the given and the resolved
+    form of each path). The first entry wins when two sources name the same folder (GITHUB_WORKSPACE is the checkout)."""
+    env = os.environ if env is None else env
+    entries = [(work / "repo", "/workspace/project"), (work, "/workspace"),
+               (ROOT, "/opt/asent"), (env.get("GITHUB_WORKSPACE"), "/opt/asent"),
+               (env.get("RUNNER_TEMP"), "/tmp/runner-temp"),
+               (tempfile.gettempdir(), "/tmp"), *((env.get(name), "/tmp") for name in TEMP_VARS),
+               (env.get("HOME") or Path.home(), "/home/user")]
+    table = {}
+    for raw, placeholder in entries:
+        path = _usable(str(raw) if raw else None)
+        if path is not None:
+            for form in (str(path), str(path.resolve())):
+                table.setdefault(form, placeholder)
+    return table
+
+
+def _temp_roots(table: dict, env) -> set:
+    """The table's folders that asent's own mkdtemp folders can sit in (the temp folder and RUNNER_TEMP)."""
+    roots = {tempfile.gettempdir(), env.get("RUNNER_TEMP"), *(env.get(name) for name in TEMP_VARS)}
+    paths = {p for p in (_usable(r) for r in roots) if p is not None}
+    return {form for p in paths for form in (str(p), str(p.resolve()))} & set(table)
+
+
+def _replacer(work: Path, env):
+    """One regex over all machine paths, applied in a single pass so a placeholder is never replaced again.
+
+    At a position the longest machine path wins (alternatives are tried in order); a temp folder's mkdtemp
+    pattern is tried just before the temp folder itself, so /tmp/asent-gate-ab12cd_3 -> /tmp/asent-gate-run
+    while a longer known path under it (the scenario folder) still wins."""
+    table = machine_paths(work, env)
+    temps = _temp_roots(table, env)
+    alternatives, replacement = [], {}
+    for path in sorted(table, key=len, reverse=True):
+        if path in temps:
+            name = f"m{len(alternatives)}"
+            alternatives.append(f"(?P<{name}>{re.escape(path)}{MKDTEMP.replace('?P<prefix>', f'?P<{name}p>')})")
+            replacement[name] = lambda m, name=name, new=table[path]: f"{new}/{m.group(name + 'p')}run"
+        name = f"a{len(alternatives)}"
+        alternatives.append(f"(?P<{name}>{re.escape(path)})")
+        replacement[name] = lambda m, new=table[path]: new
+    pattern = re.compile("(?:" + "|".join(alternatives) + ")" + SEGMENT_END)
+    return table, lambda s: pattern.sub(lambda m: replacement[m.lastgroup](m), s)
+
+
+def _user_names(env) -> set:
+    """$USER, $LOGNAME, $USERNAME and the home folder's name (so the check works when no user variable is set)."""
+    home = _usable(env.get("HOME") or str(Path.home()))
+    return ({env.get(name) for name in USER_VARS} | {home.name if home else None}) - {None, ""}
+
+
+def leftovers(strings, table: dict, env) -> list:
+    r"""Machine paths, and the user name as a path segment, still present in `strings` (sorted).
+
+    A match that lies wholly inside a placeholder is not counted (e.g. /home/user when the user is `user`, or
+    /opt/asent when the home folder is /opt); a placeholder that only starts the match does not hide it
+    (/tmp/asent-fixture-<random>/repo is still found). The user name only counts inside a path (/runner/,
+    \runner): as a plain word it is also an ordinary key of asent's own reports (SATRA's sandbox_image.runner),
+    and the user of a GitHub runner is called `runner`."""
+    machine = {path: re.compile(re.escape(path) + SEGMENT_END) for path, placeholder in table.items() if path != placeholder}
+    users = {u: re.compile(r"(?<=[/\\])" + re.escape(u) + SEGMENT_END) for u in _user_names(env)}
+    placeholders = [re.compile(re.escape(p) + SEGMENT_END) for p in set(table.values())]
+    found = set()
+    for s in strings:
+        covers = [m.span() for q in placeholders for m in q.finditer(s)]
+        for name, pattern in (*machine.items(), *users.items()):
+            if any(not any(a <= m.start() and m.end() <= b for a, b in covers) for m in pattern.finditer(s)):
+                found.add(name)
+    return sorted(found)
+
+
+def _strings(value):
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, list):
+        for x in value:
+            yield from _strings(x)
+    elif isinstance(value, dict):
+        for k, x in value.items():
+            yield k
+            yield from _strings(x)
+
+
+def neutral(value, work: Path, env=None):
     """The same JSON value with machine paths replaced by placeholders (see the module docstring)."""
-    rules = _placeholders(work)
-
-    def text(s: str) -> str:
-        for pattern, new in rules:
-            s = pattern.sub(new, s)
-        return s
+    env = os.environ if env is None else env
+    table, text = _replacer(work, env)
 
     def walk(v):
         if isinstance(v, str):
@@ -183,13 +280,19 @@ def neutral(value, work: Path):
         if isinstance(v, list):
             return [walk(x) for x in v]
         if isinstance(v, dict):
-            return {text(k): walk(x) for k, x in v.items()}
-        return v
+            keys = {}
+            for k, x in v.items():
+                new = text(k)
+                if new in keys:  # two machine paths became the same placeholder: the file would lose an entry
+                    raise ScenarioError(f"keys {keys[new][0]!r} and {k!r} both become {new!r} after neutral()")
+                keys[new] = (k, walk(x))
+            return {new: x for new, (_, x) in keys.items()}
+        if v is None or isinstance(v, (bool, int, float)):
+            return v
+        raise ScenarioError(f"not a JSON value, so it would be neither neutralised nor checked: {type(v).__name__}")
 
     result = walk(value)
-    dump = json.dumps(result)
-    left = [s for s in {str(work), str(work.resolve()), str(ROOT), str(Path.home()), os.environ.get("USER") or "\0"}
-            if s and re.search(r"(?<![\w.-])" + re.escape(s) + r"(?=/|$|[^\w.-])", dump)]
+    left = leftovers(_strings(result), table, env)
     if left:
         raise ScenarioError(f"machine paths still present after neutral(): {left}")
     return result
