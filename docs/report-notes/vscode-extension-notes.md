@@ -449,3 +449,70 @@ Claude Code wrote the module and tests. Verified by `npm test`.
 ### Supervisor Q&A prep
 
 - *Can a malicious report mark files outside the project?* No; anything resolving outside the root is dropped (VS-P3).
+
+## Step 8 — Commands, status bar, panel and Workspace Trust (2026-11-21)
+
+Commit `feat(vscode): commands, status bar, report panel and workspace trust`.
+Unit tests on the staged tree: 62 passing, 6 pending. Full Python suite: 2201 passed, 20 skipped, 1 xfailed.
+Review: no reviewer pass was run for this step.
+
+### Ch 6 Implementation
+
+| File | Function | What it does |
+|---|---|---|
+| `src/extension.ts` | `activate` | Output channel, diagnostic collection, status bar item (click → Show report), the five commands, a watcher on `<folder>/asent-report.json` (300 ms debounce; not while a gate runs), and an initial silent `report --json` if the file exists. Returns a read-only `state()` for the extension test. |
+| | `runGate` | Trusted folder only; one run at a time (`gateRunning`); cancellable progress; 30-min timeout; status `gate running`; then Problems, status, panel and a notification per decision; `warnIfDockerMissing`. |
+| | `warnIfDockerMissing` | Only when the report says neither Docker nor Podman was available and SATRA was not disabled/not applicable: runs `doctor --json` and, if Docker is missing, a warning with doctor's fix lines in the ASENT output. |
+| | `showReport` / `loadReport` | `report --json --file=`; asent's `{"error"}` text is shown in the panel; allowed in untrusted folders. |
+| | `doctor` | `doctor --json` in the home directory; lines in the ASENT output. |
+| | `initProject` | Trusted only; `init --json --repository=`; asent's error or the starter message. |
+| | `openDashboard` | Trusted only; one process (`dashboard`/`dashboardStarting`); opens the URL only if it matches `^http://127\.0\.0\.1:\d{1,5}/$`; stopped on deactivate. |
+| | `reportError` | `AsentNotFound` → error with install lines and "Open settings"; `AsentOutputError` → stderr in output and "Run Doctor"; `AsentCancelled` → warning. |
+| `src/panel.ts` | `ReportPanel` | One webview: `enableScripts: false`, `enableCommandUris: false`, `enableForms: false`, `localResourceRoots: []`; a fresh 16-byte nonce per render. |
+| `test/unit/security.test.ts` | | Static checks over `src/` (below). |
+
+### Design decisions
+
+| Decision | Alternatives considered | Why |
+|---|---|---|
+| Trust check in code with a "Manage Workspace Trust" button | Disable via `enablement` | V11 asks for a clear message. |
+| Doctor allowed in untrusted folders | Refuse | It checks the machine, not the folder, and runs in the home directory. |
+| Docker warning only when SATRA could have run | After every REVIEW | On a machine without Docker every CAVR-only gate would otherwise warn about something irrelevant. |
+| Notifications with buttons are not awaited | `await` the choice | Awaiting keeps the command pending until a click. |
+| Open only a 127.0.0.1 URL | Open whatever asent prints | V9: the extension itself never sends anything anywhere; the dashboard is local only by design (`backend/commands/dashboard.py`). |
+
+### Requirements covered
+
+| Req | Acceptance check |
+|---|---|
+| V1, V3, V5, V11, V13 | Implemented here; exercised in a real VS Code by the step 9 extension test. |
+| V9 | `security.test.ts`: no shell, `spawn` only in `cli.ts`, no network modules or `fetch`, no `SecretStorage`/`globalState`/`workspaceState`/`.update(`, no `enableScripts: true`/messages, one `openExternal` guarded by the 127.0.0.1 pattern. |
+
+### Ch 7 Test cases
+
+| Test ID | Purpose | Input | Expected | Result |
+|---|---|---|---|---|
+| VS-S1 | Module list | `src/` | the 8 modules | pass |
+| VS-S2 | Processes | all of `src/` | no `shell: true`, no exec/fork; `child_process` only in `cli.ts` | pass |
+| VS-S3 | No network | all of `src/` | no http/https/net/tls/dgram/undici, no fetch/WebSocket | pass |
+| VS-S4 | Stores nothing | all of `src/` | no secrets/state/config writes | pass |
+| VS-S5 | Webview | `panel.ts` | scripts, command URIs off; no local roots; no messages | pass |
+| VS-S6 | One URL | `extension.ts` | one `openExternal`, 127.0.0.1 pattern | pass |
+
+### Defects found and fixed
+
+- First version awaited `showErrorMessage(..., "Show details")` and similar; the command stayed pending until the user clicked, which would also hang the extension test. Changed to `.then(...)`.
+
+### Known limitations / deferred
+
+- The file watcher covers the folder that was current at activation; other folders of a multi-root workspace update when a command runs.
+- The dashboard has no "stop" command; it stops when the window closes.
+
+### Tool disclosure (Ch 8.7)
+
+Claude Code wrote `extension.ts`, `panel.ts` and the security test. Verified by `npm test`; the behaviour in VS Code is verified by step 9.
+
+### Supervisor Q&A prep
+
+- *What can an untrusted repository make the extension do?* Read its own `asent-report.json` with the user's asent; Init, Run gate and the dashboard refuse before starting anything, and its settings cannot change `asent.path`.
+- *Why is the status bar not stored between sessions?* Nothing is stored; on activation it is read again from `asent-report.json`.
