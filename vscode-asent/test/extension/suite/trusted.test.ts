@@ -19,9 +19,11 @@ describe("ASENT extension (trusted folder)", () => {
     assert.strictEqual((await api()).state().statusText, "$(shield) ASENT");
   });
 
-  it("contributes the five commands", async () => {
+  it("contributes the six commands", async () => {
     const all = await vscode.commands.getCommands(true);
-    for (const id of ["asent.init", "asent.gate", "asent.showReport", "asent.doctor", "asent.dashboard"]) assert.ok(all.includes(id), id);
+    for (const id of ["asent.init", "asent.gate", "asent.showReport", "asent.doctor", "asent.dashboard", "asent.stopDashboard"]) {
+      assert.ok(all.includes(id), id);
+    }
   });
 
   it("Run gate (CAVR BLOCK): argument array, status bar, Problems entry and panel", async () => {
@@ -99,6 +101,31 @@ describe("ASENT extension (trusted folder)", () => {
     assert.strictEqual((await api()).state().dashboardRunning, true);
     await vscode.commands.executeCommand("asent.dashboard");
     assert.deepStrictEqual(callsOf("dashboard").map((c) => c.argv), [["dashboard", "--json"]]);
+  });
+
+  it("Stop dashboard ends the process it started", async () => {
+    const pid = (await api()).state().dashboardPid;
+    assert.ok(pid, "the dashboard from the previous test is running");
+    await vscode.commands.executeCommand("asent.stopDashboard");
+    assert.strictEqual((await api()).state().dashboardRunning, false);
+    await until("the stub dashboard process exits", () => {
+      try {
+        process.kill(pid!, 0);
+        return false;
+      } catch {
+        return true;
+      }
+    });
+  });
+
+  it("Stop dashboard when none is running only says so; a new start works", async () => {
+    await vscode.commands.executeCommand("asent.stopDashboard");
+    assert.strictEqual((await api()).state().dashboardRunning, false);
+    await vscode.commands.executeCommand("asent.dashboard");
+    assert.strictEqual((await api()).state().dashboardRunning, true);
+    assert.strictEqual(callsOf("dashboard").length, 2);
+    await vscode.commands.executeCommand("asent.stopDashboard");
+    assert.strictEqual((await api()).state().dashboardRunning, false);
   });
 
   it("asent missing: the command ends with a message, it does not throw or hang", async () => {

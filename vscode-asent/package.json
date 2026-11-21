@@ -56,6 +56,10 @@
       {
         "command": "asent.dashboard",
         "title": "ASENT: Open web dashboard"
+      },
+      {
+        "command": "asent.stopDashboard",
+        "title": "ASENT: Stop dashboard"
       }
     ],
     "configuration": {

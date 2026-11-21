@@ -693,7 +693,7 @@ Claude Code wrote both texts. Verified by packaging (README included) and by che
 ## Step 12 — Neutral machine paths in the fixtures (2026-11-21)
 
 Commit `test(vscode): neutral machine paths in the fixtures`.
-Unit tests on the staged tree: 66 passing, 6 pending. Python suite: run once after step 13 (Maryam's instruction for the two extra steps; result under step 13).
+Unit tests on the staged tree: 66 passing, 6 pending. Python suite: run once after step 14 (Maryam's instruction for the extra steps; result under step 14).
 Review: no reviewer pass was run for this step.
 
 ### Ch 6 Implementation
@@ -799,3 +799,61 @@ Claude Code found the cause in `node_modules/@vscode/test-electron/out/runTest.j
 ### Supervisor Q&A prep
 
 - *How did you notice?* The first real run asserted `isTrusted === false` and got `true`; the test was written to check the precondition, not to assume it.
+
+## Step 14 — ASENT: Stop dashboard (2026-11-21)
+
+Commit `feat(vscode): ASENT: Stop dashboard command`.
+Unit tests on the staged tree: 66 passing, 6 pending. Extension test on the staged tree: trusted 13 passing, untrusted 4 passing.
+Full Python suite (run once after this step, as Maryam asked for steps 12–14): 2201 passed, 20 skipped, 1 xfailed.
+Review: no reviewer pass was run for this step.
+
+### Ch 6 Implementation
+
+| File | Function | What it does |
+|---|---|---|
+| `vscode-asent/package.json` | | Sixth command `asent.stopDashboard`, "ASENT: Stop dashboard". |
+| `vscode-asent/src/extension.ts` | `stopDashboardCommand` | Running → `stopDashboard()` (SIGTERM, SIGKILL after 3 s), a line in the ASENT output and a message; still starting → "still starting"; not running → "not running". Allowed in untrusted folders. |
+| | `state()` | Adds `dashboardPid` (read-only, for the extension test). |
+| `vscode-asent/test/unit/manifest.test.ts` | | Expects six commands. |
+| `vscode-asent/test/extension/suite/trusted.test.ts` | | Six commands; Stop ends the process; Stop again and a new start. |
+| `vscode-asent/test/extension/suite/untrusted.test.ts` | | Stop is allowed and starts nothing. |
+| `vscode-asent/README.md` | | Command table row; trust paragraph. |
+
+### Design decisions
+
+| Decision | Alternatives considered | Why |
+|---|---|---|
+| Stop allowed in untrusted folders | Require trust | It runs nothing; it only ends a process this window started. |
+| Only the process this window started | Find any dashboard on the port | The extension never touches processes it did not start. |
+
+### Requirements covered
+
+| Req | Acceptance check |
+|---|---|
+| Extra 2 | Start → running with a PID; Stop → not running and the PID is gone; Stop again → nothing; Start again → a second `dashboard --json` call. |
+
+### Ch 7 Test cases
+
+| Test ID | Purpose | Expected | Result |
+|---|---|---|---|
+| VS-M1' | Manifest | six commands with titles | pass |
+| VS-E2' | Commands in VS Code | six registered | pass |
+| VS-E15 | Stop | state not running; `process.kill(pid, 0)` fails | pass |
+| VS-E16 | Stop when stopped, then start | no error; 2nd dashboard call; stop | pass |
+| VS-E18 | Stop in untrusted folder | allowed, no dashboard call | pass |
+
+### Defects found and fixed
+
+- The manifest test, changed first, failed as expected (`1 failing`) until the command was added.
+
+### Known limitations / deferred
+
+- None new. (Step 8's "no stop command" limitation is resolved.)
+
+### Tool disclosure (Ch 8.7)
+
+Claude Code wrote the command and tests; Maryam asked for it. Verified by the unit suite, the extension test on the staged tree, and the full Python suite.
+
+### Supervisor Q&A prep
+
+- *What happens to the dashboard when VS Code closes?* It is stopped on deactivate; Stop dashboard does the same on request.

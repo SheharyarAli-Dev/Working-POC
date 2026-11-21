@@ -28,4 +28,10 @@ describe("ASENT extension (untrusted folder)", () => {
     assert.strictEqual((await api()).state().dashboardRunning, false);
     assert.strictEqual((await api()).state().decision, "BLOCK", "the shown report is unchanged");
   });
+
+  it("Stop dashboard is allowed (it runs nothing) and, with none running, starts nothing", async () => {
+    await vscode.commands.executeCommand("asent.stopDashboard");
+    assert.deepStrictEqual(callsOf("dashboard"), []);
+    assert.strictEqual((await api()).state().dashboardRunning, false);
+  });
 });

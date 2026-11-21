@@ -6,7 +6,7 @@ import * as path from "path";
 const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "..", "..", "package.json"), "utf8"));
 
 describe("package.json manifest", () => {
-  it("contributes exactly the five ASENT commands with their titles", () => {
+  it("contributes exactly the six ASENT commands with their titles", () => {
     const titles = Object.fromEntries(manifest.contributes.commands.map((c: { command: string; title: string }) => [c.command, c.title]));
     assert.deepStrictEqual(titles, {
       "asent.init": "ASENT: Init project",
@@ -14,6 +14,7 @@ describe("package.json manifest", () => {
       "asent.showReport": "ASENT: Show report",
       "asent.doctor": "ASENT: Doctor",
       "asent.dashboard": "ASENT: Open web dashboard",
+      "asent.stopDashboard": "ASENT: Stop dashboard",
     });
   });
 

@@ -26,7 +26,8 @@ Needs VS Code 1.95 or newer.
 | ASENT: Run gate on this branch | `asent gate --json --output-dir=<folder> [--base=<asent.baseBranch>]` | Head is `HEAD`. Shows the panel, status bar and Problems. One run at a time; cancellable. Trusted folders only. |
 | ASENT: Show report | `asent report --json --file=<folder>/asent-report.json` | Opens the panel. Works in untrusted folders. |
 | ASENT: Doctor | `asent doctor --json` (in your home folder) | Lists what is missing, with asent's own `fix:` lines, in the **ASENT** output. |
-| ASENT: Open web dashboard | `asent dashboard --json` | Opens the `http://127.0.0.1:PORT/` it prints (nothing else). One process at a time; it stops when the window closes. Trusted folders only. |
+| ASENT: Open web dashboard | `asent dashboard --json` | Opens the `http://127.0.0.1:PORT/` it prints (nothing else). One process at a time; it stops with **ASENT: Stop dashboard** or when the window closes. Trusted folders only. |
+| ASENT: Stop dashboard | (stops the process above) | Stops only the dashboard this window started. Works in untrusted folders. |
 
 ## What you see
 
@@ -52,7 +53,7 @@ Needs VS Code 1.95 or newer.
 
 ## Workspace Trust and activation
 
-In an untrusted folder only **Show report** (and Doctor) work; Init, Run gate and the dashboard say they need a
+In an untrusted folder only **Show report**, Doctor and Stop dashboard work; Init, Run gate and the dashboard say they need a
 trusted folder. The folder's own `.vscode/settings.json` cannot set `asent.path` or `asent.baseBranch` there.
 The extension activates only in a folder that has `.asent/` or `asent-report.json`, or when you run one of its commands.
 

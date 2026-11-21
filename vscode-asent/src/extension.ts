@@ -19,7 +19,10 @@ const NOT_RUN_FOR = new Set(["not assessed (disabled by base config)", "not appl
 
 /** Read-only view for the extension test; it exposes nothing the user could not already see. */
 export interface AsentApi {
-  state(): { statusText: string; decision: Decision | null; gateRunning: boolean; dashboardRunning: boolean; panelHtml: string | undefined };
+  state(): {
+    statusText: string; decision: Decision | null; gateRunning: boolean; dashboardRunning: boolean;
+    dashboardPid: number | undefined; panelHtml: string | undefined;
+  };
 }
 
 let output: vscode.OutputChannel;
@@ -45,7 +48,8 @@ export function activate(context: vscode.ExtensionContext): AsentApi {
     vscode.commands.registerCommand("asent.gate", () => guarded(runGate)),
     vscode.commands.registerCommand("asent.showReport", () => guarded(showReport)),
     vscode.commands.registerCommand("asent.doctor", () => guarded(doctor)),
-    vscode.commands.registerCommand("asent.dashboard", () => guarded(openDashboard)));
+    vscode.commands.registerCommand("asent.dashboard", () => guarded(openDashboard)),
+    vscode.commands.registerCommand("asent.stopDashboard", () => guarded(stopDashboardCommand)));
 
   const folder = currentFolder();
   if (folder) {
@@ -64,7 +68,7 @@ export function activate(context: vscode.ExtensionContext): AsentApi {
 
   return {
     state: () => ({ statusText: status.text, decision: last?.report.decision ?? null, gateRunning,
-      dashboardRunning: dashboard !== null, panelHtml: panel.visibleHtml }),
+      dashboardRunning: dashboard !== null, dashboardPid: dashboard?.process.process.pid, panelHtml: panel.visibleHtml }),
   };
 }
 
@@ -347,4 +351,20 @@ async function openLocal(url: string): Promise<void> {
 function stopDashboard(): void {
   dashboard?.process.stop();
   dashboard = null;
+}
+
+/** "ASENT: Stop dashboard": stops only the process this window started. Allowed in untrusted folders: it runs nothing. */
+async function stopDashboardCommand(): Promise<void> {
+  if (dashboardStarting) {
+    void vscode.window.showInformationMessage("ASENT: the dashboard is still starting; stop it once it is running.");
+    return;
+  }
+  if (!dashboard) {
+    void vscode.window.showInformationMessage("ASENT: the dashboard is not running.");
+    return;
+  }
+  const url = dashboard.url;
+  stopDashboard();
+  show([`asent dashboard at ${url} stopped on request.`]);
+  void vscode.window.showInformationMessage(`ASENT: dashboard at ${url} stopped.`);
 }
