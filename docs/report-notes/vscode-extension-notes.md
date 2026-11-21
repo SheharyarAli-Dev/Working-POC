@@ -339,3 +339,61 @@ Claude Code wrote the module and tests. Verified by `npm test`.
 ### Supervisor Q&A prep
 
 - *Does the extension install Docker or build images?* No; it shows the commands doctor prints, and doctor itself only looks.
+
+## Step 6 — Report panel HTML (2026-11-21)
+
+Commit `feat(vscode): report panel HTML with a strict CSP and no scripts`.
+Unit tests on the staged tree: 51 passing, 6 pending. Full Python suite: 2201 passed, 20 skipped, 1 xfailed.
+Review: no reviewer pass was run for this step.
+
+### Ch 6 Implementation
+
+| File | Function | What it does |
+|---|---|---|
+| `src/html.ts` | `renderPanel(report, {nonce, message})` | Banner (decision, exit code, time, ASENT version, reasons), three cards (result chip, status, reason, evidence), commit/config block, bounded-claim note. Without a report: only the message. |
+| | `csp(nonce)` | `default-src 'none'; style-src 'nonce-…'; img-src 'none'; font-src 'none'; script-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'`. |
+| | `escapeHtml` | `& < > " '` escaped for every report value. |
+| | `STYLE` | Only `var(--vscode-…)` colours and fonts. |
+
+### Design decisions
+
+| Decision | Alternatives considered | Why |
+|---|---|---|
+| No script at all | A nonce'd script for interactivity | Nothing in V2 needs interaction; with `script-src 'none'` a report value can never execute even if escaping had a bug. |
+| Theme variables only | Own light/dark palettes | Follows every theme, including high contrast, with no theme detection code. |
+| Nonce must be base64 | Trust the caller | It is placed inside the CSP; a bad value could widen it. |
+
+### Requirements covered
+
+| Req | Acceptance check |
+|---|---|
+| V2 | Banner per decision, three cards with CAVR/SATRA-RV/SABLE titles, base/head SHA and config digest present; CSP meta exact; no `<script`, no `src=`/`href=`, no `@import`/`url(`; colours only from theme variables. |
+
+### Ch 7 Test cases
+
+| Test ID | Purpose | Input | Expected | Result |
+|---|---|---|---|---|
+| VS-H1 | CSP / no scripts / no resources | all four real reports | exact CSP, one nonce'd `<style>`, no script, handlers, links, imports | pass |
+| VS-H2 | Theme | `accept.json` | no literal colours outside `var(--vscode-…)` | pass |
+| VS-H3 | ACCEPT content | `accept.json` | banner, three titles, both SHAs, digest, evidence line | pass |
+| VS-H4 | BLOCK / REVIEW | real reports | banner classes, "Config changed in head: yes" | pass |
+| VS-H5 | Injection | derived: `<script>` reason, `<img onerror>` module reason | escaped text only | pass |
+| VS-H6 | escapeHtml | `<a href="x">'&'</a>` | all five escaped | pass |
+| VS-H7 | No report | message with `<here>` | escaped message, no banner | pass |
+| VS-H8 | Bad nonce | `x'; script-src *` | refused | pass |
+
+### Defects found and fixed
+
+None in this step.
+
+### Known limitations / deferred
+
+- The look in light and dark themes is checked by the theme-variable test, not by screenshots.
+
+### Tool disclosure (Ch 8.7)
+
+Claude Code wrote the renderer and tests. Verified by `npm test`.
+
+### Supervisor Q&A prep
+
+- *What if a report contains HTML?* It is escaped (VS-H5), and even unescaped it could not run: the CSP allows no script.
