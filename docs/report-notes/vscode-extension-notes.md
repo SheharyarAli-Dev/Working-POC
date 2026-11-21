@@ -1210,3 +1210,65 @@ Claude Code diagnosed both causes (reproduced locally), wrote the tests first, t
 - *Is accepting the user name as a plain word safe?* The check is for machine paths; every path form of the user name (`/runner`, `\runner`) is still refused, and no ASENT output writes the login name as text.
 - *Doesn't `verify: "changed"` just pick the passing config?* It is a documented CAVR mode that checks the base -> head edit; the head edits no requirement, so there is nothing to verify. The default `"all"` on an empty file stays UNRESOLVED, tested.
 - *How is a placeholder never replaced again?* One regex pass over the original string; substituted text is not scanned again.
+
+## Step 20 — Real SATRA BLOCK fixture from the GitHub runner (2026-11-21)
+
+Commit `test(vscode): add the real SATRA BLOCK fixture from the fixtures workflow`.
+Unit tests: 90 passing, 5 pending (Step 18: 89 / 6; the SATRA BLOCK test now runs). Extension test: trusted 16 passing, untrusted 5 passing.
+Python suite: 2226 passed, 20 skipped, 1 xfailed (`.venv/bin/python -m pytest -q`, 422 s; no Python code changed).
+Review: no reviewer pass (fixture import and docs only); checked by the scans below.
+
+### Ch 6 Implementation
+
+| File | What changed |
+|---|---|
+| `vscode-asent/test/fixtures/reports/satra-block.json` (new) | Copied unchanged from the artifact `vscode-asent-fixtures` of the manual workflow "VS Code extension fixtures" (ubuntu-latest, Docker, `make_fixtures.py --only satra-block doctor`). Only `reports/satra-block.json` was taken; the artifact's `doctor/doctor.json` was ignored and the committed one kept. |
+| `vscode-asent/test/fixtures/README.md`, `vscode-asent/README.md` | The SATRA row describes the real result and where it came from; how to regenerate it. |
+
+The report: decision BLOCK, exit code 1, reasons `["SATRA: REJECT"]`; SATRA `block`/`REJECT` "Candidate violates the trusted
+contract tests" (`test_other_user_denied` fails on the head's `return True`); CAVR `pass`/`VERIFIED` "requirements.txt: no
+requirement was added or changed" (Step 19); SABLE disabled by the base config.
+
+### Design decisions
+
+| Decision | Alternatives considered | Why |
+|---|---|---|
+| Keep the committed `doctor.json` | Take the runner's doctor output | Maryam's instruction; the existing one is the documented "not ready: no Docker" case the doctor tests use. |
+| Copy the file byte for byte | Re-run `neutral()` on it here | It was already neutralised by the generator on the runner; editing it here would break "nothing hand-edited". It is checked instead. |
+| Unzip outside the repository | Unzip into the fixtures folder | The zip is downloaded data; only the one checked file enters the repository. |
+
+### Requirements covered
+
+| Req | Acceptance check |
+|---|---|
+| V7 | A real SATRA BLOCK report is committed and the extension shows it as SATRA-RV REJECT with the failing trusted test as evidence (`report.test.ts`). |
+| Extra 1 | The committed SATRA report carries only the documented placeholders (`fixtures.test.ts`, plus the scans below). |
+
+### Ch 7 Test cases
+
+| Test ID | Purpose | Input | Expected | Result |
+|---|---|---|---|---|
+| VS-R6 | SATRA BLOCK | `satra-block.json` | BLOCK, exit 1, SATRA-RV block/REJECT, `APPLICATION_REGRESSION: failing test test_other_user_denied`, candidate counts | pass (was skipped) |
+| VS-X1 | Neutral paths (unit) | all fixtures incl. `satra-block.json` | no foreign home, checkout, scenario folder, mkdtemp suffix; documented placeholders | pass |
+| VS-X2 | Generator's check | all 1358 keys/strings of `satra-block.json`; `leftovers()` with a runner table (`/home/runner`, `RUNNER_TEMP`, `GITHUB_WORKSPACE`) and with this machine's table | `[]` | `[]` both |
+| VS-X3 | Manual scan | `/home/<not user>`, `Working-POC`, `hostedtoolcache`, `/runner/`, `GITHUB_`/`RUNNER_`, mkdtemp suffix | none | none (only `*_workspace` keys and SATRA's container path `/work` matched the loose `_work` pattern; container mounts' host side is `/tmp/asent-pytest-run/...`) |
+| VS-X4 | Extension test | trusted and untrusted suites | all pass | 16 + 5 pass |
+
+### Defects found and fixed
+
+- None in this step. Step 19's fixes made the workflow write the file (SATRA REJECT, gate BLOCK, CAVR VERIFIED).
+
+### Known limitations / deferred
+
+- The extension test (electron) does not read `satra-block.json`; the SATRA BLOCK display is checked by the unit test.
+- Hashes in the report computed over records with original paths do not re-verify against the neutral text (as for every fixture; README).
+
+### Tool disclosure (Ch 8.7)
+
+Maryam ran the workflow and supplied the artifact. Claude Code unzipped it outside the repository, copied the one file, scanned it,
+updated the READMEs and ran the tests. Nothing in the fixture was edited.
+
+### Supervisor Q&A prep
+
+- *How do you know the fixture is real?* It was written by `make_fixtures.py` on a GitHub runner from a real gate run in Docker; `_expect` refuses to write anything but BLOCK with SATRA `block`, and the file is committed byte for byte.
+- *Why does CAVR pass in a SATRA BLOCK report?* The head edits no requirement and the scenario verifies the edit (`verify: "changed"`), so CAVR has nothing to verify; the BLOCK is SATRA's alone (Step 19).

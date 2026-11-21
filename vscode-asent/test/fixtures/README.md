@@ -12,7 +12,7 @@ hand-written or edited. To regenerate (from the repository root):
 | `reports/cavr-block.json` | `asent gate --json` | BLOCK: CAVR REJECTED, `reqeusts==2.31.0` on the denylist |
 | `reports/review.json` | `asent gate --json` | REVIEW: the head edits `.asent/` (config changed in head); CAVR itself passes |
 | `reports/sable-block.json` | `asent gate --json` | BLOCK: SABLE REGRESSED (`scenarios/sable/regressed`) |
-| `reports/satra-block.json` | `asent gate --json` | **not here yet**: needs Docker. Run the manual workflow "VS Code extension fixtures" and commit its `satra-block.json`. The test that needs it is skipped until then. |
+| `reports/satra-block.json` | `asent gate --json` | BLOCK: SATRA REJECT (`can_access` returns True; trusted test `test_other_user_denied` fails), CAVR VERIFIED (`NOTHING_TO_VERIFY`). Written on a GitHub runner with Docker by the manual workflow "VS Code extension fixtures" (artifact `vscode-asent-fixtures`); the artifact's `doctor.json` was not used. |
 | `doctor/doctor.json` | `asent doctor --json` | not ready: Docker is not installed on the machine that wrote it |
 | `init/init.json` | `asent init --json` | starter `.asent/` written |
 | `dashboard/dashboard.json` | the line `asent dashboard --json` prints | the server itself was not started |
