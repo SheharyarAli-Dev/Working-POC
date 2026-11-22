@@ -1,0 +1,169 @@
+{
+ "note": "Real PyPI JSON API response, recorded once and stored unchanged.",
+ "source": "https://pypi.org/pypi/pypdf/6.21.4/json",
+ "recorded_at": "2026-11-22T10:01:20.064641+00:00",
+ "response_sha256": "b45425043ef5052ffaa71a2f91f5147c204dcc9aebf2f59a2ea80a9fe421490c",
+ "response": {
+  "info": {
+   "author": null,
+   "author_email": "Mathieu Fenniak <biziqe@mathieu.fenniak.net>",
+   "bugtrack_url": null,
+   "classifiers": [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Programming Language :: Python :: 3.15",
+    "Programming Language :: Python :: 3.9",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Typing :: Typed"
+   ],
+   "description": "[![PyPI version](https://badge.fury.io/py/pypdf.svg)](https://badge.fury.io/py/pypdf)\n[![Python Support](https://img.shields.io/pypi/pyversions/pypdf.svg)](https://pypi.org/project/pypdf/)\n[![](https://img.shields.io/badge/-documentation-green)](https://pypdf.readthedocs.io/en/stable/)\n[![GitHub last commit](https://img.shields.io/github/last-commit/py-pdf/pypdf)](https://github.com/py-pdf/pypdf)\n[![codecov](https://codecov.io/gh/py-pdf/pypdf/branch/main/graph/badge.svg?token=id42cGNZ5Z)](https://codecov.io/gh/py-pdf/pypdf)\n\n# pypdf\n\npypdf is a free and open-source pure-python PDF library capable of splitting,\n[merging](https://pypdf.readthedocs.io/en/stable/user/merging-pdfs.html),\n[cropping, and transforming](https://pypdf.readthedocs.io/en/stable/user/cropping-and-transforming.html)\nthe pages of PDF files. It can also add\ncustom data, viewing options, and\n[passwords](https://pypdf.readthedocs.io/en/stable/user/encryption-decryption.html)\nto PDF files. pypdf can\n[retrieve text](https://pypdf.readthedocs.io/en/stable/user/extract-text.html)\nand\n[metadata](https://pypdf.readthedocs.io/en/stable/user/metadata.html)\nfrom PDFs as well.\n\nSee [pdfly](https://github.com/py-pdf/pdfly) for a CLI application that uses pypdf to interact with PDFs.\n\n## Installation\n\nInstall pypdf using pip:\n\n```\npip install pypdf\n```\n\nFor using pypdf with AES encryption or decryption, install extra dependencies:\n\n```\npip install pypdf[crypto]\n```\n\n> **NOTE**: `pypdf` 3.1.0 and above include significant improvements compared to\n> previous versions. Please refer to [the migration\n> guide](https://pypdf.readthedocs.io/en/latest/user/migration-1-to-2.html) for\n> more information.\n\n## Usage\n\n```python\nfrom pypdf import PdfReader\n\nreader = PdfReader(\"example.pdf\")\nnumber_of_pages = len(reader.pages)\npage = reader.pages[0]\ntext = page.extract_text()\n```\n\npypdf can do a lot more, e.g. splitting, merging, reading and creating annotations, decrypting and encrypting. Check out the\n[documentation](https://pypdf.readthedocs.io/en/stable/) for additional usage\nexamples!\n\nFor questions and answers, visit\n[StackOverflow](https://stackoverflow.com/questions/tagged/pypdf)\n(tagged with [pypdf](https://stackoverflow.com/questions/tagged/pypdf)).\n\n## Contributions\n\nMaintaining pypdf is a collaborative effort. You can support the project by\nwriting documentation, helping to narrow down issues, and submitting code.\nSee the [CONTRIBUTING.md](https://github.com/py-pdf/pypdf/blob/main/CONTRIBUTING.md) file for more information.\n\n### Q&A\n\nThe experience pypdf users have covers the whole range from beginner to expert. You can contribute to the pypdf community by answering questions\non [StackOverflow](https://stackoverflow.com/questions/tagged/pypdf),\nhelping in [discussions](https://github.com/py-pdf/pypdf/discussions),\nand asking users who report issues for [MCVE](https://stackoverflow.com/help/minimal-reproducible-example)'s (Code + example PDF!).\n\n\n### Issues\n\nA good bug ticket includes a MCVE - a minimal complete verifiable example.\nFor pypdf, this means that you must upload a PDF that causes the bug to occur\nas well as the code you're executing with all of the output. Use\n`print(pypdf.__version__)` to tell us which version you're using.\n\n### Code\n\nAll code contributions are welcome, but smaller ones have a better chance to\nget included in a timely manner. Adding unit tests for new features or test\ncases for bugs you've fixed help us to ensure that the Pull Request (PR) is fine.\n\npypdf includes a test suite which can be executed with `pytest`:\n\n```bash\n$ pytest\n===================== test session starts =====================\nplatform linux -- Python 3.6.15, pytest-7.0.1, pluggy-1.0.0\nrootdir: /home/moose/GitHub/Martin/pypdf\nplugins: cov-3.0.0\ncollected 233 items\n\ntests/test_basic_features.py ..                         [  0%]\ntests/test_constants.py .                               [  1%]\ntests/test_filters.py .................x.....           [ 11%]\ntests/test_generic.py ................................. [ 25%]\n.............                                           [ 30%]\ntests/test_javascript.py ..                             [ 31%]\ntests/test_merger.py .                                  [ 32%]\ntests/test_page.py .........................            [ 42%]\ntests/test_pagerange.py ................                [ 49%]\ntests/test_papersizes.py ..................             [ 57%]\ntests/test_reader.py .................................. [ 72%]\n...............                                         [ 78%]\ntests/test_utils.py ....................                [ 87%]\ntests/test_workflows.py ..........                      [ 91%]\ntests/test_writer.py .................                  [ 98%]\ntests/test_xmp.py ...                                   [100%]\n\n========== 232 passed, 1 xfailed, 1 warning in 4.52s ==========\n```\n\n",
+   "description_content_type": "text/markdown",
+   "docs_url": null,
+   "download_url": null,
+   "downloads": {
+    "last_day": -1,
+    "last_month": -1,
+    "last_week": -1
+   },
+   "dynamic": null,
+   "home_page": null,
+   "keywords": null,
+   "license": null,
+   "license_expression": "BSD-3-Clause",
+   "license_files": [
+    "LICENSE"
+   ],
+   "maintainer": "stefan6419846",
+   "maintainer_email": "Martin Thoma <info@martin-thoma.de>",
+   "name": "pypdf",
+   "package_url": "https://pypi.org/project/pypdf/",
+   "platform": null,
+   "project_url": "https://pypi.org/project/pypdf/",
+   "project_urls": {
+    "Bug Reports": "https://github.com/py-pdf/pypdf/issues",
+    "Changelog": "https://pypdf.readthedocs.io/en/latest/meta/CHANGELOG.html",
+    "Documentation": "https://pypdf.readthedocs.io/en/latest/",
+    "Source": "https://github.com/py-pdf/pypdf"
+   },
+   "provides_extra": [
+    "brotli",
+    "crypto",
+    "cryptodome",
+    "dev",
+    "docs",
+    "fonts",
+    "full",
+    "image",
+    "rtl-text"
+   ],
+   "release_url": "https://pypi.org/project/pypdf/6.21.4/",
+   "requires_dist": [
+    "typing_extensions>=4.0; python_version < \"3.11\"",
+    "brotli>=1.2.0; extra == \"brotli\"",
+    "cryptography>3.0; extra == \"crypto\"",
+    "PyCryptodome; extra == \"cryptodome\"",
+    "flit; extra == \"dev\"",
+    "pip-tools; extra == \"dev\"",
+    "pre-commit; extra == \"dev\"",
+    "pytest-cov; extra == \"dev\"",
+    "pytest-socket; extra == \"dev\"",
+    "pytest-timeout; extra == \"dev\"",
+    "pytest-xdist; extra == \"dev\"",
+    "wheel; extra == \"dev\"",
+    "myst_parser; extra == \"docs\"",
+    "sphinx; extra == \"docs\"",
+    "sphinx_rtd_theme; extra == \"docs\"",
+    "fonttools; extra == \"fonts\"",
+    "arabic-reshaper; extra == \"full\"",
+    "brotli>=1.2.0; extra == \"full\"",
+    "cryptography>3.0; extra == \"full\"",
+    "fonttools; extra == \"full\"",
+    "Pillow>=8.0.0; extra == \"full\"",
+    "python-bidi; extra == \"full\"",
+    "Pillow>=8.0.0; extra == \"image\"",
+    "arabic-reshaper; extra == \"rtl-text\"",
+    "python-bidi; extra == \"rtl-text\""
+   ],
+   "requires_python": ">=3.9",
+   "summary": "A pure-python PDF library capable of splitting, merging, cropping, and transforming PDF files",
+   "version": "6.21.4",
+   "yanked": false,
+   "yanked_reason": null
+  },
+  "last_serial": 43830098,
+  "ownership": {
+   "organization": null,
+   "roles": [
+    {
+     "role": "Owner",
+     "user": "Martin.Thoma"
+    },
+    {
+     "role": "Owner",
+     "user": "mfenniak"
+    },
+    {
+     "role": "Owner",
+     "user": "stefan6419846"
+    }
+   ]
+  },
+  "urls": [
+   {
+    "comment_text": null,
+    "core-metadata": {
+     "sha256": "383b3d4cd588005f67afc74b113cbe19ea008691cdf18db3795601116a3d8139"
+    },
+    "digests": {
+     "blake2b_256": "3f4b77e8ad4ac42c9d93600f40541a50e9feb3a61d2bbee2d76f659346072051",
+     "md5": "f5e0dae7400c5599b4050ea14fbe6db3",
+     "sha256": "33e4fb41ca352810eb4e9838aa0d82d6888a5f8bf682f43e99cce5faa666255c"
+    },
+    "downloads": -1,
+    "filename": "pypdf-6.21.4-py3-none-any.whl",
+    "has_sig": false,
+    "md5_digest": "f5e0dae7400c5599b4050ea14fbe6db3",
+    "packagetype": "bdist_wheel",
+    "python_version": "py3",
+    "requires_python": ">=3.9",
+    "size": 410430,
+    "upload_time": "2026-10-28T17:00:53",
+    "upload_time_iso_8601": "2026-10-28T17:00:53.146109Z",
+    "url": "https://files.pythonhosted.org/packages/3f/4b/77e8ad4ac42c9d93600f40541a50e9feb3a61d2bbee2d76f659346072051/pypdf-6.21.4-py3-none-any.whl",
+    "yanked": false,
+    "yanked_reason": null
+   },
+   {
+    "comment_text": null,
+    "core-metadata": false,
+    "digests": {
+     "blake2b_256": "1ee1ec8f4d155c997c45917153a5521e60d6ee6389d68abdcbc8e44e564caffc",
+     "md5": "e969e3c56062296cacf478010f6c8953",
+     "sha256": "c8817e3f888d47a087872ded69812c1ef30cacb871d6e053e0c00bbaf0bc2163"
+    },
+    "downloads": -1,
+    "filename": "pypdf-6.21.4.tar.gz",
+    "has_sig": false,
+    "md5_digest": "e969e3c56062296cacf478010f6c8953",
+    "packagetype": "sdist",
+    "python_version": "source",
+    "requires_python": ">=3.9",
+    "size": 7109255,
+    "upload_time": "2026-10-28T17:00:54",
+    "upload_time_iso_8601": "2026-10-28T17:00:54.810531Z",
+    "url": "https://files.pythonhosted.org/packages/1e/e1/ec8f4d155c997c45917153a5521e60d6ee6389d68abdcbc8e44e564caffc/pypdf-6.21.4.tar.gz",
+    "yanked": false,
+    "yanked_reason": null
+   }
+  ],
+  "vulnerabilities": []
+ }
+}

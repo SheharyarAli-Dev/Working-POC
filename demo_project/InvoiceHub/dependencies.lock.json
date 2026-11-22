@@ -3,9 +3,8 @@
   "packages": [
     {
       "name": "pypdf",
-      "version": "6.19.0",
-      "sha256": "7e5d6e730e7dae87d560a2cee218b852f6498c8be61966f3cd02ead971e48d14",
-      "artifact": "artifacts/pypdf-6.19.0-py3-none-any.whl",
+      "version": "6.21.4",
+      "sha256": "33e4fb41ca352810eb4e9838aa0d82d6888a5f8bf682f43e99cce5faa666255c",
       "ecosystem": "PyPI"
     }
   ],

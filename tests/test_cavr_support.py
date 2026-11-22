@@ -23,6 +23,12 @@ REPO = Path(__file__).resolve().parents[1]
 PYPDF_WHEEL = REPO / "artifacts" / "pypdf-6.19.0-py3-none-any.whl"
 PYPDF_SHA256 = "7e5d6e730e7dae87d560a2cee218b852f6498c8be61966f3cd02ead971e48d14"
 PYPDF_REGISTRY = next((REPO / "advisories").glob("registry-*.json"))
+DATA = REPO / "tests" / "test_cavr_data"
+# The demo pin (Q2 of docs/cavr-m2-plan.md): the real pypdf 6.21.4 wheel and its registry JSON, recorded 2026-11-22.
+PIN_VERSION = "6.21.4"
+PIN_WHEEL = DATA / "pypdf-6.21.4-py3-none-any.whl"
+PIN_SHA256 = "33e4fb41ca352810eb4e9838aa0d82d6888a5f8bf682f43e99cce5faa666255c"
+PIN_REGISTRY = DATA / "pypi-pypdf-6.21.4.json"
 
 
 def sha256_file(path) -> str:
@@ -77,6 +83,16 @@ def build_wheel(directory, name, version, files=None, requires=(), tag="py3-none
     return wheel
 
 
+def pin_registry_response() -> dict:
+    """The recorded `pypi.org/pypi/pypdf/6.21.4/json` body (retrieved 2026-11-22)."""
+    return json.loads(PIN_REGISTRY.read_text(encoding="utf-8"))["response"]
+
+
+def recorded_vulns(filename) -> list:
+    """The advisories of one recorded OSV answer in tests/test_cavr_data/ (an empty answer has none)."""
+    return json.loads((DATA / filename).read_text(encoding="utf-8"))["response"].get("vulns", [])
+
+
 def file_entry(path, url=None, packagetype="bdist_wheel") -> dict:
     """One `urls` entry of a registry response, with the real digest and size of `path`."""
     path = Path(path)
@@ -117,7 +133,12 @@ class FakeIndex:
         return response
 
     def add_pypdf(self):
+        """The real pypdf 6.19.0 wheel (a REJECTED demo case: give it RECORDED_6_19_0_NOW, never "no advisories")."""
         return self.add("pypdf", "6.19.0", PYPDF_WHEEL, response=pypdf_registry_response())
+
+    def add_pin(self):
+        """The real pypdf 6.21.4 wheel, the VERIFIED demo pin."""
+        return self.add("pypdf", PIN_VERSION, PIN_WHEEL, response=pin_registry_response())
 
     def downloads(self) -> list[str]:
         return [url for url in self.calls if FILES_HOST in url]
@@ -161,11 +182,17 @@ def synthetic_advisory(advisory_id, name, introduced="0", fixed=None) -> dict:
 # --- one project, one index, one cache: the world of the pipeline tests (steps 11-14) ---------------------
 
 INVOICEHUB = REPO / "demo_project" / "InvoiceHub"
-RECORDED_6_19_0 = json.loads((REPO / "tests" / "test_cavr_data" / "osv-pypdf-6.19.0.json").read_text())["response"].get("vulns", [])
+# Recorded OSV answers. 6.21.4: none (2026-11-22). 6.19.0: 18 advisories (2026-11-22). 5.1.0: 97 (2026-10-10).
+RECORDED_6_21_4 = recorded_vulns("osv-pypdf-6.21.4.json")
+RECORDED_6_19_0_NOW = recorded_vulns("osv-pypdf-6.19.0-2026-11-22.json")
+RECORDED_5_1_0 = recorded_vulns("osv-pypdf-5.1.0.json")
+# HISTORICAL SNAPSHOT (2026-10-10): OSV then knew no advisory for 6.19.0; it now lists 18. Only for tests of the
+# advisory logic itself; tests/conftest.py fails any test in which pypdf 6.19.0 comes out VERIFIED.
+HISTORICAL_6_19_0_2026_10_10 = recorded_vulns("osv-pypdf-6.19.0.json")
 POLICY = {
     "project_task_description": "Invoice PDF text extraction",
     "allowed_scopes": ["FILE_READ:invoice_documents", "FILE_WRITE:scratch_tmp", "PROCESS_EXEC:none", "NETWORK_CONNECT:none"],
-    "approved_requirements": ["pypdf==6.19.0", "demo==1.0", "top==1.0", "helper==2.0", "native==1.0"],
+    "approved_requirements": ["pypdf==6.21.4", "pypdf==6.19.0", "demo==1.0", "top==1.0", "helper==2.0", "native==1.0"],
     "denied_packages": [{"name": "reqeusts", "reason": "typosquat of requests"}],
 }
 UNGUARDED = "\n\ndef quick(path):\n    return PdfReader(path)\n"
@@ -182,20 +209,22 @@ class World:
         shutil.copytree(INVOICEHUB / "app", self.project / "app")
         for name in ("requirements.txt", "dependencies.lock.json"):
             shutil.copy(INVOICEHUB / name, self.project / name)
-        # Pipeline tests use a fixed historical artifact/OSV fixture. Keep its manifest stable
-        # even when the live InvoiceHub demo dependency is intentionally refreshed.
+        # The pipeline tests pin the demo pin with its recorded answers, written here so that they stay the
+        # same when the shipped InvoiceHub files change. pypdf 6.19.0 is served as well, as the REJECTED case.
         lock_path = self.project / "dependencies.lock.json"
         lockfile = json.loads(lock_path.read_text(encoding="utf-8"))
         pypdf = next(node for node in lockfile["packages"] if node["name"] == "pypdf")
-        pypdf.update(version="6.19.0", sha256=PYPDF_SHA256,
-                     artifact="artifacts/pypdf-6.19.0-py3-none-any.whl")
+        pypdf.clear()
+        pypdf.update(name="pypdf", version=PIN_VERSION, sha256=PIN_SHA256, ecosystem="PyPI")
         lock_path.write_text(json.dumps(lockfile), encoding="utf-8")
-        (self.project / "requirements.txt").write_text("pypdf==6.19.0\n", encoding="utf-8")
+        (self.project / "requirements.txt").write_text(f"pypdf=={PIN_VERSION}\n", encoding="utf-8")
         self.index = FakeIndex()
+        self.index.add_pin()
         self.index.add_pypdf()
         self.store = CavrStorage(tmp_path / "cavr.sqlite3")
         self.osv_dir = tmp_path / "osv"
-        self.advisories("pypdf", "6.19.0", RECORDED_6_19_0)
+        self.advisories("pypdf", PIN_VERSION, RECORDED_6_21_4)
+        self.advisories("pypdf", "6.19.0", RECORDED_6_19_0_NOW)
         self.policy = json.loads(json.dumps(POLICY))
         self.builds = 0
 
@@ -220,7 +249,7 @@ class World:
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(text)
 
-    def verify(self, request="pip install pypdf==6.19.0", **overrides):
+    def verify(self, request=f"pip install pypdf=={PIN_VERSION}", **overrides):
         args = {"transport": self.index, "quarantine_dir": self.tmp_path / "quarantine", "advisory_cache_dir": self.osv_dir,
                 "live_advisories": False}
         args.update(overrides)
@@ -230,3 +259,18 @@ class World:
     def cache_rows(self):
         with self.store.connect() as connection:
             return [dict(row) for row in connection.execute("SELECT * FROM verdict_cache").fetchall()]
+
+
+def recorded_demo_settings(directory) -> dict:
+    """Offline settings for orchestrator demo runs (`analyzer.DEMO_SETTINGS`): the recorded PyPI and OSV answers.
+
+    Served: the real pypdf 6.21.4 and 6.19.0 wheels with their recorded registry JSON. OSV: the recorded answers
+    of 2026-11-22 (6.21.4 none, 6.19.0 eighteen), written into a dated cache in `directory` as the adapter writes it.
+    """
+    index = FakeIndex()
+    index.add_pin()
+    index.add_pypdf()
+    osv = Path(directory) / "osv"
+    write_osv_cache(osv, "pypdf", PIN_VERSION, RECORDED_6_21_4)
+    write_osv_cache(osv, "pypdf", "6.19.0", RECORDED_6_19_0_NOW)
+    return {"transport": index, "osv": None, "advisory_cache_dir": osv, "live_advisories": False}

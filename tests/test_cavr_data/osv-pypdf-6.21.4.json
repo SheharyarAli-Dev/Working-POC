@@ -1,0 +1,15 @@
+{
+ "advisory_count": 0,
+ "note": "Real OSV response, recorded once and stored unchanged (one page, no next_page_token).",
+ "query": {
+  "package": {
+   "ecosystem": "PyPI",
+   "name": "pypdf"
+  },
+  "version": "6.21.4"
+ },
+ "recorded_at": "2026-11-22T10:01:20.064641+00:00",
+ "source": "https://api.osv.dev/v1/query",
+ "response_sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+ "response": {}
+}

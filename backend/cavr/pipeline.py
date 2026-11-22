@@ -15,6 +15,8 @@ stages run in this order, and each one adds its result to the evidence:
     7. advisories           OSV, for every package of the tree, on every run        (advisories)
     8. AST scan             cache miss only; sinks judged against the contract
                             and against call-site reachability                      (ast_scan, reachability)
+    8b. deep analysis       only with `deep=` and only for an escalated UNRESOLVED
+                            from stage 8; its answer replaces that verdict          (deep_stage)
     9. verdict              VERIFIED / REJECTED / UNRESOLVED, or BLOCK from stage 2
 
 Rules of the verdict:
@@ -27,7 +29,10 @@ Rules of the verdict:
 - A sensitive sink in a wheel is evidence, not a failure, unless the contract does not allow
   its capability outright (it is denied, or granted only for a scope the scan cannot check)
   and the project's call sites can reach it. Then the verdict is UNRESOLVED and carries
-  `escalation: "deep analysis required (M2)"`.
+  `escalation: "deep analysis required (M2)"`. With a deep analyzer (`deep=`), that one verdict
+  goes to `deep_stage.run_deep`, which fails closed; no other verdict ever reaches it. The deep
+  analyzer's version, image ID and budget are part of `analyzer_version`, so the cache key keeps
+  its 8 fields. `deep=None` (the default) changes nothing.
 - Only the analysis of stage 8 is cached, and only when it is VERIFIED or REJECTED. The
   advisory result is never cached: a cached VERIFIED becomes REJECTED the day OSV lists the
   version, and VERIFIED again if the advisory is withdrawn.
@@ -43,6 +48,7 @@ store's verdict log; `metrics(store)` gives the cache hit rate and the p50 / p95
 No stage installs, imports or runs package code.
 """
 from __future__ import annotations
+import copy
 import hashlib
 import time
 from pathlib import Path
@@ -57,6 +63,7 @@ from backend.cavr.ast_scan import ANALYZER_VERSION as SCAN_VERSION, scan_wheel
 from backend.cavr.capability_contract import infer_capability_contract
 from backend.cavr.capture import parse_pip_command, redact
 from backend.cavr.context_extractor import extract_project_context
+from backend.cavr.deep_stage import identity as deep_identity, run_deep
 from backend.cavr.dep_tree import build_tree
 from backend.cavr.manifest_parser import capture_requirements_edit
 from backend.cavr.reachability import judge_sinks
@@ -68,6 +75,7 @@ from backend.threat_repo.repository import seeds
 
 PIPELINE_VERSION = "cavr-pipeline/2"  # /2: the sink judgement changed after the review of steps 9-11
 ESCALATION = "deep analysis required (M2)"
+DEEP_ESCALATION = "escalated: deep analysis ran"
 LOCKFILE_NAME = "dependencies.lock.json"
 PASSED = ("verdict", "ALL_CHECKS_PASSED")
 ANALYSIS_KEYS = {"status", "stage", "rule", "reason", "escalation", "scan", "reachability"}  # what `_analyse` returns
@@ -77,7 +85,8 @@ CACHE_LOOKUPS = ("HIT", "MISS", "NOT_REACHED")
 
 
 def verify_request(request, project_dir, policy, store, *, transport=None, quarantine_dir=None, advisory_cache_dir=None,
-                   live_advisories=True, osv=None, knowledge=None, environment=None, lockfile_name=LOCKFILE_NAME) -> dict:
+                   live_advisories=True, osv=None, knowledge=None, environment=None, lockfile_name=LOCKFILE_NAME,
+                   deep=None) -> dict:
     """Verify one request for the project at `project_dir`. Every result has the same keys.
 
     `request`  a pip command (string or list of tokens), a capture record, or
@@ -88,19 +97,20 @@ def verify_request(request, project_dir, policy, store, *, transport=None, quara
     The keyword arguments replace the outside world in tests: `transport` (PyPI),
     `osv` / `advisory_cache_dir` / `live_advisories` (OSV), `knowledge` (threat-repository
     rules), `environment` (marker variables), `quarantine_dir` (where wheels are kept).
+    `deep` is a deep analyzer for escalated packages (`deep_stage`); None means no deep stage.
     """
     started = time.perf_counter()
     knowledge = knowledge or {"records": seeds()}
     fields = {"request": None, "gate": None, "lockfile": {"path": None, "present": False},
-              "project": None, "packages": [], "policy_version": None, "analyzer_version": analyzer_version(knowledge)}
+              "project": None, "packages": [], "policy_version": None, "analyzer_version": analyzer_version(knowledge, deep)}
 
     def finish(status, stage, rule, reason) -> dict:
         packages = fields["packages"]
-        escalated = any(package["escalated"] for package in packages)
+        escalation = next((package["escalation"] for package in packages if package["escalated"]), None)
         verdict = {"status": status, "stage": stage, "rule": rule, "reason": reason,
                    "fast_gate_ms": round((time.perf_counter() - started) * 1000, 2),
                    "cache_hit": bool(packages) and all(package["cache_hit"] for package in packages),
-                   "escalated": escalated, "escalation": ESCALATION if escalated else None, **fields}
+                   "escalated": escalation is not None, "escalation": escalation, **fields}
         verdict["logged"] = _log(store, request, verdict)
         return verdict
 
@@ -134,7 +144,7 @@ def verify_request(request, project_dir, policy, store, *, transport=None, quara
     run = SimpleNamespace(policy=policy, lockfile=lockfile, context=context, store=store, transport=transport,
                           quarantine_dir=Path(quarantine_dir) if quarantine_dir is not None else default_quarantine_dir(),
                           advisory_cache_dir=Path(advisory_cache_dir) if advisory_cache_dir is not None else Path(DATA) / "cavr" / "advisories",
-                          live_advisories=live_advisories, osv=osv, knowledge=knowledge, environment=environment,
+                          live_advisories=live_advisories, osv=osv, knowledge=knowledge, environment=environment, deep=deep,
                           policy_version=policy_version(policy), analyzer_version=fields["analyzer_version"])
 
     # 3-9, once per requirement.
@@ -171,9 +181,16 @@ def default_quarantine_dir() -> Path:
     return Path(DATA) / "cavr" / "quarantine"
 
 
-def analyzer_version(knowledge=None) -> str:
-    """The cache-key field that changes when the code or the sink rules that judge an artifact change."""
-    return f"{PIPELINE_VERSION};{SCAN_VERSION};rules:{digest(python_sinks(knowledge or {'records': seeds()}))}"
+def analyzer_version(knowledge=None, deep=None) -> str:
+    """The cache-key field that changes when the code, the sink rules or the deep analyzer that judge an artifact change.
+
+    With a deep analyzer its `deep_stage.identity` (version, image ID, budget) is appended; one without a full
+    identity appends "unknown" (its escalated packages are UNRESOLVED and nothing deep is ever cached for it).
+    """
+    version = f"{PIPELINE_VERSION};{SCAN_VERSION};rules:{digest(python_sinks(knowledge or {'records': seeds()}))}"
+    if deep is None:
+        return version
+    return f"{version};deep:{deep_identity(deep) or 'unknown'}"
 
 
 def metrics(store) -> dict:
@@ -338,10 +355,14 @@ def _verify_package(requirement: dict, decision: dict, run) -> dict:
         evidence["analysis_from_cache"] = True
     else:
         analysis = _analyse(tree, contract, run)
+        if analysis["status"] == "UNRESOLVED" and analysis["escalation"] and run.deep is not None:
+            analysis = _deep(root, tree, contract, analysis, run)
         if analysis["status"] in CACHEABLE:
             stored = store_verdict(run.store, key_fields, analysis)
             cache.update(stored=stored["stored"], reason=stored["reason"])
     evidence["scan"], evidence["reachability"] = analysis["scan"], analysis["reachability"]
+    if "deep" in analysis:
+        evidence["deep"] = analysis["deep"]
 
     # 9. Verdict.
     return done(analysis["status"], analysis["stage"], analysis["rule"], analysis["reason"], cache_hit=hit,
@@ -382,6 +403,20 @@ def _analyse(tree: dict, contract: dict, run) -> dict:
     if judgement["result"] != "OK":
         return analysis("UNRESOLVED", "reachability", judgement["rule"], judgement["reason"], judgement, ESCALATION)
     return analysis("VERIFIED", *PASSED, f"hash, tree, advisories and contract checked; {judgement['reason']}", judgement)
+
+
+def _deep(root: dict, tree: dict, contract: dict, analysis: dict, run) -> dict:
+    """Stage 8b: the deep verdict replaces the escalated UNRESOLVED of stage 8; the fast evidence is kept."""
+    # A copy: the analyzer must not be able to change the fast evidence that goes into the verdict and the cache.
+    package = copy.deepcopy({
+        "name": root["name"], "version": root["version"], "escalation": analysis["escalation"],
+        "tree": {"subtree_digest": tree["subtree_digest"],
+                 "nodes": [{key: node[key] for key in ("name", "version", "sha256", "filename", "path")} for node in tree["nodes"]]},
+        "contract": contract, "scan": analysis["scan"], "reachability": analysis["reachability"],
+        "fast": {key: analysis[key] for key in ("status", "stage", "rule", "reason")}})
+    result = run_deep(run.deep, package)
+    return {**analysis, "status": result["status"], "stage": result["stage"], "rule": result["rule"],
+            "reason": result["reason"], "escalation": DEEP_ESCALATION, "deep": result}
 
 
 def _root(tree: dict):

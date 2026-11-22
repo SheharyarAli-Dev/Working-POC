@@ -1,7 +1,7 @@
 # CAVR M2 plan: finish CAVR
 
-Status: **decisions recorded** (Maryam, 2026-11-22; see "Decisions"). Planning only: no code was changed for this
-plan, and PR 1 has not started. Branch `cavr-m2-plan`. Owner: Maryam Fatima. Progress is tracked per phase at the end;
+Status: **decisions recorded** (Maryam, 2026-11-22; see "Decisions"). Phase 1 (PR 1, PR 2) is being implemented on
+branch `cavr-m2-phase1-wiring`. Owner: Maryam Fatima. Progress is tracked per phase at the end;
 update it as each PR lands.
 
 ## Sources read
@@ -127,6 +127,22 @@ design part. **not started** = nothing, or only a stub that returns constants (a
 | 33 | Evaluation corpus, baselines, ablations (§10) | not started | — | PR 21 |
 | 34 | npm, eBPF, Tree-sitter, Sigstore, level-4 replacement, RESTRICTED enforcement | not started | — | future work, out of M2 (Q3; see "Future work") |
 
+## Order of work (fast first)
+
+Decided by Maryam, 2026-11-22. The quick parts come first; the PR numbers below are kept as names, not as the order.
+
+1. **Phase 1 wiring** (PR 1, PR 2).
+2. **Repair as a proposed pin / removal patch** (PR 15, and the fast-gate part of PR 16): the proposal (requirements,
+   lockfile, policy patch) is re-verified with CAVR's existing checks (`verify_request` in a temporary copy of the
+   project), no sandbox. A candidate whose fast verdict is an escalated UNRESOLVED stays UNRESOLVED until step 3.
+3. **Phase 2 sandbox** (PR 3 – PR 9).
+4. **Phase 3 counterfactual activation and causal graph** (PR 10 – PR 13).
+5. **Dashboard and evaluation** (PR 19, and a 10–15 package evaluation from PR 21).
+
+Everything else goes to "Future work": PR 14 (RESTRICTED), the sandbox and project-test parts of PR 16, PR 17 (clean
+reconstruction), PR 18 (certificate), PR 20 (NFR guards and legacy removal check), and PR 21's baselines and ablations
+beyond the 10–15 package evaluation. Legacy modules are still deleted by the PR that replaces them (Q12).
+
 ## Order of work
 
 One part per PR, each a branch off `master`, small commits inside it (`feat(cavr): …`, `fix(cavr): …`,
@@ -181,7 +197,8 @@ exists behind the escalation (still answering UNRESOLVED without a sandbox).
   already do; the analyzer's own advisory rule (`OSV().query` on PyPI's advisory list) is removed (Q1 option A: no OSV
   answer -> UNRESOLVED). LOCAL lab nodes keep the lab path, labelled as the demo lab, until PR 12 replaces it.
   `gate_adapter` rows get the fields the orchestrator's assurance report reads (`sha256`, `contract.allowed/denied`,
-  `escalation`). The old `capability_contract.infer` goes. No orchestrator file is edited.
+  `escalation`). The old `capability_contract.infer` stays: the LOCAL lab path and the orchestrator's `_repair` still
+  read its contract, so it is deleted in PR 12 with the lab path (Q12; decided 2026-11-22). No orchestrator file is edited.
 - Demo pins (Q2), in their own commit: the VERIFIED demo case becomes `pypdf==6.21.4` (demo project requirements,
   lockfile, `.asent/cavr/policy.json`, dashboard scenario chip); `pypdf==6.19.0` and `pypdf==5.1.0` stay as REJECTED
   cases. The real 6.21.4 wheel, its registry JSON and its OSV answer are recorded once (date and SHA-256 noted) for the
@@ -322,7 +339,7 @@ counterfactual run; the §6.6 three-package canary path is found; unexplored tri
   run, 120 s per package (Q8), overridable only by the base policy. The Q8 rule applies across all runs: VERIFIED only
   if every run completed within budget, every trace is complete and no event in any context is outside the contract;
   unexplored or unsynthesizable high-risk triggers are listed and make the verdict UNRESOLVED. Replaces
-  `counterfactual.py` and the `sandbox.py` lab path; the demo LOCAL lab node moves onto this path
+  `counterfactual.py`, the `sandbox.py` lab path and the old `capability_contract.infer`; the demo LOCAL lab node moves onto this path
   (`test_controlled_dormant_execution` re-pointed, `[owner review: tests/test_modules.py]`).
 - Tests first: unit (fake runner) order follows priority, budget stops the loop, early stop, residuals in the verdict,
   a baseline that is not observed stops the loop as UNRESOLVED; Docker: an env-gated sample is clean in the baseline run
@@ -439,14 +456,14 @@ Stated as limitations in the report and on the dashboard, not implemented in M2:
 
 - **SATRA image builder API** (Q10): confirm with SATRA's owner that `backend/satra/project_image.py::prepare` is a
   public API CAVR may call. Before PR 16.
-- **Full-suite baseline**: measure `.venv/bin/python -m pytest -q` to completion before PR 1.
+- **Full-suite baseline**: measured before PR 1 (Maryam, 2026-11-22): 2282 passed, 8 skipped, 1 xfailed.
 - **Demo pin data** (Q2): if `pypdf==6.21.4` gains an advisory or its wheel changes before PR 1 is recorded, stop and ask.
 
 ## Progress
 
 ### Phase 1 — Wiring
-- [ ] PR 1 orchestrator through `verify_request` + demo pin `pypdf==6.21.4`
-- [ ] PR 2 deep-analysis stage interface
+- [x] PR 1 orchestrator through `verify_request` + demo pin `pypdf==6.21.4` (branch `cavr-m2-phase1-wiring`, 2026-11-22; report notes Step M2-1)
+- [x] PR 2 deep-analysis stage interface (branch `cavr-m2-phase1-wiring`, 2026-11-22; report notes Step M2-2)
 
 ### Phase 2 — Behaviour sandbox
 - [ ] PR 3 CAVR sandbox image `asent-cavr-sandbox:local` + identity check

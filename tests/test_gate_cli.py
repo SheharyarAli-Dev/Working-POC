@@ -56,7 +56,7 @@ def test_invalid_config(tmp_path):
 
 def test_unreviewed_starter(tmp_path):
     repo = GateRepo(tmp_path / "repo")
-    (repo.root / "requirements.txt").write_text("pypdf==6.19.0\n")
+    (repo.root / "requirements.txt").write_text("pypdf==6.21.4\n")
     init_project(repo.root)
     base = repo.commit({})
     code, report, _ = run_cli(repo, base, base, tmp_path / "out")
@@ -207,7 +207,7 @@ def test_denied_package_added_in_head_is_block(tmp_path, monkeypatch):
     index, _ = recorded_pypi(monkeypatch, tmp_path)
     repo = GateRepo(tmp_path / "repo")
     base = repo.commit(cavr_files())
-    head = repo.commit({"requirements.txt": "pypdf==6.19.0\nreqeusts==2.31.0\n"})
+    head = repo.commit({"requirements.txt": "pypdf==6.21.4\nreqeusts==2.31.0\n"})
     code, report, _ = run_cli(repo, base, head, tmp_path / "out")
     assert code == 1 and report["modules"]["CAVR"]["status"] == "REJECTED"
 

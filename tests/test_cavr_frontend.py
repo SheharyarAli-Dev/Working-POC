@@ -24,7 +24,7 @@ import pytest
 from backend.cavr import api
 from backend.cavr.pipeline import STATUSES   # VERIFIED, REJECTED, BLOCK, UNRESOLVED: the order of the report
 from test_cavr_api import Dashboard
-from test_cavr_support import PYPDF_SHA256
+from test_cavr_support import PIN_SHA256
 
 REPO = Path(__file__).resolve().parents[1]
 FRONTEND = REPO / "frontend"
@@ -206,9 +206,9 @@ def test_the_proof_drawer_prints_the_hash_result_of_each_run(dashboard, tmp_path
     drawers = dict(zip(runs, render(tmp_path, *({"view": "proof", "proof": proof} for proof in runs.values()))))
     hashes = lambda pieces: (after(pieces, "Registry SHA-256:"), after(pieces, "SHA-256 of the downloaded file:"),
                              after(pieces, "Result:"), after(pieces, "Bytes equal the registry digest:"))
-    assert hashes(drawers["verified"]) == (PYPDF_SHA256, PYPDF_SHA256, "HASH_MATCH", "true")
+    assert hashes(drawers["verified"]) == (PIN_SHA256, PIN_SHA256, "HASH_MATCH", "true")
     arrived = runs["tampered_wheel"]["hash_comparison"]["actual_sha256"]
-    assert arrived != PYPDF_SHA256 and hashes(drawers["tampered_wheel"]) == (PYPDF_SHA256, arrived, "HASH_MISMATCH", "false")
+    assert arrived != PIN_SHA256 and hashes(drawers["tampered_wheel"]) == (PIN_SHA256, arrived, "HASH_MISMATCH", "false")
     # Nothing was hashed in these two runs: no "match" and no "mismatch" is printed for them.
     assert hashes(drawers["network_off"]) == (DASH, DASH, "REGISTRY_UNAVAILABLE", DASH)
     assert hashes(drawers["not_on_allowlist"]) == (DASH, DASH, DASH, DASH)
@@ -229,12 +229,12 @@ def test_the_overview_shows_the_verdict_and_dashes_for_what_was_not_computed(das
     assert after(block_view, "Fast gate") == f"{shown(blocked['proof']['cavr_verdict']['fast_gate_ms'])} ms"
     assert "Cache hit: no" in block_view and "Escalation: " + DASH in block_view
     assert "VERDICT: ALLOW" in verified_view and after(verified_view, "POLICY STATE:") == "VERIFIED"
-    assert after(verified_view, "Artifact SHA-256") == PYPDF_SHA256[:16] + "..."
+    assert after(verified_view, "Artifact SHA-256") == PIN_SHA256[:16] + "..."
     # The hash result is the pipeline's rule, or a dash; never a sentence the page makes around a missing rule.
     assert "Hash check: HASH_MATCH" in verified_view and "Hash check: " + DASH in block_view
     # Package and version are the proof's, so they are right even when the page did not start the run itself.
-    assert [verified["proof"]["package"], verified["proof"]["version"]] == ["pypdf", "6.19.0"]
-    assert verified_view[verified_view.index("Package & Version") + 1:][:2] == ["pypdf", "6.19.0"]
+    assert [verified["proof"]["package"], verified["proof"]["version"]] == ["pypdf", "6.21.4"]
+    assert verified_view[verified_view.index("Package & Version") + 1:][:2] == ["pypdf", "6.21.4"]
     assert block_view[block_view.index("Package & Version") + 1:][:2] == ["left-pad", "1.0"]
 
 
@@ -283,9 +283,9 @@ def test_a_run_rejected_before_the_scan_does_not_say_that_the_scan_found_nothing
 def test_a_run_whose_scan_ran_still_shows_what_it_found(dashboard, tmp_path):
     data = run_data(dashboard, "verified")
     stage, contract, triggers = three_views(tmp_path, data)
-    assert after(stage, "EVIDENCE FOUND") == ("pypdf/filters.py:774 subprocess.run GUARD_DISABLED; "
-                                              "pypdf/filters.py:804 subprocess.run GUARD_DISABLED")
-    assert "pypdf/filters.py:774" in " ".join(triggers) and "GUARD_DISABLED" in triggers
+    assert after(stage, "EVIDENCE FOUND") == ("pypdf/filters.py:883 subprocess.run GUARD_DISABLED; "
+                                              "pypdf/filters.py:913 subprocess.run GUARD_DISABLED")
+    assert "pypdf/filters.py:883" in " ".join(triggers) and "GUARD_DISABLED" in triggers
     assert "Nothing found" in contract or "No reachable sink" in contract     # the scan ran: these are results of it
     # Constructed input, to reach the sentence for "scanned and nothing found": the same run with its sinks removed.
     action = next(event for event in data["events"] if event["type"] == "action_completed")["payload"]
@@ -382,5 +382,5 @@ def test_the_advisory_card_without_advisories(dashboard, tmp_path):
     verified, blocked = run_data(dashboard, "verified"), run_data(dashboard, "not_on_allowlist")
     clean, not_asked = render_html(tmp_path, {"view": "overview", **verified}, {"view": "overview", **blocked})
     assert "<details" not in clean and "<details" not in not_asked
-    assert "0 affect this version" in pieces_of(clean) and "pypdf 6.19.0: NO_KNOWN_VULNERABILITY" in " ".join(pieces_of(clean))
+    assert "0 affect this version" in pieces_of(clean) and "pypdf 6.21.4: NO_KNOWN_VULNERABILITY" in " ".join(pieces_of(clean))
     assert after(pieces_of(not_asked), "OSV advisories") == DASH       # the gate blocked the request: OSV was never asked

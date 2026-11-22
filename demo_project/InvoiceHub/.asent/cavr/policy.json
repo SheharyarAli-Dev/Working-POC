@@ -7,7 +7,7 @@
     "NETWORK_CONNECT:none"
   ],
   "approved_requirements": [
-    "pypdf==6.19.0"
+    "pypdf==6.21.4"
   ],
   "denied_packages": [],
   "dependencies": {

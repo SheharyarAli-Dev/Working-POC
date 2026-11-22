@@ -1,0 +1,3645 @@
+{
+ "advisory_count": 18,
+ "note": "Real OSV response, recorded once and stored unchanged (one page, no next_page_token).",
+ "query": {
+  "package": {
+   "ecosystem": "PyPI",
+   "name": "pypdf"
+  },
+  "version": "6.19.0"
+ },
+ "recorded_at": "2026-11-22T10:01:20.064641+00:00",
+ "source": "https://api.osv.dev/v1/query",
+ "response_sha256": "cb440e30f4222f74a19bed55b49a57f0b228b63971460ef8acac0901c4ce896c",
+ "response": {
+  "vulns": [
+   {
+    "id": "GHSA-39mj-jf6j-2qj3",
+    "summary": "pypdf: Possible infinite loop when hitting EOF in standard xref table",
+    "details": "### Impact\n\nAn attacker who uses this vulnerability can craft a PDF which leads to an infinite loop. This requires an incomplete file which ends inside the xref table.\n\n### Patches\n\nThis has been fixed in [pypdf==6.20.0](https://github.com/py-pdf/pypdf/releases/tag/6.20.0).\n\n### Workarounds\n\nIf you cannot upgrade yet, consider applying the changes from PR [#4170](https://github.com/py-pdf/pypdf/pull/4170).\n\n### Notes\n\nThis has been reported through both the secure channel and as a public issue at [#4169](https://github.com/py-pdf/pypdf/issues/4169).",
+    "aliases": [
+     "CVE-2026-113794"
+    ],
+    "modified": "2026-10-21T17:00:26.618873039Z",
+    "published": "2026-10-21T16:54:44Z",
+    "database_specific": {
+     "cwe_ids": [
+      "CWE-835"
+     ],
+     "severity": "MODERATE",
+     "github_reviewed": true,
+     "github_reviewed_at": "2026-10-21T16:54:44Z",
+     "nvd_published_at": null
+    },
+    "references": [
+     {
+      "type": "WEB",
+      "url": "https://github.com/py-pdf/pypdf/security/advisories/GHSA-39mj-jf6j-2qj3"
+     },
+     {
+      "type": "WEB",
+      "url": "https://github.com/py-pdf/pypdf/issues/4169"
+     },
+     {
+      "type": "WEB",
+      "url": "https://github.com/py-pdf/pypdf/pull/4170"
+     },
+     {
+      "type": "WEB",
+      "url": "https://github.com/py-pdf/pypdf/commit/37e1cd681744bac38b159f7e1c614eee8d639c58"
+     },
+     {
+      "type": "PACKAGE",
+      "url": "https://github.com/py-pdf/pypdf"
+     },
+     {
+      "type": "WEB",
+      "url": "https://github.com/py-pdf/pypdf/releases/tag/6.20.0"
+     }
+    ],
+    "affected": [
+     {
+      "package": {
+       "name": "pypdf",
+       "ecosystem": "PyPI",
+       "purl": "pkg:pypi/pypdf"
+      },
+      "ranges": [
+       {
+        "type": "ECOSYSTEM",
+        "events": [
+         {
+          "introduced": "0"
+         },
+         {
+          "fixed": "6.20.0"
+         }
+        ]
+       }
+      ],
+      "versions": [
+       "1.0",
+       "1.1",
+       "1.10",
+       "1.11",
+       "1.12",
+       "1.13",
+       "1.2",
+       "1.3",
+       "1.4",
+       "1.5",
+       "1.6",
+       "1.7",
+       "1.8",
+       "1.9",
+       "3.1.0",
+       "3.10.0",
+       "3.11.0",
+       "3.11.1",
+       "3.12.0",
+       "3.12.1",
+       "3.12.2",
+       "3.13.0",
+       "3.14.0",
+       "3.15.0",
+       "3.15.1",
+       "3.15.2",
+       "3.15.3",
+       "3.15.4",
+       "3.15.5",
+       "3.16.0",
+       "3.16.1",
+       "3.16.2",
+       "3.16.3",
+       "3.16.4",
+       "3.17.0",
+       "3.17.1",
+       "3.17.2",
+       "3.17.3",
+       "3.17.4",
+       "3.2.0",
+       "3.2.1",
+       "3.3.0",
+       "3.4.0",
+       "3.4.1",
+       "3.5.0",
+       "3.5.1",
+       "3.5.2",
+       "3.6.0",
+       "3.7.0",
+       "3.7.1",
+       "3.8.0",
+       "3.8.1",
+       "3.9.0",
+       "3.9.1",
+       "4.0.0",
+       "4.0.1",
+       "4.0.2",
+       "4.1.0",
+       "4.2.0",
+       "4.3.0",
+       "4.3.1",
+       "5.0.0",
+       "5.0.1",
+       "5.1.0",
+       "5.2.0",
+       "5.3.0",
+       "5.3.1",
+       "5.4.0",
+       "5.5.0",
+       "5.6.0",
+       "5.6.1",
+       "5.7.0",
+       "5.8.0",
+       "5.9.0",
+       "6.0.0",
+       "6.1.0",
+       "6.1.1",
+       "6.1.2",
+       "6.1.3",
+       "6.10.0",
+       "6.10.1",
+       "6.10.2",
+       "6.11.0",
+       "6.12.0",
+       "6.12.1",
+       "6.12.2",
+       "6.13.0",
+       "6.13.1",
+       "6.13.2",
+       "6.13.3",
+       "6.14.0",
+       "6.14.1",
+       "6.14.2",
+       "6.15.0",
+       "6.16.0",
+       "6.16.1",
+       "6.16.2",
+       "6.17.0",
+       "6.18.0",
+       "6.18.1",
+       "6.19.0",
+       "6.2.0",
+       "6.3.0",
+       "6.4.0",
+       "6.4.1",
+       "6.4.2",
+       "6.5.0",
+       "6.6.0",
+       "6.6.1",
+       "6.6.2",
+       "6.7.0",
+       "6.7.1",
+       "6.7.2",
+       "6.7.3",
+       "6.7.4",
+       "6.7.5",
+       "6.8.0",
+       "6.9.0",
+       "6.9.1",
+       "6.9.2"
+      ],
+      "database_specific": {
+       "source": "https://github.com/github/advisory-database/blob/main/advisories/github-reviewed/2026/10/GHSA-39mj-jf6j-2qj3/GHSA-39mj-jf6j-2qj3.json"
+      }
+     }
+    ],
+    "schema_version": "1.9.0",
+    "severity": [
+     {
+      "type": "CVSS_V4",
+      "score": "CVSS:4.0/AV:N/AC:L/AT:P/PR:N/UI:P/VC:N/VI:N/VA:H/SC:N/SI:N/SA:N"
+     }
+    ]
+   },
+   {
+    "id": "GHSA-42gh-23hr-vphw",
+    "summary": "pypdf has possible long runtimes when retrieving page labels",
+    "details": "### Impact\n\nAn attacker who uses this vulnerability can craft a PDF which leads to large runtimes. This requires retrieving the page labels of a file.\n\n### Patches\n\nThis has been fixed in [pypdf==6.21.3](https://github.com/py-pdf/pypdf/releases/tag/6.21.3).\n\n### Workarounds\n\nIf you cannot upgrade yet, consider applying the changes from PR [#4251](https://github.com/py-pdf/pypdf/pull/4251).",
+    "aliases": [
+     "CVE-2026-119206"
+    ],
+    "modified": "2026-10-30T23:15:05.410552661Z",
+    "published": "2026-10-30T23:08:55Z",
+    "database_specific": {
+     "severity": "HIGH",
+     "github_reviewed": true,
+     "github_reviewed_at": "2026-10-30T23:08:55Z",
+     "nvd_published_at": "2026-10-29T21:17:19Z",
+     "cwe_ids": [
+      "CWE-400"
+     ]
+    },
+    "references": [
+     {
+      "type": "WEB",
+      "url": "https://github.com/py-pdf/pypdf/security/advisories/GHSA-42gh-23hr-vphw"
+     },
+     {
+      "type": "ADVISORY",
+      "url": "https://nvd.nist.gov/vuln/detail/CVE-2026-119206"
+     },
+     {
+      "type": "WEB",
+      "url": "https://github.com/py-pdf/pypdf/pull/4251"
+     },
+     {
+      "type": "WEB",
+      "url": "https://github.com/py-pdf/pypdf/commit/b891fef37000cd86baa6e9848a3387d080b3b03e"
+     },
+     {
+      "type": "PACKAGE",
+      "url": "https://github.com/py-pdf/pypdf"
+     },
+     {
+      "type": "WEB",
+      "url": "https://github.com/py-pdf/pypdf/releases/tag/6.21.3"
+     }
+    ],
+    "affected": [
+     {
+      "package": {
+       "name": "pypdf",
+       "ecosystem": "PyPI",
+       "purl": "pkg:pypi/pypdf"
+      },
+      "ranges": [
+       {
+        "type": "ECOSYSTEM",
+        "events": [
+         {
+          "introduced": "0"
+         },
+         {
+          "fixed": "6.21.3"
+         }
+        ]
+       }
+      ],
+      "versions": [
+       "1.0",
+       "1.1",
+       "1.10",
+       "1.11",
+       "1.12",
+       "1.13",
+       "1.2",
+       "1.3",
+       "1.4",
+       "1.5",
+       "1.6",
+       "1.7",
+       "1.8",
+       "1.9",
+       "3.1.0",
+       "3.10.0",
+       "3.11.0",
+       "3.11.1",
+       "3.12.0",
+       "3.12.1",
+       "3.12.2",
+       "3.13.0",
+       "3.14.0",
+       "3.15.0",
+       "3.15.1",
+       "3.15.2",
+       "3.15.3",
+       "3.15.4",
+       "3.15.5",
+       "3.16.0",
+       "3.16.1",
+       "3.16.2",
+       "3.16.3",
+       "3.16.4",
+       "3.17.0",
+       "3.17.1",
+       "3.17.2",
+       "3.17.3",
+       "3.17.4",
+       "3.2.0",
+       "3.2.1",
+       "3.3.0",
+       "3.4.0",
+       "3.4.1",
+       "3.5.0",
+       "3.5.1",
+       "3.5.2",
+       "3.6.0",
+       "3.7.0",
+       "3.7.1",
+       "3.8.0",
+       "3.8.1",
+       "3.9.0",
+       "3.9.1",
+       "4.0.0",
+       "4.0.1",
+       "4.0.2",
+       "4.1.0",
+       "4.2.0",
+       "4.3.0",
+       "4.3.1",
+       "5.0.0",
+       "5.0.1",
+       "5.1.0",
+       "5.2.0",
+       "5.3.0",
+       "5.3.1",
+       "5.4.0",
+       "5.5.0",
+       "5.6.0",
+       "5.6.1",
+       "5.7.0",
+       "5.8.0",
+       "5.9.0",
+       "6.0.0",
+       "6.1.0",
+       "6.1.1",
+       "6.1.2",
+       "6.1.3",
+       "6.10.0",
+       "6.10.1",
+       "6.10.2",
+       "6.11.0",
+       "6.12.0",
+       "6.12.1",
+       "6.12.2",
+       "6.13.0",
+       "6.13.1",
+       "6.13.2",
+       "6.13.3",
+       "6.14.0",
+       "6.14.1",
+       "6.14.2",
+       "6.15.0",
+       "6.16.0",
+       "6.16.1",
+       "6.16.2",
+       "6.17.0",
+       "6.18.0",
+       "6.18.1",
+       "6.19.0",
+       "6.2.0",
+       "6.20.0",
+       "6.20.1",
+       "6.21.0",
+       "6.21.1",
+       "6.21.2",
+       "6.3.0",
+       "6.4.0",
+       "6.4.1",
+       "6.4.2",
+       "6.5.0",
+       "6.6.0",
+       "6.6.1",
+       "6.6.2",
+       "6.7.0",
+       "6.7.1",
+       "6.7.2",
+       "6.7.3",
+       "6.7.4",
+       "6.7.5",
+       "6.8.0",
+       "6.9.0",
+       "6.9.1",
+       "6.9.2"
+      ],
+      "database_specific": {
+       "source": "https://github.com/github/advisory-database/blob/main/advisories/github-reviewed/2026/10/GHSA-42gh-23hr-vphw/GHSA-42gh-23hr-vphw.json"
+      }
+     }
+    ],
+    "schema_version": "1.9.2",
+    "severity": [
+     {
+      "type": "CVSS_V4",
+      "score": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:P/VC:N/VI:N/VA:H/SC:N/SI:N/SA:N"
+     }
+    ]
+   },
+   {
+    "id": "GHSA-4vqv-7265-gm2w",
+    "summary": "pypdf has possible large memory usage for exceptions in strict mode",
+    "details": "### Impact\n\nAn attacker who uses this vulnerability can craft a PDF which leads to large memory usage. This requires loading an invalid dictionary.\n\n### Patches\n\nThis has been fixed in [pypdf==6.21.3](https://github.com/py-pdf/pypdf/releases/tag/6.21.3).\n\n### Workarounds\n\nIf you cannot upgrade yet, consider applying the changes from PR [#4265](https://github.com/py-pdf/pypdf/pull/4265).",
+    "aliases": [
+     "CVE-2026-119207"
+    ],
+    "modified": "2026-10-30T23:15:07.229853114Z",
+    "published": "2026-10-30T23:08:39Z",
+    "database_specific": {
+     "github_reviewed": true,
+     "github_reviewed_at": "2026-10-30T23:08:39Z",
+     "nvd_published_at": "2026-10-29T21:17:19Z",
+     "cwe_ids": [
+      "CWE-400",
+      "CWE-405"
+     ],
+     "severity": "HIGH"
+    },
+    "references": [
+     {
+      "type": "WEB",
+      "url": "https://github.com/py-pdf/pypdf/security/advisories/GHSA-4vqv-7265-gm2w"
+     },
+     {
+      "type": "ADVISORY",
+      "url": "https://nvd.nist.gov/vuln/detail/CVE-2026-119207"
+     },
+     {
+      "type": "WEB",
+      "url": "https://github.com/py-pdf/pypdf/pull/4265"
+     },
+     {
+      "type": "WEB",
+      "url": "https://github.com/py-pdf/pypdf/commit/64270258c0eced720f7960aecf8cef31afd39f8d"
+     },
+     {
+      "type": "PACKAGE",
+      "url": "https://github.com/py-pdf/pypdf"
+     },
+     {
+      "type": "WEB",
+      "url": "https://github.com/py-pdf/pypdf/releases/tag/6.21.3"
+     }
+    ],
+    "affected": [
+     {
+      "package": {
+       "name": "pypdf",
+       "ecosystem": "PyPI",
+       "purl": "pkg:pypi/pypdf"
+      },
+      "ranges": [
+       {
+        "type": "ECOSYSTEM",
+        "events": [
+         {
+          "introduced": "0"
+         },
+         {
+          "fixed": "6.21.3"
+         }
+        ]
+       }
+      ],
+      "versions": [
+       "1.0",
+       "1.1",
+       "1.10",
+       "1.11",
+       "1.12",
+       "1.13",
+       "1.2",
+       "1.3",
+       "1.4",
+       "1.5",
+       "1.6",
+       "1.7",
+       "1.8",
+       "1.9",
+       "3.1.0",
+       "3.10.0",
+       "3.11.0",
+       "3.11.1",
+       "3.12.0",
+       "3.12.1",
+       "3.12.2",
+       "3.13.0",
+       "3.14.0",
+       "3.15.0",
+       "3.15.1",
+       "3.15.2",
+       "3.15.3",
+       "3.15.4",
+       "3.15.5",
+       "3.16.0",
+       "3.16.1",
+       "3.16.2",
+       "3.16.3",
+       "3.16.4",
+       "3.17.0",
+       "3.17.1",
+       "3.17.2",
+       "3.17.3",
+       "3.17.4",
+       "3.2.0",
+       "3.2.1",
+       "3.3.0",
+       "3.4.0",
+       "3.4.1",
+       "3.5.0",
+       "3.5.1",
+       "3.5.2",
+       "3.6.0",
+       "3.7.0",
+       "3.7.1",
+       "3.8.0",
+       "3.8.1",
+       "3.9.0",
+       "3.9.1",
+       "4.0.0",
+       "4.0.1",
+       "4.0.2",
+       "4.1.0",
+       "4.2.0",
+       "4.3.0",
+       "4.3.1",
+       "5.0.0",
+       "5.0.1",
+       "5.1.0",
+       "5.2.0",
+       "5.3.0",
+       "5.3.1",
+       "5.4.0",
+       "5.5.0",
+       "5.6.0",
+       "5.6.1",
+       "5.7.0",
+       "5.8.0",
+       "5.9.0",
+       "6.0.0",
+       "6.1.0",
+       "6.1.1",
+       "6.1.2",
+       "6.1.3",
+       "6.10.0",
+       "6.10.1",
+       "6.10.2",
+       "6.11.0",
+       "6.12.0",
+       "6.12.1",
+       "6.12.2",
+       "6.13.0",
+       "6.13.1",
+       "6.13.2",
+       "6.13.3",
+       "6.14.0",
+       "6.14.1",
+       "6.14.2",
+       "6.15.0",
+       "6.16.0",
+       "6.16.1",
+       "6.16.2",
+       "6.17.0",
+       "6.18.0",
+       "6.18.1",
+       "6.19.0",
+       "6.2.0",
+       "6.20.0",
+       "6.20.1",
+       "6.21.0",
+       "6.21.1",
+       "6.21.2",
+       "6.3.0",
+       "6.4.0",
+       "6.4.1",
+       "6.4.2",
+       "6.5.0",
+       "6.6.0",
+       "6.6.1",
+       "6.6.2",
+       "6.7.0",
+       "6.7.1",
+       "6.7.2",
+       "6.7.3",
+       "6.7.4",
+       "6.7.5",
+       "6.8.0",
+       "6.9.0",
+       "6.9.1",
+       "6.9.2"
+      ],
+      "database_specific": {
+       "source": "https://github.com/github/advisory-database/blob/main/advisories/github-reviewed/2026/10/GHSA-4vqv-7265-gm2w/GHSA-4vqv-7265-gm2w.json"
+      }
+     }
+    ],
+    "schema_version": "1.9.2",
+    "severity": [
+     {
+      "type": "CVSS_V4",
+      "score": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:P/VC:N/VI:N/VA:H/SC:N/SI:N/SA:N"
+     }
+    ]
+   },
+   {
+    "id": "GHSA-5849-834g-hvw5",
+    "summary": "pypdf has possible infinite loop when hitting EOF in standard xref table during trailer search",
+    "details": "### Impact\n\nAn attacker who uses this vulnerability can craft a PDF which leads to an infinite loop. This requires opening an incomplete file without a `trailer`.\n\n### Patches\n\nThis has been fixed in [pypdf==6.21.4](https://github.com/py-pdf/pypdf/releases/tag/6.21.4).\n\n### Workarounds\n\nIf you cannot upgrade yet, consider applying the changes from PR [#4289](https://github.com/py-pdf/pypdf/pull/4289).",
+    "aliases": [
+     "CVE-2026-119203"
+    ],
+    "modified": "2026-10-30T23:30:04.101910128Z",
+    "published": "2026-10-30T23:13:16Z",
+    "database_specific": {
+     "severity": "HIGH",
+     "github_reviewed": true,
+     "github_reviewed_at": "2026-10-30T23:13:16Z",
+     "nvd_published_at": "2026-10-29T21:17:19Z",
+     "cwe_ids": [
+      "CWE-835"
+     ]
+    },
+    "references": [
+     {
+      "type": "WEB",
+      "url": "https://github.com/py-pdf/pypdf/security/advisories/GHSA-5849-834g-hvw5"
+     },
+     {
+      "type": "ADVISORY",
+      "url": "https://nvd.nist.gov/vuln/detail/CVE-2026-119203"
+     },
+     {
+      "type": "WEB",
+      "url": "https://github.com/py-pdf/pypdf/pull/4289"
+     },
+     {
+      "type": "WEB",
+      "url": "https://github.com/py-pdf/pypdf/commit/06593f993789a4b573dd955730c1a7051128bb2a"
+     },
+     {
+      "type": "PACKAGE",
+      "url": "https://github.com/py-pdf/pypdf"
+     },
+     {
+      "type": "WEB",
+      "url": "https://github.com/py-pdf/pypdf/releases/tag/6.21.4"
+     }
+    ],
+    "affected": [
+     {
+      "package": {
+       "name": "pypdf",
+       "ecosystem": "PyPI",
+       "purl": "pkg:pypi/pypdf"
+      },
+      "ranges": [
+       {
+        "type": "ECOSYSTEM",
+        "events": [
+         {
+          "introduced": "0"
+         },
+         {
+          "fixed": "6.21.4"
+         }
+        ]
+       }
+      ],
+      "versions": [
+       "1.0",
+       "1.1",
+       "1.10",
+       "1.11",
+       "1.12",
+       "1.13",
+       "1.2",
+       "1.3",
+       "1.4",
+       "1.5",
+       "1.6",
+       "1.7",
+       "1.8",
+       "1.9",
+       "3.1.0",
+       "3.10.0",
+       "3.11.0",
+       "3.11.1",
+       "3.12.0",
+       "3.12.1",
+       "3.12.2",
+       "3.13.0",
+       "3.14.0",
+       "3.15.0",
+       "3.15.1",
+       "3.15.2",
+       "3.15.3",
+       "3.15.4",
+       "3.15.5",
+       "3.16.0",
+       "3.16.1",
+       "3.16.2",
+       "3.16.3",
+       "3.16.4",
+       "3.17.0",
+       "3.17.1",
+       "3.17.2",
+       "3.17.3",
+       "3.17.4",
+       "3.2.0",
+       "3.2.1",
+       "3.3.0",
+       "3.4.0",
+       "3.4.1",
+       "3.5.0",
+       "3.5.1",
+       "3.5.2",
+       "3.6.0",
+       "3.7.0",
+       "3.7.1",
+       "3.8.0",
+       "3.8.1",
+       "3.9.0",
+       "3.9.1",
+       "4.0.0",
+       "4.0.1",
+       "4.0.2",
+       "4.1.0",
+       "4.2.0",
+       "4.3.0",
+       "4.3.1",
+       "5.0.0",
+       "5.0.1",
+       "5.1.0",
+       "5.2.0",
+       "5.3.0",
+       "5.3.1",
+       "5.4.0",
+       "5.5.0",
+       "5.6.0",
+       "5.6.1",
+       "5.7.0",
+       "5.8.0",
+       "5.9.0",
+       "6.0.0",
+       "6.1.0",
+       "6.1.1",
+       "6.1.2",
+       "6.1.3",
+       "6.10.0",
+       "6.10.1",
+       "6.10.2",
+       "6.11.0",
+       "6.12.0",
+       "6.12.1",
+       "6.12.2",
+       "6.13.0",
+       "6.13.1",
+       "6.13.2",
+       "6.13.3",
+       "6.14.0",
+       "6.14.1",
+       "6.14.2",
+       "6.15.0",
+       "6.16.0",
+       "6.16.1",
+       "6.16.2",
+       "6.17.0",
+       "6.18.0",
+       "6.18.1",
+       "6.19.0",
+       "6.2.0",
+       "6.20.0",
+       "6.20.1",
+       "6.21.0",
+       "6.21.1",
+       "6.21.2",
+       "6.21.3",
+       "6.3.0",
+       "6.4.0",
+       "6.4.1",
+       "6.4.2",
+       "6.5.0",
+       "6.6.0",
+       "6.6.1",
+       "6.6.2",
+       "6.7.0",
+       "6.7.1",
+       "6.7.2",
+       "6.7.3",
+       "6.7.4",
+       "6.7.5",
+       "6.8.0",
+       "6.9.0",
+       "6.9.1",
+       "6.9.2"
+      ],
+      "database_specific": {
+       "source": "https://github.com/github/advisory-database/blob/main/advisories/github-reviewed/2026/10/GHSA-5849-834g-hvw5/GHSA-5849-834g-hvw5.json"
+      }
+     }
+    ],
+    "schema_version": "1.9.2",
+    "severity": [
+     {
+      "type": "CVSS_V4",
+      "score": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:P/VC:N/VI:N/VA:H/SC:N/SI:N/SA:N"
+     }
+    ]
+   },
+   {
+    "id": "GHSA-5hx5-vpf9-5wcv",
+    "summary": "pypdf: Unvalidated JPEG image data loading",
+    "details": "### Impact\n\nAn attacker who uses this vulnerability can craft a PDF which leads to arbitrary image parsers being called. This requires loading an image which claims to use the `/DCTDecode` filter (JPEG data).\n\nUsers which do not have the optional *Pillow* dependency installed in their environment are not affected.\n\n### Patches\n\nThis has been fixed in [pypdf==6.21.1](https://github.com/py-pdf/pypdf/releases/tag/6.21.1).\n\n### Workarounds\n\nIf you cannot upgrade yet, consider applying the changes from PR [#4222](https://github.com/py-pdf/pypdf/pull/4222).",
+    "aliases": [
+     "CVE-2026-113786"
+    ],
+    "modified": "2026-10-21T20:15:04.178781594Z",
+    "published": "2026-10-21T19:58:10Z",
+    "database_specific": {
+     "severity": "LOW",
+     "github_reviewed": true,
+     "github_reviewed_at": "2026-10-21T19:58:10Z",
+     "nvd_published_at": "2026-10-21T15:17:16Z",
+     "cwe_ids": [
+      "CWE-183",
+      "CWE-20"
+     ]
+    },
+    "references": [
+     {
+      "type": "WEB",
+      "url": "https://github.com/py-pdf/pypdf/security/advisories/GHSA-5hx5-vpf9-5wcv"
+     },
+     {
+      "type": "ADVISORY",
+      "url": "https://nvd.nist.gov/vuln/detail/CVE-2026-113786"
+     },
+     {
+      "type": "WEB",
+      "url": "https://github.com/py-pdf/pypdf/pull/4222"
+     },
+     {
+      "type": "WEB",
+      "url": "https://github.com/py-pdf/pypdf/commit/512d8eb94eb04be1d1c90504e6da2dcef8679e07"
+     },
+     {
+      "type": "PACKAGE",
+      "url": "https://github.com/py-pdf/pypdf"
+     },
+     {
+      "type": "WEB",
+      "url": "https://github.com/py-pdf/pypdf/releases/tag/6.21.1"
+     }
+    ],
+    "affected": [
+     {
+      "package": {
+       "name": "pypdf",
+       "ecosystem": "PyPI",
+       "purl": "pkg:pypi/pypdf"
+      },
+      "ranges": [
+       {
+        "type": "ECOSYSTEM",
+        "events": [
+         {
+          "introduced": "0"
+         },
+         {
+          "fixed": "6.21.1"
+         }
+        ]
+       }
+      ],
+      "versions": [
+       "1.0",
+       "1.1",
+       "1.10",
+       "1.11",
+       "1.12",
+       "1.13",
+       "1.2",
+       "1.3",
+       "1.4",
+       "1.5",
+       "1.6",
+       "1.7",
+       "1.8",
+       "1.9",
+       "3.1.0",
+       "3.10.0",
+       "3.11.0",
+       "3.11.1",
+       "3.12.0",
+       "3.12.1",
+       "3.12.2",
+       "3.13.0",
+       "3.14.0",
+       "3.15.0",
+       "3.15.1",
+       "3.15.2",
+       "3.15.3",
+       "3.15.4",
+       "3.15.5",
+       "3.16.0",
+       "3.16.1",
+       "3.16.2",
+       "3.16.3",
+       "3.16.4",
+       "3.17.0",
+       "3.17.1",
+       "3.17.2",
+       "3.17.3",
+       "3.17.4",
+       "3.2.0",
+       "3.2.1",
+       "3.3.0",
+       "3.4.0",
+       "3.4.1",
+       "3.5.0",
+       "3.5.1",
+       "3.5.2",
+       "3.6.0",
+       "3.7.0",
+       "3.7.1",
+       "3.8.0",
+       "3.8.1",
+       "3.9.0",
+       "3.9.1",
+       "4.0.0",
+       "4.0.1",
+       "4.0.2",
+       "4.1.0",
+       "4.2.0",
+       "4.3.0",
+       "4.3.1",
+       "5.0.0",
+       "5.0.1",
+       "5.1.0",
+       "5.2.0",
+       "5.3.0",
+       "5.3.1",
+       "5.4.0",
+       "5.5.0",
+       "5.6.0",
+       "5.6.1",
+       "5.7.0",
+       "5.8.0",
+       "5.9.0",
+       "6.0.0",
+       "6.1.0",
+       "6.1.1",
+       "6.1.2",
+       "6.1.3",
+       "6.10.0",
+       "6.10.1",
+       "6.10.2",
+       "6.11.0",
+       "6.12.0",
+       "6.12.1",
+       "6.12.2",
+       "6.13.0",
+       "6.13.1",
+       "6.13.2",
+       "6.13.3",
+       "6.14.0",
+       "6.14.1",
+       "6.14.2",
+       "6.15.0",
+       "6.16.0",
+       "6.16.1",
+       "6.16.2",
+       "6.17.0",
+       "6.18.0",
+       "6.18.1",
+       "6.19.0",
+       "6.2.0",
+       "6.20.0",
+       "6.20.1",
+       "6.21.0",
+       "6.3.0",
+       "6.4.0",
+       "6.4.1",
+       "6.4.2",
+       "6.5.0",
+       "6.6.0",
+       "6.6.1",
+       "6.6.2",
+       "6.7.0",
+       "6.7.1",
+       "6.7.2",
+       "6.7.3",
+       "6.7.4",
+       "6.7.5",
+       "6.8.0",
+       "6.9.0",
+       "6.9.1",
+       "6.9.2"
+      ],
+      "database_specific": {
+       "source": "https://github.com/github/advisory-database/blob/main/advisories/github-reviewed/2026/10/GHSA-5hx5-vpf9-5wcv/GHSA-5hx5-vpf9-5wcv.json"
+      }
+     }
+    ],
+    "schema_version": "1.9.0",
+    "severity": [
+     {
+      "type": "CVSS_V4",
+      "score": "CVSS:4.0/AV:N/AC:L/AT:P/PR:N/UI:P/VC:N/VI:N/VA:L/SC:N/SI:N/SA:N"
+     }
+    ]
+   },
+   {
+    "id": "GHSA-62m5-6wh8-28x7",
+    "summary": "pypdf has possible long runtimes/large memory usage for encrypted PDF files",
+    "details": "### Impact\n\nAn attacker who uses this vulnerability can craft a PDF which leads to large runtimes/memory usage. This requires accessing the page count of an encrypted PDF file, which itself declares a wrong `/Count` value.\n\n### Patches\n\nThis has been fixed in [pypdf==6.21.3](https://github.com/py-pdf/pypdf/releases/tag/6.21.3).\n\n### Workarounds\n\nIf you cannot upgrade yet, consider applying the changes from PR [#4270](https://github.com/py-pdf/pypdf/pull/4270).",
+    "aliases": [
+     "CVE-2026-119208"
+    ],
+    "modified": "2026-10-30T23:15:05.408554649Z",
+    "published": "2026-10-30T23:08:24Z",
+    "database_specific": {
+     "nvd_published_at": "2026-10-29T21:17:20Z",
+     "cwe_ids": [
+      "CWE-400",
+      "CWE-770"
+     ],
+     "severity": "HIGH",
+     "github_reviewed": true,
+     "github_reviewed_at": "2026-10-30T23:08:24Z"
+    },
+    "references": [
+     {
+      "type": "WEB",
+      "url": "https://github.com/py-pdf/pypdf/security/advisories/GHSA-62m5-6wh8-28x7"
+     },
+     {
+      "type": "ADVISORY",
+      "url": "https://nvd.nist.gov/vuln/detail/CVE-2026-119208"
+     },
+     {
+      "type": "WEB",
+      "url": "https://github.com/py-pdf/pypdf/pull/4270"
+     },
+     {
+      "type": "WEB",
+      "url": "https://github.com/py-pdf/pypdf/commit/82b91951dc74496bb3efe6465434f041bb6a5e6b"
+     },
+     {
+      "type": "PACKAGE",
+      "url": "https://github.com/py-pdf/pypdf"
+     },
+     {
+      "type": "WEB",
+      "url": "https://github.com/py-pdf/pypdf/releases/tag/6.21.3"
+     }
+    ],
+    "affected": [
+     {
+      "package": {
+       "name": "pypdf",
+       "ecosystem": "PyPI",
+       "purl": "pkg:pypi/pypdf"
+      },
+      "ranges": [
+       {
+        "type": "ECOSYSTEM",
+        "events": [
+         {
+          "introduced": "0"
+         },
+         {
+          "fixed": "6.21.3"
+         }
+        ]
+       }
+      ],
+      "versions": [
+       "1.0",
+       "1.1",
+       "1.10",
+       "1.11",
+       "1.12",
+       "1.13",
+       "1.2",
+       "1.3",
+       "1.4",
+       "1.5",
+       "1.6",
+       "1.7",
+       "1.8",
+       "1.9",
+       "3.1.0",
+       "3.10.0",
+       "3.11.0",
+       "3.11.1",
+       "3.12.0",
+       "3.12.1",
+       "3.12.2",
+       "3.13.0",
+       "3.14.0",
+       "3.15.0",
+       "3.15.1",
+       "3.15.2",
+       "3.15.3",
+       "3.15.4",
+       "3.15.5",
+       "3.16.0",
+       "3.16.1",
+       "3.16.2",
+       "3.16.3",
+       "3.16.4",
+       "3.17.0",
+       "3.17.1",
+       "3.17.2",
+       "3.17.3",
+       "3.17.4",
+       "3.2.0",
+       "3.2.1",
+       "3.3.0",
+       "3.4.0",
+       "3.4.1",
+       "3.5.0",
+       "3.5.1",
+       "3.5.2",
+       "3.6.0",
+       "3.7.0",
+       "3.7.1",
+       "3.8.0",
+       "3.8.1",
+       "3.9.0",
+       "3.9.1",
+       "4.0.0",
+       "4.0.1",
+       "4.0.2",
+       "4.1.0",
+       "4.2.0",
+       "4.3.0",
+       "4.3.1",
+       "5.0.0",
+       "5.0.1",
+       "5.1.0",
+       "5.2.0",
+       "5.3.0",
+       "5.3.1",
+       "5.4.0",
+       "5.5.0",
+       "5.6.0",
+       "5.6.1",
+       "5.7.0",
+       "5.8.0",
+       "5.9.0",
+       "6.0.0",
+       "6.1.0",
+       "6.1.1",
+       "6.1.2",
+       "6.1.3",
+       "6.10.0",
+       "6.10.1",
+       "6.10.2",
+       "6.11.0",
+       "6.12.0",
+       "6.12.1",
+       "6.12.2",
+       "6.13.0",
+       "6.13.1",
+       "6.13.2",
+       "6.13.3",
+       "6.14.0",
+       "6.14.1",
+       "6.14.2",
+       "6.15.0",
+       "6.16.0",
+       "6.16.1",
+       "6.16.2",
+       "6.17.0",
+       "6.18.0",
+       "6.18.1",
+       "6.19.0",
+       "6.2.0",
+       "6.20.0",
+       "6.20.1",
+       "6.21.0",
+       "6.21.1",
+       "6.21.2",
+       "6.3.0",
+       "6.4.0",
+       "6.4.1",
+       "6.4.2",
+       "6.5.0",
+       "6.6.0",
+       "6.6.1",
+       "6.6.2",
+       "6.7.0",
+       "6.7.1",
+       "6.7.2",
+       "6.7.3",
+       "6.7.4",
+       "6.7.5",
+       "6.8.0",
+       "6.9.0",
+       "6.9.1",
+       "6.9.2"
+      ],
+      "database_specific": {
+       "source": "https://github.com/github/advisory-database/blob/main/advisories/github-reviewed/2026/10/GHSA-62m5-6wh8-28x7/GHSA-62m5-6wh8-28x7.json"
+      }
+     }
+    ],
+    "schema_version": "1.9.2",
+    "severity": [
+     {
+      "type": "CVSS_V4",
+      "score": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:P/VC:N/VI:N/VA:H/SC:N/SI:N/SA:N"
+     }
+    ]
+   },
+   {
+    "id": "GHSA-6c7f-9265-g8fw",
+    "summary": "pypdf: Possible long runtimes for repeated references to the same missing object",
+    "details": "### Impact\n\nAn attacker who uses this vulnerability can craft a PDF which leads to long runtimes. This requires loading relevant parts of a file (like their pages) where the same, but non-existent indirect object is referenced multiple times.\n\n### Patches\n\nThis has been fixed in [pypdf==6.21.2](https://github.com/py-pdf/pypdf/releases/tag/6.21.2).\n\n### Workarounds\n\nIf you cannot upgrade yet, consider applying the changes from PR [#4240](https://github.com/py-pdf/pypdf/pull/4240).",
+    "aliases": [
+     "CVE-2026-115572"
+    ],
+    "modified": "2026-10-23T21:00:06.235957799Z",
+    "published": "2026-10-23T20:55:15Z",
+    "database_specific": {
+     "severity": "HIGH",
+     "github_reviewed": true,
+     "github_reviewed_at": "2026-10-23T20:55:15Z",
+     "nvd_published_at": null,
+     "cwe_ids": [
+      "CWE-400"
+     ]
+    },
+    "references": [
+     {
+      "type": "WEB",
+      "url": "https://github.com/py-pdf/pypdf/security/advisories/GHSA-6c7f-9265-g8fw"
+     },
+     {
+      "type": "WEB",
+      "url": "https://github.com/py-pdf/pypdf/pull/4240"
+     },
+     {
+      "type": "WEB",
+      "url": "https://github.com/py-pdf/pypdf/commit/68a0e5046cc9e14a6c24a21a713f3c7fbde18b4b"
+     },
+     {
+      "type": "PACKAGE",
+      "url": "https://github.com/py-pdf/pypdf"
+     },
+     {
+      "type": "WEB",
+      "url": "https://github.com/py-pdf/pypdf/releases/tag/6.21.2"
+     }
+    ],
+    "affected": [
+     {
+      "package": {
+       "name": "pypdf",
+       "ecosystem": "PyPI",
+       "purl": "pkg:pypi/pypdf"
+      },
+      "ranges": [
+       {
+        "type": "ECOSYSTEM",
+        "events": [
+         {
+          "introduced": "0"
+         },
+         {
+          "fixed": "6.21.2"
+         }
+        ]
+       }
+      ],
+      "versions": [
+       "1.0",
+       "1.1",
+       "1.10",
+       "1.11",
+       "1.12",
+       "1.13",
+       "1.2",
+       "1.3",
+       "1.4",
+       "1.5",
+       "1.6",
+       "1.7",
+       "1.8",
+       "1.9",
+       "3.1.0",
+       "3.10.0",
+       "3.11.0",
+       "3.11.1",
+       "3.12.0",
+       "3.12.1",
+       "3.12.2",
+       "3.13.0",
+       "3.14.0",
+       "3.15.0",
+       "3.15.1",
+       "3.15.2",
+       "3.15.3",
+       "3.15.4",
+       "3.15.5",
+       "3.16.0",
+       "3.16.1",
+       "3.16.2",
+       "3.16.3",
+       "3.16.4",
+       "3.17.0",
+       "3.17.1",
+       "3.17.2",
+       "3.17.3",
+       "3.17.4",
+       "3.2.0",
+       "3.2.1",
+       "3.3.0",
+       "3.4.0",
+       "3.4.1",
+       "3.5.0",
+       "3.5.1",
+       "3.5.2",
+       "3.6.0",
+       "3.7.0",
+       "3.7.1",
+       "3.8.0",
+       "3.8.1",
+       "3.9.0",
+       "3.9.1",
+       "4.0.0",
+       "4.0.1",
+       "4.0.2",
+       "4.1.0",
+       "4.2.0",
+       "4.3.0",
+       "4.3.1",
+       "5.0.0",
+       "5.0.1",
+       "5.1.0",
+       "5.2.0",
+       "5.3.0",
+       "5.3.1",
+       "5.4.0",
+       "5.5.0",
+       "5.6.0",
+       "5.6.1",
+       "5.7.0",
+       "5.8.0",
+       "5.9.0",
+       "6.0.0",
+       "6.1.0",
+       "6.1.1",
+       "6.1.2",
+       "6.1.3",
+       "6.10.0",
+       "6.10.1",
+       "6.10.2",
+       "6.11.0",
+       "6.12.0",
+       "6.12.1",
+       "6.12.2",
+       "6.13.0",
+       "6.13.1",
+       "6.13.2",
+       "6.13.3",
+       "6.14.0",
+       "6.14.1",
+       "6.14.2",
+       "6.15.0",
+       "6.16.0",
+       "6.16.1",
+       "6.16.2",
+       "6.17.0",
+       "6.18.0",
+       "6.18.1",
+       "6.19.0",
+       "6.2.0",
+       "6.20.0",
+       "6.20.1",
+       "6.21.0",
+       "6.21.1",
+       "6.3.0",
+       "6.4.0",
+       "6.4.1",
+       "6.4.2",
+       "6.5.0",
+       "6.6.0",
+       "6.6.1",
+       "6.6.2",
+       "6.7.0",
+       "6.7.1",
+       "6.7.2",
+       "6.7.3",
+       "6.7.4",
+       "6.7.5",
+       "6.8.0",
+       "6.9.0",
+       "6.9.1",
+       "6.9.2"
+      ],
+      "database_specific": {
+       "source": "https://github.com/github/advisory-database/blob/main/advisories/github-reviewed/2026/10/GHSA-6c7f-9265-g8fw/GHSA-6c7f-9265-g8fw.json"
+      }
+     }
+    ],
+    "schema_version": "1.9.0",
+    "severity": [
+     {
+      "type": "CVSS_V4",
+      "score": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:P/VC:N/VI:N/VA:H/SC:N/SI:N/SA:N"
+     }
+    ]
+   },
+   {
+    "id": "GHSA-6vvc-x485-93v7",
+    "summary": "pypdf: Possible long runtimes/large memory usage when retrieving form fields",
+    "details": "### Impact\n\nAn attacker who uses this vulnerability can craft a PDF which leads to large memory usage and/or long runtimes. This requires retrieving the form fields of a document.\n\n### Patches\n\nThis has been fixed in [pypdf==6.21.0](https://github.com/py-pdf/pypdf/releases/tag/6.21.0).\n\n### Workarounds\n\nIf you cannot upgrade yet, consider applying the changes from PR [#4219](https://github.com/py-pdf/pypdf/pull/4219).",
+    "aliases": [
+     "CVE-2026-113789"
+    ],
+    "modified": "2026-10-22T17:00:04.207149781Z",
+    "published": "2026-10-22T16:49:56Z",
+    "database_specific": {
+     "nvd_published_at": "2026-10-21T16:17:26Z",
+     "cwe_ids": [
+      "CWE-400",
+      "CWE-407"
+     ],
+     "severity": "MODERATE",
+     "github_reviewed": true,
+     "github_reviewed_at": "2026-10-22T16:49:56Z"
+    },
+    "references": [
+     {
+      "type": "WEB",
+      "url": "https://github.com/py-pdf/pypdf/security/advisories/GHSA-6vvc-x485-93v7"
+     },
+     {
+      "type": "ADVISORY",
+      "url": "https://nvd.nist.gov/vuln/detail/CVE-2026-113789"
+     },
+     {
+      "type": "WEB",
+      "url": "https://github.com/py-pdf/pypdf/pull/4219"
+     },
+     {
+      "type": "WEB",
+      "url": "https://github.com/py-pdf/pypdf/commit/5ef728f0e16d225c853e89f861ba0a67402fe3f2"
+     },
+     {
+      "type": "PACKAGE",
+      "url": "https://github.com/py-pdf/pypdf"
+     },
+     {
+      "type": "WEB",
+      "url": "https://github.com/py-pdf/pypdf/releases/tag/6.21.0"
+     }
+    ],
+    "affected": [
+     {
+      "package": {
+       "name": "pypdf",
+       "ecosystem": "PyPI",
+       "purl": "pkg:pypi/pypdf"
+      },
+      "ranges": [
+       {
+        "type": "ECOSYSTEM",
+        "events": [
+         {
+          "introduced": "0"
+         },
+         {
+          "fixed": "6.21.0"
+         }
+        ]
+       }
+      ],
+      "versions": [
+       "1.0",
+       "1.1",
+       "1.10",
+       "1.11",
+       "1.12",
+       "1.13",
+       "1.2",
+       "1.3",
+       "1.4",
+       "1.5",
+       "1.6",
+       "1.7",
+       "1.8",
+       "1.9",
+       "3.1.0",
+       "3.10.0",
+       "3.11.0",
+       "3.11.1",
+       "3.12.0",
+       "3.12.1",
+       "3.12.2",
+       "3.13.0",
+       "3.14.0",
+       "3.15.0",
+       "3.15.1",
+       "3.15.2",
+       "3.15.3",
+       "3.15.4",
+       "3.15.5",
+       "3.16.0",
+       "3.16.1",
+       "3.16.2",
+       "3.16.3",
+       "3.16.4",
+       "3.17.0",
+       "3.17.1",
+       "3.17.2",
+       "3.17.3",
+       "3.17.4",
+       "3.2.0",
+       "3.2.1",
+       "3.3.0",
+       "3.4.0",
+       "3.4.1",
+       "3.5.0",
+       "3.5.1",
+       "3.5.2",
+       "3.6.0",
+       "3.7.0",
+       "3.7.1",
+       "3.8.0",
+       "3.8.1",
+       "3.9.0",
+       "3.9.1",
+       "4.0.0",
+       "4.0.1",
+       "4.0.2",
+       "4.1.0",
+       "4.2.0",
+       "4.3.0",
+       "4.3.1",
+       "5.0.0",
+       "5.0.1",
+       "5.1.0",
+       "5.2.0",
+       "5.3.0",
+       "5.3.1",
+       "5.4.0",
+       "5.5.0",
+       "5.6.0",
+       "5.6.1",
+       "5.7.0",
+       "5.8.0",
+       "5.9.0",
+       "6.0.0",
+       "6.1.0",
+       "6.1.1",
+       "6.1.2",
+       "6.1.3",
+       "6.10.0",
+       "6.10.1",
+       "6.10.2",
+       "6.11.0",
+       "6.12.0",
+       "6.12.1",
+       "6.12.2",
+       "6.13.0",
+       "6.13.1",
+       "6.13.2",
+       "6.13.3",
+       "6.14.0",
+       "6.14.1",
+       "6.14.2",
+       "6.15.0",
+       "6.16.0",
+       "6.16.1",
+       "6.16.2",
+       "6.17.0",
+       "6.18.0",
+       "6.18.1",
+       "6.19.0",
+       "6.2.0",
+       "6.20.0",
+       "6.20.1",
+       "6.3.0",
+       "6.4.0",
+       "6.4.1",
+       "6.4.2",
+       "6.5.0",
+       "6.6.0",
+       "6.6.1",
+       "6.6.2",
+       "6.7.0",
+       "6.7.1",
+       "6.7.2",
+       "6.7.3",
+       "6.7.4",
+       "6.7.5",
+       "6.8.0",
+       "6.9.0",
+       "6.9.1",
+       "6.9.2"
+      ],
+      "database_specific": {
+       "source": "https://github.com/github/advisory-database/blob/main/advisories/github-reviewed/2026/10/GHSA-6vvc-x485-93v7/GHSA-6vvc-x485-93v7.json"
+      }
+     }
+    ],
+    "schema_version": "1.9.0",
+    "severity": [
+     {
+      "type": "CVSS_V4",
+      "score": "CVSS:4.0/AV:N/AC:L/AT:P/PR:N/UI:P/VC:N/VI:N/VA:H/SC:N/SI:N/SA:N"
+     }
+    ]
+   },
+   {
+    "id": "GHSA-7mh2-4gg2-979f",
+    "summary": "pypdf: Possible large memory usage for streams with multiple filters",
+    "details": "### Impact\n\nAn attacker who uses this vulnerability can craft a PDF which leads to large memory consumption. This requires accessing any stream with a large amount of filters or multiple filters which pass around large amounts of data.\n\n### Patches\n\nThis has been fixed in [pypdf==6.20.0](https://github.com/py-pdf/pypdf/releases/tag/6.20.0).\n\n### Workarounds\n\nIf you cannot upgrade yet, consider applying the changes from PR [#4173](https://github.com/py-pdf/pypdf/pull/4173).",
+    "aliases": [
+     "CVE-2026-113795"
+    ],
+    "modified": "2026-10-21T17:00:06.161656397Z",
+    "published": "2026-10-21T16:48:30Z",
+    "database_specific": {
+     "github_reviewed_at": "2026-10-21T16:48:30Z",
+     "nvd_published_at": null,
+     "cwe_ids": [
+      "CWE-400",
+      "CWE-770"
+     ],
+     "severity": "MODERATE",
+     "github_reviewed": true
+    },
+    "references": [
+     {
+      "type": "WEB",
+      "url": "https://github.com/py-pdf/pypdf/security/advisories/GHSA-7mh2-4gg2-979f"
+     },
+     {
+      "type": "WEB",
+      "url": "https://github.com/py-pdf/pypdf/pull/4173"
+     },
+     {
+      "type": "WEB",
+      "url": "https://github.com/py-pdf/pypdf/commit/80a84d4be6022d910874ccb0d2365400f3f0e185"
+     },
+     {
+      "type": "PACKAGE",
+      "url": "https://github.com/py-pdf/pypdf"
+     },
+     {
+      "type": "WEB",
+      "url": "https://github.com/py-pdf/pypdf/releases/tag/6.20.0"
+     }
+    ],
+    "affected": [
+     {
+      "package": {
+       "name": "pypdf",
+       "ecosystem": "PyPI",
+       "purl": "pkg:pypi/pypdf"
+      },
+      "ranges": [
+       {
+        "type": "ECOSYSTEM",
+        "events": [
+         {
+          "introduced": "0"
+         },
+         {
+          "fixed": "6.20.0"
+         }
+        ]
+       }
+      ],
+      "versions": [
+       "1.0",
+       "1.1",
+       "1.10",
+       "1.11",
+       "1.12",
+       "1.13",
+       "1.2",
+       "1.3",
+       "1.4",
+       "1.5",
+       "1.6",
+       "1.7",
+       "1.8",
+       "1.9",
+       "3.1.0",
+       "3.10.0",
+       "3.11.0",
+       "3.11.1",
+       "3.12.0",
+       "3.12.1",
+       "3.12.2",
+       "3.13.0",
+       "3.14.0",
+       "3.15.0",
+       "3.15.1",
+       "3.15.2",
+       "3.15.3",
+       "3.15.4",
+       "3.15.5",
+       "3.16.0",
+       "3.16.1",
+       "3.16.2",
+       "3.16.3",
+       "3.16.4",
+       "3.17.0",
+       "3.17.1",
+       "3.17.2",
+       "3.17.3",
+       "3.17.4",
+       "3.2.0",
+       "3.2.1",
+       "3.3.0",
+       "3.4.0",
+       "3.4.1",
+       "3.5.0",
+       "3.5.1",
+       "3.5.2",
+       "3.6.0",
+       "3.7.0",
+       "3.7.1",
+       "3.8.0",
+       "3.8.1",
+       "3.9.0",
+       "3.9.1",
+       "4.0.0",
+       "4.0.1",
+       "4.0.2",
+       "4.1.0",
+       "4.2.0",
+       "4.3.0",
+       "4.3.1",
+       "5.0.0",
+       "5.0.1",
+       "5.1.0",
+       "5.2.0",
+       "5.3.0",
+       "5.3.1",
+       "5.4.0",
+       "5.5.0",
+       "5.6.0",
+       "5.6.1",
+       "5.7.0",
+       "5.8.0",
+       "5.9.0",
+       "6.0.0",
+       "6.1.0",
+       "6.1.1",
+       "6.1.2",
+       "6.1.3",
+       "6.10.0",
+       "6.10.1",
+       "6.10.2",
+       "6.11.0",
+       "6.12.0",
+       "6.12.1",
+       "6.12.2",
+       "6.13.0",
+       "6.13.1",
+       "6.13.2",
+       "6.13.3",
+       "6.14.0",
+       "6.14.1",
+       "6.14.2",
+       "6.15.0",
+       "6.16.0",
+       "6.16.1",
+       "6.16.2",
+       "6.17.0",
+       "6.18.0",
+       "6.18.1",
+       "6.19.0",
+       "6.2.0",
+       "6.3.0",
+       "6.4.0",
+       "6.4.1",
+       "6.4.2",
+       "6.5.0",
+       "6.6.0",
+       "6.6.1",
+       "6.6.2",
+       "6.7.0",
+       "6.7.1",
+       "6.7.2",
+       "6.7.3",
+       "6.7.4",
+       "6.7.5",
+       "6.8.0",
+       "6.9.0",
+       "6.9.1",
+       "6.9.2"
+      ],
+      "database_specific": {
+       "source": "https://github.com/github/advisory-database/blob/main/advisories/github-reviewed/2026/10/GHSA-7mh2-4gg2-979f/GHSA-7mh2-4gg2-979f.json"
+      }
+     }
+    ],
+    "schema_version": "1.9.0",
+    "severity": [
+     {
+      "type": "CVSS_V4",
+      "score": "CVSS:4.0/AV:N/AC:L/AT:P/PR:N/UI:P/VC:N/VI:N/VA:H/SC:N/SI:N/SA:N"
+     }
+    ]
+   },
+   {
+    "id": "GHSA-9mx8-4j7g-633p",
+    "summary": "pypdf: Possible infinite loop when removing tree items",
+    "details": "### Impact\n\nAn attacker who uses this vulnerability can craft a PDF which leads to an infinite loop. This requires removing an object from a tree, for example an outline item.\n\n### Patches\n\nThis has been fixed in [pypdf==6.20.1](https://github.com/py-pdf/pypdf/releases/tag/6.20.1).\n\n### Workarounds\n\nIf you cannot upgrade yet, consider applying the changes from PR [#4188](https://github.com/py-pdf/pypdf/pull/4188).",
+    "aliases": [
+     "CVE-2026-113793"
+    ],
+    "modified": "2026-10-21T17:00:06.245541968Z",
+    "published": "2026-10-21T16:55:10Z",
+    "database_specific": {
+     "nvd_published_at": null,
+     "cwe_ids": [
+      "CWE-835"
+     ],
+     "severity": "MODERATE",
+     "github_reviewed": true,
+     "github_reviewed_at": "2026-10-21T16:55:10Z"
+    },
+    "references": [
+     {
+      "type": "WEB",
+      "url": "https://github.com/py-pdf/pypdf/security/advisories/GHSA-9mx8-4j7g-633p"
+     },
+     {
+      "type": "WEB",
+      "url": "https://github.com/py-pdf/pypdf/pull/4188"
+     },
+     {
+      "type": "WEB",
+      "url": "https://github.com/py-pdf/pypdf/commit/c9c35b4471c2eb5fe078094f6c816e69d4ed25a0"
+     },
+     {
+      "type": "PACKAGE",
+      "url": "https://github.com/py-pdf/pypdf"
+     },
+     {
+      "type": "WEB",
+      "url": "https://github.com/py-pdf/pypdf/releases/tag/6.20.1"
+     }
+    ],
+    "affected": [
+     {
+      "package": {
+       "name": "pypdf",
+       "ecosystem": "PyPI",
+       "purl": "pkg:pypi/pypdf"
+      },
+      "ranges": [
+       {
+        "type": "ECOSYSTEM",
+        "events": [
+         {
+          "introduced": "0"
+         },
+         {
+          "fixed": "6.20.1"
+         }
+        ]
+       }
+      ],
+      "versions": [
+       "1.0",
+       "1.1",
+       "1.10",
+       "1.11",
+       "1.12",
+       "1.13",
+       "1.2",
+       "1.3",
+       "1.4",
+       "1.5",
+       "1.6",
+       "1.7",
+       "1.8",
+       "1.9",
+       "3.1.0",
+       "3.10.0",
+       "3.11.0",
+       "3.11.1",
+       "3.12.0",
+       "3.12.1",
+       "3.12.2",
+       "3.13.0",
+       "3.14.0",
+       "3.15.0",
+       "3.15.1",
+       "3.15.2",
+       "3.15.3",
+       "3.15.4",
+       "3.15.5",
+       "3.16.0",
+       "3.16.1",
+       "3.16.2",
+       "3.16.3",
+       "3.16.4",
+       "3.17.0",
+       "3.17.1",
+       "3.17.2",
+       "3.17.3",
+       "3.17.4",
+       "3.2.0",
+       "3.2.1",
+       "3.3.0",
+       "3.4.0",
+       "3.4.1",
+       "3.5.0",
+       "3.5.1",
+       "3.5.2",
+       "3.6.0",
+       "3.7.0",
+       "3.7.1",
+       "3.8.0",
+       "3.8.1",
+       "3.9.0",
+       "3.9.1",
+       "4.0.0",
+       "4.0.1",
+       "4.0.2",
+       "4.1.0",
+       "4.2.0",
+       "4.3.0",
+       "4.3.1",
+       "5.0.0",
+       "5.0.1",
+       "5.1.0",
+       "5.2.0",
+       "5.3.0",
+       "5.3.1",
+       "5.4.0",
+       "5.5.0",
+       "5.6.0",
+       "5.6.1",
+       "5.7.0",
+       "5.8.0",
+       "5.9.0",
+       "6.0.0",
+       "6.1.0",
+       "6.1.1",
+       "6.1.2",
+       "6.1.3",
+       "6.10.0",
+       "6.10.1",
+       "6.10.2",
+       "6.11.0",
+       "6.12.0",
+       "6.12.1",
+       "6.12.2",
+       "6.13.0",
+       "6.13.1",
+       "6.13.2",
+       "6.13.3",
+       "6.14.0",
+       "6.14.1",
+       "6.14.2",
+       "6.15.0",
+       "6.16.0",
+       "6.16.1",
+       "6.16.2",
+       "6.17.0",
+       "6.18.0",
+       "6.18.1",
+       "6.19.0",
+       "6.2.0",
+       "6.20.0",
+       "6.3.0",
+       "6.4.0",
+       "6.4.1",
+       "6.4.2",
+       "6.5.0",
+       "6.6.0",
+       "6.6.1",
+       "6.6.2",
+       "6.7.0",
+       "6.7.1",
+       "6.7.2",
+       "6.7.3",
+       "6.7.4",
+       "6.7.5",
+       "6.8.0",
+       "6.9.0",
+       "6.9.1",
+       "6.9.2"
+      ],
+      "database_specific": {
+       "source": "https://github.com/github/advisory-database/blob/main/advisories/github-reviewed/2026/10/GHSA-9mx8-4j7g-633p/GHSA-9mx8-4j7g-633p.json"
+      }
+     }
+    ],
+    "schema_version": "1.9.0",
+    "severity": [
+     {
+      "type": "CVSS_V4",
+      "score": "CVSS:4.0/AV:N/AC:L/AT:P/PR:N/UI:P/VC:N/VI:N/VA:H/SC:N/SI:N/SA:N"
+     }
+    ]
+   },
+   {
+    "id": "GHSA-cgf9-327m-v77c",
+    "summary": "pypdf: Possible large memory usage when parsing content streams",
+    "details": "### Impact\n\nAn attacker who uses this vulnerability can craft a PDF which leads to large memory usage. This requires parsing content streams with many small operations.\n\n### Patches\n\nThis has been fixed in [pypdf==6.21.0](https://github.com/py-pdf/pypdf/releases/tag/6.21.0).\n\n### Workarounds\n\nIf you cannot upgrade yet, consider applying the changes from PR [#4218](https://github.com/py-pdf/pypdf/pull/4218).",
+    "aliases": [
+     "CVE-2026-113791"
+    ],
+    "modified": "2026-10-22T17:00:04.215115256Z",
+    "published": "2026-10-22T16:49:22Z",
+    "database_specific": {
+     "severity": "MODERATE",
+     "github_reviewed": true,
+     "github_reviewed_at": "2026-10-22T16:49:22Z",
+     "nvd_published_at": "2026-10-21T16:17:27Z",
+     "cwe_ids": [
+      "CWE-400",
+      "CWE-770"
+     ]
+    },
+    "references": [
+     {
+      "type": "WEB",
+      "url": "https://github.com/py-pdf/pypdf/security/advisories/GHSA-cgf9-327m-v77c"
+     },
+     {
+      "type": "ADVISORY",
+      "url": "https://nvd.nist.gov/vuln/detail/CVE-2026-113791"
+     },
+     {
+      "type": "WEB",
+      "url": "https://github.com/py-pdf/pypdf/pull/4218"
+     },
+     {
+      "type": "WEB",
+      "url": "https://github.com/py-pdf/pypdf/commit/18bd2981a74479483a0b9507602c58a63d6c9b12"
+     },
+     {
+      "type": "PACKAGE",
+      "url": "https://github.com/py-pdf/pypdf"
+     },
+     {
+      "type": "WEB",
+      "url": "https://github.com/py-pdf/pypdf/releases/tag/6.21.0"
+     }
+    ],
+    "affected": [
+     {
+      "package": {
+       "name": "pypdf",
+       "ecosystem": "PyPI",
+       "purl": "pkg:pypi/pypdf"
+      },
+      "ranges": [
+       {
+        "type": "ECOSYSTEM",
+        "events": [
+         {
+          "introduced": "0"
+         },
+         {
+          "fixed": "6.21.0"
+         }
+        ]
+       }
+      ],
+      "versions": [
+       "1.0",
+       "1.1",
+       "1.10",
+       "1.11",
+       "1.12",
+       "1.13",
+       "1.2",
+       "1.3",
+       "1.4",
+       "1.5",
+       "1.6",
+       "1.7",
+       "1.8",
+       "1.9",
+       "3.1.0",
+       "3.10.0",
+       "3.11.0",
+       "3.11.1",
+       "3.12.0",
+       "3.12.1",
+       "3.12.2",
+       "3.13.0",
+       "3.14.0",
+       "3.15.0",
+       "3.15.1",
+       "3.15.2",
+       "3.15.3",
+       "3.15.4",
+       "3.15.5",
+       "3.16.0",
+       "3.16.1",
+       "3.16.2",
+       "3.16.3",
+       "3.16.4",
+       "3.17.0",
+       "3.17.1",
+       "3.17.2",
+       "3.17.3",
+       "3.17.4",
+       "3.2.0",
+       "3.2.1",
+       "3.3.0",
+       "3.4.0",
+       "3.4.1",
+       "3.5.0",
+       "3.5.1",
+       "3.5.2",
+       "3.6.0",
+       "3.7.0",
+       "3.7.1",
+       "3.8.0",
+       "3.8.1",
+       "3.9.0",
+       "3.9.1",
+       "4.0.0",
+       "4.0.1",
+       "4.0.2",
+       "4.1.0",
+       "4.2.0",
+       "4.3.0",
+       "4.3.1",
+       "5.0.0",
+       "5.0.1",
+       "5.1.0",
+       "5.2.0",
+       "5.3.0",
+       "5.3.1",
+       "5.4.0",
+       "5.5.0",
+       "5.6.0",
+       "5.6.1",
+       "5.7.0",
+       "5.8.0",
+       "5.9.0",
+       "6.0.0",
+       "6.1.0",
+       "6.1.1",
+       "6.1.2",
+       "6.1.3",
+       "6.10.0",
+       "6.10.1",
+       "6.10.2",
+       "6.11.0",
+       "6.12.0",
+       "6.12.1",
+       "6.12.2",
+       "6.13.0",
+       "6.13.1",
+       "6.13.2",
+       "6.13.3",
+       "6.14.0",
+       "6.14.1",
+       "6.14.2",
+       "6.15.0",
+       "6.16.0",
+       "6.16.1",
+       "6.16.2",
+       "6.17.0",
+       "6.18.0",
+       "6.18.1",
+       "6.19.0",
+       "6.2.0",
+       "6.20.0",
+       "6.20.1",
+       "6.3.0",
+       "6.4.0",
+       "6.4.1",
+       "6.4.2",
+       "6.5.0",
+       "6.6.0",
+       "6.6.1",
+       "6.6.2",
+       "6.7.0",
+       "6.7.1",
+       "6.7.2",
+       "6.7.3",
+       "6.7.4",
+       "6.7.5",
+       "6.8.0",
+       "6.9.0",
+       "6.9.1",
+       "6.9.2"
+      ],
+      "database_specific": {
+       "source": "https://github.com/github/advisory-database/blob/main/advisories/github-reviewed/2026/10/GHSA-cgf9-327m-v77c/GHSA-cgf9-327m-v77c.json"
+      }
+     }
+    ],
+    "schema_version": "1.9.0",
+    "severity": [
+     {
+      "type": "CVSS_V4",
+      "score": "CVSS:4.0/AV:N/AC:L/AT:P/PR:N/UI:P/VC:N/VI:N/VA:H/SC:N/SI:N/SA:N"
+     }
+    ]
+   },
+   {
+    "id": "GHSA-cggf-277g-3q54",
+    "summary": "pypdf has possible large memory usage when parsing page tree",
+    "details": "### Impact\n\nAn attacker who uses this vulnerability can craft a PDF which leads to large memory usage. This requires parsing the page tree with many shared resources.\n\n### Patches\n\nThis has been fixed in [pypdf==6.21.4](https://github.com/py-pdf/pypdf/releases/tag/6.21.4).\n\n### Workarounds\n\nIf you cannot upgrade yet, consider applying the changes from PR [#4290](https://github.com/py-pdf/pypdf/pull/4290).",
+    "aliases": [
+     "CVE-2026-119204"
+    ],
+    "modified": "2026-10-30T23:30:04.096691081Z",
+    "published": "2026-10-30T23:13:01Z",
+    "database_specific": {
+     "github_reviewed": true,
+     "github_reviewed_at": "2026-10-30T23:13:01Z",
+     "nvd_published_at": "2026-10-29T21:17:19Z",
+     "cwe_ids": [
+      "CWE-400"
+     ],
+     "severity": "HIGH"
+    },
+    "references": [
+     {
+      "type": "WEB",
+      "url": "https://github.com/py-pdf/pypdf/security/advisories/GHSA-cggf-277g-3q54"
+     },
+     {
+      "type": "ADVISORY",
+      "url": "https://nvd.nist.gov/vuln/detail/CVE-2026-119204"
+     },
+     {
+      "type": "WEB",
+      "url": "https://github.com/py-pdf/pypdf/pull/4290"
+     },
+     {
+      "type": "WEB",
+      "url": "https://github.com/py-pdf/pypdf/commit/ea4ac663133f1b3de1d7a8f2e6fa239802fde79e"
+     },
+     {
+      "type": "PACKAGE",
+      "url": "https://github.com/py-pdf/pypdf"
+     },
+     {
+      "type": "WEB",
+      "url": "https://github.com/py-pdf/pypdf/releases/tag/6.21.4"
+     }
+    ],
+    "affected": [
+     {
+      "package": {
+       "name": "pypdf",
+       "ecosystem": "PyPI",
+       "purl": "pkg:pypi/pypdf"
+      },
+      "ranges": [
+       {
+        "type": "ECOSYSTEM",
+        "events": [
+         {
+          "introduced": "0"
+         },
+         {
+          "fixed": "6.21.4"
+         }
+        ]
+       }
+      ],
+      "versions": [
+       "1.0",
+       "1.1",
+       "1.10",
+       "1.11",
+       "1.12",
+       "1.13",
+       "1.2",
+       "1.3",
+       "1.4",
+       "1.5",
+       "1.6",
+       "1.7",
+       "1.8",
+       "1.9",
+       "3.1.0",
+       "3.10.0",
+       "3.11.0",
+       "3.11.1",
+       "3.12.0",
+       "3.12.1",
+       "3.12.2",
+       "3.13.0",
+       "3.14.0",
+       "3.15.0",
+       "3.15.1",
+       "3.15.2",
+       "3.15.3",
+       "3.15.4",
+       "3.15.5",
+       "3.16.0",
+       "3.16.1",
+       "3.16.2",
+       "3.16.3",
+       "3.16.4",
+       "3.17.0",
+       "3.17.1",
+       "3.17.2",
+       "3.17.3",
+       "3.17.4",
+       "3.2.0",
+       "3.2.1",
+       "3.3.0",
+       "3.4.0",
+       "3.4.1",
+       "3.5.0",
+       "3.5.1",
+       "3.5.2",
+       "3.6.0",
+       "3.7.0",
+       "3.7.1",
+       "3.8.0",
+       "3.8.1",
+       "3.9.0",
+       "3.9.1",
+       "4.0.0",
+       "4.0.1",
+       "4.0.2",
+       "4.1.0",
+       "4.2.0",
+       "4.3.0",
+       "4.3.1",
+       "5.0.0",
+       "5.0.1",
+       "5.1.0",
+       "5.2.0",
+       "5.3.0",
+       "5.3.1",
+       "5.4.0",
+       "5.5.0",
+       "5.6.0",
+       "5.6.1",
+       "5.7.0",
+       "5.8.0",
+       "5.9.0",
+       "6.0.0",
+       "6.1.0",
+       "6.1.1",
+       "6.1.2",
+       "6.1.3",
+       "6.10.0",
+       "6.10.1",
+       "6.10.2",
+       "6.11.0",
+       "6.12.0",
+       "6.12.1",
+       "6.12.2",
+       "6.13.0",
+       "6.13.1",
+       "6.13.2",
+       "6.13.3",
+       "6.14.0",
+       "6.14.1",
+       "6.14.2",
+       "6.15.0",
+       "6.16.0",
+       "6.16.1",
+       "6.16.2",
+       "6.17.0",
+       "6.18.0",
+       "6.18.1",
+       "6.19.0",
+       "6.2.0",
+       "6.20.0",
+       "6.20.1",
+       "6.21.0",
+       "6.21.1",
+       "6.21.2",
+       "6.21.3",
+       "6.3.0",
+       "6.4.0",
+       "6.4.1",
+       "6.4.2",
+       "6.5.0",
+       "6.6.0",
+       "6.6.1",
+       "6.6.2",
+       "6.7.0",
+       "6.7.1",
+       "6.7.2",
+       "6.7.3",
+       "6.7.4",
+       "6.7.5",
+       "6.8.0",
+       "6.9.0",
+       "6.9.1",
+       "6.9.2"
+      ],
+      "database_specific": {
+       "source": "https://github.com/github/advisory-database/blob/main/advisories/github-reviewed/2026/10/GHSA-cggf-277g-3q54/GHSA-cggf-277g-3q54.json"
+      }
+     }
+    ],
+    "schema_version": "1.9.2",
+    "severity": [
+     {
+      "type": "CVSS_V4",
+      "score": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:P/VC:N/VI:N/VA:H/SC:N/SI:N/SA:N"
+     }
+    ]
+   },
+   {
+    "id": "GHSA-f54x-cmq8-qg57",
+    "summary": "pypdf: Possible large memory usage when parsing arrays and dictionaries",
+    "details": "### Impact\n\nAn attacker who uses this vulnerability can craft a PDF which leads to large memory usage. This requires parsing arrays and/or dictionaries with lots of elements.\n\n### Patches\n\nThis has been fixed in [pypdf==6.21.0](https://github.com/py-pdf/pypdf/releases/tag/6.21.0).\n\n### Workarounds\n\nIf you cannot upgrade yet, consider applying the changes from PR [#4218](https://github.com/py-pdf/pypdf/pull/4218).",
+    "aliases": [
+     "CVE-2026-113790"
+    ],
+    "modified": "2026-10-22T17:00:04.224392742Z",
+    "published": "2026-10-22T16:49:40Z",
+    "database_specific": {
+     "cwe_ids": [
+      "CWE-400"
+     ],
+     "severity": "MODERATE",
+     "github_reviewed": true,
+     "github_reviewed_at": "2026-10-22T16:49:40Z",
+     "nvd_published_at": "2026-10-21T16:17:26Z"
+    },
+    "references": [
+     {
+      "type": "WEB",
+      "url": "https://github.com/py-pdf/pypdf/security/advisories/GHSA-f54x-cmq8-qg57"
+     },
+     {
+      "type": "ADVISORY",
+      "url": "https://nvd.nist.gov/vuln/detail/CVE-2026-113790"
+     },
+     {
+      "type": "WEB",
+      "url": "https://github.com/py-pdf/pypdf/pull/4218"
+     },
+     {
+      "type": "WEB",
+      "url": "https://github.com/py-pdf/pypdf/commit/18bd2981a74479483a0b9507602c58a63d6c9b12"
+     },
+     {
+      "type": "PACKAGE",
+      "url": "https://github.com/py-pdf/pypdf"
+     },
+     {
+      "type": "WEB",
+      "url": "https://github.com/py-pdf/pypdf/releases/tag/6.21.0"
+     }
+    ],
+    "affected": [
+     {
+      "package": {
+       "name": "pypdf",
+       "ecosystem": "PyPI",
+       "purl": "pkg:pypi/pypdf"
+      },
+      "ranges": [
+       {
+        "type": "ECOSYSTEM",
+        "events": [
+         {
+          "introduced": "0"
+         },
+         {
+          "fixed": "6.21.0"
+         }
+        ]
+       }
+      ],
+      "versions": [
+       "1.0",
+       "1.1",
+       "1.10",
+       "1.11",
+       "1.12",
+       "1.13",
+       "1.2",
+       "1.3",
+       "1.4",
+       "1.5",
+       "1.6",
+       "1.7",
+       "1.8",
+       "1.9",
+       "3.1.0",
+       "3.10.0",
+       "3.11.0",
+       "3.11.1",
+       "3.12.0",
+       "3.12.1",
+       "3.12.2",
+       "3.13.0",
+       "3.14.0",
+       "3.15.0",
+       "3.15.1",
+       "3.15.2",
+       "3.15.3",
+       "3.15.4",
+       "3.15.5",
+       "3.16.0",
+       "3.16.1",
+       "3.16.2",
+       "3.16.3",
+       "3.16.4",
+       "3.17.0",
+       "3.17.1",
+       "3.17.2",
+       "3.17.3",
+       "3.17.4",
+       "3.2.0",
+       "3.2.1",
+       "3.3.0",
+       "3.4.0",
+       "3.4.1",
+       "3.5.0",
+       "3.5.1",
+       "3.5.2",
+       "3.6.0",
+       "3.7.0",
+       "3.7.1",
+       "3.8.0",
+       "3.8.1",
+       "3.9.0",
+       "3.9.1",
+       "4.0.0",
+       "4.0.1",
+       "4.0.2",
+       "4.1.0",
+       "4.2.0",
+       "4.3.0",
+       "4.3.1",
+       "5.0.0",
+       "5.0.1",
+       "5.1.0",
+       "5.2.0",
+       "5.3.0",
+       "5.3.1",
+       "5.4.0",
+       "5.5.0",
+       "5.6.0",
+       "5.6.1",
+       "5.7.0",
+       "5.8.0",
+       "5.9.0",
+       "6.0.0",
+       "6.1.0",
+       "6.1.1",
+       "6.1.2",
+       "6.1.3",
+       "6.10.0",
+       "6.10.1",
+       "6.10.2",
+       "6.11.0",
+       "6.12.0",
+       "6.12.1",
+       "6.12.2",
+       "6.13.0",
+       "6.13.1",
+       "6.13.2",
+       "6.13.3",
+       "6.14.0",
+       "6.14.1",
+       "6.14.2",
+       "6.15.0",
+       "6.16.0",
+       "6.16.1",
+       "6.16.2",
+       "6.17.0",
+       "6.18.0",
+       "6.18.1",
+       "6.19.0",
+       "6.2.0",
+       "6.20.0",
+       "6.20.1",
+       "6.3.0",
+       "6.4.0",
+       "6.4.1",
+       "6.4.2",
+       "6.5.0",
+       "6.6.0",
+       "6.6.1",
+       "6.6.2",
+       "6.7.0",
+       "6.7.1",
+       "6.7.2",
+       "6.7.3",
+       "6.7.4",
+       "6.7.5",
+       "6.8.0",
+       "6.9.0",
+       "6.9.1",
+       "6.9.2"
+      ],
+      "database_specific": {
+       "source": "https://github.com/github/advisory-database/blob/main/advisories/github-reviewed/2026/10/GHSA-f54x-cmq8-qg57/GHSA-f54x-cmq8-qg57.json"
+      }
+     }
+    ],
+    "schema_version": "1.9.0",
+    "severity": [
+     {
+      "type": "CVSS_V4",
+      "score": "CVSS:4.0/AV:N/AC:L/AT:P/PR:N/UI:P/VC:N/VI:N/VA:H/SC:N/SI:N/SA:N"
+     }
+    ]
+   },
+   {
+    "id": "GHSA-gmh7-3g9r-mjh5",
+    "summary": "pypdf: Possible long runtimes for large xref table header limits",
+    "details": "### Impact\n\nAn attacker who uses this vulnerability can craft a PDF which leads to long runtimes. This requires opening a file with large/wrong upper limits in the xref table.\n\n### Patches\n\nThis has been fixed in [pypdf==6.21.2](https://github.com/py-pdf/pypdf/releases/tag/6.21.2).\n\n### Workarounds\n\nIf you cannot upgrade yet, consider applying the changes from PR [#4239](https://github.com/py-pdf/pypdf/pull/4239).",
+    "aliases": [
+     "CVE-2026-115580"
+    ],
+    "modified": "2026-10-23T21:00:05.293776771Z",
+    "published": "2026-10-23T20:54:12Z",
+    "database_specific": {
+     "severity": "HIGH",
+     "github_reviewed": true,
+     "github_reviewed_at": "2026-10-23T20:54:12Z",
+     "nvd_published_at": null,
+     "cwe_ids": [
+      "CWE-834"
+     ]
+    },
+    "references": [
+     {
+      "type": "WEB",
+      "url": "https://github.com/py-pdf/pypdf/security/advisories/GHSA-gmh7-3g9r-mjh5"
+     },
+     {
+      "type": "WEB",
+      "url": "https://github.com/py-pdf/pypdf/pull/4239"
+     },
+     {
+      "type": "WEB",
+      "url": "https://github.com/py-pdf/pypdf/commit/a3061e34b169d34478d520f5f049c53cfb1482b2"
+     },
+     {
+      "type": "PACKAGE",
+      "url": "https://github.com/py-pdf/pypdf"
+     },
+     {
+      "type": "WEB",
+      "url": "https://github.com/py-pdf/pypdf/releases/tag/6.21.2"
+     }
+    ],
+    "affected": [
+     {
+      "package": {
+       "name": "pypdf",
+       "ecosystem": "PyPI",
+       "purl": "pkg:pypi/pypdf"
+      },
+      "ranges": [
+       {
+        "type": "ECOSYSTEM",
+        "events": [
+         {
+          "introduced": "0"
+         },
+         {
+          "fixed": "6.21.2"
+         }
+        ]
+       }
+      ],
+      "versions": [
+       "1.0",
+       "1.1",
+       "1.10",
+       "1.11",
+       "1.12",
+       "1.13",
+       "1.2",
+       "1.3",
+       "1.4",
+       "1.5",
+       "1.6",
+       "1.7",
+       "1.8",
+       "1.9",
+       "3.1.0",
+       "3.10.0",
+       "3.11.0",
+       "3.11.1",
+       "3.12.0",
+       "3.12.1",
+       "3.12.2",
+       "3.13.0",
+       "3.14.0",
+       "3.15.0",
+       "3.15.1",
+       "3.15.2",
+       "3.15.3",
+       "3.15.4",
+       "3.15.5",
+       "3.16.0",
+       "3.16.1",
+       "3.16.2",
+       "3.16.3",
+       "3.16.4",
+       "3.17.0",
+       "3.17.1",
+       "3.17.2",
+       "3.17.3",
+       "3.17.4",
+       "3.2.0",
+       "3.2.1",
+       "3.3.0",
+       "3.4.0",
+       "3.4.1",
+       "3.5.0",
+       "3.5.1",
+       "3.5.2",
+       "3.6.0",
+       "3.7.0",
+       "3.7.1",
+       "3.8.0",
+       "3.8.1",
+       "3.9.0",
+       "3.9.1",
+       "4.0.0",
+       "4.0.1",
+       "4.0.2",
+       "4.1.0",
+       "4.2.0",
+       "4.3.0",
+       "4.3.1",
+       "5.0.0",
+       "5.0.1",
+       "5.1.0",
+       "5.2.0",
+       "5.3.0",
+       "5.3.1",
+       "5.4.0",
+       "5.5.0",
+       "5.6.0",
+       "5.6.1",
+       "5.7.0",
+       "5.8.0",
+       "5.9.0",
+       "6.0.0",
+       "6.1.0",
+       "6.1.1",
+       "6.1.2",
+       "6.1.3",
+       "6.10.0",
+       "6.10.1",
+       "6.10.2",
+       "6.11.0",
+       "6.12.0",
+       "6.12.1",
+       "6.12.2",
+       "6.13.0",
+       "6.13.1",
+       "6.13.2",
+       "6.13.3",
+       "6.14.0",
+       "6.14.1",
+       "6.14.2",
+       "6.15.0",
+       "6.16.0",
+       "6.16.1",
+       "6.16.2",
+       "6.17.0",
+       "6.18.0",
+       "6.18.1",
+       "6.19.0",
+       "6.2.0",
+       "6.20.0",
+       "6.20.1",
+       "6.21.0",
+       "6.21.1",
+       "6.3.0",
+       "6.4.0",
+       "6.4.1",
+       "6.4.2",
+       "6.5.0",
+       "6.6.0",
+       "6.6.1",
+       "6.6.2",
+       "6.7.0",
+       "6.7.1",
+       "6.7.2",
+       "6.7.3",
+       "6.7.4",
+       "6.7.5",
+       "6.8.0",
+       "6.9.0",
+       "6.9.1",
+       "6.9.2"
+      ],
+      "database_specific": {
+       "source": "https://github.com/github/advisory-database/blob/main/advisories/github-reviewed/2026/10/GHSA-gmh7-3g9r-mjh5/GHSA-gmh7-3g9r-mjh5.json"
+      }
+     }
+    ],
+    "schema_version": "1.9.0",
+    "severity": [
+     {
+      "type": "CVSS_V4",
+      "score": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:P/VC:N/VI:N/VA:H/SC:N/SI:N/SA:N"
+     }
+    ]
+   },
+   {
+    "id": "GHSA-jr96-gvgh-j3r4",
+    "summary": "pypdf: Possible long runtimes for repeated malformed cross-reference entries (Follow-up)",
+    "details": "### Impact\n\nAn attacker who uses this vulnerability can craft a PDF which leads to long runtimes. This requires cross-reference streams with repeated malformed cross-reference streams.\n\n### Patches\n\nThis has been fixed in [pypdf==6.21.2](https://github.com/py-pdf/pypdf/releases/tag/6.21.2).\n\n### Workarounds\n\nIf you cannot upgrade yet, consider applying the changes from PR [#4240](https://github.com/py-pdf/pypdf/pull/4240).\n\n### Notes\n\nThis is a follow-up to https://github.com/py-pdf/pypdf/security/advisories/GHSA-55h5-xmcq-c37v, which had the side-effect of still loading the whole stream again despite the cache being present.",
+    "aliases": [
+     "CVE-2026-115585"
+    ],
+    "modified": "2026-10-23T21:00:06.090706376Z",
+    "published": "2026-10-23T20:54:27Z",
+    "database_specific": {
+     "nvd_published_at": null,
+     "cwe_ids": [
+      "CWE-400",
+      "CWE-407"
+     ],
+     "severity": "HIGH",
+     "github_reviewed": true,
+     "github_reviewed_at": "2026-10-23T20:54:27Z"
+    },
+    "references": [
+     {
+      "type": "WEB",
+      "url": "https://github.com/py-pdf/pypdf/security/advisories/GHSA-jr96-gvgh-j3r4"
+     },
+     {
+      "type": "WEB",
+      "url": "https://github.com/py-pdf/pypdf/pull/4240"
+     },
+     {
+      "type": "WEB",
+      "url": "https://github.com/py-pdf/pypdf/commit/68a0e5046cc9e14a6c24a21a713f3c7fbde18b4b"
+     },
+     {
+      "type": "PACKAGE",
+      "url": "https://github.com/py-pdf/pypdf"
+     },
+     {
+      "type": "WEB",
+      "url": "https://github.com/py-pdf/pypdf/releases/tag/6.21.2"
+     }
+    ],
+    "affected": [
+     {
+      "package": {
+       "name": "pypdf",
+       "ecosystem": "PyPI",
+       "purl": "pkg:pypi/pypdf"
+      },
+      "ranges": [
+       {
+        "type": "ECOSYSTEM",
+        "events": [
+         {
+          "introduced": "0"
+         },
+         {
+          "fixed": "6.21.2"
+         }
+        ]
+       }
+      ],
+      "versions": [
+       "1.0",
+       "1.1",
+       "1.10",
+       "1.11",
+       "1.12",
+       "1.13",
+       "1.2",
+       "1.3",
+       "1.4",
+       "1.5",
+       "1.6",
+       "1.7",
+       "1.8",
+       "1.9",
+       "3.1.0",
+       "3.10.0",
+       "3.11.0",
+       "3.11.1",
+       "3.12.0",
+       "3.12.1",
+       "3.12.2",
+       "3.13.0",
+       "3.14.0",
+       "3.15.0",
+       "3.15.1",
+       "3.15.2",
+       "3.15.3",
+       "3.15.4",
+       "3.15.5",
+       "3.16.0",
+       "3.16.1",
+       "3.16.2",
+       "3.16.3",
+       "3.16.4",
+       "3.17.0",
+       "3.17.1",
+       "3.17.2",
+       "3.17.3",
+       "3.17.4",
+       "3.2.0",
+       "3.2.1",
+       "3.3.0",
+       "3.4.0",
+       "3.4.1",
+       "3.5.0",
+       "3.5.1",
+       "3.5.2",
+       "3.6.0",
+       "3.7.0",
+       "3.7.1",
+       "3.8.0",
+       "3.8.1",
+       "3.9.0",
+       "3.9.1",
+       "4.0.0",
+       "4.0.1",
+       "4.0.2",
+       "4.1.0",
+       "4.2.0",
+       "4.3.0",
+       "4.3.1",
+       "5.0.0",
+       "5.0.1",
+       "5.1.0",
+       "5.2.0",
+       "5.3.0",
+       "5.3.1",
+       "5.4.0",
+       "5.5.0",
+       "5.6.0",
+       "5.6.1",
+       "5.7.0",
+       "5.8.0",
+       "5.9.0",
+       "6.0.0",
+       "6.1.0",
+       "6.1.1",
+       "6.1.2",
+       "6.1.3",
+       "6.10.0",
+       "6.10.1",
+       "6.10.2",
+       "6.11.0",
+       "6.12.0",
+       "6.12.1",
+       "6.12.2",
+       "6.13.0",
+       "6.13.1",
+       "6.13.2",
+       "6.13.3",
+       "6.14.0",
+       "6.14.1",
+       "6.14.2",
+       "6.15.0",
+       "6.16.0",
+       "6.16.1",
+       "6.16.2",
+       "6.17.0",
+       "6.18.0",
+       "6.18.1",
+       "6.19.0",
+       "6.2.0",
+       "6.20.0",
+       "6.20.1",
+       "6.21.0",
+       "6.21.1",
+       "6.3.0",
+       "6.4.0",
+       "6.4.1",
+       "6.4.2",
+       "6.5.0",
+       "6.6.0",
+       "6.6.1",
+       "6.6.2",
+       "6.7.0",
+       "6.7.1",
+       "6.7.2",
+       "6.7.3",
+       "6.7.4",
+       "6.7.5",
+       "6.8.0",
+       "6.9.0",
+       "6.9.1",
+       "6.9.2"
+      ],
+      "database_specific": {
+       "source": "https://github.com/github/advisory-database/blob/main/advisories/github-reviewed/2026/10/GHSA-jr96-gvgh-j3r4/GHSA-jr96-gvgh-j3r4.json"
+      }
+     }
+    ],
+    "schema_version": "1.9.0",
+    "severity": [
+     {
+      "type": "CVSS_V4",
+      "score": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:P/VC:N/VI:N/VA:H/SC:N/SI:N/SA:N"
+     }
+    ]
+   },
+   {
+    "id": "GHSA-mfr5-77xh-9j7h",
+    "summary": "pypdf has possible infinite loop when cloning dictionaries",
+    "details": "### Impact\n\nAn attacker who uses this vulnerability can craft a PDF which leads to an infinite loop. This requires cloning/duplicating a `DictionaryObject`.\n\n### Patches\n\nThis has been fixed in [pypdf==6.21.4](https://github.com/py-pdf/pypdf/releases/tag/6.21.4).\n\n### Workarounds\n\nIf you cannot upgrade yet, consider applying the changes from PR [#4288](https://github.com/py-pdf/pypdf/pull/4288).",
+    "aliases": [
+     "CVE-2026-119205"
+    ],
+    "modified": "2026-10-30T23:30:04.094971776Z",
+    "published": "2026-10-30T23:12:20Z",
+    "database_specific": {
+     "nvd_published_at": "2026-10-29T21:17:19Z",
+     "cwe_ids": [
+      "CWE-835"
+     ],
+     "severity": "HIGH",
+     "github_reviewed": true,
+     "github_reviewed_at": "2026-10-30T23:12:20Z"
+    },
+    "references": [
+     {
+      "type": "WEB",
+      "url": "https://github.com/py-pdf/pypdf/security/advisories/GHSA-mfr5-77xh-9j7h"
+     },
+     {
+      "type": "ADVISORY",
+      "url": "https://nvd.nist.gov/vuln/detail/CVE-2026-119205"
+     },
+     {
+      "type": "WEB",
+      "url": "https://github.com/py-pdf/pypdf/pull/4288"
+     },
+     {
+      "type": "WEB",
+      "url": "https://github.com/py-pdf/pypdf/commit/f176db1a1f7f9af3e472e69a843ef1175653b044"
+     },
+     {
+      "type": "PACKAGE",
+      "url": "https://github.com/py-pdf/pypdf"
+     },
+     {
+      "type": "WEB",
+      "url": "https://github.com/py-pdf/pypdf/releases/tag/6.21.4"
+     }
+    ],
+    "affected": [
+     {
+      "package": {
+       "name": "pypdf",
+       "ecosystem": "PyPI",
+       "purl": "pkg:pypi/pypdf"
+      },
+      "ranges": [
+       {
+        "type": "ECOSYSTEM",
+        "events": [
+         {
+          "introduced": "0"
+         },
+         {
+          "fixed": "6.21.4"
+         }
+        ]
+       }
+      ],
+      "versions": [
+       "1.0",
+       "1.1",
+       "1.10",
+       "1.11",
+       "1.12",
+       "1.13",
+       "1.2",
+       "1.3",
+       "1.4",
+       "1.5",
+       "1.6",
+       "1.7",
+       "1.8",
+       "1.9",
+       "3.1.0",
+       "3.10.0",
+       "3.11.0",
+       "3.11.1",
+       "3.12.0",
+       "3.12.1",
+       "3.12.2",
+       "3.13.0",
+       "3.14.0",
+       "3.15.0",
+       "3.15.1",
+       "3.15.2",
+       "3.15.3",
+       "3.15.4",
+       "3.15.5",
+       "3.16.0",
+       "3.16.1",
+       "3.16.2",
+       "3.16.3",
+       "3.16.4",
+       "3.17.0",
+       "3.17.1",
+       "3.17.2",
+       "3.17.3",
+       "3.17.4",
+       "3.2.0",
+       "3.2.1",
+       "3.3.0",
+       "3.4.0",
+       "3.4.1",
+       "3.5.0",
+       "3.5.1",
+       "3.5.2",
+       "3.6.0",
+       "3.7.0",
+       "3.7.1",
+       "3.8.0",
+       "3.8.1",
+       "3.9.0",
+       "3.9.1",
+       "4.0.0",
+       "4.0.1",
+       "4.0.2",
+       "4.1.0",
+       "4.2.0",
+       "4.3.0",
+       "4.3.1",
+       "5.0.0",
+       "5.0.1",
+       "5.1.0",
+       "5.2.0",
+       "5.3.0",
+       "5.3.1",
+       "5.4.0",
+       "5.5.0",
+       "5.6.0",
+       "5.6.1",
+       "5.7.0",
+       "5.8.0",
+       "5.9.0",
+       "6.0.0",
+       "6.1.0",
+       "6.1.1",
+       "6.1.2",
+       "6.1.3",
+       "6.10.0",
+       "6.10.1",
+       "6.10.2",
+       "6.11.0",
+       "6.12.0",
+       "6.12.1",
+       "6.12.2",
+       "6.13.0",
+       "6.13.1",
+       "6.13.2",
+       "6.13.3",
+       "6.14.0",
+       "6.14.1",
+       "6.14.2",
+       "6.15.0",
+       "6.16.0",
+       "6.16.1",
+       "6.16.2",
+       "6.17.0",
+       "6.18.0",
+       "6.18.1",
+       "6.19.0",
+       "6.2.0",
+       "6.20.0",
+       "6.20.1",
+       "6.21.0",
+       "6.21.1",
+       "6.21.2",
+       "6.21.3",
+       "6.3.0",
+       "6.4.0",
+       "6.4.1",
+       "6.4.2",
+       "6.5.0",
+       "6.6.0",
+       "6.6.1",
+       "6.6.2",
+       "6.7.0",
+       "6.7.1",
+       "6.7.2",
+       "6.7.3",
+       "6.7.4",
+       "6.7.5",
+       "6.8.0",
+       "6.9.0",
+       "6.9.1",
+       "6.9.2"
+      ],
+      "database_specific": {
+       "source": "https://github.com/github/advisory-database/blob/main/advisories/github-reviewed/2026/10/GHSA-mfr5-77xh-9j7h/GHSA-mfr5-77xh-9j7h.json"
+      }
+     }
+    ],
+    "schema_version": "1.9.2",
+    "severity": [
+     {
+      "type": "CVSS_V4",
+      "score": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:P/VC:N/VI:N/VA:H/SC:N/SI:N/SA:N"
+     }
+    ]
+   },
+   {
+    "id": "GHSA-qfv9-64jg-mh7p",
+    "summary": "pypdf: Possible infinite loop in PdfWriter.find_outline_item",
+    "details": "### Impact\n\nAn attacker who uses this vulnerability can craft a PDF which leads to an infinite loop. This requires calling `find_outline_item` on a `PdfWriter`.\n\n### Patches\n\nThis has been fixed in [pypdf==6.20.1](https://github.com/py-pdf/pypdf/releases/tag/6.20.1).\n\n### Workarounds\n\nIf you cannot upgrade yet, consider applying the changes from PR [#4188](https://github.com/py-pdf/pypdf/pull/4188).",
+    "aliases": [
+     "CVE-2026-113792"
+    ],
+    "modified": "2026-10-21T17:00:06.238658983Z",
+    "published": "2026-10-21T16:55:35Z",
+    "database_specific": {
+     "cwe_ids": [
+      "CWE-835"
+     ],
+     "severity": "MODERATE",
+     "github_reviewed": true,
+     "github_reviewed_at": "2026-10-21T16:55:35Z",
+     "nvd_published_at": null
+    },
+    "references": [
+     {
+      "type": "WEB",
+      "url": "https://github.com/py-pdf/pypdf/security/advisories/GHSA-qfv9-64jg-mh7p"
+     },
+     {
+      "type": "WEB",
+      "url": "https://github.com/py-pdf/pypdf/pull/4188"
+     },
+     {
+      "type": "WEB",
+      "url": "https://github.com/py-pdf/pypdf/commit/c9c35b4471c2eb5fe078094f6c816e69d4ed25a0"
+     },
+     {
+      "type": "PACKAGE",
+      "url": "https://github.com/py-pdf/pypdf"
+     },
+     {
+      "type": "WEB",
+      "url": "https://github.com/py-pdf/pypdf/releases/tag/6.20.1"
+     }
+    ],
+    "affected": [
+     {
+      "package": {
+       "name": "pypdf",
+       "ecosystem": "PyPI",
+       "purl": "pkg:pypi/pypdf"
+      },
+      "ranges": [
+       {
+        "type": "ECOSYSTEM",
+        "events": [
+         {
+          "introduced": "0"
+         },
+         {
+          "fixed": "6.20.1"
+         }
+        ]
+       }
+      ],
+      "versions": [
+       "1.0",
+       "1.1",
+       "1.10",
+       "1.11",
+       "1.12",
+       "1.13",
+       "1.2",
+       "1.3",
+       "1.4",
+       "1.5",
+       "1.6",
+       "1.7",
+       "1.8",
+       "1.9",
+       "3.1.0",
+       "3.10.0",
+       "3.11.0",
+       "3.11.1",
+       "3.12.0",
+       "3.12.1",
+       "3.12.2",
+       "3.13.0",
+       "3.14.0",
+       "3.15.0",
+       "3.15.1",
+       "3.15.2",
+       "3.15.3",
+       "3.15.4",
+       "3.15.5",
+       "3.16.0",
+       "3.16.1",
+       "3.16.2",
+       "3.16.3",
+       "3.16.4",
+       "3.17.0",
+       "3.17.1",
+       "3.17.2",
+       "3.17.3",
+       "3.17.4",
+       "3.2.0",
+       "3.2.1",
+       "3.3.0",
+       "3.4.0",
+       "3.4.1",
+       "3.5.0",
+       "3.5.1",
+       "3.5.2",
+       "3.6.0",
+       "3.7.0",
+       "3.7.1",
+       "3.8.0",
+       "3.8.1",
+       "3.9.0",
+       "3.9.1",
+       "4.0.0",
+       "4.0.1",
+       "4.0.2",
+       "4.1.0",
+       "4.2.0",
+       "4.3.0",
+       "4.3.1",
+       "5.0.0",
+       "5.0.1",
+       "5.1.0",
+       "5.2.0",
+       "5.3.0",
+       "5.3.1",
+       "5.4.0",
+       "5.5.0",
+       "5.6.0",
+       "5.6.1",
+       "5.7.0",
+       "5.8.0",
+       "5.9.0",
+       "6.0.0",
+       "6.1.0",
+       "6.1.1",
+       "6.1.2",
+       "6.1.3",
+       "6.10.0",
+       "6.10.1",
+       "6.10.2",
+       "6.11.0",
+       "6.12.0",
+       "6.12.1",
+       "6.12.2",
+       "6.13.0",
+       "6.13.1",
+       "6.13.2",
+       "6.13.3",
+       "6.14.0",
+       "6.14.1",
+       "6.14.2",
+       "6.15.0",
+       "6.16.0",
+       "6.16.1",
+       "6.16.2",
+       "6.17.0",
+       "6.18.0",
+       "6.18.1",
+       "6.19.0",
+       "6.2.0",
+       "6.20.0",
+       "6.3.0",
+       "6.4.0",
+       "6.4.1",
+       "6.4.2",
+       "6.5.0",
+       "6.6.0",
+       "6.6.1",
+       "6.6.2",
+       "6.7.0",
+       "6.7.1",
+       "6.7.2",
+       "6.7.3",
+       "6.7.4",
+       "6.7.5",
+       "6.8.0",
+       "6.9.0",
+       "6.9.1",
+       "6.9.2"
+      ],
+      "database_specific": {
+       "source": "https://github.com/github/advisory-database/blob/main/advisories/github-reviewed/2026/10/GHSA-qfv9-64jg-mh7p/GHSA-qfv9-64jg-mh7p.json"
+      }
+     }
+    ],
+    "schema_version": "1.9.0",
+    "severity": [
+     {
+      "type": "CVSS_V4",
+      "score": "CVSS:4.0/AV:N/AC:L/AT:P/PR:N/UI:P/VC:N/VI:N/VA:H/SC:N/SI:N/SA:N"
+     }
+    ]
+   },
+   {
+    "id": "GHSA-x3rh-gjgm-fmqc",
+    "summary": "pypdf has possible large memory usage when parsing cross-reference streams",
+    "details": "### Impact\n\nAn attacker who uses this vulnerability can craft a PDF which leads to large memory usage. This requires opening a file with cross-reference streams.\n\n### Patches\n\nThis has been fixed in [pypdf==6.21.3](https://github.com/py-pdf/pypdf/releases/tag/6.21.3).\n\n### Workarounds\n\nIf you cannot upgrade yet, consider applying the changes from PR [#4269](https://github.com/py-pdf/pypdf/pull/4269).",
+    "aliases": [
+     "CVE-2026-119209"
+    ],
+    "modified": "2026-10-30T23:15:04.529631202Z",
+    "published": "2026-10-30T23:07:28Z",
+    "database_specific": {
+     "github_reviewed_at": "2026-10-30T23:07:28Z",
+     "nvd_published_at": "2026-10-29T21:17:20Z",
+     "cwe_ids": [
+      "CWE-400",
+      "CWE-770"
+     ],
+     "severity": "HIGH",
+     "github_reviewed": true
+    },
+    "references": [
+     {
+      "type": "WEB",
+      "url": "https://github.com/py-pdf/pypdf/security/advisories/GHSA-x3rh-gjgm-fmqc"
+     },
+     {
+      "type": "ADVISORY",
+      "url": "https://nvd.nist.gov/vuln/detail/CVE-2026-119209"
+     },
+     {
+      "type": "WEB",
+      "url": "https://github.com/py-pdf/pypdf/pull/4269"
+     },
+     {
+      "type": "WEB",
+      "url": "https://github.com/py-pdf/pypdf/commit/a93fe3a901fd00af38f0a105c3ba7175fa72dcb4"
+     },
+     {
+      "type": "PACKAGE",
+      "url": "https://github.com/py-pdf/pypdf"
+     },
+     {
+      "type": "WEB",
+      "url": "https://github.com/py-pdf/pypdf/releases/tag/6.21.3"
+     }
+    ],
+    "affected": [
+     {
+      "package": {
+       "name": "pypdf",
+       "ecosystem": "PyPI",
+       "purl": "pkg:pypi/pypdf"
+      },
+      "ranges": [
+       {
+        "type": "ECOSYSTEM",
+        "events": [
+         {
+          "introduced": "0"
+         },
+         {
+          "fixed": "6.21.3"
+         }
+        ]
+       }
+      ],
+      "versions": [
+       "1.0",
+       "1.1",
+       "1.10",
+       "1.11",
+       "1.12",
+       "1.13",
+       "1.2",
+       "1.3",
+       "1.4",
+       "1.5",
+       "1.6",
+       "1.7",
+       "1.8",
+       "1.9",
+       "3.1.0",
+       "3.10.0",
+       "3.11.0",
+       "3.11.1",
+       "3.12.0",
+       "3.12.1",
+       "3.12.2",
+       "3.13.0",
+       "3.14.0",
+       "3.15.0",
+       "3.15.1",
+       "3.15.2",
+       "3.15.3",
+       "3.15.4",
+       "3.15.5",
+       "3.16.0",
+       "3.16.1",
+       "3.16.2",
+       "3.16.3",
+       "3.16.4",
+       "3.17.0",
+       "3.17.1",
+       "3.17.2",
+       "3.17.3",
+       "3.17.4",
+       "3.2.0",
+       "3.2.1",
+       "3.3.0",
+       "3.4.0",
+       "3.4.1",
+       "3.5.0",
+       "3.5.1",
+       "3.5.2",
+       "3.6.0",
+       "3.7.0",
+       "3.7.1",
+       "3.8.0",
+       "3.8.1",
+       "3.9.0",
+       "3.9.1",
+       "4.0.0",
+       "4.0.1",
+       "4.0.2",
+       "4.1.0",
+       "4.2.0",
+       "4.3.0",
+       "4.3.1",
+       "5.0.0",
+       "5.0.1",
+       "5.1.0",
+       "5.2.0",
+       "5.3.0",
+       "5.3.1",
+       "5.4.0",
+       "5.5.0",
+       "5.6.0",
+       "5.6.1",
+       "5.7.0",
+       "5.8.0",
+       "5.9.0",
+       "6.0.0",
+       "6.1.0",
+       "6.1.1",
+       "6.1.2",
+       "6.1.3",
+       "6.10.0",
+       "6.10.1",
+       "6.10.2",
+       "6.11.0",
+       "6.12.0",
+       "6.12.1",
+       "6.12.2",
+       "6.13.0",
+       "6.13.1",
+       "6.13.2",
+       "6.13.3",
+       "6.14.0",
+       "6.14.1",
+       "6.14.2",
+       "6.15.0",
+       "6.16.0",
+       "6.16.1",
+       "6.16.2",
+       "6.17.0",
+       "6.18.0",
+       "6.18.1",
+       "6.19.0",
+       "6.2.0",
+       "6.20.0",
+       "6.20.1",
+       "6.21.0",
+       "6.21.1",
+       "6.21.2",
+       "6.3.0",
+       "6.4.0",
+       "6.4.1",
+       "6.4.2",
+       "6.5.0",
+       "6.6.0",
+       "6.6.1",
+       "6.6.2",
+       "6.7.0",
+       "6.7.1",
+       "6.7.2",
+       "6.7.3",
+       "6.7.4",
+       "6.7.5",
+       "6.8.0",
+       "6.9.0",
+       "6.9.1",
+       "6.9.2"
+      ],
+      "database_specific": {
+       "source": "https://github.com/github/advisory-database/blob/main/advisories/github-reviewed/2026/10/GHSA-x3rh-gjgm-fmqc/GHSA-x3rh-gjgm-fmqc.json"
+      }
+     }
+    ],
+    "schema_version": "1.9.2",
+    "severity": [
+     {
+      "type": "CVSS_V4",
+      "score": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:P/VC:N/VI:N/VA:H/SC:N/SI:N/SA:N"
+     }
+    ]
+   }
+  ]
+ }
+}

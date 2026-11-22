@@ -2,7 +2,7 @@
 
 `GateRepo` is a real git repository in tmp_path. `commit` writes files and commits them, so base and
 head are real commits; the gate resolves and exports them like any other repository. PyPI and OSV are
-the recorded real answers from `test_cavr_support` (real pypdf 6.19.0 wheel and registry response),
+the recorded real answers from `test_cavr_support` (real pypdf 6.21.4 wheel and registry response),
 injected through `gate_adapter.SETTINGS`.
 """
 import json
@@ -12,7 +12,7 @@ import subprocess
 from pathlib import Path
 
 from backend.cavr import gate_adapter
-from test_cavr_support import FakeIndex, INVOICEHUB, POLICY, RECORDED_6_19_0, write_osv_cache
+from test_cavr_support import FakeIndex, INVOICEHUB, POLICY, RECORDED_6_21_4, write_osv_cache
 
 DISABLED = {"enabled": False, "reason": "not part of this test"}
 
@@ -55,7 +55,7 @@ def invoice_app_files() -> dict:
     return {f"app/{p.name}": p.read_text() for p in (INVOICEHUB / "app").glob("*.py")}
 
 
-def cavr_files(policy=None, requirements="pypdf==6.19.0\n", **modules):
+def cavr_files(policy=None, requirements="pypdf==6.21.4\n", **modules):
     files = {**invoice_app_files(), "requirements.txt": requirements,
              ".asent/cavr/policy.json": json.dumps(policy or POLICY, indent=2),
              ".asent/config.json": config(CAVR={"enabled": True}, SATRA=modules.get("SATRA", DISABLED),
@@ -64,11 +64,11 @@ def cavr_files(policy=None, requirements="pypdf==6.19.0\n", **modules):
 
 
 def recorded_pypi(monkeypatch, tmp_path):
-    """Serve the real pypdf 6.19.0 wheel and its recorded registry and OSV answers to gate runs."""
+    """Serve the real pypdf 6.21.4 wheel and its recorded registry and OSV answers to gate runs."""
     index = FakeIndex()
-    index.add_pypdf()
+    index.add_pin()
     osv = tmp_path / "osv"
-    write_osv_cache(osv, "pypdf", "6.19.0", RECORDED_6_19_0)
+    write_osv_cache(osv, "pypdf", "6.21.4", RECORDED_6_21_4)
     monkeypatch.setattr(gate_adapter, "SETTINGS", {"transport": index, "osv": None, "advisory_cache_dir": osv, "live_advisories": False})
     return index, osv
 
