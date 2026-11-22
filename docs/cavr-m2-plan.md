@@ -463,7 +463,7 @@ Stated as limitations in the report and on the dashboard, not implemented in M2:
 
 ### Phase 1 — Wiring
 - [x] PR 1 orchestrator through `verify_request` + demo pin `pypdf==6.21.4` (branch `cavr-m2-phase1-wiring`, 2026-11-22; report notes Step M2-1)
-- [ ] PR 2 deep-analysis stage interface
+- [x] PR 2 deep-analysis stage interface (branch `cavr-m2-phase1-wiring`, 2026-11-22; report notes Step M2-2)
 
 ### Phase 2 — Behaviour sandbox
 - [ ] PR 3 CAVR sandbox image `asent-cavr-sandbox:local` + identity check

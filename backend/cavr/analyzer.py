@@ -35,7 +35,7 @@ from backend.threat_repo.package_records import packages, vulnerabilities
 from backend.threat_repo.repository import active, seeds
 from backend.threat_repo.source_sink_rules import correlate
 
-DEMO_SETTINGS = {"transport": None, "osv": None, "advisory_cache_dir": None, "live_advisories": True}
+DEMO_SETTINGS = {"transport": None, "osv": None, "advisory_cache_dir": None, "live_advisories": True, "deep": None}
 LAB_BOUNDED = "Demo lab (LOCAL controlled reproductions only): selected Python source/capability model; does not prove arbitrary package safety"
 
 

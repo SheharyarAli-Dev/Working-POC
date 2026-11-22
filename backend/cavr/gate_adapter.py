@@ -23,10 +23,13 @@ else VERIFIED. A dependency manifest the pipeline cannot read (pyproject depende
 Pipenv, setup.py, npm) is UNRESOLVED: those dependencies would otherwise pass unseen.
 
 `SETTINGS` replaces the outside world in tests (PyPI transport, OSV); None means the pipeline's
-own default (live PyPI, live OSV). A `settings` argument is used instead of `SETTINGS` when given.
+own default (live PyPI, live OSV). `deep` is the deep analyzer for escalated packages (PR 2 of
+docs/cavr-m2-plan.md); None, the default until the sandbox exists, means no deep stage.
+A `settings` argument is used instead of `SETTINGS` when given.
 
 Each package row carries what the orchestrator's assurance report reads: `sha256`, `artifact` (the
-wheel's file name), `escalation`, `tree_nodes`, `advisories` (one line per OSV answer), and the contract with `required` (the allowed
+wheel's file name), `escalation`, `tree_nodes`, `advisories` (one line per OSV answer), and the
+contract with `required` (the allowed
 capabilities the project's call sites need), `denied`, `confidence` (the contract's rule, e.g.
 CONTRACT_INFERRED; demo-lab rows keep the older 'rule-grounded' / 'insufficient') and `authority`. The verdict cache, quarantine and advisory cache live in the
 run store's data directory, so a gate run never touches the dashboard's database.
@@ -41,7 +44,7 @@ from backend.cavr.pipeline import verify_request
 from backend.cavr.storage import CavrStorage
 from backend.cavr.verdict_cache import KEY_FIELDS
 
-SETTINGS = {"transport": None, "osv": None, "advisory_cache_dir": None, "live_advisories": True}
+SETTINGS = {"transport": None, "osv": None, "advisory_cache_dir": None, "live_advisories": True, "deep": None}
 STATUS_MAP = {"VERIFIED": "VERIFIED", "REJECTED": "REJECTED", "BLOCK": "REJECTED"}
 UNSUPPORTED_MANIFESTS = ("poetry.lock", "uv.lock", "Pipfile", "Pipfile.lock", "setup.py", "setup.cfg", "package.json",
                          "package-lock.json", "yarn.lock", "pnpm-lock.yaml")
@@ -123,7 +126,8 @@ def analyze_pipeline(context, store, outdir, emit, settings=None):
                                  transport=settings.get("transport"), osv=settings.get("osv"),
                                  quarantine_dir=data_root / "quarantine",
                                  advisory_cache_dir=settings.get("advisory_cache_dir") or data_root / "advisories",
-                                 live_advisories=settings.get("live_advisories", True), knowledge=context.knowledge)
+                                 live_advisories=settings.get("live_advisories", True), knowledge=context.knowledge,
+                                 deep=settings.get("deep"))
         entry = {"file": name, "request": shown, "status": verdict.get("status"), "mapped": map_status(verdict.get("status")),
                  "stage": verdict.get("stage"), "rule": verdict.get("rule"), "reason": verdict.get("reason"),
                  "policy_version": verdict.get("policy_version"), "analyzer_version": verdict.get("analyzer_version"),

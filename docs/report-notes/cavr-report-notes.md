@@ -3641,3 +3641,118 @@ Run before the commit: `tests/test_cavr_*.py`, `tests/test_gate_*.py`, `test_cli
 2. **How do tests stay offline but honest?** The bytes and answers are real recordings, served by a fake transport;
    nothing is hand-written, and a guard fails any test that shows 6.19.0 VERIFIED.
 3. **What still is not the pipeline?** LOCAL controlled-reproduction modules (the demo lab) until PR 12.
+
+## Step M2-2 — Deep-analysis stage behind the escalation, fail closed (2026-11-22)
+
+PR 2 of `docs/cavr-m2-plan.md` (Phase 1). Decision Q8 applied to the interface; no sandbox yet.
+
+### Ch 6 Implementation
+
+- New `backend/cavr/deep_stage.py`. `identity(deep)` returns `<version>;image:<image id>;budget:<digest>` or None
+  when the version, image ID or a budget with `package_seconds > 0` is missing. `run_deep(deep, package)` always
+  returns `{status, stage: "deep", rule, reason, evidence, elapsed_seconds}`: no identity -> `DEEP_IDENTITY_UNKNOWN`
+  (not called); raises -> `INTERNAL_ERROR`; None -> `DEEP_NO_RESULT`; not a dict / unknown status / empty rule or
+  reason / non-dict evidence -> `DEEP_RESULT_INVALID`; elapsed by the host clock (`CLOCK`, `time.monotonic`) over
+  `package_seconds` -> `DEEP_BUDGET_EXCEEDED` unless the answer is REJECTED; otherwise the analyzer's answer.
+  `identity` never raises (a failing attribute or an undigestable budget is "no identity").
+- `backend/cavr/pipeline.py`. `verify_request(..., deep=None)`. `analyzer_version(knowledge, deep)` appends
+  `;deep:<identity or unknown>` only when `deep` is given. Stage 8b (`_deep`): only when stage 8's analysis is
+  UNRESOLVED with an escalation and `deep` is not None, the analyzer gets a deep copy of the package's evidence and its answer replaces status, stage, rule and reason; the fast scan and
+  reachability evidence stay; `evidence["deep"]` holds the deep result; the package's escalation text becomes
+  `escalated: deep analysis ran`. The combined analysis is cached like any analysis (VERIFIED / REJECTED only).
+  The request-level `escalation` is now the first escalated package's text (unchanged for `deep=None`).
+- `gate_adapter.SETTINGS["deep"]` and `analyzer.DEMO_SETTINGS["deep"]` (None) are passed through.
+
+Key algorithm: stages 1–7 unchanged -> stage 8 fast analysis -> if escalated and a deep analyzer is configured:
+`run_deep` (validated, timed by the host) -> replace the escalated verdict -> cache if VERIFIED/REJECTED under the
+8-field key whose `analyzer_version` carries the deep identity. Every earlier return (BLOCK, hash mismatch, OSV
+affected or unknown, contract unknown, tree problems) happens before stage 8, so the deep stage cannot see them.
+
+### Design decisions
+
+- **Deep identity inside `analyzer_version`** rather than a 9th key field: the key stays the 8 fields (M1 rule);
+  a new image, version or budget is a miss by construction.
+- **Host clock, not the analyzer's own timing**, for the budget (Q8): a package-controlled run cannot report itself
+  as within budget. The clock is a module seam (`CLOCK`) so tests are deterministic.
+- **REJECTED over budget stays REJECTED**: an observed violation is a violation (Q8); only VERIFIED / UNRESOLVED
+  answers become `DEEP_BUDGET_EXCEEDED`.
+- **No identity -> not called**: without a key the result could not be cached or audited; fail closed.
+- **Placement after `_analyse`, before the cache store**: a cached deep verdict is reused only for the same deep
+  identity, and advisories (stage 7) are still checked on every call.
+
+### Requirements covered
+
+| ID | Acceptance check |
+|---|---|
+| FR-6 | Every deep failure mode is UNRESOLVED: `test_no_or_malformed_deep_result_is_unresolved`, `..._raises_...`, `..._without_a_full_identity_...`, `test_going_over_the_time_budget_...` |
+| FR-4 (interface) | Escalated packages reach a deep stage: `test_deep_verified_lifts_only_the_escalation` |
+| NFR-4 | Deep identity and budget in the key: `test_changing_the_image_id_is_a_cache_miss`, `test_changing_the_deep_version_or_budget_changes_the_key` |
+
+### Ch 7 Test cases
+
+`tests/test_cavr_deep_stage.py` (fake deep analyzer `FakeDeep`; real pipeline on the recorded pypdf 6.21.4 data).
+
+| Test ID | Purpose | Input | Expected | Result |
+|---|---|---|---|---|
+| `test_deep_none_keeps_the_analyzer_version_and_the_escalated_verdict` | deep=None unchanged | escalated project | UNRESOLVED `SINK_REACHABLE`, no `;deep:` | pass |
+| `test_deep_verified_lifts_only_the_escalation` | lift | deep VERIFIED | package VERIFIED `deep/DEEP_CLEAN`, fast evidence kept | pass |
+| `test_deep_rejected_rejects_with_the_deep_evidence` | violation | deep REJECTED | REJECTED with deep evidence | pass |
+| `test_deep_unresolved_stays_unresolved` | incomplete | deep UNRESOLVED | UNRESOLVED | pass |
+| `test_deep_analyzer_that_raises_is_unresolved_internal_error` | fault | raises | UNRESOLVED `INTERNAL_ERROR` | pass |
+| `test_no_or_malformed_deep_result_is_unresolved` (6) | bad answers | None, str, bad status, no rule, empty rule, bad evidence | `DEEP_NO_RESULT` (None) / `DEEP_RESULT_INVALID` | pass |
+| `test_deep_analyzer_without_a_full_identity_is_unresolved_and_never_called` (5) | identity | missing version / image / budget | `DEEP_IDENTITY_UNKNOWN`, 0 calls | pass |
+| `test_going_over_the_time_budget_is_unresolved_even_when_the_answer_is_verified` | Q8 budget | 120.5 s | UNRESOLVED `DEEP_BUDGET_EXCEEDED` | pass |
+| `test_a_violation_found_over_the_budget_is_still_rejected` | Q8 | REJECTED, 120.5 s | REJECTED | pass |
+| `test_exactly_on_the_budget_is_within_it` | boundary | 120 s | VERIFIED | pass |
+| `test_not_called_for_a_fast_verified_package` | not escalated | clean project | VERIFIED, 0 calls | pass |
+| `test_not_called_for_a_rejected_package` | not escalated | affected advisory | REJECTED, 0 calls | pass |
+| `test_not_called_for_a_blocked_request` | not escalated | left-pad | BLOCK, 0 calls | pass |
+| `test_deep_verified_never_lifts_missing_advisories` | owner request | no OSV answer | UNRESOLVED `ADVISORIES_UNAVAILABLE`, 0 calls | pass |
+| `test_deep_verified_never_lifts_a_request_hash_mismatch` | owner request (UNRESOLVED by hash) | wrong `--hash` in requirements | UNRESOLVED `REQUEST_HASH_MISMATCH`, 0 calls | pass |
+| `test_deep_verified_never_lifts_a_registry_hash_mismatch` | REJECTED by hash | one bit flipped | REJECTED `HASH_MISMATCH`, 0 calls | pass |
+| `test_an_identity_that_cannot_be_read_is_unresolved_never_an_exception` (2) | fail closed | raising property, unsortable budget | `DEEP_IDENTITY_UNKNOWN`, `;deep:unknown` | pass |
+| `test_a_cached_deep_verified_is_never_served_without_that_deep_analyzer` | cache | stored deep VERIFIED, then deep=None / no identity | escalated UNRESOLVED / `DEEP_IDENTITY_UNKNOWN`, no hit | pass |
+| `test_not_called_for_an_unknown_contract` | not escalated | invalid scopes | UNRESOLVED `CAPABILITY_POLICY_INVALID`, 0 calls | pass |
+| `test_a_cached_deep_verified_still_rechecks_osv` | cache + OSV | hit, then advisory | hit with 1 call; then REJECTED | pass |
+| `test_changing_the_image_id_is_a_cache_miss` | key | new image ID | MISS, called again | pass |
+| `test_changing_the_deep_version_or_budget_changes_the_key` (2) | key | new version / budget | not a hit, called again | pass |
+| `test_unresolved_deep_answers_are_not_cached` | cache | deep UNRESOLVED twice | 2 calls, no cache row | pass |
+
+`tests/test_cavr_deep_stage.py`: 34 passed. Run before the commit (same set as Step M2-1): 1572 passed, 11 skipped
+(live, `CAVR_LIVE` unset), 818 s; `test_cavr_pipeline.py` unchanged and passing (deep=None is unchanged).
+
+### Defects found and fixed
+
+- First run: 2 of 30 failed because the tests read the request-level stage/rule; a VERIFIED request always reads
+  `verdict / ALL_CHECKS_PASSED`. The tests now check the package's stage and rule (test fix, no code change).
+- cavr-reviewer MAJOR: the owner asked for a deep VERIFIED never lifting an UNRESOLVED caused by a hash; the test
+  covered the REJECTED registry mismatch only. Added the `REQUEST_HASH_MISMATCH` test, kept the REJECTED one renamed.
+  MINORs fixed: `identity` cannot raise; stage 8b also requires status UNRESOLVED; the analyzer gets a deep copy;
+  exact rules in the malformed-answer test; stored-row and `analyzer_version` asserts in the cache-miss tests; a
+  test that a cached deep VERIFIED is not served with `deep=None` or without an identity; docstring wrapped.
+- Review: 1 pass of cavr-reviewer, verdict "OK to commit" (0 BLOCKER, 1 MAJOR, 9 MINOR); MAJOR and 7 MINORs
+  fixed; 1 MINOR open (budget limits, recorded below); the notes MINOR is this entry.
+
+### Known limitations / deferred
+
+- No real deep analyzer exists: `SETTINGS["deep"]` is None, so every escalated package is still UNRESOLVED
+  (`deep analysis required (M2)`). The sandbox analyzer comes in Phase 2 (PR 3–9).
+- The budget is checked after `analyse` returns: a hanging analyzer blocks the call. Stopping a run at the
+  deadline is the runner's job (PR 4). `package_seconds` has no upper bound, and `runs` / `run_seconds` are carried
+  in the identity but not enforced here; both are checked when the real analyzer and the base-policy budget arrive
+  (PR 9, PR 12).
+- Until PR 3 the image ID is whatever the analyzer object reports; PR 3's `image_identity()` reads the real one.
+- `elapsed_seconds` is in the deep evidence; `deep_analysis_ms` in the verdict log is PR 9 (NFR-4).
+
+### Tool disclosure (Ch 8.7)
+
+- **Generated by Claude Code:** `deep_stage.py`, the pipeline change, the tests and these notes. **Reviewed by
+  Maryam:** the plan and the required test list; the diff itself not yet. **Verified by:** the runs listed above.
+
+### Supervisor Q&A prep
+
+1. **Can a deep VERIFIED hide a known vulnerability?** No. Advisories are checked at stage 7 on every call, before
+   the deep stage and also on a cache hit (`test_a_cached_deep_verified_still_rechecks_osv`).
+2. **Why trust the time budget?** It is measured by the host around the call, not reported by the analyzer.
+3. **What happens if the sandbox image changes?** Its ID is in `analyzer_version`, so the key changes and the
+   package is analysed again.
