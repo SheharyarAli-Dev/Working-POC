@@ -3756,3 +3756,101 @@ affected or unknown, contract unknown, tree problems) happens before stage 8, so
 2. **Why trust the time budget?** It is measured by the host around the call, not reported by the analyzer.
 3. **What happens if the sandbox image changes?** Its ID is in `analyzer_version`, so the key changes and the
    package is analysed again.
+
+## Step M2-1a — Re-pin the rewritten safe lab adapter for the Docker-less host fallback (2026-11-22)
+
+Fix for a CI failure introduced by Step M2-1: `tests/test_cavr_targeted.py::test_pinned_repair_candidate_functionality_and_security`
+failed with "Untrusted package requires Docker/Podman; host fallback only accepts hash-pinned inert sources". It
+passed locally only because Docker was available.
+
+### Ch 6 Implementation
+
+- `scenarios/laboratory_hashes.json`: the digest of `scenarios/cavr_controlled/invoice_pdf_safe.py` replaced in
+  `cavr_sources` and `python_sources`: `b4e7ebcbe324484da22c64d925a2d03fd8aa06f55da73f62e4104b7163a340bf` (before
+  Step M2-1) -> `c8387145dc6fc5957affb64cb5630a770f5180b369dd2e7a344e7b29efc332ea` (Step M2-1 rewrite). These are the
+  values the hashing rule of `scripts/build_scenarios.py` gives for that file; the generator itself was not run.
+- New `tests/test_cavr_lab_pins.py`: pins match the shipped lab sources; the real host fallback runs with Docker,
+  Podman and strace hidden; an unpinned source is still refused.
+
+Cause: the host fallback (`backend/cavr/sandbox.py::run_counterfactual`) pins the lab `.py` source by its
+LF-normalised SHA-256, not the pypdf wheel; the lab imports the host's pypdf. Step M2-1 bound `reader =
+PdfReader(...)` to one name (for the guard proof), which changed the source digest; the pin still held the old one.
+SATRA's host fallback (`backend/satra/pytest_runner.py::permitted_builtin`) reads `python_sources` from the same file
+for the vendored copy, so `test_integration.py::test_cavr_repair_invalidates_satra_then_reverifies` also failed
+without Docker (`cross_module` ended BLOCK, SATRA INCONCLUSIVE after the repair).
+
+### Design decisions
+
+- **Pin the new source digest, not the 6.21.4 wheel sha256**: the allowlist is compared with `.py` source digests;
+  a wheel hash would match nothing and would put a non-source entry into an inert-source list.
+- **Edit two entries by hand instead of running the generator**: the generator also rewrites the scenario catalog
+  and Terraform candidates, and would add two unrelated SATRA digests (below).
+- **Fallback rule unchanged**: `test_an_unpinned_source_is_still_refused_without_docker`.
+- **Audit before pinning** (owner request). Old vs new diff: the inline `PdfReader(BytesIO(content)).pages` became
+  `reader = PdfReader(BytesIO(content))` + `reader.pages`, and a comment line. Static: same imports (`io.BytesIO`,
+  `pypdf.PdfReader`, `pypdf.apply_configuration`), same 5 calls, CAVR `ast_scan.scan_wheel` `SCAN_COMPLETE` with 0
+  sinks, 0 dynamic code, 0 gated branches for both. Runtime (host fallback, Python audit hook, both modes, host pypdf
+  6.19.0): the same event types and counts for old and new (115 reads, 1 write: the bytecode cache), 0 process,
+  network or secret events, no canary. Measured with a scratch script, not committed; the test repeats the checks.
+
+### Requirements covered
+
+| ID | Acceptance check |
+|---|---|
+| FR-6 | Fail-Closed Security Policy: an unpinned source is refused without an engine: `test_an_unpinned_source_is_still_refused_without_docker` |
+| NFR-1 | Non-Root Isolation: only pinned inert sources run on the host: `test_every_cavr_lab_source_is_pinned_for_the_host_fallback`, `test_pinned_lab_sources_run_on_the_host_without_docker` |
+
+### Ch 7 Test cases
+
+`tests/test_cavr_lab_pins.py` (engines hidden by monkeypatching `sandbox.availability`).
+
+| Test ID | Purpose | Input | Expected | Result |
+|---|---|---|---|---|
+| `test_every_cavr_lab_source_is_pinned_for_the_host_fallback` | pins in step | `invoice_pdf_*.py` | `cavr_sources` == their LF digests; all in `python_sources` | fail before, pass after |
+| `test_pinned_lab_sources_run_on_the_host_without_docker` | real fallback | safe adapter, no Docker/Podman/strace | `PINNED_INERT_LAB_PYTHON_AUDIT`, same text both modes, no canary, no process/network/secret/write events except one bytecode-cache write per run | fail before, pass after |
+| `test_an_unpinned_source_is_still_refused_without_docker` | rule unchanged | adapter + one comment line | refusal, no runs | pass |
+
+Runs on 2026-11-22. Docker hidden (`DOCKER_HOST=unix:///nonexistent`), `test_cavr_*`, `test_gate_*`, `test_cli_gate`,
+`test_shared`, `test_modules`, `test_integration`, `test_orchestrator_config`, `test_api_replay`,
+`test_hash_verification_line_endings`: before 2 failed (`test_cavr_targeted.py::test_pinned_repair_candidate_functionality_and_security`,
+`test_integration.py::test_cavr_repair_invalidates_satra_then_reverifies`), 1572 passed, 11 skipped; after 1577 passed,
+11 skipped, 0 failed. Full suite with Docker: 2346 passed, 11 skipped, 1 xfailed, 2 failed in
+`test_satra_project_image_docker.py` (the image build's PyPI download; on rerun one passed, the other failed again on a
+truncated `pydantic-core` download reported by pip as a hash mismatch; that path runs in Docker and does not read
+`laboratory_hashes.json`). After the review fixes: `test_cavr_lab_pins.py` + `test_cavr_targeted.py` 9 passed with and
+without Docker.
+
+### Defects found and fixed
+
+- CI: Step M2-1 changed a pinned lab source without re-pinning it; Step M2-1's verification ran with Docker, so the
+  pin was never consulted. Fixed by the re-pin; the new tests fail on any machine if it happens again.
+- The first draft of the runtime test forbade every `FILE_WRITE`; the old, approved adapter also writes one file:
+  the interpreter's bytecode cache for the imported adapter (`__pycache__/package.cpython-*.pyc.*`) inside the
+  disposable workspace. The test allows exactly that write and no other.
+- Review: 1 pass of cavr-reviewer, verdict "OK to commit" (0 BLOCKER, 0 MAJOR, 7 MINOR); 6 MINORs fixed, 1 answered by the Docker-hidden run; 0 open.
+
+### Known limitations / deferred
+
+- **For Sheharyar (SATRA), not changed here:** two `backend/satra/trusted_*.py` digests are not in `python_sources`
+  (drift since 2026-11-08); the generator would add them: `backend/satra/trusted_data.py`
+  `91c373c6b2192385a674dd1a6911c509b2663615cd98f7901e6107125fe3ca80` (since 71413b9) and
+  `backend/satra/trusted_run_plugin.py` `cc900a7fee5a3e31a7d0d815258e30f5672f7d0cd859fb7bd78801eac6e2e643`
+  (since 3ce766b).
+- The host `.venv` still has pypdf 6.19.0 from `pyproject.toml` (the lab imports it); to fix later, not in this
+  commit.
+- The lab harness runs with `python -I`, which ignores the `PYTHONDONTWRITEBYTECODE=1` set by `sandbox.py`, so the
+  interpreter writes a bytecode cache in the workspace (harmless there; not changed here).
+
+### Tool disclosure (Ch 8.7)
+
+- **Generated by Claude Code:** the re-pin, the tests, the audit and these notes. **Reviewed by Maryam:** the plan,
+  the tag and the audit request; the diff itself not yet. **Verified by:** the runs listed above.
+
+### Supervisor Q&A prep
+
+1. **Why not pin the pypdf 6.21.4 wheel?** The fallback never runs a wheel; it runs one reviewed `.py` file and pins
+   that file's digest.
+2. **Does re-pinning weaken the fallback?** No. The rule is unchanged, and any other change to the file is refused
+   (`test_an_unpinned_source_is_still_refused_without_docker`).
+3. **How do you know the new file is still inert?** Same imports and calls, 0 sinks in the CAVR scan, and an
+   the same audit-event types and counts as the approved file on the same host fallback.
