@@ -3499,3 +3499,145 @@ Not run here: `docker build` (Docker not installed), `actionlint` (not installed
 ### Supervisor Q&A prep
 
 1. **How do you know the gate does not secretly analyse the demo project?** A text guard over every module the gate runs, plus a run where every demo function raises, plus an import check in a fresh interpreter.
+
+## Step M2-1 — Demo and scenario runs through `verify_request`; demo pin pypdf 6.21.4 (2026-11-22)
+
+PR 1 of `docs/cavr-m2-plan.md` (Phase 1). Decisions applied: Q1 option A, Q2, Q4, Q12; D1–D5 of the Phase 1 plan.
+
+### Ch 6 Implementation
+
+- `backend/cavr/analyzer.py` (rewritten). `analyze()` sends gate runs to `gate_adapter.analyze_pipeline` with the
+  gate's `SETTINGS`, and demo/scenario runs to `_analyze_demo`, which calls the same `analyze_pipeline` with
+  `DEMO_SETTINGS` (a separate dict of the same shape). Then, over `dependencies.lock.json`:
+  LOCAL nodes go to `_lab` (the earlier lab code, moved unchanged and restricted to LOCAL sources, rows labelled
+  `engine: "demo-lab"`; a LOCAL artifact that is not a `.py` source is UNRESOLVED `LOCAL_ARTIFACT_NOT_SUPPORTED`);
+  a lock entry without a usable name and version is UNRESOLVED `LOCK_ENTRY_INVALID`; a PyPI node that no pipeline verdict judged (not a requested package, not in any verified
+  tree) becomes UNRESOLVED `LOCKED_NOT_VERIFIED`; any other ecosystem is UNRESOLVED `UNSUPPORTED_ECOSYSTEM`. The
+  module status is the worst over the pipeline result and every node. A pipeline exception is UNRESOLVED
+  `INTERNAL_ERROR`. Removed: the PyPI wheel branch, the analyzer's own `OSV().query` advisory rule, `read_artifact`
+  for wheels, the direct `fast_gate.disabled_jbig2_sinks` call and the orchestrator-store cache for PyPI nodes.
+- `backend/cavr/gate_adapter.py`. `analyze_pipeline(..., settings=None)` (None = `SETTINGS`). Each package row adds
+  `engine`, `artifact` (wheel file name), `escalation`, `tree_nodes`, `advisories` (one summary line per OSV answer)
+  and `contract` + `required` (allowed entries with status REQUIRED) + `confidence` (the contract's rule): the names
+  `Service.report` already reads, so no orchestrator file changed.
+- `backend/cavr/api.py`. Seven chips: 1–2 `pypdf 6.21.4` (VERIFIED), new 3 `pypdf 6.19.0 (OSV)` (REJECTED), 4
+  `pypdf 5.1.0 (OSV)`, 5 left-pad (BLOCK), 6 tampered wheel and 7 network off on 6.21.4.
+- Demo data [owner review]: `demo_project/InvoiceHub/{requirements.txt, dependencies.lock.json,
+  .asent/cavr/policy.json}` pin `pypdf==6.21.4` (sha256 `33e4fb41…5255c`); `backend/cavr/sample_project/requirements.txt`
+  likewise; `scenarios/cavr_controlled/invoice_pdf_safe.py` binds `reader = PdfReader(...)` inside the guard (same
+  behaviour; the reachability proof only follows a reader bound to one name).
+- Recorded data (`tests/test_cavr_data/`, recorded once on 2026-11-22 with httpx from pypi.org and api.osv.dev; the
+  wheel's SHA-256 was checked against the registry digest before saving): `pypdf-6.21.4-py3-none-any.whl` (410430
+  bytes, uploaded 2026-10-28, not yanked), `pypi-pypdf-6.21.4.json`, `osv-pypdf-6.21.4.json` (0 advisories),
+  `osv-pypdf-6.19.0-2026-11-22.json` (18). `osv-pypdf-6.19.0.json` (0, 2026-10-10) is labelled
+  `historical_snapshot: true`.
+- Tests support: `test_cavr_support.py` gains `PIN_*`, `pin_registry_response`, `RECORDED_6_21_4`,
+  `RECORDED_6_19_0_NOW`, `HISTORICAL_6_19_0_2026_10_10`, `FakeIndex.add_pin`, `recorded_demo_settings`; `World`
+  pins 6.21.4 and also serves 6.19.0 with its 18 advisories. `tests/conftest.py` [owner review]:
+  `_offline_demo_runs` (session) puts the recorded answers into `analyzer.DEMO_SETTINGS`; `_record_verified_6_19_0`
+  + `_no_verified_6_19_0` fail any test in which a pipeline package verdict is VERIFIED for pypdf 6.19.0.
+
+### Design decisions
+
+- **Reuse `analyze_pipeline` for demo runs** rather than a second loop over lock nodes: one code path for gate and
+  demo; the demo project already has a frozen `.asent/` config. Alternative (per-lock-node `pip install x==y`)
+  rejected: it would verify children twice and differ from the gate.
+- **Separate `DEMO_SETTINGS`** instead of patching `gate_adapter.SETTINGS` in tests: `test_live_pypi_and_osv`
+  asserts the gate's live default, and a session-wide patch of the gate settings would leak into gate tests.
+- **`LOCKED_NOT_VERIFIED`**: a pinned package nobody verified would otherwise pass unseen (fail closed, FR-6).
+- **`infer` kept** (D5): the lab path and `Service._repair` read its contract; deleted in PR 12 with the lab path.
+- **Revocation tests use `BEH-PROCESS_EXEC`** (D1): the fast gate reads sink rules (through the contract
+  vocabulary and `analyzer_version`), not trigger rules; disabling `TRIG-ENV` changes no verdict (tested).
+- **6.19.0 never VERIFIED**: rather than relabel tests one by one, a conftest guard enforces it for the whole suite;
+  the shared test worlds moved to 6.21.4.
+- **`invoice_pdf_safe.py` rewrite** instead of widening the reachability proof: the proof's limit is documented
+  (M1 step 9) and changing proofs is out of PR 1.
+
+### Requirements covered
+
+| ID | Acceptance check |
+|---|---|
+| FR-15 | Demo/scenario runs publish pipeline evidence: `test_demo_pypi_node_is_judged_by_the_pipeline` |
+| FR-11 | Demo pin's wheel hash = recorded file = registry digest: `test_demo_pin_6_21_4_is_verified_on_the_recorded_answers` |
+| FR-6 | No OSV answer -> UNRESOLVED; pipeline fault -> UNRESOLVED; unjudged lock node -> UNRESOLVED |
+| FR-10 | Assurance report lists pypdf sha256 and contract: `test_assurance_report_lists_each_cavr_package_sha256_and_contract` |
+
+### Ch 7 Test cases
+
+| Test ID | Purpose | Input | Expected | Result |
+|---|---|---|---|---|
+| `test_demo_pypi_node_is_judged_by_the_pipeline` | demo run uses the pipeline | `safe` scenario | VERIFIED, engine pipeline, 8 key fields | pass |
+| `test_demo_run_never_asks_osv_outside_the_pipeline` | no second advisory rule | OSV stub + `OSV.query` trap | stub asked once, trap never | pass |
+| `test_demo_run_without_an_osv_answer_is_unresolved` | Q1 A | empty OSV cache | UNRESOLVED `ADVISORIES_UNAVAILABLE` | pass |
+| `test_demo_pin_6_21_4_is_verified_on_the_recorded_answers` | shipped pin + recordings agree | shipped files | VERIFIED, sha `33e4fb41…` | pass |
+| `test_rejected_demo_pins_are_rejected_by_recorded_advisories[6.19.0/5.1.0]` | REJECTED demo cases | recorded 18 / 97 | REJECTED `KNOWN_VULNERABILITY` | pass |
+| `test_orchestrator_demo_run_with_the_6_19_0_pin_is_rejected` | REJECTED case through `analyzer.analyze` | pin 6.19.0, approved | REJECTED, 18 advisories | pass |
+| `test_local_wheel_in_the_lock_is_unresolved_never_verified` | review BLOCKER | LOCAL wheel with unpinned Requires-Dist | UNRESOLVED `LOCAL_ARTIFACT_NOT_SUPPORTED` | pass |
+| `test_non_pypi_ecosystem_in_the_lock_is_unresolved` | edge | npm entry | UNRESOLVED `UNSUPPORTED_ECOSYSTEM` | pass |
+| `test_lock_entry_without_a_usable_name_and_version_is_unresolved` (4 cases) | edge | malformed entries | UNRESOLVED `LOCK_ENTRY_INVALID`, nothing VERIFIED | pass |
+| `test_unreadable_lockfile_is_unresolved` (3 cases) | edge | bad JSON, list, dict packages | UNRESOLVED | pass |
+| `test_missing_lockfile_is_judged_like_the_gate` | edge | no lockfile | VERIFIED (exact pin, no dependencies), as a gate run | pass |
+| `test_demo_run_without_a_frozen_cavr_config_is_unresolved` | edge | no frozen `.asent/` | UNRESOLVED | pass |
+| `test_assurance_report_lists_each_cavr_package_sha256_and_contract` | report fields | integration `safe` run | sha, artifact, required/denied/confidence | pass |
+| `test_pipeline_fault_in_a_demo_run_is_unresolved` | fail closed | `verify_request` raises | UNRESOLVED `INTERNAL_ERROR` | pass |
+| `test_local_lab_node_keeps_the_lab_path_labelled_demo_lab` | lab path kept | `cavr_canary` | lab REJECTED; pypdf UNRESOLVED `SINK_REACHABLE` | pass |
+| `test_locked_pypi_node_no_request_verifies_is_unresolved` | edge: unjudged pin | extra lock entry | UNRESOLVED `LOCKED_NOT_VERIFIED` | pass |
+| `test_demo_settings_never_change_gate_settings` | settings isolation | spy | demo gets DEMO_SETTINGS, gate None | pass |
+| `test_disabled_trigger_rule_does_not_change_the_fast_gate` | D1 | TRIG-ENV off | VERIFIED, same key fields | pass |
+| `test_inline_pdfreader_pages_form_is_unresolved_never_verified` | known limitation | inline `PdfReader(...).pages` | UNRESOLVED, escalated | pass |
+| `test_repaired_cross_module_state_verifies_pypdf` | repair state | `cross_module` + `replace_lab` | pypdf VERIFIED | pass |
+| `test_modules::test_cavr_safe_cache_and_advisory` (changed) | cache + revocation | BEH-PROCESS_EXEC off/on | MISS, HIT; revoked UNRESOLVED, not from cache, lookup not reached; restored HIT same key | pass |
+| `test_integration::test_gateway_and_knowledge_revocation` (changed) | same through the service | as above | REVIEW then ACCEPT | pass |
+| `test_cavr_advisories` (2 new, 1 renamed) | 6.19.0 recordings | 18-advisory answer; historical label | REJECTED; labelled | pass |
+| `test_cavr_live.py` (rewritten, CAVR_LIVE=1 only) | live, with URL proof | real PyPI/OSV | `LiveTransport.reached`, OSV mode LIVE | not run (skipped without CAVR_LIVE) |
+
+Run before the commit: `tests/test_cavr_*.py`, `tests/test_gate_*.py`, `test_cli_gate.py`, `test_shared.py`,
+`test_modules.py`, `test_integration.py`, `test_orchestrator_config.py`, `test_api_replay.py`: 1538 passed, 11 skipped
+(live, `CAVR_LIVE` unset), 604 s. `reports/scenario-validation.json` unchanged.
+
+### Defects found and fixed
+
+- First guard run: 98 tests showed pypdf 6.19.0 VERIFIED through the shared test worlds (`World`, `Gate`,
+  `gate_support.recorded_pypi`); moved to 6.21.4.
+- `cross_module` would have ended REVIEW: pypdf UNRESOLVED `SINK_REACHABLE` through the inline reader in
+  `invoice_pdf_safe.py`; fixed in the demo data, limitation pinned by a test.
+- `test_gate_no_hardcoded_paths` allowlist matches the lab line's exact text; the moved line keeps the original
+  spelling `context.path/'fixtures/invoice.pdf'`.
+- cavr-reviewer BLOCKER: the moved lab code had lost the earlier Requires-Dist check, and nothing limited it to
+  `.py` sources, so a LOCAL wheel with unpinned dependencies would have been VERIFIED (fail-open). Fixed: the lab
+  accepts only LOCAL `.py` sources (which have no Requires-Dist); anything else is `LOCAL_ARTIFACT_NOT_SUPPORTED`.
+  Also from the review: malformed lock entries give a `LOCK_ENTRY_INVALID` row instead of an exception; the 6.19.0
+  guard compares canonical versions; six edge tests added.
+- Review: 1 pass of cavr-reviewer, verdict "fix first" (1 BLOCKER, 0 MAJOR, 7 MINOR); BLOCKER and MINORs 1–6
+  fixed; 1 MINOR open (replay baseline note, recorded under limitations).
+
+### Known limitations / deferred
+
+- Reachability proof follows only `reader = PdfReader(...)` bound to one name; `PdfReader(...).pages` inline stays
+  UNRESOLVED (escalated). Answered by the deep path (Phase 2), not by more proofs.
+- After revoking `BEH-PROCESS_EXEC` the cache is not consulted at all (the contract fails before an 8-field key
+  exists): "not served from the cache" is shown as `cache_hit False` and `lookup None`, not as a MISS.
+- A *weakened* sink rule (enabled, fewer `python_sinks`) changes `analyzer_version` (cache miss) and re-scans with
+  fewer sinks; the pipeline has no seed-coverage check like the old analyzer's. Not changed in PR 1 (gate behaviour);
+  to be decided.
+- ASENT's own `pyproject.toml` / `requirements.lock.txt` still pin `pypdf==6.19.0` for the host (the lab harness
+  imports it); packaging is outside CAVR's scope.
+- SATRA builds its project image from the demo `requirements.txt`, so its Docker image is rebuilt for 6.21.4.
+- `scenarios/replay/weak-oracle/baseline` (a SATRA replay fixture) still pins `pypdf==6.19.0` with the old artifact;
+  it is a historical replay input, not a CAVR demo pin, and its tests pass (`test_api_replay.py`). Not changed.
+- A missing lockfile is judged as in a gate run: an exact pin with no dependencies is VERIFIED.
+- `docs/cavr-demo.md` case transcripts are from 2026-10-11 (old pin) and are kept as recorded, with a dated note.
+
+### Tool disclosure (Ch 8.7)
+
+- **Generated by Claude Code:** the code, tests, recordings script (run once; not committed) and these notes.
+  **Reviewed by Maryam:** the plan and decisions D1–D5 and the additions (live proof, inline-form test, revocation
+  assertions, historical label); the diff itself not yet. **Verified by:** the test runs listed above.
+
+### Supervisor Q&A prep
+
+1. **Why is 6.19.0 no longer the VERIFIED pin?** OSV listed 18 advisories for it on 2026-11-22; CAVR rejects it,
+   as it should. 6.21.4 has a wheel, is not yanked and has 0 advisories (recorded the same day).
+2. **How do tests stay offline but honest?** The bytes and answers are real recordings, served by a fake transport;
+   nothing is hand-written, and a guard fails any test that shows 6.19.0 VERIFIED.
+3. **What still is not the pipeline?** LOCAL controlled-reproduction modules (the demo lab) until PR 12.

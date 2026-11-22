@@ -19,14 +19,31 @@ from backend.orchestrator.context_service import ContextService
 from backend.sable.fixtures.scenarios import SCENARIOS as SABLE_FIXTURES
 
 
-def test_cavr_safe_cache_and_advisory(service,scenario,tmp_path,advisory_clock):
+def test_cavr_safe_cache_and_advisory(service,scenario,tmp_path):
+    # PR 1 of docs/cavr-m2-plan.md: the demo's pypdf node is judged by verify_request, on the recorded
+    # pypdf 6.21.4 wheel, registry JSON and OSV answer (tests/conftest.py::_offline_demo_runs).
+    from test_cavr_support import PIN_SHA256
     r,c=scenario();first=cavr(c,service.store,tmp_path/'first',lambda *a:None);second=cavr(c,service.store,tmp_path/'second',lambda *a:None)
-    assert first[0]=='VERIFIED';assert first[1]['nodes'][0]['metadata']['registry_digest_verified']
-    assert second[1]['nodes'][0]['cache_hit'] and second[1]['nodes'][0]['deep_analysis_ms']==0
-    assert first[1]['nodes'][0]['osv']['response_sha256']
+    node=first[1]['nodes'][0]
+    assert first[0]=='VERIFIED' and (node['engine'],node['name'],node['version'])==('pipeline','pypdf','6.21.4')
+    assert node['sha256']==PIN_SHA256 and node['cache']['lookup']=='MISS' and node['cache']['stored']
+    (advisory,)=node['advisories'];assert advisory['rule']=='NO_KNOWN_VULNERABILITY' and advisory['response_sha256']
+    again=second[1]['nodes'][0]
+    assert again['cache_hit'] and again['cache']['lookup']=='HIT' and again['cache']['key']==node['cache']['key']
+    assert again['advisories'][0]['response_sha256']==advisory['response_sha256']  # OSV is asked on a hit too
     assert OSV(tmp_path/'empty').query('nonexistent-example','1.0')['available'] is False
-    service.change_threats(record_id='TRIG-ENV',enabled=False)
-    new=ContextService(r.candidate_workspace,r.baseline_workspace,service.threats.snapshot());assert cavr(new,service.store,tmp_path/'disabled',lambda *a:None)[0]=='UNRESOLVED'
+    # Revoking a sink rule the contract depends on: the stored VERIFIED is not reused. The contract is worked out
+    # again from the new rules first and fails, so no 8-field key exists and the cache is never consulted.
+    service.change_threats(record_id='BEH-PROCESS_EXEC',enabled=False)
+    new=ContextService(r.candidate_workspace,r.baseline_workspace,service.threats.snapshot())
+    status,details,_=cavr(new,service.store,tmp_path/'disabled',lambda *a:None);revoked=details['nodes'][0]
+    assert status=='UNRESOLVED' and (revoked['stage'],revoked['rule'])==('contract','CAPABILITY_POLICY_INVALID')
+    assert revoked['cache_hit'] is False and revoked['cache']['lookup'] is None and revoked['key_fields'] is None
+    assert 'PROCESS_EXEC' in revoked['reason']
+    service.change_threats(record_id='BEH-PROCESS_EXEC',enabled=True)
+    restored=ContextService(r.candidate_workspace,r.baseline_workspace,service.threats.snapshot())
+    status,details,_=cavr(restored,service.store,tmp_path/'restored',lambda *a:None)
+    assert status=='VERIFIED' and details['nodes'][0]['cache']['key']==node['cache']['key'] and details['nodes'][0]['cache_hit']
 
 def test_committed_advisory_evidence_is_fresh_on_the_fixed_clock_and_stale_after_max_age():
     # Guards the fixed-clock fix: the frozen clock only moves "now", the 30-day max-age rule still fails closed.

@@ -9,14 +9,20 @@ Every block marked **Recorded output** is the real output of the command above i
 access. Cases 1-6 were run through the dashboard API, which is exactly what a chip click calls.
 Lines that will differ on your run are listed under each case.
 
+> **Changed 2026-11-22 (M2 PR 1, `docs/cavr-m2-plan.md` Q2).** OSV now lists 18 advisories for pypdf 6.19.0, so
+> the VERIFIED demo pin is **pypdf 6.21.4**, and 6.19.0 is a REJECTED chip of its own. There are seven chips. The
+> table below is the current list. The case transcripts further down were recorded on 2026-10-11 with the old pin
+> and are kept as recorded; on a new run, read 6.21.4 where they say 6.19.0 for chips 1, 2, 6 and 7.
+
 | # | Chip on the page | Request | Expected |
 |---|---|---|---|
-| 1 | 1. pypdf 6.19.0 | `pip install pypdf==6.19.0` | VERIFIED, cache lookup MISS |
-| 2 | 2. pypdf 6.19.0 again | the same again | VERIFIED, `cache_hit: True` |
-| 3 | 3. pypdf 5.1.0 (OSV) | `pip install pypdf==5.1.0` | REJECTED `KNOWN_VULNERABILITY`, count and first 3 OSV ids |
-| 4 | 4. left-pad 1.0 (not allowed) | `pip install left-pad==1.0` | BLOCK `NOT_ON_ALLOWLIST`, nothing downloaded |
-| 5 | 5. Tampered wheel | `pip install pypdf==6.19.0`, one bit flipped on the way | REJECTED `HASH_MISMATCH` |
-| 6 | 6. Network unavailable | `pip install pypdf==6.19.0`, PyPI unreachable | UNRESOLVED `REGISTRY_UNAVAILABLE` |
+| 1 | 1. pypdf 6.21.4 | `pip install pypdf==6.21.4` | VERIFIED, cache lookup MISS |
+| 2 | 2. pypdf 6.21.4 again | the same again | VERIFIED, `cache_hit: True` |
+| 3 | 3. pypdf 6.19.0 (OSV) | `pip install pypdf==6.19.0` | REJECTED `KNOWN_VULNERABILITY` (18 advisories on 2026-11-22) |
+| 4 | 4. pypdf 5.1.0 (OSV) | `pip install pypdf==5.1.0` | REJECTED `KNOWN_VULNERABILITY`, count and first 3 OSV ids |
+| 5 | 5. left-pad 1.0 (not allowed) | `pip install left-pad==1.0` | BLOCK `NOT_ON_ALLOWLIST`, nothing downloaded |
+| 6 | 6. Tampered wheel | `pip install pypdf==6.21.4`, one bit flipped on the way | REJECTED `HASH_MISMATCH` |
+| 7 | 7. Network unavailable | `pip install pypdf==6.21.4`, PyPI unreachable | UNRESOLVED `REGISTRY_UNAVAILABLE` |
 
 The same requests through the pip wrapper (the C1 entry point, with exit codes) are in
 "The pip wrapper" after case 6. Read "Things to know before you present" at the end.
@@ -100,7 +106,7 @@ Leave it running. `ASENT_DATA` must be the same directory as in terminal A.
 
 ### Step 4: the chips are the backend's list
 
-Open **http://127.0.0.1:8000**, go to the CAVR module. The six chips are read from
+Open **http://127.0.0.1:8000**, go to the CAVR module. The seven chips are read from
 `GET /api/cavr/scenarios`; the page holds no package name of its own.
 
 ```bash
@@ -110,15 +116,16 @@ for s in json.load(sys.stdin):
     print(s["id"].ljust(17), "|", s["display_name"].ljust(30), "|", s["request"].ljust(27), "|", s["condition"], "|", s["expected_status"])'
 ```
 
-**Recorded output:**
+**Recorded output** (2026-11-22, the same lines printed from `api.list_scenarios()`, which this endpoint returns):
 
 ```text
-verified          | 1. pypdf 6.19.0                | pip install pypdf==6.19.0   | None | VERIFIED
-verified_again    | 2. pypdf 6.19.0 again          | pip install pypdf==6.19.0   | None | VERIFIED
-known_vulnerable  | 3. pypdf 5.1.0 (OSV)           | pip install pypdf==5.1.0    | None | REJECTED
-not_on_allowlist  | 4. left-pad 1.0 (not allowed)  | pip install left-pad==1.0   | None | BLOCK
-tampered_wheel    | 5. Tampered wheel              | pip install pypdf==6.19.0   | tampered_wheel | REJECTED
-network_off       | 6. Network unavailable         | pip install pypdf==6.19.0   | network_off | UNRESOLVED
+verified          | 1. pypdf 6.21.4                | pip install pypdf==6.21.4   | None | VERIFIED
+verified_again    | 2. pypdf 6.21.4 again          | pip install pypdf==6.21.4   | None | VERIFIED
+recent_advisories | 3. pypdf 6.19.0 (OSV)          | pip install pypdf==6.19.0   | None | REJECTED
+known_vulnerable  | 4. pypdf 5.1.0 (OSV)           | pip install pypdf==5.1.0    | None | REJECTED
+not_on_allowlist  | 5. left-pad 1.0 (not allowed)  | pip install left-pad==1.0   | None | BLOCK
+tampered_wheel    | 6. Tampered wheel              | pip install pypdf==6.21.4   | tampered_wheel | REJECTED
+network_off       | 7. Network unavailable         | pip install pypdf==6.21.4   | network_off | UNRESOLVED
 ```
 
 The last column is what the chip is meant to show. It is never used to compute a verdict

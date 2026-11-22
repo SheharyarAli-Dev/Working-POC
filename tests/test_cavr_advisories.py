@@ -1,8 +1,9 @@
 """C3 OSV check with real version ranges (plan step 7). Offline.
 
 Two kinds of advisory data are used and kept apart:
-- RECORDED: real api.osv.dev responses for pypdf 5.1.0 (97 advisories) and pypdf 6.19.0 (none),
-  recorded on 2026-10-10 in tests/test_cavr_data/. Only `retrieved_at` is set by the tests, because
+- RECORDED: real api.osv.dev responses in tests/test_cavr_data/: pypdf 5.1.0 (97 advisories, 2026-10-10),
+  pypdf 6.21.4 (none, 2026-11-22) and pypdf 6.19.0 (18, 2026-11-22). The 6.19.0 answer of 2026-10-10
+  (none) is a historical snapshot and is only checked to be labelled as one. Only `retrieved_at` is set by the tests, because
   the cache refuses data older than `max_age_days`.
 - SYNTHETIC: hand-written advisories for range shapes the recorded data does not contain
   (last_affected, several ranges, GIT-only). Their ids start with "SYNTH-".
@@ -19,7 +20,10 @@ from backend.orchestrator.hashing import digest
 
 DATA = Path(__file__).parent / "test_cavr_data"
 RECORDED_5_1_0 = json.loads((DATA / "osv-pypdf-5.1.0.json").read_text())["response"]["vulns"]
-RECORDED_6_19_0 = json.loads((DATA / "osv-pypdf-6.19.0.json").read_text())["response"]
+RECORDED_6_21_4 = json.loads((DATA / "osv-pypdf-6.21.4.json").read_text())["response"]
+RECORDED_6_19_0_NOW = json.loads((DATA / "osv-pypdf-6.19.0-2026-11-22.json").read_text())["response"]
+# Historical snapshot (2026-10-10, no advisories then): only checked to be labelled as such below.
+HISTORICAL_6_19_0 = json.loads((DATA / "osv-pypdf-6.19.0.json").read_text())
 FIXED_IN_6_19_0 = next(v for v in RECORDED_5_1_0 if v["id"] == "GHSA-php9-fj8v-98fj")  # introduced 0, fixed 6.19.0
 
 
@@ -116,12 +120,26 @@ def test_the_other_reasons_that_list_ids_are_summarised_the_same_way(tmp_path):
     assert disagreement["reason"].endswith(": SYNTH-0801, SYNTH-0802, SYNTH-0803 and 1 more")
 
 
-def test_recorded_pypdf_6_19_0_has_no_known_vulnerability(tmp_path):
-    assert RECORDED_6_19_0 == {}  # how OSV answers when it knows nothing for the version
-    result = check(tmp_path, "pypdf", "6.19.0", RECORDED_6_19_0.get("vulns", []))
+def test_recorded_pypdf_6_21_4_has_no_known_vulnerability(tmp_path):
+    assert RECORDED_6_21_4 == {}  # how OSV answers when it knows nothing for the version
+    result = check(tmp_path, "pypdf", "6.21.4", RECORDED_6_21_4.get("vulns", []))
     assert outcome(result) == ("OK", "NO_KNOWN_VULNERABILITY")
     assert result["advisory_count"] == 0 and result["affected"] == []
     assert len(result["response_sha256"]) == 64 and result["retrieved_at"]
+
+
+def test_recorded_pypdf_6_19_0_of_2026_11_22_is_rejected_by_its_ranges(tmp_path):
+    vulns = RECORDED_6_19_0_NOW["vulns"]
+    result = check(tmp_path, "pypdf", "6.19.0", vulns)
+    assert outcome(result) == ("REJECTED", "KNOWN_VULNERABILITY")
+    # Every one of the 18 advisories OSV returned is confirmed by this module's own range check.
+    assert len(vulns) == 18 and sorted(entry["id"] for entry in result["affected"]) == sorted(v["id"] for v in vulns)
+
+
+def test_historical_6_19_0_snapshot_is_labelled_and_is_not_the_current_answer():
+    assert HISTORICAL_6_19_0["historical_snapshot"] is True and "HISTORICAL SNAPSHOT" in HISTORICAL_6_19_0["note"]
+    assert HISTORICAL_6_19_0["recorded_at"] == "2026-10-10" and HISTORICAL_6_19_0["response"] == {}
+    assert RECORDED_6_19_0_NOW["vulns"]  # OSV's answer of 2026-11-22 is not empty
 
 
 def test_every_recorded_advisory_matches_5_1_0_and_most_do_not_match_6_19_0():

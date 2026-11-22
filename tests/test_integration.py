@@ -52,26 +52,30 @@ def test_cavr_repair_invalidates_satra_then_reverifies(integration_runs):
     assert current(svc,r,'CAVR')['status']=='VERIFIED'
     assert current(svc,r,'SATRA')['candidate_snapshot']==r.candidate_snapshot
 
-@pytest.mark.usefixtures('advisory_clock')  # re-analyses against the dated advisory evidence
 def test_satra_repair_differential(integration_runs):
     svc,runs=integration_runs;r=runs['satra_weak'];svc.analyze(r.run_id,auto_repair=True);fresh=svc.store.run(r.run_id)
     assert fresh.final_decision=='ACCEPT',fresh.model_dump()
     assert current(svc,fresh,'SATRA')['details']['oracle']['accepted']
 
-@pytest.mark.usefixtures('advisory_clock')  # re-analyses against the dated advisory evidence
 def test_gateway_and_knowledge_revocation(integration_runs):
     svc,runs=integration_runs;r=runs['safe']
     locked = json.loads((Path(r.candidate_workspace) / 'dependencies.lock.json').read_text())['packages']
     pypdf_version = next(item['version'] for item in locked if item['name'] == 'pypdf')
     assert svc.dependency_event(r.run_id, f'pip install pypdf=={pypdf_version}')['allowed']
     assert not svc.dependency_event(r.run_id,'npm install unknown')['allowed']
-    before=len(svc.store.evidence(r.run_id));result=svc.change_threats(record_id='TRIG-ENV',enabled=False)
-    assert result['cleared_cache_entries']>0
+    stored=next(n for n in current(svc,r,'CAVR')['details']['nodes'] if n['name']=='pypdf')
+    # Revoking a sink rule (PR 1 of docs/cavr-m2-plan.md: the fast gate reads sink rules, not trigger rules).
+    before=len(svc.store.evidence(r.run_id));svc.change_threats(record_id='BEH-PROCESS_EXEC',enabled=False)
     assert svc.current_run(r.run_id).final_decision=='REVIEW'
     svc.analyze(r.run_id);assert svc.store.run(r.run_id).final_decision=='REVIEW'
-    assert current(svc,r,'CAVR')['status']=='UNRESOLVED'
-    svc.change_threats(record_id='TRIG-ENV',enabled=True);svc.analyze(r.run_id)
+    evidence=current(svc,r,'CAVR');revoked=next(n for n in evidence['details']['nodes'] if n['name']=='pypdf')
+    assert evidence['status']=='UNRESOLVED' and (revoked['stage'],revoked['rule'])==('contract','CAPABILITY_POLICY_INVALID')
+    # Worked out again, not served from the cache: the contract fails first, so no key exists and no lookup happens.
+    assert revoked['cache_hit'] is False and revoked['cache']['lookup'] is None and stored['cache']['key']
+    svc.change_threats(record_id='BEH-PROCESS_EXEC',enabled=True);svc.analyze(r.run_id)
     assert svc.store.run(r.run_id).final_decision=='ACCEPT'
+    restored=next(n for n in current(svc,r,'CAVR')['details']['nodes'] if n['name']=='pypdf')
+    assert restored['cache']['key']==stored['cache']['key'] and restored['cache_hit']
     assert len(svc.store.evidence(r.run_id))>before
 
 @pytest.mark.parametrize('scenario,status,decision',[

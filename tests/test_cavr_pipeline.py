@@ -1,7 +1,7 @@
 """The single verify_request pipeline (plan step 11). Offline.
 
-What is real here: the pypdf 6.19.0 wheel and its recorded registry response, a historical captured
-OSV answer for pypdf 6.19.0 (fixed test input, not a current safety claim), the InvoiceHub demo
+What is real here: the pypdf 6.21.4 wheel and its recorded registry response, a historical captured
+OSV answer for pypdf 6.21.4 (fixed test input, not a current safety claim), the InvoiceHub demo
 project's source, every tmp-built
 wheel (a real zip, served with a digest computed from its bytes) and the SQLite cache file.
 What is synthetic and labelled so: advisories whose id starts with "SYNTH-".
@@ -19,7 +19,7 @@ from backend.cavr.pypi_client import TransportError, registry_url
 from backend.cavr.storage import CavrStorage
 from backend.cavr.verdict_cache import lookup
 from backend.threat_repo.repository import seeds
-from test_cavr_support import (CLEAN_DEMO, PYPDF_SHA256, PYPDF_WHEEL, RECORDED_6_19_0, UNGUARDED, USES_DEMO, World, build_wheel,
+from test_cavr_support import (CLEAN_DEMO, PIN_SHA256, PIN_WHEEL, RECORDED_6_21_4, UNGUARDED, USES_DEMO, World, build_wheel,
                                sha256_file, synthetic_advisory)
 
 @pytest.fixture
@@ -46,41 +46,41 @@ def assert_metric_fields(verdict):
 
 # --- end to end: the real pypdf wheel in the InvoiceHub project -------------------------------------------
 
-def test_pypdf_6_19_0_is_verified_with_the_guard_evidence(world):
+def test_pypdf_6_21_4_is_verified_with_the_guard_evidence(world):
     verdict = world.verify()
     assert outcome(verdict) == ("VERIFIED", "verdict", "ALL_CHECKS_PASSED"), verdict["reason"]
     assert_metric_fields(verdict)
     assert verdict["cache_hit"] is False and verdict["escalated"] is False and verdict["escalation"] is None
     assert verdict["fast_gate_ms"] > 0
     package = only(verdict)
-    assert (package["package"], package["version"], package["status"]) == ("pypdf", "6.19.0", "VERIFIED")
+    assert (package["package"], package["version"], package["status"]) == ("pypdf", "6.21.4", "VERIFIED")
     evidence = package["evidence"]
     # C1 / C2
     assert verdict["request"]["source"] == "pip_command" and verdict["gate"]["result"] == "PERMITTED"
     # C3a: the real SHA-256 of the downloaded file against the registry digest
     assert evidence["artifact"]["rule"] == "HASH_MATCH"
-    assert evidence["artifact"]["sha256"] == evidence["artifact"]["registry_sha256"] == PYPDF_SHA256
-    assert sha256_file(evidence["artifact"]["path"]) == PYPDF_SHA256
+    assert evidence["artifact"]["sha256"] == evidence["artifact"]["registry_sha256"] == PIN_SHA256
+    assert sha256_file(evidence["artifact"]["path"]) == PIN_SHA256
     # C3b: the tree and its digest
     assert evidence["tree"]["rule"] == "TREE_BUILT" and len(evidence["tree"]["subtree_digest"]) == 64
-    assert [(n["name"], n["version"], n["sha256"]) for n in evidence["tree"]["nodes"]] == [("pypdf", "6.19.0", PYPDF_SHA256)]
+    assert [(n["name"], n["version"], n["sha256"]) for n in evidence["tree"]["nodes"]] == [("pypdf", "6.21.4", PIN_SHA256)]
     # C4: the contract from the project's call sites
     assert evidence["contract"]["rule"] == "CONTRACT_INFERRED"
     assert [(c["file"], c["line"], c["symbol"]) for c in evidence["contract"]["call_sites"]] == [
         ("app/pdf_adapter.py", 7, "pypdf.apply_configuration"), ("app/pdf_adapter.py", 8, "pypdf.PdfReader")]
     # OSV
-    assert [(a["name"], a["version"], a["rule"]) for a in evidence["advisories"]] == [("pypdf", "6.19.0", "NO_KNOWN_VULNERABILITY")]
+    assert [(a["name"], a["version"], a["rule"]) for a in evidence["advisories"]] == [("pypdf", "6.21.4", "NO_KNOWN_VULNERABILITY")]
     # AST scan and the guard evidence
     assert [(s["package"], s["rule"], s["python_files"]) for s in evidence["scan"]] == [("pypdf", "SCAN_COMPLETE", 59)]
     reachability = evidence["reachability"]
     assert [(s["file"], s["line"], s["sink"], s["verdict"]) for s in reachability["sinks"]] == [
-        ("pypdf/filters.py", 774, "subprocess.run", "GUARD_DISABLED"), ("pypdf/filters.py", 804, "subprocess.run", "GUARD_DISABLED")]
+        ("pypdf/filters.py", 883, "subprocess.run", "GUARD_DISABLED"), ("pypdf/filters.py", 913, "subprocess.run", "GUARD_DISABLED")]
     proof = reachability["proofs"][0]
-    assert proof["id"] == "pypdf-jbig2dec-disabled" and proof["accepted"] is True and proof["guard_result"] == [774, 804]
+    assert proof["id"] == "pypdf-jbig2dec-disabled" and proof["accepted"] is True and proof["guard_result"] == [883, 913]
     # The verdict is now in the cache under the 8-field key.
     assert package["cache"]["lookup"] == "MISS" and package["cache"]["stored"] is True
     fields = package["key_fields"]
-    assert fields == {"ecosystem": "PyPI", "name": "pypdf", "version": "6.19.0", "artifact_sha256": PYPDF_SHA256,
+    assert fields == {"ecosystem": "PyPI", "name": "pypdf", "version": "6.21.4", "artifact_sha256": PIN_SHA256,
                       "subtree_digest": evidence["tree"]["subtree_digest"], "contract_digest": evidence["contract"]["digest"],
                       "policy_version": verdict["policy_version"], "analyzer_version": verdict["analyzer_version"]}
     assert lookup(world.store, fields)["hit"] is True
@@ -98,7 +98,7 @@ def test_the_same_project_with_a_reader_outside_the_guard_is_unresolved_and_esca
     assert package["escalation"] == ESCALATION and package["escalated"] is True
     assert [s["verdict"] for s in package["evidence"]["reachability"]["sinks"]] == ["REACHABLE", "REACHABLE"]
     assert package["evidence"]["reachability"]["proofs"][0]["accepted"] is False
-    assert "pypdf/filters.py:774" in verdict["reason"]
+    assert "pypdf/filters.py:883" in verdict["reason"]
     # UNRESOLVED is never cached.
     assert package["cache"]["stored"] is False and world.cache_rows() == []
 
@@ -121,7 +121,7 @@ def test_verified_then_guard_removed_is_not_served_from_the_cache(world):
     ("pip install pypdf", "NOT_PINNED"),
     ("pip install pypdf>=6", "NOT_PINNED"),
     ("pip install pypdf==5.1.0", "NOT_ON_ALLOWLIST"),
-    ("pip install pypdf==6.19.0 reqeusts==1.0", "DENYLIST"),
+    ("pip install pypdf==6.21.4 reqeusts==1.0", "DENYLIST"),
     ("python -m pip install demo==1.0", "NOT_IN_LOCKFILE"),
 ])
 def test_gate_block_makes_zero_downloads(world, request_text, rule):
@@ -144,10 +144,10 @@ def test_missing_or_invalid_policy_is_unresolved_with_zero_downloads(world, poli
 
 @pytest.mark.parametrize("request_value, rule", [
     (None, "REQUEST_INVALID"), (5, "REQUEST_INVALID"), ({}, "REQUEST_INVALID"), ({"requirements": "pypdf"}, "CAPTURE_INCOMPLETE"),
-    ("ls -la", "CAPTURE_INCOMPLETE"), ("pip download pypdf==6.19.0", "CAPTURE_INCOMPLETE"),
-    ("pip install https://example.invalid/pypdf-6.19.0-py3-none-any.whl", "CAPTURE_INCOMPLETE"),
-    ("pip install pypdf==6.19.0 --index-url https://example.invalid/simple", "CAPTURE_INCOMPLETE"),
-    ("pip install -r missing.txt", "CAPTURE_INCOMPLETE"), ("pip install 'pypdf==6.19.0", "CAPTURE_INCOMPLETE"),
+    ("ls -la", "CAPTURE_INCOMPLETE"), ("pip download pypdf==6.21.4", "CAPTURE_INCOMPLETE"),
+    ("pip install https://example.invalid/pypdf-6.21.4-py3-none-any.whl", "CAPTURE_INCOMPLETE"),
+    ("pip install pypdf==6.21.4 --index-url https://example.invalid/simple", "CAPTURE_INCOMPLETE"),
+    ("pip install -r missing.txt", "CAPTURE_INCOMPLETE"), ("pip install 'pypdf==6.21.4", "CAPTURE_INCOMPLETE"),
     ("pip install", "CAPTURE_INCOMPLETE"),
 ])
 def test_requests_that_cannot_be_captured_are_unresolved_with_zero_downloads(world, request_value, rule):
@@ -160,16 +160,16 @@ def test_requests_that_cannot_be_captured_are_unresolved_with_zero_downloads(wor
 # --- C3a: hash mismatch -> REJECTED --------------------------------------------------------------------------
 
 def test_one_flipped_byte_is_rejected(world):
-    response = world.index.add_pypdf()
+    response = world.index.add_pin()
     url = next(entry["url"] for entry in response["urls"] if entry["filename"].endswith(".whl"))
-    data = bytearray(PYPDF_WHEEL.read_bytes())
+    data = bytearray(PIN_WHEEL.read_bytes())
     data[len(data) // 2] ^= 0x01
     world.index.routes[url] = bytes(data)
     verdict = world.verify()
     assert outcome(verdict) == ("REJECTED", "artifact", "HASH_MISMATCH")
     assert_metric_fields(verdict)
     artifact = only(verdict)["evidence"]["artifact"]
-    assert artifact["registry_sha256"] == PYPDF_SHA256 and artifact["sha256"] != PYPDF_SHA256
+    assert artifact["registry_sha256"] == PIN_SHA256 and artifact["sha256"] != PIN_SHA256
     assert artifact["sha256"] == sha256_file(artifact["path"]) and artifact["path"].endswith(".rejected")
     # Nothing after the download ran, and nothing was cached.
     assert only(verdict)["evidence"]["scan"] == [] and world.cache_rows() == []
@@ -216,7 +216,7 @@ def test_vulnerable_dependency_rejects_the_request(world):
 # --- UNRESOLVED on network loss ----------------------------------------------------------------------------------
 
 def test_registry_unreachable_is_unresolved(world):
-    world.index.routes[registry_url("pypdf", "6.19.0")] = TransportError("ConnectError: network is unreachable")
+    world.index.routes[registry_url("pypdf", "6.21.4")] = TransportError("ConnectError: network is unreachable")
     verdict = world.verify()
     assert outcome(verdict) == ("UNRESOLVED", "artifact", "REGISTRY_UNAVAILABLE")
     assert_metric_fields(verdict)
@@ -224,7 +224,7 @@ def test_registry_unreachable_is_unresolved(world):
 
 
 def test_download_cut_off_is_unresolved(world):
-    response = world.index.add_pypdf()
+    response = world.index.add_pin()
     url = next(entry["url"] for entry in response["urls"] if entry["filename"].endswith(".whl"))
     world.index.routes[url] = TransportError("ReadTimeout: timed out")
     assert outcome(world.verify()) == ("UNRESOLVED", "artifact", "DOWNLOAD_FAILED")
@@ -273,26 +273,26 @@ def test_second_run_is_a_cache_hit_that_still_checks_osv(world, monkeypatch):
     assert (first["cache_hit"], second["cache_hit"]) == (False, True)
     assert_metric_fields(second)
     assert len(scans) == 1                                   # the AST scan ran once
-    assert osv.calls == [("pypdf", "6.19.0")] * 2            # OSV was asked both times
+    assert osv.calls == [("pypdf", "6.21.4")] * 2            # OSV was asked both times
     assert len(world.index.downloads()) == 2                 # the artifact was downloaded and hashed both times
     package = only(second)
     assert package["cache"]["lookup"] == "HIT" and package["key_fields"] == only(first)["key_fields"]
     # The cached part is marked; the fresh parts are from this run.
     assert package["evidence"]["reachability"] == only(first)["evidence"]["reachability"]
     assert package["evidence"]["analysis_from_cache"] is True and only(first)["evidence"]["analysis_from_cache"] is False
-    assert package["evidence"]["artifact"]["sha256"] == PYPDF_SHA256
+    assert package["evidence"]["artifact"]["sha256"] == PIN_SHA256
 
 
 def test_cached_verified_turns_rejected_when_the_advisory_data_changes(world):
     assert world.verify()["status"] == "VERIFIED"
-    world.advisories("pypdf", "6.19.0", [synthetic_advisory("SYNTH-0004", "pypdf", introduced="6.0", fixed="6.20.0")])
+    world.advisories("pypdf", "6.21.4", [synthetic_advisory("SYNTH-0004", "pypdf", introduced="6.0", fixed="6.22.0")])
     verdict = world.verify()
     assert outcome(verdict) == ("REJECTED", "advisories", "KNOWN_VULNERABILITY")
     assert verdict["cache_hit"] is True and "SYNTH-0004" in verdict["reason"]
     assert_metric_fields(verdict)
     # The stored analysis is untouched, so the verdict follows the advisory data back.
     assert [row["status"] for row in world.cache_rows()] == ["VERIFIED"]
-    world.advisories("pypdf", "6.19.0", RECORDED_6_19_0)
+    world.advisories("pypdf", "6.21.4", RECORDED_6_21_4)
     again = world.verify()
     assert again["status"] == "VERIFIED" and again["cache_hit"] is True
 
@@ -352,7 +352,7 @@ def test_metric_fields_are_present_on_every_status(world):
     world.add("demo", "1.0", CLEAN_DEMO)
     world.advisories("demo", "1.0", [synthetic_advisory("SYNTH-0005", "demo")])
     seen = {}
-    for request_text in ("pip install pypdf==6.19.0", "pip install reqeusts==1.0", "pip install demo==1.0", "pip install -r nowhere.txt"):
+    for request_text in ("pip install pypdf==6.21.4", "pip install reqeusts==1.0", "pip install demo==1.0", "pip install -r nowhere.txt"):
         verdict = world.verify(request_text)
         assert_metric_fields(verdict)
         assert {"fast_gate_ms", "cache_hit", "escalated", "escalation"} <= set(verdict)
@@ -409,7 +409,7 @@ def test_verdicts_are_logged_and_the_report_numbers_come_from_the_log(world):
     log = world.store.get_verdict_log()
     assert [(row["status"], row["cache_lookup"]) for row in log] == [
         ("VERIFIED", "HIT"), ("BLOCK", "NOT_REACHED"), ("VERIFIED", "HIT"), ("VERIFIED", "MISS")]  # newest first
-    assert log[0]["requested"] == "pip install pypdf==6.19.0" and log[0]["cache_hit"] == 1 and log[0]["escalated"] == 0
+    assert log[0]["requested"] == "pip install pypdf==6.21.4" and log[0]["cache_hit"] == 1 and log[0]["escalated"] == 0
 
 
 def test_blocks_do_not_move_the_latency_reported_for_verified_requests(world):
@@ -441,7 +441,7 @@ def test_which_cache_lookup_is_logged_for_each_kind_of_verdict(world):
     assert world.verify()["cache_hit"] is False and logged() == "MISS"
     assert world.verify()["cache_hit"] is True and logged() == "HIT"
     # OSV now lists the version: the stored analysis is still found (HIT), and the verdict is REJECTED.
-    world.advisories("pypdf", "6.19.0", [synthetic_advisory("SYNTH-0301", "pypdf")])
+    world.advisories("pypdf", "6.21.4", [synthetic_advisory("SYNTH-0301", "pypdf")])
     rejected = world.verify()
     assert outcome(rejected) == ("REJECTED", "advisories", "KNOWN_VULNERABILITY") and logged() == "HIT"
     report = metrics(world.store)
@@ -452,7 +452,7 @@ def test_which_cache_lookup_is_logged_for_each_kind_of_verdict(world):
 
 
 def test_a_rejection_by_osv_before_any_stored_analysis_is_logged_as_a_miss(world):
-    world.advisories("pypdf", "6.19.0", [synthetic_advisory("SYNTH-0302", "pypdf")])
+    world.advisories("pypdf", "6.21.4", [synthetic_advisory("SYNTH-0302", "pypdf")])
     assert world.verify()["status"] == "REJECTED"
     assert world.store.get_verdict_log()[0]["cache_lookup"] == "MISS"       # the key was looked up; nothing was stored for it
 
@@ -572,7 +572,7 @@ def test_artifact_changed_between_hashing_and_scanning_is_unresolved(world, monk
 
     def build_then_swap(*args, **kwargs):
         tree = real_build(*args, **kwargs)
-        wheel = build_wheel(world.tmp_path / "swap", "pypdf", "6.19.0", files={"pypdf/__init__.py": "x = 1\n"})
+        wheel = build_wheel(world.tmp_path / "swap", "pypdf", "6.21.4", files={"pypdf/__init__.py": "x = 1\n"})
         shutil.copy(wheel, tree["nodes"][0]["path"])
         return tree
 
@@ -588,9 +588,9 @@ def test_project_that_cannot_be_read_is_unresolved(world):
 
 
 def test_local_version_is_unresolved_before_any_download(world):
-    """The gate permits `6.19.0+local` under `pypdf==6.19.0` (PEP 440) when there is no lockfile; PyPI has no such file."""
+    """The gate permits `6.21.4+local` under `pypdf==6.21.4` (PEP 440) when there is no lockfile; PyPI has no such file."""
     (world.project / "dependencies.lock.json").unlink()
-    verdict = world.verify("pip install pypdf==6.19.0+local")
+    verdict = world.verify("pip install pypdf==6.21.4+local")
     assert outcome(verdict) == ("UNRESOLVED", "tree", "INVALID_REQUEST") and world.index.calls == []
     assert_metric_fields(verdict)
 
@@ -608,7 +608,7 @@ def test_a_fault_inside_a_stage_is_unresolved_not_an_exception(world, monkeypatc
 
 @pytest.mark.parametrize("project_dir", [None, 5])
 def test_project_directory_that_is_not_a_path_is_unresolved(world, project_dir):
-    verdict = verify_request("pip install pypdf==6.19.0", project_dir, world.policy, world.store, transport=world.index)
+    verdict = verify_request("pip install pypdf==6.21.4", project_dir, world.policy, world.store, transport=world.index)
     assert outcome(verdict) == ("UNRESOLVED", "capture", "REQUEST_INVALID") and world.index.calls == []
     assert_metric_fields(verdict)
 
@@ -618,20 +618,20 @@ def test_project_directory_that_is_not_a_path_is_unresolved(world, project_dir):
 def test_several_requirements_the_worst_one_decides(world):
     world.add("demo", "1.0", CLEAN_DEMO)
     world.write("app/uses_demo.py", USES_DEMO)
-    both = world.verify("pip install pypdf==6.19.0 demo==1.0")
+    both = world.verify("pip install pypdf==6.21.4 demo==1.0")
     assert outcome(both) == ("VERIFIED", "verdict", "ALL_CHECKS_PASSED"), both["reason"]
     assert [(p["package"], p["status"]) for p in both["packages"]] == [("pypdf", "VERIFIED"), ("demo", "VERIFIED")]
     world.advisories("demo", "1.0", [synthetic_advisory("SYNTH-0006", "demo")])
-    mixed = world.verify("pip install pypdf==6.19.0 demo==1.0")
+    mixed = world.verify("pip install pypdf==6.21.4 demo==1.0")
     assert outcome(mixed) == ("REJECTED", "advisories", "KNOWN_VULNERABILITY")
     assert [(p["package"], p["status"], p["cache_hit"]) for p in mixed["packages"]] == [("pypdf", "VERIFIED", True), ("demo", "REJECTED", True)]
     assert mixed["cache_hit"] is True and "demo" in mixed["reason"]
 
 
 def test_requirements_file_with_the_right_hash_and_with_a_wrong_one(world):
-    world.write("reqs.txt", f"pypdf==6.19.0 --hash=sha256:{PYPDF_SHA256}\n")
+    world.write("reqs.txt", f"pypdf==6.21.4 --hash=sha256:{PIN_SHA256}\n")
     assert world.verify("pip install -r reqs.txt")["status"] == "VERIFIED"
-    world.write("reqs.txt", f"pypdf==6.19.0 --hash=sha256:{'0' * 64}\n")
+    world.write("reqs.txt", f"pypdf==6.21.4 --hash=sha256:{'0' * 64}\n")
     verdict = world.verify("pip install -r reqs.txt")
     assert outcome(verdict) == ("UNRESOLVED", "artifact", "REQUEST_HASH_MISMATCH")
 
@@ -640,7 +640,7 @@ def test_requirements_edit_is_verified_through_the_same_path(world):
     path = world.project / "requirements.txt"
     path.write_text("")
     before = snapshot_requirements(path)
-    path.write_text("pypdf==6.19.0\n")
+    path.write_text("pypdf==6.21.4\n")
     verdict = world.verify({"requirements_edit": {"before": before, "after": snapshot_requirements(path)}})
     assert outcome(verdict) == ("VERIFIED", "verdict", "ALL_CHECKS_PASSED"), verdict["reason"]
     assert verdict["request"]["source"] == "requirements_edit" and only(verdict)["package"] == "pypdf"
@@ -666,7 +666,7 @@ def test_bad_requirements_snapshots_are_unresolved_not_an_exception(world, edit)
 
 def test_a_captured_record_can_be_passed_in(world):
     from backend.cavr.capture import parse_pip_command
-    record = parse_pip_command("pip install pypdf==6.19.0", cwd=world.project)
+    record = parse_pip_command("pip install pypdf==6.21.4", cwd=world.project)
     assert world.verify(record)["status"] == "VERIFIED"
     # The record is input: one that claims to be complete but lists an unsupported entry is not trusted.
     record["unsupported"].append({"raw": "-e .", "reason": "editable", "origin": "command"})
@@ -692,15 +692,15 @@ def test_verifying_does_not_install_or_run_the_package(world):
 # --- step 12: items deferred from the batch 9-11 review ------------------------------------------------------------------
 
 def test_the_same_line_twice_is_verified_once(world):
-    verdict = world.verify("pip install pypdf==6.19.0 pypdf==6.19.0")
+    verdict = world.verify("pip install pypdf==6.21.4 pypdf==6.21.4")
     assert outcome(verdict) == ("VERIFIED", "verdict", "ALL_CHECKS_PASSED"), verdict["reason"]
     assert only(verdict)["package"] == "pypdf" and len(world.index.downloads()) == 1
 
 
 @pytest.mark.parametrize("lines", [
-    f"pypdf==6.19.0 --hash=sha256:{PYPDF_SHA256}\npypdf==6.19.0 --hash=sha256:{'0' * 64}\n",   # the second hash is wrong
-    f"pypdf==6.19.0\npypdf==6.19.0 --hash=sha256:{'0' * 64}\n",
-    "pypdf==6.19.0\npypdf[crypto]==6.19.0\n",                                                 # the second line adds an extra
+    f"pypdf==6.21.4 --hash=sha256:{PIN_SHA256}\npypdf==6.21.4 --hash=sha256:{'0' * 64}\n",   # the second hash is wrong
+    f"pypdf==6.21.4\npypdf==6.21.4 --hash=sha256:{'0' * 64}\n",
+    "pypdf==6.21.4\npypdf[crypto]==6.21.4\n",                                                 # the second line adds an extra
 ])
 def test_one_release_asked_for_twice_in_different_ways_is_unresolved(world, lines):
     """Before step 12 the second line was skipped, so its hash and its extra were never checked."""
@@ -715,8 +715,8 @@ def test_one_release_asked_for_twice_in_different_ways_is_unresolved(world, line
 
 def test_a_caller_made_record_with_an_odd_command_is_still_logged(world):
     from backend.cavr.capture import parse_pip_command
-    for command in (5, None, "pip install pypdf==6.19.0", {"a": 1}):
-        record = parse_pip_command("pip install pypdf==6.19.0", cwd=world.project)
+    for command in (5, None, "pip install pypdf==6.21.4", {"a": 1}):
+        record = parse_pip_command("pip install pypdf==6.21.4", cwd=world.project)
         record["command"] = command
         verdict = world.verify(record)
         assert verdict["status"] == "VERIFIED" and verdict["logged"] is True
@@ -725,10 +725,10 @@ def test_a_caller_made_record_with_an_odd_command_is_still_logged(world):
 
 def test_url_passwords_do_not_reach_the_verdict_log(world):
     from backend.cavr.capture import parse_pip_command
-    captured = world.verify("pip install pypdf==6.19.0 --index-url https://alice:hunter2@example.invalid/simple")
+    captured = world.verify("pip install pypdf==6.21.4 --index-url https://alice:hunter2@example.invalid/simple")
     assert captured["status"] == "UNRESOLVED" and "hunter2" not in json.dumps(captured)
-    record = parse_pip_command("pip install pypdf==6.19.0", cwd=world.project)
-    record["command"] = ["pip", "install", "pypdf==6.19.0", "--proxy", "http://bob:hunter2@proxy.invalid:8080"] + ["x" * 600]
+    record = parse_pip_command("pip install pypdf==6.21.4", cwd=world.project)
+    record["command"] = ["pip", "install", "pypdf==6.21.4", "--proxy", "http://bob:hunter2@proxy.invalid:8080"] + ["x" * 600]
     assert world.verify(record)["logged"] is True
     log = world.store.get_verdict_log()
     assert "hunter2" not in json.dumps(log) and "***@proxy.invalid" in log[0]["requested"]

@@ -1,14 +1,15 @@
 {
- "advisory_count": 0,
- "note": "Real OSV response, recorded once and stored unchanged: an empty object, which is how OSV answers when it knows no advisory for the version.",
- "query": {
-  "package": {
-   "ecosystem": "PyPI",
-   "name": "pypdf"
+  "historical_snapshot": true,
+  "note": "Real OSV response, recorded once and stored unchanged: an empty object, which is how OSV answers when it knows no advisory for the version. HISTORICAL SNAPSHOT of 2026-10-10: OSV no longer answers this way (18 advisories on 2026-11-22, see osv-pypdf-6.19.0-2026-11-22.json). Kept only for tests of the advisory logic itself; no test may use it to show pypdf 6.19.0 VERIFIED (tests/conftest.py enforces this).",
+  "advisory_count": 0,
+  "query": {
+    "package": {
+      "ecosystem": "PyPI",
+      "name": "pypdf"
+    },
+    "version": "6.19.0"
   },
-  "version": "6.19.0"
- },
- "recorded_at": "2026-10-10",
- "response": {},
- "source": "https://api.osv.dev/v1/query"
+  "recorded_at": "2026-10-10",
+  "response": {},
+  "source": "https://api.osv.dev/v1/query"
 }

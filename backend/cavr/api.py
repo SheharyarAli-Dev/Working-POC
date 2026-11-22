@@ -86,23 +86,26 @@ HASH_MATCHES = {"HASH_MATCH": True, "HASH_MISMATCH": False}
 # the page reads this list and sends the chosen id to POST /api/cavr/run. `expected_status` and
 # `description` say what the chip is meant to show and are never used to compute anything.
 SCENARIOS = [
-    {"id": "verified", "display_name": "1. pypdf 6.19.0", "package": "pypdf", "version": "6.19.0", "condition": None,
+    {"id": "verified", "display_name": "1. pypdf 6.21.4", "package": "pypdf", "version": "6.21.4", "condition": None,
      "expected_status": "VERIFIED",
      "description": "The real wheel from PyPI: hash, dependency tree, OSV, contract and sink reachability all pass."},
-    {"id": "verified_again", "display_name": "2. pypdf 6.19.0 again", "package": "pypdf", "version": "6.19.0",
+    {"id": "verified_again", "display_name": "2. pypdf 6.21.4 again", "package": "pypdf", "version": "6.21.4",
      "condition": None, "expected_status": "VERIFIED",
      "description": "The same request a second time. A cache hit when chip 1 has run before for the same file, tree, "
                     "contract, policy and analyzer; the wheel is still downloaded and hashed, and OSV is still asked."},
-    {"id": "known_vulnerable", "display_name": "3. pypdf 5.1.0 (OSV)", "package": "pypdf", "version": "5.1.0", "condition": None,
+    {"id": "recent_advisories", "display_name": "3. pypdf 6.19.0 (OSV)", "package": "pypdf", "version": "6.19.0",
+     "condition": None, "expected_status": "REJECTED",
+     "description": "The earlier demo pin. Permitted by the policy, but OSV now lists advisories that affect this version."},
+    {"id": "known_vulnerable", "display_name": "4. pypdf 5.1.0 (OSV)", "package": "pypdf", "version": "5.1.0", "condition": None,
      "expected_status": "REJECTED",
      "description": "Permitted by the policy, but OSV lists advisories that affect this version."},
-    {"id": "not_on_allowlist", "display_name": "4. left-pad 1.0 (not allowed)", "package": "left-pad", "version": "1.0",
+    {"id": "not_on_allowlist", "display_name": "5. left-pad 1.0 (not allowed)", "package": "left-pad", "version": "1.0",
      "condition": None, "expected_status": "BLOCK",
      "description": "Not on the project allowlist: blocked by the requirement gate before anything is downloaded."},
-    {"id": "tampered_wheel", "display_name": "5. Tampered wheel", "package": "pypdf", "version": "6.19.0",
+    {"id": "tampered_wheel", "display_name": "6. Tampered wheel", "package": "pypdf", "version": "6.21.4",
      "condition": "tampered_wheel", "expected_status": "REJECTED",
      "description": "One bit of the downloaded wheel is flipped on the way: its SHA-256 no longer matches the registry."},
-    {"id": "network_off", "display_name": "6. Network unavailable", "package": "pypdf", "version": "6.19.0",
+    {"id": "network_off", "display_name": "7. Network unavailable", "package": "pypdf", "version": "6.21.4",
      "condition": "network_off", "expected_status": "UNRESOLVED",
      "description": "PyPI cannot be reached: nothing can be established, so nothing is verified."},
 ]
