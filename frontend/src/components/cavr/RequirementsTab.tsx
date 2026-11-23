@@ -9,7 +9,7 @@ interface RequirementsTabProps {
 // The last column is what the backend returned for the stage that would prove the requirement,
 // or a dash when that stage did not run. The page gives no PASS or FAIL of its own.
 export const RequirementsTab: React.FC<RequirementsTabProps> = ({ state }) => {
-  const { gateResult, actionData, counterfactualResults, causalGraph, repair, reverification, reconstruction, certificate } = state;
+  const { gateResult, actionData, counterfactualResults, causalGraph, repair, reconstruction, certificate } = state;
   const v = state.proofData?.cavr_verdict;
   const captureSource = v?.request?.source;
 
@@ -65,18 +65,18 @@ export const RequirementsTab: React.FC<RequirementsTabProps> = ({ state }) => {
     {
       id: "FR-7",
       name: "Minimal Safe Repair",
-      desc: "Search candidates across 4 repair levels minimizing disruption objective w1*deps + w2*dist + w3*calls + w4*risk. Deep analysis (M2).",
-      module: "repair_engine.py",
-      event: "P10 MinimalRepair",
-      returned: repair?.chosen_candidate?.name
+      desc: "For a REJECTED package: the smallest newer release of the same package that is not yanked, has a wheel and is not OSV-affected (at most 5 candidates), or a removal when the project never imports it. A proposal for a person to approve; never applied.",
+      module: "repair_proposal.py",
+      event: "Verdict (repair)",
+      returned: repair ? `${repair.result}${repair.pin ? `: ${repair.pin.requirement}` : ''}` : null
     },
     {
       id: "FR-8",
       name: "Re-Verification Suite",
-      desc: "Re-execute sample project tests and security obligations for chosen repair candidate inside fresh container. Deep analysis (M2).",
-      module: "reverifier.py",
-      event: "P11 Reverification",
-      returned: reverification ? `all_passed: ${reverification.all_passed}` : null
+      desc: "Each repair candidate goes through the pipeline again on a copy of the project, under the patched requirements, lockfile and policy. Sandbox and project tests: not run (M2).",
+      module: "repair_proposal.py",
+      event: "Verdict (repair re-check)",
+      returned: repair?.pin?.recheck ? `${repair.pin.recheck.status} (${repair.pin.recheck.rule})` : null
     },
     {
       id: "FR-9",

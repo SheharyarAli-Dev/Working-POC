@@ -24,12 +24,17 @@ both agree the version is affected -> REJECTED. When they do not agree, or the r
 evaluated here, nothing is concluded -> UNRESOLVED. Withdrawn advisories are listed, not counted.
 
 This check is never cached with the verdict: advisories change while the artifact does not.
+
+`package_advisories(name, cache_dir)` is the package-wide answer (every advisory, no version) that the
+repair search uses to leave affected releases out before re-checking any. It is stale after 24 hours.
+It talks to OSV itself, because the adapter in `backend/integrations/` only asks per version.
 """
 from __future__ import annotations
 import json
 from datetime import datetime, timezone
 from pathlib import Path
 
+import httpx
 from packaging.utils import canonicalize_name
 
 from backend.cavr.pypi_client import request_problem
@@ -140,6 +145,130 @@ def match_advisory(name: str, version: str, vuln: dict) -> dict:
         answers = [_entry_affects(version, entry) for entry in entries]
         match["status"] = "AFFECTED" if True in answers else "UNKNOWN" if None in answers else "NOT_AFFECTED"
     return match
+
+
+# --- the package-wide answer: every advisory of a package, for the repair search ------------------------------------
+
+PACKAGE_MAX_AGE_HOURS = 24
+OSV_QUERY_URL = "https://api.osv.dev/v1/query"
+MAX_OSV_PAGES = 20
+MAX_OSV_PAGE_BYTES = 20 * 1024 * 1024
+
+
+def package_query(name: str) -> dict:
+    """The OSV query for every advisory of `name` (no version)."""
+    return {"package": {"name": canonicalize_name(name), "ecosystem": "PyPI"}}
+
+
+def package_cache_path(cache_dir, name: str) -> Path:
+    return Path(cache_dir) / ("package-" + digest(package_query(name)) + ".json")
+
+
+def package_advisories(name, cache_dir, live: bool = False, osv=None, max_age_hours: float = PACKAGE_MAX_AGE_HOURS,
+                       now=None) -> dict:
+    """Every OSV advisory of `name`, whatever the version. Used by the repair search to leave affected releases out.
+
+    OK `PACKAGE_ADVISORIES_READ` with `vulnerabilities`; otherwise UNRESOLVED: INVALID_REQUEST,
+    ADVISORIES_UNAVAILABLE (no answer), ADVISORIES_STALE (older than `max_age_hours`, 24 by default, or dated in
+    the future) or ADVISORIES_INVALID. The answer comes from `osv.query_package(name, live=live)` when `osv` is
+    given (an `osv` without that method has no answer: a test stub never reaches the network), else from OSV
+    itself (`live`) with the dated, digest-checked cache in `cache_dir` as the fallback, in the adapter's format.
+    `now` replaces the clock (a function that returns an aware datetime).
+    """
+    fields = {"name": name if isinstance(name, str) else None, "mode": "UNAVAILABLE", "retrieved_at": None,
+              "age_hours": None, "response_sha256": None, "advisory_count": None, "vulnerabilities": None,
+              "live_error": None}
+
+    def result(outcome, rule, reason):
+        return {"result": outcome, "rule": rule, "reason": reason, "ecosystem": "PyPI", **fields}
+
+    problem = request_problem(name, "0")
+    if problem:
+        return result("UNRESOLVED", "INVALID_REQUEST", problem)
+    name = fields["name"] = canonicalize_name(name)
+    try:
+        if osv is not None:
+            query = getattr(osv, "query_package", None)
+            if query is None:
+                return result("UNRESOLVED", "ADVISORIES_UNAVAILABLE", "the OSV client given cannot answer a package-wide query")
+            answer = query(name, live=live)
+        else:
+            answer = _package_answer(name, cache_dir, live)
+    except Exception as exc:  # any failure means no answer
+        return result("UNRESOLVED", "ADVISORIES_UNAVAILABLE", f"package-wide advisory lookup failed: {type(exc).__name__}: {exc}")
+    if not isinstance(answer, dict) or answer.get("available") is not True:
+        error = answer.get("error") if isinstance(answer, dict) else None
+        return result("UNRESOLVED", "ADVISORIES_UNAVAILABLE", f"no package-wide OSV answer for {name}: {error or 'no answer'}")
+    fields.update(mode=answer.get("mode"), retrieved_at=answer.get("retrieved_at"),
+                  response_sha256=answer.get("response_sha256"), live_error=answer.get("live_error"))
+    try:
+        moment = datetime.fromisoformat(answer["retrieved_at"])
+        if moment.tzinfo is None:
+            moment = moment.replace(tzinfo=timezone.utc)
+        age = ((now() if now else datetime.now(timezone.utc)) - moment).total_seconds() / 3600
+    except (KeyError, TypeError, ValueError):
+        age = None
+    fields["age_hours"] = None if age is None else round(age, 2)
+    if age is None or age > max_age_hours or age < -FUTURE_TOLERANCE_DAYS * 24:
+        return result("UNRESOLVED", "ADVISORIES_STALE",
+                      f"the package-wide OSV answer is dated {answer.get('retrieved_at')!r}; it must be at most "
+                      f"{max_age_hours} hours old")
+    vulns = answer.get("vulnerabilities")
+    if not isinstance(vulns, list) or not all(isinstance(v, dict) and isinstance(v.get("id"), str) and v["id"] for v in vulns):
+        return result("UNRESOLVED", "ADVISORIES_INVALID", "the package-wide OSV answer is not a list of advisories with ids")
+    fields.update(vulnerabilities=vulns, advisory_count=len(vulns))
+    return result("OK", "PACKAGE_ADVISORIES_READ", f"OSV lists {len(vulns)} advisories for {name} (all versions)")
+
+
+def _post_capped(client, request) -> dict:
+    """One OSV page, read in chunks; more than MAX_OSV_PAGE_BYTES is an error, not a partial answer."""
+    with client.stream("POST", OSV_QUERY_URL, json=request) as response:
+        response.raise_for_status()
+        body = bytearray()
+        for chunk in response.iter_bytes():
+            body.extend(chunk)
+            if len(body) > MAX_OSV_PAGE_BYTES:
+                raise ValueError(f"OSV answer is larger than {MAX_OSV_PAGE_BYTES} bytes")
+    page = json.loads(bytes(body).decode("utf-8"))
+    if not isinstance(page, dict):
+        raise ValueError("OSV answer is not a JSON object")
+    return page
+
+
+def _package_answer(name: str, cache_dir, live: bool) -> dict:
+    """OSV's package-wide answer: live (stored in the cache) or from the cache. The age is judged by the caller."""
+    query = package_query(name)
+    path = package_cache_path(cache_dir, name)
+    error = None
+    if live:
+        try:
+            vulns, pages, request = [], [], query
+            with httpx.Client(timeout=8) as client:
+                for _ in range(MAX_OSV_PAGES):
+                    page = _post_capped(client, request)
+                    pages.append(page)
+                    vulns.extend(page.get("vulns", []))
+                    if not page.get("next_page_token"):
+                        break
+                    request = {**query, "page_token": page["next_page_token"]}
+                else:
+                    raise ValueError("OSV pagination budget exceeded; incomplete evidence")
+            body = {"vulns": vulns, "pages": pages}
+            value = {"query": query, "retrieved_at": datetime.now(timezone.utc).isoformat(), "source": OSV_QUERY_URL,
+                     "response": body, "response_sha256": digest(body)}
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(value, indent=2), encoding="utf-8")
+            return {**value, "available": True, "mode": "LIVE", "vulnerabilities": vulns}
+        except Exception as exc:  # fall back to the cache
+            error = f"{type(exc).__name__}: {exc}"
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {"available": False, "error": error or "no cached package-wide answer"}
+    if not isinstance(value, dict) or value.get("query") != query or value.get("response_sha256") != digest(value.get("response")):
+        return {"available": False, "error": "the cached package-wide answer is damaged (query or digest differs)"}
+    return {**value, "available": True, "mode": "DATED CACHE", "live_error": error,
+            "vulnerabilities": (value.get("response") or {}).get("vulns")}
 
 
 # --- internals ---------------------------------------------------------------

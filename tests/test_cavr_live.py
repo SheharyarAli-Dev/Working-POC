@@ -212,3 +212,34 @@ def test_live_dashboard_scenarios_are_real_requests(tmp_path, monkeypatch, live)
     assert sorted(path.name for path in (tmp_path / "quarantine").iterdir()) == [
         "pypdf-5.1.0-py3-none-any.whl", "pypdf-6.19.0-py3-none-any.whl", f"pypdf-{PIN_VERSION}-py3-none-any.whl"]
     assert outcome["network_off"] == ("UNRESOLVED", "REGISTRY_UNAVAILABLE")
+
+
+def test_live_repair_for_pypdf_6_19_0(tmp_path, live):
+    """Repair against the real registry and OSV: a REJECTED pypdf 6.19.0 gets a newer pin that passed a live re-check.
+    The version is not asserted (OSV may list 6.21.4 one day); its digest, its re-check and the untouched project are."""
+    from packaging.version import Version
+    from backend.cavr.repair_proposal import propose_repair
+    project = tmp_path / "project"
+    shutil.copytree(REPO / "demo_project" / "InvoiceHub" / "app", project / "app")
+    (project / "requirements.txt").write_text("pypdf==6.19.0\n")
+    lock = {"lock_version": 1, "edges": [],
+            "packages": [{"name": "pypdf", "version": "6.19.0", "ecosystem": "PyPI", "sha256": PYPDF_SHA256}]}
+    (project / "dependencies.lock.json").write_text(json.dumps(lock))
+    policy = {**json.loads((REPO / "demo_project" / "InvoiceHub" / ".asent" / "cavr" / "policy.json").read_text())}
+    policy["approved_requirements"] = ["pypdf==6.19.0"]
+    args = {"transport": live, "advisory_cache_dir": tmp_path / "osv", "live_advisories": True}
+    verdict = verify_request("pip install -r requirements.txt", project, policy, None,
+                             quarantine_dir=tmp_path / "quarantine", **args)
+    package = verdict["packages"][0]
+    assert (package["status"], package["stage"]) == ("REJECTED", "advisories"), verdict["reason"]
+    before = {path: path.read_bytes() for path in project.rglob("*") if path.is_file()}
+    block = propose_repair(verdict, package, project_dir=project, policy=policy, requirements_file="requirements.txt",
+                           work_dir=tmp_path / "work", **args)
+    assert block["advisory_screen"]["mode"] == "LIVE" and block["registry"]["rule"] == "RELEASES_READ"
+    assert block["result"] == "PROPOSED" and block["pin"], block["reason"]
+    pin = block["pin"]
+    assert Version(pin["version"]) > Version("6.19.0") and pin["recheck"]["status"] == "VERIFIED"
+    assert pin["recheck"]["package"]["sha256"] == pin["recheck"]["package"]["registry_sha256"]
+    assert pin["lockfile_entry"]["after"]["sha256"] == pin["recheck"]["package"]["sha256"]
+    assert live.reached("pypdf", pin["version"])
+    assert {path: path.read_bytes() for path in project.rglob("*") if path.is_file()} == before

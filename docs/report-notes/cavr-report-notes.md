@@ -3854,3 +3854,450 @@ without Docker.
    (`test_an_unpinned_source_is_still_refused_without_docker`).
 3. **How do you know the new file is still inert?** Same imports and calls, 0 sinks in the CAVR scan, and an
    the same audit-event types and counts as the approved file on the same host fallback.
+
+## Step M2-3 — Repair proposal from real releases, re-verified with `verify_request` (2026-11-23)
+
+PR 15 and the fast-gate part of PR 16 of `docs/cavr-m2-plan.md` (fast-first item 2). Decisions Q9, Q10, Q12 applied;
+no sandbox. Owner additions of 2026-11-23: symlinks in the copy, lockfile dependents, the major-version limitation,
+the 24-hour limit on the package-wide OSV answer.
+
+### Ch 6 Implementation
+
+- New `backend/cavr/repair_proposal.py`. `propose_repair(verdict, package, project_dir=, policy=, requirements_file=,
+  …)` returns one block (`schema: cavr.repair.v1`): `result` PROPOSED / NO_REPAIR_FOUND / NOT_ATTEMPTED, `pin`,
+  `removal`, `removal_reason`, `candidates_tried`, `excluded`, `not_tried`, `budget`, `registry`, `advisory_screen`,
+  `project_copy`, `limitations`, and always `applied: false`, `gate_decision_changed: false`. Any exception gives
+  NO_REPAIR_FOUND / `INTERNAL_ERROR`. `copy_project` copies without following links; `_ProjectFiles` makes the
+  requirements / lockfile patches in the copy and restores them after each re-check; `_policy_for_pin` makes the
+  patched policy.
+- `backend/cavr/pypi_client.py`: `project_url`, `fetch_releases` (every release from `pypi.org/pypi/<name>/json`:
+  yanked, has a wheel; SHA-256 of the bytes received) and `release_wheel` (the wheel `fetch_artifact` would take and
+  its registry SHA-256, without downloading). Both reuse `_read_capped`, `_parse_release`, `select_wheel`.
+- `backend/cavr/advisories.py`: `package_query`, `package_cache_path`, `package_advisories` (OSV's package-wide
+  answer, dated and digest-checked cache in the adapter's format, stale after 24 hours, `now` injectable).
+- `backend/cavr/gate_adapter.py`: every package row has `repair` (None unless REJECTED); `SETTINGS["repair"]`
+  (default True); `_repair` wraps the call once more, so a failure is NO_REPAIR_FOUND. Status, reasons and events
+  are computed as before. The block reaches `asent-report.json` through the CAVR evidence.
+
+Key algorithm: REJECTED by an advisory or `HASH_MISMATCH` -> copy the project (links not followed; the copy must
+read like the project: same result, rule and sources digest) -> releases newer than the rejected one, minus
+pre-releases, yanked and wheel-less -> minus releases affected by any advisory of the package-wide OSV answer ->
+same major first, smallest upgrade first -> for at most 5 candidates within 60 s: patch requirements line, lockfile
+entry (registry SHA-256) and `approved_requirements` in the copy, `verify_request` with the patched policy, a fresh
+quarantine and no store -> the first VERIFIED, not escalated re-check whose wheel has the registry digest is the
+pin. Removal separately: only when the project never imports it and nothing depends on it.
+
+### Design decisions
+
+- **Package-wide OSV screen before the budget** (alternative: only the rejected version's advisories, or one OSV
+  query per release). 5.1.0's own 97 advisories leave 6.19.0–6.21.3 looking clean, which uses up 5 candidates and
+  gives no repair; one query per release is ~60 queries. The screen only filters; each candidate's own
+  `verify_request` is the judgement. It is implemented in CAVR because `backend/integrations/osv_adapter.py` only
+  asks per version (not edited).
+- **Re-check through `verify_request` on a copy** (alternative: re-run selected checks): the proposed policy and
+  lockfile go through the requirement gate like any request, and the re-check is the same code as a real verdict.
+  The request is the requirements edit (original file -> patched file), so the patch text itself is checked.
+- **`store=None` for re-checks**: they are not in the verdict log (metrics stay about real requests) and cannot
+  read or write the verdict cache.
+- **Copy must read like the project** (owner: skip links that point outside). Skipping an outside `.py` link would
+  make the copy read better than the project (`context_extractor` reports such a link as not read), so the
+  re-check would be about another project: `COPY_DIFFERS`, no repair. Links inside the project are recreated as
+  relative links, never followed.
+- **Policy patch is minimal**: no change when an entry already approves the candidate (e.g. `pypdf>=5,<7`);
+  otherwise the exact `name==old` pin is replaced by `name==new`, or `name==new` is added.
+- **Removal needs proof of no dependents** (owner): another package of the verdict with it in its tree, or a
+  lockfile edge pointing to it, blocks removal; a lockfile that locks other packages but has no `edges`, or no
+  lockfile, cannot rule a dependent out, so no removal. Never for a hash mismatch (import names untrusted).
+- **Upgrades only** (alternative: also downgrades): an older release is a step back in fixes; listed as a limitation.
+- **Budget between candidates**: a running `verify_request` is not interrupted (its downloads have their own
+  deadlines); stated in every block.
+
+### Requirements covered
+
+| ID | Acceptance check |
+|---|---|
+| FR-7 | Nearest safe release proposed from real data: `test_6_19_0_proposes_6_21_4`, `test_5_1_0_proposes_6_21_4_with_the_major_version_limitation` |
+| FR-8 (fast part) | Each candidate re-verified by `verify_request` under the proposed policy: `recheck` VERIFIED, `test_tampered_candidate_is_skipped`, `test_candidate_without_an_osv_answer_is_skipped`, `test_escalated_candidate_is_skipped` |
+| FR-6 | Fail closed: `test_exception_inside_repair_gives_no_repair_found`, `test_exception_in_the_gate_wiring_keeps_the_verdict`, `test_copy_that_reads_differently_from_the_project_gives_no_repair_found`, `test_package_wide_osv_answer_is_stale_after_24_hours` |
+| Q9 | Proposal only: `test_repair_never_writes_the_project`, `test_gate_decision_is_unchanged_with_or_without_a_proposal` |
+
+### Ch 7 Test cases
+
+`tests/test_cavr_repair.py` (recorded pypdf data of 2026-11-23 for the real cases; synthetic `demo` wheels and
+SYNTH- advisories otherwise).
+
+| Test ID | Purpose | Input | Expected | Result |
+|---|---|---|---|---|
+| `test_6_19_0_proposes_6_21_4` | real case | pypdf 6.19.0, recorded releases + OSV | pin 6.21.4, re-check VERIFIED, 6.20.0–6.21.3 excluded, 7.x not tried | pass |
+| `test_5_1_0_proposes_6_21_4_with_the_major_version_limitation` | real case, major change | pypdf 5.1.0 (real wheel) | pin 6.21.4, policy pin moved, limitation "major version change (5 -> 6)…" | pass |
+| `test_tampered_candidate_is_skipped` | tampered | demo 1.1 bytes flipped | 1.1 SKIPPED `HASH_MISMATCH`, 1.2 proposed | pass |
+| `test_yanked_version_is_skipped` | yanked | demo 1.1 yanked | excluded `YANKED`, 1.2 proposed | pass |
+| `test_release_without_a_wheel_is_excluded` | sdist only | demo 1.1 sdist | excluded `NO_WHEEL` | pass |
+| `test_candidate_without_an_osv_answer_is_skipped` | no OSV | no answer for 1.1 | 1.1 SKIPPED `ADVISORIES_UNAVAILABLE` | pass |
+| `test_escalated_candidate_is_skipped` | escalated | 1.1 re-check escalated | 1.1 SKIPPED, 1.2 proposed | pass |
+| `test_no_safe_version_gives_no_repair_found` | none safe | advisory without fix | NO_REPAIR_FOUND `NO_SAFE_CANDIDATE`, package still REJECTED | pass |
+| `test_unused_package_gets_a_removal` | removal | project never imports demo | removal diff, lockfile entry removed, re-check `NOTHING_TO_VERIFY` | pass |
+| `test_used_package_never_gets_a_removal` | no removal | demo imported | removal None, reason names `app/uses_demo.py` | pass |
+| `test_removal_is_not_proposed_when_a_locked_package_depends_on_it` | owner addition | edge other-tool -> Demo | removal None | pass |
+| `test_removal_is_not_proposed_when_the_lockfile_records_no_dependencies` | cannot tell | lockfile without edges | removal None | pass |
+| `test_hash_mismatch_is_repaired_but_never_removed` | hash case | demo 1.0 tampered | attempted, removal None | pass |
+| `test_repair_never_writes_the_project` | Q9 | every file, link and mtime | unchanged; policy and verdict unchanged | pass |
+| `test_recheck_is_neither_logged_nor_cached` | isolation | verdict log, cache rows | unchanged | pass |
+| `test_exception_inside_repair_gives_no_repair_found` | fail closed | `fetch_releases` raises | NO_REPAIR_FOUND `INTERNAL_ERROR` | pass |
+| `test_budget_limits_the_number_of_candidates` | budget | 7 candidates, all UNRESOLVED | 5 tried, `stopped_by: candidates` | pass |
+| `test_budget_limits_the_time` | budget | fake clock +40 s per read, 60 s | `stopped_by: time`, < 3 tried | pass |
+| `test_package_wide_osv_answer_is_stale_after_24_hours` | owner addition | fake clock +25 h / +23 h | `ADVISORIES_STALE` / PROPOSED | pass |
+| `test_policy_range_that_already_covers_the_candidate_needs_no_policy_change` | policy | `demo>=1,<3` | `changed: false` | pass |
+| `test_package_that_is_not_rejected_is_not_repaired` | eligibility | VERIFIED pypdf 6.21.4 | NOT_ATTEMPTED, registry not asked | pass |
+| `test_symlink_to_a_file_outside_the_project_is_not_copied` | owner addition | `notes.txt` -> outside file; in-project link | outside link skipped, inside kept, outside file and project unchanged | pass |
+| `test_copy_that_reads_differently_from_the_project_gives_no_repair_found` | fail closed | `.py` link out of the project | NO_REPAIR_FOUND `COPY_DIFFERS` | pass |
+| `test_gate_decision_is_unchanged_with_or_without_a_proposal` | gate | REJECTED 6.19.0, repair on / off | same status, reasons, row status, events; proposal 6.21.4 only when on | pass |
+| `test_gate_row_of_a_verified_package_has_no_repair` | gate | VERIFIED | `repair: null` | pass |
+| `test_exception_in_the_gate_wiring_keeps_the_verdict` | gate fail closed | `propose_repair` raises | REJECTED, NO_REPAIR_FOUND | pass |
+| `test_cavr_live.py::test_live_repair_for_pypdf_6_19_0` | live (`CAVR_LIVE=1`) | real PyPI + OSV | newer pin, re-check VERIFIED, digest = registry, project unchanged | pass (10 s) |
+
+`tests/test_cavr_repair.py`: 26 passed. Before the commit (CAVR, orchestrator, integration, `test_modules.py`; no
+pytest-xdist, run serially): 1483 passed, 11 skipped (live). Baseline of the same set before the step: 1457 passed,
+10 skipped; no earlier result changed.
+
+### Defects found and fixed
+
+- First run of the new tests: 1 failure, the removal reason said "(imports)"; reworded to "imported at file:line".
+- While writing the symlink test: a directory link inside the project makes `context_extractor` report the
+  project as not fully read, so the in-project link in the test is a non-`.py` file link.
+- Review: the one cavr-reviewer pass runs after step M2-5 (owner's order); its outcome is recorded there.
+
+### Known limitations / deferred
+
+- Project tests are not run on the proposal (Q10, waiting for Sheharyar / SATRA's image builder API): in every block.
+- No sandbox or deep analysis on the re-check: an escalated candidate is skipped (Phase 2).
+- No resolver: a candidate whose new dependencies are not in the lockfile is UNRESOLVED and skipped.
+- No downgrades, no pre-releases, no replacement package (level 4 is future work, Q3); no transitive (level 2) repair.
+- `_repair` (orchestrator) and `repair.rank_repairs` stay until PR 12 (owner decision 2026-11-23): the
+  `cross_module` LOCAL-lab demo still uses them.
+
+### Tool disclosure (Ch 8.7)
+
+- **Generated by Claude Code:** `repair_proposal.py`, the `pypi_client` / `advisories` additions, the gate wiring,
+  the tests, the recorded data (fetched from pypi.org and api.osv.dev on 2026-11-23, stored unchanged) and these
+  notes. **Reviewed by Maryam:** the plan, the test list and the four additions; the diff not yet. **Verified by:**
+  the runs above and the live test.
+
+### Supervisor Q&A prep
+
+1. **Can repair turn a REJECTED into a pass?** No. The block is extra data on the row; status, reasons and the gate
+   decision are computed before and without it (`test_gate_decision_is_unchanged_with_or_without_a_proposal`).
+2. **Why trust the proposed version?** It went through the same `verify_request` as any request, under the proposed
+   policy and lockfile: real wheel hashed against the registry, tree, OSV for that version, contract, AST scan.
+3. **Why is 7.x not proposed for 6.19.0?** Same major first: 6.21.4 is a smaller change; 7.x is listed under `not_tried`.
+
+## Step M2-4 — The repair proposal in the report, the dashboard and the VS Code panel (2026-11-23)
+
+Display of the step M2-3 block. Shared files (Q4, `[owner review: …]`): `backend/commands/report.py`,
+`frontend/src/components/CavrModule.tsx`, `vscode-asent/src/report.ts` and its unit test.
+
+### Ch 6 Implementation
+
+- `asent-report.json`: no change needed; the `repair` block is in the CAVR evidence rows since step M2-3
+  (`assurance.evidence[].details.pipeline[].packages[].repair`).
+- `backend/commands/report.py`: `cavr_repairs(report)` and `_patch_lines` add a section "CAVR repair proposals (not
+  applied; for a person to approve)" after the module rows: per REJECTED package its result, the pin with its
+  re-check and digests, the requirements +/- lines (or the pip command), the lockfile entry, the policy change, the
+  removal or why not, skipped candidates, limitations. Read from the evidence record the CAVR module row names.
+- `backend/cavr/api.py`: `dashboard_repair(verdict, condition)` runs after the verdict in the worker thread for a
+  REJECTED first package (no requirements file on this path: the pin is a `pip install` command), under the same
+  demo condition (`_conditions`). The block goes to the verdict event's `repair` and to the proof's `repair`; the
+  pipeline verdict object is not changed.
+- `frontend/src/components/cavr/RepairTab.tsx`: rewritten to print the block (result, pin / removal card with the
+  re-check, digests, diff, lockfile and policy lines, skipped and excluded candidates, limitations). The approve /
+  reject buttons stay and only record the decision (`/api/cavr/approve-alternative`, writes nothing to the project).
+  `types.ts`: `RepairBlock`, `RepairPart`, `RepairCandidate`. `CavrModule.tsx`: the recorded alternative is the
+  pin requirement (or "remove <name>"). `RequirementsTab.tsx`: FR-7 / FR-8 rows name `repair_proposal.py` and
+  print the block's result and re-check.
+- `vscode-asent/src/report.ts`: `repairLine` adds one key-evidence line after each package with a block, e.g.
+  `repair: proposes pin pypdf==6.21.4 (re-check VERIFIED); not applied`.
+- `tests/test_cavr_data/render_cavr.mjs`: a `repair` view.
+
+### Design decisions
+
+- **Read from the evidence, not a new report field**: `asent-report.json` keeps schema `asent.gate.v1`; every
+  surface reads the same block, so they cannot disagree.
+- **Dashboard repair outside `verify_dashboard_request`**: the proof's `cavr_verdict` stays exactly the pipeline's
+  answer (an existing test checks equality); the block sits next to it.
+- **Same demo condition for candidates**: a demo condition only makes things worse, also for repair.
+- **Buttons kept, relabelled "Record approval / rejection"**: Q9 — a person approves; the dashboard only records it.
+
+### Requirements covered
+
+| ID | Acceptance check |
+|---|---|
+| FR-7 / FR-10 | The proposal and its evidence are in the report and text output: `test_asent_gate_report_carries_the_repair_block_and_the_same_decision`, `test_asent_report_text_lists_the_proposal` |
+| Q9 | Same exit code (1), decision and reasons with and without repair; tab says "Applied: false" |
+| FR-7 (dashboard) | `test_dashboard_rejected_run_has_the_proposal_and_keeps_its_verdict`, `test_the_repair_tab_prints_the_proposal_of_the_run` |
+
+### Ch 7 Test cases
+
+`tests/test_cavr_repair_surfaces.py` (recorded data as in step M2-3) and `vscode-asent/test/unit/report.test.ts`.
+
+| Test ID | Purpose | Input | Expected | Result |
+|---|---|---|---|---|
+| `test_asent_gate_report_carries_the_repair_block_and_the_same_decision` | report JSON | `asent gate`, head pins pypdf 6.19.0, repair on / off | exit 1 BLOCK both; same reasons and CAVR result; block PROPOSED pypdf==6.21.4 only when on | pass |
+| `test_asent_report_text_lists_the_proposal` | text output | that report | section, pin line with digests, -/+ lines, lockfile, policy, removal reason, limitation; before "Reasons:" | pass |
+| `test_asent_report_text_without_a_block_has_no_repair_section` | text output | repair off; empty report | no section | pass |
+| `test_dashboard_rejected_run_has_the_proposal_and_keeps_its_verdict` | dashboard | chip known_vulnerable | verdict BLOCK/REJECTED; repair pin via pip command; proof `cavr_verdict` unchanged | pass |
+| `test_dashboard_verified_run_has_no_repair` | dashboard | chip verified | repair None | pass |
+| `test_dashboard_network_off_is_unresolved_and_gets_no_repair` | dashboard | network_off | UNRESOLVED, repair None | pass |
+| `test_dashboard_tampered_wheel_run_gets_no_proposal` | dashboard | tampered (pypdf 6.21.4) | 7.x candidates SKIPPED `RELEASE_NOT_FOUND`, NO_REPAIR_FOUND | pass |
+| `test_the_repair_tab_prints_the_proposal_of_the_run` | page render | known_vulnerable run | pin, re-check, digests, command, "Applied: false" | pass |
+| `test_the_repair_tab_without_a_block` | page render | verified run | "Not run: …" | pass |
+| `test_no_old_repair_fixture_field_is_left_in_the_page` | source | page and parts | no `chosen_candidate`, `ranked_candidates`, `cost_breakdown`, `dependency_diff`, `repair_engine.py`, `reverifier.py` | pass |
+| VS Code: 3 tests in "CAVR repair proposal … in the key evidence" | panel | derived block on the ACCEPT fixture | pin line after its package; removal; no repair found; none without a block | pass |
+
+`tests/test_cavr_repair_surfaces.py`: 10 passed. Before the commit (same set as step M2-3): 1493 passed, 11 skipped;
+no earlier result changed. Also run because `backend/commands/report.py` changed: `test_cli_report.py`,
+`test_gate_cli.py`, `test_vscode_make_fixtures.py`: 55 passed. `npx tsc --noEmit` (frontend): no errors.
+`npm test` (vscode-asent): 93 passing, 5 pending.
+
+### Defects found and fixed
+
+- First version of the tampered-wheel dashboard test assumed tampered candidates; the chip is pypdf 6.21.4, whose
+  upgrades (7.x) are not served offline, so they are `RELEASE_NOT_FOUND`. Test corrected to what happens.
+- `RequirementsTab.tsx` read `repair.chosen_candidate`, which no longer type-checks; its FR-7 / FR-8 rows changed in
+  this step instead of step M2-5.
+- Review: recorded after step M2-5.
+
+### Known limitations / deferred
+
+- `asent-summary.md` (`backend/gate/summary.py`) does not list the proposal (not asked; the JSON and `asent report` do).
+- The VS Code panel shows one line per block, not the diff; the diff is in `asent report`.
+- The dashboard's sample project has no lockfile and the request is a pip command, so its proposal has no diff and
+  no lockfile entry, and removal is never proposed there.
+
+### Tool disclosure (Ch 8.7)
+
+- **Generated by Claude Code:** the code and tests listed above and these notes. **Reviewed by Maryam:** the plan
+  (which surfaces); the diff not yet. **Verified by:** the runs above, `npx tsc --noEmit` (frontend), `npm test`
+  (VS Code).
+
+### Supervisor Q&A prep
+
+1. **Could the dashboard show a proposal for a package that passed?** No: `dashboard_repair` returns None unless the
+   first package is REJECTED (`test_dashboard_verified_run_has_no_repair`).
+2. **Does the "Record approval" button install anything?** No. It writes an audit row through the existing endpoint;
+   the proposal is applied by a person in a pull request.
+
+## Step M2-5 — Delete `repair_engine.py` and `reverifier.py` (Q12) (2026-11-23)
+
+### Ch 6 Implementation
+
+- Deleted `backend/cavr/repair_engine.py` (210 lines: `calculate_repair_candidates`, per-name hard-coded candidates)
+  and `backend/cavr/reverifier.py` (58 lines: `reverify_candidate`, five constant `passed: True` obligations, a
+  fixture-faked stub). Nothing imported either: checked with a repository-wide search over `.py`, `.ts`, `.tsx`,
+  `.mjs`, `.json`, shell and packaging files before deleting; neither had tests of its own.
+- Kept: the two "must not be loaded" lists in `tests/test_cavr_api.py` still name both modules (they now guard
+  against the modules coming back). `docs/cavr-m1-plan.md` and earlier report notes mention them as history.
+- `docs/cavr-m2-plan.md`: checklist rows 20 and 21 and the Phase 4 progress (PR 15 done; PR 16 fast-gate part done).
+
+### Design decisions
+
+- **Delete now (Q12)**: their replacement (`repair_proposal.py`, steps M2-3 / M2-4) has landed and is tested, and
+  the last reader (`RequirementsTab.tsx` FR-7 / FR-8 labels) changed in step M2-4.
+- **Not deleted (owner decision 2026-11-23)**: `backend/cavr/repair.py::rank_repairs` and the orchestrator
+  `Service._repair`. The `cross_module` LOCAL-lab demo still uses them (`tests/conftest.py::integration_runs`
+  with `auto_repair=True`, `test_integration.py::test_cavr_repair_invalidates_satra_then_reverifies`, `main.py` /
+  `cli.py --repair`; tests `test_modules.py::test_repair_constraints`,
+  `test_cavr_targeted.py::test_repair_rank_ignores_caller_security_functionality_booleans`). That demo swaps a LOCAL
+  adapter that is not on PyPI, which the new repair cannot do. They go with the LOCAL lab path in PR 12. The SATRA
+  half of `_repair` belongs to SATRA.
+
+### Requirements covered
+
+| ID | Acceptance check |
+|---|---|
+| Q12 / "no fixture-faked results" | The constant-pass re-verification stub is gone; `test_api_imports_none_of_the_fixture_or_simulation_modules` and `test_the_running_app_loads_none_of_the_fixture_or_simulation_modules` still pass |
+
+### Ch 7 Test cases
+
+| Test ID | Purpose | Input | Expected | Result |
+|---|---|---|---|---|
+| `test_cavr_api.py::test_api_imports_none_of_the_fixture_or_simulation_modules` | guard | `api.py` imports | neither module imported | pass |
+| `test_cavr_api.py::test_the_running_app_loads_none_of_the_fixture_or_simulation_modules` | guard | `import backend.main` in a subprocess | neither module loaded | pass |
+| `test_cavr_repair_surfaces.py::test_no_old_repair_fixture_field_is_left_in_the_page` | page | page sources | no `repair_engine.py` / `reverifier.py` label | pass |
+
+Before the commit (same set as step M2-3): 1493 passed, 11 skipped; no earlier result changed.
+
+### Defects found and fixed
+
+- None in this step. Review: recorded under "Review of steps M2-3 to M2-5" below.
+
+### Known limitations / deferred
+
+- `repair.rank_repairs` and `Service._repair` remain until PR 12 (above).
+
+### Tool disclosure (Ch 8.7)
+
+- **Generated by Claude Code:** the deletion, the plan update and these notes. **Reviewed by Maryam:** the deletion
+  list and the decision to keep `_repair` / `rank_repairs` (2026-11-23). **Verified by:** the search and the runs above.
+
+### Supervisor Q&A prep
+
+1. **Why keep `rank_repairs` if repair was replaced?** Q12: a module is deleted only when nothing uses it; the
+   `cross_module` demo still does, until PR 12 removes the LOCAL lab path.
+
+## Review of steps M2-3 to M2-5 — fixes (2026-11-23)
+
+Review: 1 pass of cavr-reviewer over 3d241ed..5773e09, verdict "Fix first" (1 BLOCKER, 12 MINOR of which 3 marked
+major); BLOCKER and 9 MINOR fixed in this commit, 3 MINOR open (below).
+
+### Ch 6 Implementation
+
+- `repair_proposal._copy_problem` also compares the bytes (`_file_digest`) of the lockfile and of the requirements
+  file in the project and in the copy; a link out of the project is not copied, so the difference is
+  `COPY_DIFFERS` (BLOCKER). `copy_project` skips the directories `context_extractor` does not read (dot-directories,
+  virtual environments, `__pycache__`, `node_modules`); a copy failure is `COPY_FAILED`.
+- Removal: another package of the verdict without a complete tree blocks removal; `REMOVAL_LIMITATION` (Python
+  imports only) is added to a block with a removal; the lockfile patch also drops the removed package's edges.
+- Patches: requirements and lockfile read and written as bytes (a CRLF file keeps CRLF); an approved exact pin is
+  matched by version (`_is_exact_pin`: `demo==1` matches 1.0, a wildcard is not a pin).
+- The budget clock starts before the release list is read. A `--hash` line limitation is stated.
+- `advisories._post_capped`: the live package-wide OSV page is read in chunks, at most 20 MB.
+
+### Design decisions
+
+- **Bytes of the two files, not only the link list**: whatever the cause (a link, an unreadable file), a re-check
+  with other inputs than the project's is not evidence about the project.
+- **Explicit `edges: []` is trusted** as the lockfile's own statement (review MINOR 4, second half: not changed);
+  a missing `edges` key with other packages locked is still "cannot rule out".
+
+### Ch 7 Test cases
+
+`tests/test_cavr_repair_edges.py` (new) and changes in `tests/test_cavr_repair.py`.
+
+| Test ID | Purpose | Input | Expected | Result |
+|---|---|---|---|---|
+| `test_lockfile_that_links_out_of_the_project_gives_no_repair_found` | BLOCKER | lockfile is a link out | `COPY_DIFFERS` | pass |
+| `test_requirements_file_that_links_out_of_the_project_gives_no_repair_found` | same, requirements | link made after judging | `COPY_DIFFERS` | pass |
+| `test_virtualenv_dot_directories_and_node_modules_are_not_copied` | copy | `.venv`, `env/pyvenv.cfg`, `.secrets/.env`, `node_modules` | skipped, proposal made, project unchanged | pass |
+| `test_project_over_the_copy_budget_gives_no_repair_found` | copy budget | `MAX_COPY_FILES = 1` | `COPY_FAILED` | pass |
+| `test_fetch_releases_reads_yanked_and_wheel_flags` | reader | yanked, sdist-only, no files, bad version | flags per release; bad version last | pass |
+| `test_fetch_releases_failures_are_unresolved` (6) | reader | 404, transport error, bad JSON, other package, bad shapes | `PROJECT_NOT_FOUND` / `REGISTRY_UNAVAILABLE` / `REGISTRY_INVALID` | pass |
+| `test_fetch_releases_over_the_size_cap_is_unresolved` | reader | cap 10 bytes; bad name | `REGISTRY_INVALID`; `INVALID_REQUEST` | pass |
+| `test_release_wheel_names_the_wheel_and_its_registry_digest_without_downloading` | reader | one wheel | digest, no download | pass |
+| `test_release_wheel_failures_are_unresolved` (5) | reader | yanked release / file, no digest, no wheel, other version | `YANKED`, `REGISTRY_DIGEST_MISSING`, `NO_WHEEL`, `REGISTRY_INVALID`; 404 `RELEASE_NOT_FOUND` | pass |
+| `test_package_advisories_reads_a_fresh_cache` | OSV | fresh cache | OK, DATED CACHE | pass |
+| `test_package_advisories_without_a_cache_or_with_a_damaged_one_is_unavailable` | OSV | none; digest broken | `ADVISORIES_UNAVAILABLE` | pass |
+| `test_package_advisories_invalid_list_future_date_and_bad_name` | OSV | bad list, +2 h, unparsable date, bad name | `ADVISORIES_INVALID`, `ADVISORIES_STALE`, `INVALID_REQUEST` | pass |
+| `test_package_advisories_stub_without_a_package_query_never_reaches_the_network` | OSV | per-version stub, live | unavailable, nothing cached | pass |
+| `test_pin_rewrites_a_continued_line_with_extras_marker_and_hash_and_keeps_crlf` | rewrite | CRLF, `\` continuation, extras, marker, `--hash` | one line, new hash, CRLF kept | pass |
+| `test_remove_deletes_every_physical_line_of_the_requirement` | rewrite | continued line | both lines gone | pass |
+| `test_requirement_line_must_be_exactly_one_line` | rewrite | two marker lines; other version | None | pass |
+| `test_lockfile_patches` | lockfile | pin, removal, edges, bad edges, no lockfile | entry replaced; edges of removed package dropped; reasons | pass |
+| `test_policy_exact_pin_is_matched_by_version_not_by_text` | policy | `demo==1`, `demo==1.*` | `demo==1` replaced; wildcard kept | pass |
+| `test_pre_release_is_excluded` | rule | 1.1rc1 | `PRE_RELEASE`, 1.2 proposed | pass |
+| `test_advisory_range_that_cannot_be_evaluated_excludes_the_release` | rule | GIT range advisory | `ADVISORY_RANGE_UNKNOWN`, no repair | pass |
+| `test_requirement_from_an_included_file_gives_no_pin` | rule | `-r base.txt` | `REQUIREMENT_LINE_NOT_FOUND`, nothing tried | pass |
+| `test_recheck_wheel_that_differs_from_the_registry_listing_is_skipped` | rule | listing digest replaced | `RECHECK_DIGEST_DIFFERS` | pass |
+| `test_removal_is_not_proposed_when_another_package_of_the_request_depends_on_it` | removal | top requires demo | reason names top==1.0 | pass |
+| `test_removal_is_not_proposed_when_another_package_has_no_complete_tree` | removal | top unreadable | "not complete" | pass |
+| `test_hash_mismatch_is_repaired_but_never_removed` (tightened) | — | demo 1.0 tampered, used | pin 1.1, no removal | pass |
+| `test_budget_limits_the_time` (tightened) | — | fake clock | exactly 1.1 tried, `not_tried` [1.2, 1.3], `BUDGET_EXHAUSTED` | pass |
+
+`tests/test_cavr_repair_edges.py`: 33 passed. Before the commit (same set as step M2-3): 1526 passed, 11 skipped;
+no earlier result changed.
+
+### Defects found and fixed
+
+- BLOCKER (reviewer): a lockfile linked out of the project was dropped from the copy and the re-check ran without
+  it while the copy check passed. Fixed as above; two tests.
+- Found by the new tests: a CRLF requirements file lost its CRs in the patch (`read_text` / `write_text` translate
+  newlines). Fixed by reading and writing bytes. The test helper `project_response` failed on an unparsable
+  version (test fix).
+- Reviewer's platform-wheel point (MINOR 5, first half) does not apply: `dep_tree` and `release_wheel` both use the
+  host's default tags. The `--hash` half is now a stated limitation.
+
+### Known limitations / deferred (review MINORs left open)
+
+- No overall repair cap per gate run: each REJECTED package gets its own 60 s budget (MINOR 8). The dashboard
+  publishes the verdict events after the repair has run (same MINOR).
+- A rewritten requirements line drops an inline comment; a pinned lockfile entry keeps only name, version,
+  ecosystem, sha256 (MINOR 6).
+- Commit `cabee91`'s `[owner review: …]` tag does not name `vscode-asent/test/unit/report.test.ts` (MINOR 11); history
+  is not rewritten, recorded here. `docs/cavr-m2-plan.md` is CAVR's own plan (the plan's rule allows it).
+
+### Tool disclosure (Ch 8.7)
+
+- **Generated by Claude Code:** the fixes, the tests and these notes; review by the cavr-reviewer agent.
+  **Reviewed by Maryam:** not yet. **Verified by:** the runs above.
+
+### Supervisor Q&A prep
+
+1. **If the lockfile is a link out of the project, what did the re-check check?** Nothing is proposed: the copy has
+   no lockfile, its bytes differ from the project's, so the result is `COPY_DIFFERS`.
+2. **What does a removal's `NOTHING_TO_VERIFY` prove?** Only that the patched requirements file asks for nothing new.
+   The evidence for the removal is the import scan and the dependents check; the block states that only Python
+   imports are seen.
+
+## Step M2-6 — Repair budget per gate run (2026-11-23)
+
+Owner request after the review (open MINOR 8: no overall repair cap per gate run).
+
+### Ch 6 Implementation
+
+- `backend/cavr/gate_adapter.py`: `REPAIR_RUN_SECONDS = 120.0`, `RUN_BUDGET_USED_UP`, `CLOCK` (`time.monotonic`).
+  `analyze_pipeline` keeps `repair_spent`, the seconds spent inside repair in this run; `_repair` measures each call
+  with `CLOCK` and adds it. Before a REJECTED package: nothing left -> NOT_ATTEMPTED / `RUN_BUDGET_USED_UP`,
+  "repair budget for this run used up", and the registry is not asked; otherwise `propose_repair` gets
+  `budget_seconds = min(60, what is left of the run)` and the same clock.
+- `backend/cavr/repair_proposal.py`: `not_attempted(name, version, package, rule, reason)`, a NOT_ATTEMPTED block
+  with every key.
+
+### Design decisions
+
+- **Only repair time counts** (alternative: wall time since the start of the run): the verdicts themselves must not
+  use up the repair budget; `test_run_budget_counts_repair_time_only`.
+- **Per-package budget cut to what is left**: the run total then also holds between the candidates of the last
+  package, not only between packages.
+- **Checked before a package starts**, like the per-package budget: a repair already running is not stopped, so a
+  run can go past 120 s by at most one candidate check.
+
+### Requirements covered
+
+| ID | Acceptance check |
+|---|---|
+| FR-7 / NFR (bounded cost) | Repair time of one gate run is bounded: `test_run_budget_is_shared_by_all_rejected_packages` |
+| Q9 | Verdicts unchanged when repair is cut: all three packages stay REJECTED, module REJECTED |
+
+### Ch 7 Test cases
+
+`tests/test_cavr_repair.py` (fake clock `gate_adapter.CLOCK`; three REJECTED packages: the real pypdf 6.19.0 with
+its recorded advisories, synthetic `demo` and `top` with SYNTH- advisories).
+
+| Test ID | Purpose | Input | Expected | Result |
+|---|---|---|---|---|
+| `test_run_budget_is_shared_by_all_rejected_packages` | run budget | each repair takes 70 s | budgets passed 60 s, 50 s; 3rd NOT_ATTEMPTED `RUN_BUDGET_USED_UP`; all REJECTED | pass |
+| `test_run_budget_counts_repair_time_only` | only repair time | pipeline takes 500 s per file | all three repaired (fake), none NOT_ATTEMPTED | pass |
+| `test_run_budget_used_up_never_asks_the_registry` | nothing left | `REPAIR_RUN_SECONDS = 0` | all NOT_ATTEMPTED, no release list fetched | pass |
+
+Run before the commit, as asked (repair and gate tests only: `tests/test_cavr_repair*.py`,
+`tests/test_cavr_gate_adapter.py`, `tests/test_gate_*.py`): 166 passed, 1 skipped (live).
+
+### Defects found and fixed
+
+- First version started the run clock before the pipeline ran, so verification time counted against the repair
+  budget; changed to summing the time spent in repair (test above).
+- Review: no cavr-reviewer pass for this commit (owner asked for the tests above only).
+
+### Known limitations / deferred
+
+- The dashboard still publishes the verdict after the repair (rest of review MINOR 8). The dashboard path repairs
+  one package per run, so the per-package 60 s bounds it.
+
+### Tool disclosure (Ch 8.7)
+
+- **Generated by Claude Code:** the change, the tests and these notes. **Reviewed by Maryam:** the requirement
+  (120 s, NOT_ATTEMPTED wording, fake clock with 3 packages). **Verified by:** the run above.
+
+### Supervisor Q&A prep
+
+1. **Can a gate run with many vulnerable packages take forever in repair?** No: at most 120 s of repair per run
+   (plus one candidate check in progress); later packages say NOT_ATTEMPTED with the reason.

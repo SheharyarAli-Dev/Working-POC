@@ -24,7 +24,7 @@ export interface CavrRunState {
   counterfactualResults: any | null;
   causalGraph: any | null;
   violatingPaths: any[] | null;
-  repair: any | null;
+  repair: RepairBlock | null;
   reverification: any | null;
   certificate: any | null;
   reconstruction: any | null;
@@ -65,4 +65,52 @@ export interface Scenario {
   version: string;
   condition: string | null;
   expected_status: string;
+}
+
+// The repair block of backend/cavr/repair_proposal.py (schema cavr.repair.v1). A proposal for a person to
+// approve; `applied` and `gate_decision_changed` are always false.
+export interface RepairRecheck {
+  request?: string | null;
+  status?: string | null;
+  rule?: string | null;
+  reason?: string | null;
+  package?: { sha256?: string | null; registry_sha256?: string | null } | null;
+}
+
+export interface RepairPart {
+  requirement?: string;
+  name?: string;
+  version?: string;
+  requirements_file?: string | null;
+  requirements_diff?: string | null;
+  pip_command?: string | null;
+  lockfile_entry?: { file: string; before: any; after: { name: string; version: string; sha256: string } | null } | null;
+  policy?: { changed?: boolean; added?: string[]; removed?: string[] };
+  recheck?: RepairRecheck;
+}
+
+export interface RepairCandidate {
+  version: string;
+  outcome: string;
+  status?: string | null;
+  rule?: string | null;
+  reason?: string | null;
+}
+
+export interface RepairBlock {
+  result: 'PROPOSED' | 'NO_REPAIR_FOUND' | 'NOT_ATTEMPTED';
+  rule: string;
+  reason: string;
+  package: string | null;
+  version: string | null;
+  rejected?: { status?: string | null; stage?: string | null; rule?: string | null };
+  applied: boolean;
+  gate_decision_changed: boolean;
+  pin: RepairPart | null;
+  removal: RepairPart | null;
+  removal_reason?: string | null;
+  candidates_tried?: RepairCandidate[];
+  excluded?: { version: string; rule: string; reason: string }[];
+  budget?: { max_candidates?: number | null; seconds?: number | null; tried?: number; stopped_by?: string | null };
+  limitations?: string[];
 }

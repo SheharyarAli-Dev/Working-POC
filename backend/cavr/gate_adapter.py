@@ -23,7 +23,7 @@ else VERIFIED. A dependency manifest the pipeline cannot read (pyproject depende
 Pipenv, setup.py, npm) is UNRESOLVED: those dependencies would otherwise pass unseen.
 
 `SETTINGS` replaces the outside world in tests (PyPI transport, OSV); None means the pipeline's
-own default (live PyPI, live OSV). `deep` is the deep analyzer for escalated packages (PR 2 of
+own default (live PyPI, live OSV). `repair` (default True) turns the repair proposal on or off. `deep` is the deep analyzer for escalated packages (PR 2 of
 docs/cavr-m2-plan.md); None, the default until the sandbox exists, means no deep stage.
 A `settings` argument is used instead of `SETTINGS` when given.
 
@@ -33,22 +33,39 @@ contract with `required` (the allowed
 capabilities the project's call sites need), `denied`, `confidence` (the contract's rule, e.g.
 CONTRACT_INFERRED; demo-lab rows keep the older 'rule-grounded' / 'insufficient') and `authority`. The verdict cache, quarantine and advisory cache live in the
 run store's data directory, so a gate run never touches the dashboard's database.
+
+Every row also has `repair`: None unless the package is REJECTED, else the block of
+`repair_proposal.propose_repair` (a proposed pin and / or removal for a person to approve, or
+"no repair found"). It is extra information: the row's status, the module status, the reasons and
+the events are computed exactly as without it, and a failure inside repair is NO_REPAIR_FOUND.
+
+Repair budget per gate run: `REPAIR_RUN_SECONDS` (120 s) of time spent in repair, summed over all REJECTED
+packages of the run (verification time does not count), on top of each package's own budget
+(`repair_proposal.BUDGET_SECONDS`, 60 s), which is cut to what is left of the run.
+Once the run's budget is used up, every further REJECTED package gets NOT_ATTEMPTED / RUN_BUDGET_USED_UP.
+Like the package budget it is checked before a package starts; a repair already running is not stopped.
+`CLOCK` is the run's clock (seconds), replaced in tests.
 """
 from __future__ import annotations
 
+import time
 import tomllib
 from pathlib import Path
 
 from backend.cavr.manifest_parser import snapshot_requirements
 from backend.cavr.pipeline import verify_request
+from backend.cavr.repair_proposal import BUDGET_SECONDS, no_repair, not_attempted, propose_repair
 from backend.cavr.storage import CavrStorage
 from backend.cavr.verdict_cache import KEY_FIELDS
 
-SETTINGS = {"transport": None, "osv": None, "advisory_cache_dir": None, "live_advisories": True, "deep": None}
+SETTINGS = {"transport": None, "osv": None, "advisory_cache_dir": None, "live_advisories": True, "deep": None, "repair": True}
 STATUS_MAP = {"VERIFIED": "VERIFIED", "REJECTED": "REJECTED", "BLOCK": "REJECTED"}
 UNSUPPORTED_MANIFESTS = ("poetry.lock", "uv.lock", "Pipfile", "Pipfile.lock", "setup.py", "setup.cfg", "package.json",
                          "package-lock.json", "yarn.lock", "pnpm-lock.yaml")
 ADVISORY_FIELDS = ("name", "version", "result", "rule", "mode", "advisory_count", "response_sha256", "retrieved_at")
+REPAIR_RUN_SECONDS = 120.0
+RUN_BUDGET_USED_UP = "repair budget for this run used up"
+CLOCK = time.monotonic
 BOUNDED = "M1 fast gate: artifact hash, dependency tree, advisories, capability contract and AST sink scan; no deep runtime analysis (M2)"
 
 
@@ -87,6 +104,30 @@ def _row_contract(contract: dict) -> dict:
     return {**contract, "required": required, "confidence": contract.get("rule")}
 
 
+def _repair(verdict, package, project, policy, requirements_file, data_root, context, settings, spent):
+    """The repair block of one REJECTED package; never raises and never changes the verdict.
+
+    `spent` is a one-item list: the seconds this run has spent in repair so far (only repair time counts).
+    """
+    left = REPAIR_RUN_SECONDS - spent[0]
+    if left <= 0:
+        return not_attempted(package.get("package"), package.get("version"), package, "RUN_BUDGET_USED_UP",
+                             RUN_BUDGET_USED_UP)
+    started = CLOCK()
+    try:
+        return propose_repair(verdict, package, project_dir=project, policy=policy, requirements_file=requirements_file,
+                              budget_seconds=min(BUDGET_SECONDS, left), clock=CLOCK,
+                              transport=settings.get("transport"), osv=settings.get("osv"),
+                              advisory_cache_dir=settings.get("advisory_cache_dir") or data_root / "advisories",
+                              live_advisories=settings.get("live_advisories", True), knowledge=context.knowledge,
+                              work_dir=data_root / "repair")
+    except Exception as exc:
+        return no_repair(package.get("package"), package.get("version"), package, "INTERNAL_ERROR",
+                         f"repair failed: {type(exc).__name__}: {exc}")
+    finally:
+        spent[0] += CLOCK() - started
+
+
 def analyze_pipeline(context, store, outdir, emit, settings=None):
     settings = SETTINGS if settings is None else settings
     config = getattr(context, "config", None)
@@ -112,6 +153,7 @@ def analyze_pipeline(context, store, outdir, emit, settings=None):
     cavr_store = CavrStorage(data_root / "cavr.sqlite3")
     project = Path(context.path)
     pipeline, nodes = [], []
+    repair_spent = [0.0]   # seconds spent in repair in this run, against REPAIR_RUN_SECONDS
     for name in present:
         if cavr.verify == "changed":
             before, after = snapshot_requirements(Path(context.baseline) / name), snapshot_requirements(project / name)
@@ -146,7 +188,10 @@ def analyze_pipeline(context, store, outdir, emit, settings=None):
                    "tree_nodes": [{"name": n.get("name"), "version": n.get("version"), "sha256": n.get("sha256")}
                                   for n in tree.get("nodes") or []],
                    "advisories": [{key: advisory.get(key) for key in ADVISORY_FIELDS} for advisory in evidence.get("advisories") or []],
-                   "contract": _row_contract(evidence.get("contract") or {})}
+                   "contract": _row_contract(evidence.get("contract") or {}),
+                   "repair": None}
+            if package.get("status") == "REJECTED" and settings.get("repair", True):
+                row["repair"] = _repair(verdict, package, project, policy, name, data_root, context, settings, repair_spent)
             entry["packages"].append(row)
             nodes.append(row)
         emit("cavr.pipeline_verdict", {k: entry[k] for k in ("file", "status", "mapped", "stage", "rule", "reason")})

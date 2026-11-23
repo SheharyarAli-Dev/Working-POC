@@ -140,6 +140,34 @@ describe("parseReport refuses anything that is not an ASENT gate report", () => 
   });
 });
 
+describe("CAVR repair proposal (backend/cavr/repair_proposal.py) in the key evidence", () => {
+  // Derived input, not a fixture: the real ACCEPT report with the package rejected and a `repair` block of the
+  // shape the backend writes (fields as in tests/test_cavr_repair.py::test_6_19_0_proposes_6_21_4).
+  const withRepair = (repair: any) => {
+    const raw = fixtureJson("reports", "accept.json");
+    const record = raw.assurance.evidence.find((e: any) => e.evidence_id === raw.modules.CAVR.evidence_id);
+    Object.assign(record.details.pipeline[0].packages[0], { status: "REJECTED", mapped: "REJECTED", repair });
+    return card(fromJson(raw), "CAVR").evidence;
+  };
+
+  it("a proposed pin is shown with its re-check and as not applied, right after its package", () => {
+    const evidence = withRepair({ result: "PROPOSED", rule: "REPAIR_PROPOSED", pin: { requirement: "pypdf==6.21.4", recheck: { status: "VERIFIED" } }, removal: null });
+    const at = evidence.findIndex((line) => line.startsWith("pypdf==6.19.0: REJECTED"));
+    assert.ok(at >= 0, evidence.join("\n"));
+    assert.strictEqual(evidence[at + 1], "repair: proposes pin pypdf==6.21.4 (re-check VERIFIED); not applied");
+  });
+
+  it("a removal, and no repair found, are shown as they are", () => {
+    assert.ok(withRepair({ result: "PROPOSED", pin: null, removal: { name: "demo" } }).includes("repair: proposes remove demo; not applied"));
+    assert.ok(withRepair({ result: "NO_REPAIR_FOUND", rule: "NO_SAFE_CANDIDATE", reason: "none safe" })
+      .includes("repair: no repair found (NO_SAFE_CANDIDATE: none safe)"));
+  });
+
+  it("a package without a block gets no repair line", () => {
+    assert.ok(!withRepair(null).some((line) => line.startsWith("repair:")));
+  });
+});
+
 describe("Problems entries from CAVR package call sites", () => {
   // Derived input, not a fixture: the real ACCEPT report with ONLY the package's status changed to a
   // rejection, because no recorded real run rejects a package that the project calls. It checks that

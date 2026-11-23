@@ -1,6 +1,6 @@
 import React from 'react';
-import { CavrRunState, NOT_RUN_ON_FAST_GATE } from './types';
-import { Wrench, CheckCircle2, XCircle, ThumbsUp, ThumbsDown, Lock, ArrowRight, ShieldCheck } from 'lucide-react';
+import { CavrRunState, RepairBlock, RepairPart, shown } from './types';
+import { ThumbsUp, ThumbsDown, Lock, ShieldCheck } from 'lucide-react';
 
 interface RepairTabProps {
   state: CavrRunState;
@@ -8,174 +8,139 @@ interface RepairTabProps {
   decisionState: 'pending' | 'approved' | 'rejected';
 }
 
+// The repair block of backend/cavr/repair_proposal.py, printed as the backend wrote it. A proposal only:
+// CAVR never applies it and the verdict above stays what the pipeline decided.
 export const RepairTab: React.FC<RepairTabProps> = ({ state, onApproveReject, decisionState }) => {
-  if (!state.repair) {
-    // No invented substitute and no invented "all obligations passed" list.
+  const repair: RepairBlock | null = state.repair;
+  if (!repair) {
     return (
       <div className="evidence-tab-pane repair-pane">
         <div className="reverification-card">
-          <h6>Repair and re-verification</h6>
-          <p>{NOT_RUN_ON_FAST_GATE}</p>
+          <h6>Repair proposal</h6>
+          <p>Not run: repair is looked for only when a package is REJECTED.</p>
         </div>
       </div>
     );
   }
-  const repair = state.repair;
-  const reverification = state.reverification || { all_passed: false, obligations: [] };
-
-  const candidates = repair.ranked_candidates || [];
-  const chosen = repair.chosen_candidate || candidates[0];
+  const skipped = (repair.candidates_tried || []).filter((candidate) => candidate.outcome !== 'PROPOSED');
 
   return (
     <div className="evidence-tab-pane repair-pane">
-      {/* Dependency Tree with Crossed Out Rejected Path */}
-      <div className="repair-top-grid">
-        <div className="repair-tree-card">
-          <h6>Dependency Tree &amp; Rejection Boundary</h6>
-          <div className="dep-tree-box">
-            <div className="tree-node root">
-              <span>project: invoice_extractor</span>
-            </div>
-            <div className="tree-branch">
-              <span className="branch-line">└── </span>
-              <span className="tree-node rejected-node">
-                <del>{state.package}=={state.version}</del>
-                <span className="rejected-badge">BLOCKED / QUARANTINED</span>
-              </span>
-            </div>
-            {chosen && (
-              <div className="tree-branch approved-branch">
-                <span className="branch-line">└── </span>
-                <span className="tree-node safe-node">
-                  <strong>{chosen.name}=={chosen.version}</strong>
-                  <span className="safe-badge">RECOMMENDED SUBSTITUTE</span>
-                </span>
-              </div>
-            )}
-          </div>
+      <div className="reverification-card">
+        <h6>Repair proposal</h6>
+        <p>
+          <strong>{shown(repair.package)}=={shown(repair.version)}</strong> was {shown(repair.rejected?.status)} (
+          {shown(repair.rejected?.stage)} / {shown(repair.rejected?.rule)}).
+        </p>
+        <p>Result: <strong>{shown(repair.result)}</strong> ({shown(repair.rule)}). {shown(repair.reason)}</p>
+        <p>Applied: {String(repair.applied)}. Gate decision changed: {String(repair.gate_decision_changed)}.</p>
+      </div>
 
-          {/* Before & After Diff */}
-          <div className="dependency-diff-box">
-            <span className="diff-title">Dependency Specification Diff:</span>
-            <pre className="diff-pre">
-              <span className="diff-del">{repair.dependency_diff?.before}</span>
-              {"\n"}
-              <span className="diff-add">{repair.dependency_diff?.after}</span>
-            </pre>
-          </div>
-        </div>
+      {repair.pin && <ProposalCard title={`Pin ${repair.pin.requirement}`} part={repair.pin} />}
+      {repair.removal && <ProposalCard title={`Remove ${repair.removal.name}`} part={repair.removal} />}
+      {!repair.removal && repair.removal_reason && (
+        <div className="reverification-card"><p>Removal not proposed: {repair.removal_reason}</p></div>
+      )}
 
-        {/* Human-in-the-Loop Action Card */}
+      <div className="reverification-card">
+        <h6>Candidates</h6>
+        <p>
+          Tried: {shown(repair.budget?.tried)} of at most {shown(repair.budget?.max_candidates)} within{' '}
+          {shown(repair.budget?.seconds)} s. Stopped by the budget: {shown(repair.budget?.stopped_by)}.
+        </p>
+        <ul>
+          {skipped.map((candidate) => (
+            <li key={`skipped-${candidate.version}`}>
+              skipped {candidate.version}: {shown(candidate.status)} {shown(candidate.rule)}: {shown(candidate.reason)}
+            </li>
+          ))}
+        </ul>
+        <details>
+          <summary>{(repair.excluded || []).length} releases left out before any re-check</summary>
+          <ul>
+            {(repair.excluded || []).map((entry) => (
+              <li key={`excluded-${entry.version}`}>{entry.version}: {entry.rule}: {entry.reason}</li>
+            ))}
+          </ul>
+        </details>
+      </div>
+
+      <div className="reverification-card">
+        <h6>Limitations</h6>
+        <ul>
+          {(repair.limitations || []).map((item) => <li key={item}>{item}</li>)}
+        </ul>
+      </div>
+
+      {(repair.pin || repair.removal) && (
         <div className="repair-decision-card">
           <div className="decision-header">
             <Lock size={16} className="text-amber-400" />
-            <h6>Human-in-the-Loop Authorization Gate</h6>
+            <h6>Human approval</h6>
           </div>
           <p className="decision-notice">
-            Under ASENT assurance rules, automated tools may <strong>never</strong> install repair candidates silently. 
-            All substitutions require explicit operator approval recorded in the audit log.
+            The proposal is applied by a person, in a pull request of its own. These buttons only record the decision in
+            the audit log; nothing is installed and no project file is changed.
           </p>
-
-          {chosen ? (
-            <div className="chosen-candidate-preview">
-              <div className="candidate-name-row">
-                <strong>{chosen.name}</strong> <code>v{chosen.version}</code>
-                <span className="candidate-level-pill">{chosen.level_name}</span>
-              </div>
-              <p className="candidate-reason">{chosen.justification}</p>
-            </div>
-          ) : (
-            <p className="no-cand">No safe alternative discovered. Package permanently unresolved.</p>
-          )}
-
           <div className="decision-buttons-row">
-            <button 
+            <button
               className={`repair-act-btn approve ${decisionState === 'approved' ? 'selected' : ''}`}
               onClick={() => onApproveReject(true)}
               disabled={decisionState !== 'pending'}
             >
               <ThumbsUp size={14} />
-              <span>{decisionState === 'approved' ? 'Approved & Logged' : 'Approve Alternative'}</span>
+              <span>{decisionState === 'approved' ? 'Approval recorded' : 'Record approval'}</span>
             </button>
-
-            <button 
+            <button
               className={`repair-act-btn reject ${decisionState === 'rejected' ? 'selected' : ''}`}
               onClick={() => onApproveReject(false)}
               disabled={decisionState !== 'pending'}
             >
               <ThumbsDown size={14} />
-              <span>{decisionState === 'rejected' ? 'Rejected & Quarantined' : 'Reject Substitute'}</span>
+              <span>{decisionState === 'rejected' ? 'Rejection recorded' : 'Record rejection'}</span>
             </button>
           </div>
         </div>
+      )}
+    </div>
+  );
+};
+
+const ProposalCard: React.FC<{ title: string; part: RepairPart }> = ({ title, part }) => {
+  const recheck = part.recheck || {};
+  const lock = part.lockfile_entry;
+  const policy = part.policy || {};
+  const changes = [...(policy.added || []).map((item) => `+ ${item}`), ...(policy.removed || []).map((item) => `- ${item}`)];
+  return (
+    <div className="reverification-card">
+      <div className="reverify-header">
+        <ShieldCheck size={16} className="text-emerald-400" />
+        <h6>{title}</h6>
       </div>
-
-      {/* Candidate Ranking with Stacked Cost Breakdown */}
-      <div className="candidate-ranking-card">
-        <h6>Candidate Ranking &amp; Objective Cost Breakdown</h6>
-        <span className="cost-formula-note">
-          Objective: <code>Cost = w1·(direct deps changed) + w2·(version distance) + w3·(call sites changed) + w4·(new risk)</code>
-        </span>
-
-        <div className="candidates-list">
-          {candidates.map((cand: any, idx: number) => {
-            const isChosen = cand.name === chosen?.name;
-            const cb = cand.cost_breakdown || { w1_direct_deps: 50, w2_version_distance: 10, w3_call_sites_changed: 0, w4_new_risk: 0 };
-
-            return (
-              <div key={idx} className={`candidate-row-card ${isChosen ? 'is-chosen' : ''}`}>
-                <div className="candidate-col-info">
-                  <div className="cand-rank-badge">#{idx + 1}</div>
-                  <div>
-                    <strong>{cand.name}</strong> <code>v{cand.version}</code>
-                    <span className="cand-level-sub">{cand.level_name}</span>
-                  </div>
-                </div>
-
-                {/* Stacked Cost Bar */}
-                <div className="candidate-col-cost">
-                  <div className="cost-total-row">
-                    <span>Total Cost:</span>
-                    <strong>{cand.cost}</strong>
-                  </div>
-                  <div className="stacked-cost-bar">
-                    <div className="cost-seg w1" style={{ width: `${Math.min(cb.w1_direct_deps * 0.8, 40)}%` }} title={`Deps Cost: ${cb.w1_direct_deps}`} />
-                    <div className="cost-seg w2" style={{ width: `${Math.min(cb.w2_version_distance * 0.8, 30)}%` }} title={`Version Dist Cost: ${cb.w2_version_distance}`} />
-                    <div className="cost-seg w3" style={{ width: `${Math.min(cb.w3_call_sites_changed * 0.8, 30)}%` }} title={`Call Sites Cost: ${cb.w3_call_sites_changed}`} />
-                  </div>
-                </div>
-
-                {/* Constraints Checklist */}
-                <div className="candidate-col-constraints">
-                  <span className="checklist-tag"><CheckCircle2 size={12} className="text-emerald-400" /> Unreachable</span>
-                  <span className="checklist-tag"><CheckCircle2 size={12} className="text-emerald-400" /> Satisfiable</span>
-                  <span className="checklist-tag"><CheckCircle2 size={12} className="text-emerald-400" /> OSV Clean</span>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* Re-Verification Obligations Checklist */}
-      <div className="reverification-card">
-        <div className="reverify-header">
-          <ShieldCheck size={16} className="text-emerald-400" />
-          <h6>Candidate Re-Verification Obligations (P11)</h6>
-        </div>
-
-        <div className="obligations-grid">
-          {reverification.obligations?.map((ob: any) => (
-            <div key={ob.id} className="obligation-item">
-              <CheckCircle2 size={15} className="text-emerald-400" />
-              <div>
-                <strong>{ob.obligation}</strong>
-                {ob.evidence && <p>{ob.evidence}</p>}
-              </div>
-            </div>
+      <p>
+        Re-check: <strong>{shown(recheck.status)}</strong> {shown(recheck.rule)} ({shown(recheck.request)}).{' '}
+        {shown(recheck.reason)}
+      </p>
+      {recheck.package && (
+        <p>
+          Wheel sha256 {shown(recheck.package.sha256)}; registry sha256 {shown(recheck.package.registry_sha256)}.
+        </p>
+      )}
+      {part.requirements_diff ? (
+        <pre className="diff-pre">
+          {part.requirements_diff.split('\n').filter((line) => line !== '').map((line, index) => (
+            <span key={index} className={line.startsWith('+') && !line.startsWith('+++') ? 'diff-add'
+              : line.startsWith('-') && !line.startsWith('---') ? 'diff-del' : ''}>{line + '\n'}</span>
           ))}
-        </div>
-      </div>
+        </pre>
+      ) : (
+        <p>Command: {shown(part.pip_command)}</p>
+      )}
+      <p>
+        Lockfile: {lock ? (lock.after ? `${lock.file}: ${lock.after.name} ${lock.after.version} sha256 ${lock.after.sha256}`
+          : `${lock.file}: remove ${shown(lock.before?.name)}`) : 'none in the project'}
+      </p>
+      <p>Policy approved_requirements: {changes.length ? changes.join(', ') : 'no change needed'}</p>
     </div>
   );
 };

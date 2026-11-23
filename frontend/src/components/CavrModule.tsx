@@ -184,8 +184,9 @@ export const CavrModule: React.FC = () => {
   };
 
   const handleAlternativeChoice = async (approved: boolean) => {
-    if (!runState.runId || !runState.repair?.chosen_candidate) return;
-    const chosenName = runState.repair.chosen_candidate.name;
+    const proposal = runState.repair?.pin?.requirement || (runState.repair?.removal ? `remove ${runState.repair.removal.name}` : null);
+    if (!runState.runId || !proposal) return;
+    const chosenName = proposal;
 
     try {
       const res = await fetch('/api/cavr/approve-alternative', {

@@ -31,8 +31,14 @@ to the verdict log, so it is not in the report numbers of `/api/cavr/metrics`, a
 reads nor writes the verdict cache. It downloads into a directory of its own
 (`demo_quarantine_dir`), so it cannot delete or change a wheel that a real run quarantined.
 
-Not run on this path: the sandbox, the counterfactual engine, the causal graph, repair,
-re-verification and reconstruction (M2). Their fields in the events are null.
+Repair (PR 15): after a REJECTED verdict, `dashboard_repair` asks `repair_proposal.propose_repair` for a
+proposal (a newer pin re-checked by the pipeline on a copy of the project) and puts the block in the
+verdict event's `repair` and in the proof. It is a proposal only: the verdict, the certificate and the
+run's status are the pipeline's, and nothing is written to the project. Under a demo condition the same
+condition applies to the candidates' downloads.
+
+Not run on this path: the sandbox, the counterfactual engine, the causal graph, project tests on the
+repair proposal, and reconstruction (M2). Their fields in the events are null.
 """
 from __future__ import annotations
 import asyncio
@@ -46,6 +52,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse, StreamingResponse
 from pydantic import BaseModel
 
+from backend.config import DATA
 from backend.cavr import requirement_gate
 from backend.cavr.advisories import FIRST_IDS, summarise_ids
 from backend.cavr.assurance import EvidenceChain, certificate_for_verdict, generate_printable_html_certificate, verify_chain
@@ -53,6 +60,7 @@ from backend.cavr.capture import redact
 from backend.cavr.context_extractor import SAMPLE_PROJECT_DIR
 from backend.cavr.pipeline import default_quarantine_dir, metrics as pipeline_metrics, verify_request
 from backend.cavr.pypi_client import FILES_HOST, HttpxTransport, TransportError
+from backend.cavr.repair_proposal import no_repair, propose_repair
 from backend.cavr.storage import CavrStorage
 from backend.cavr.verdict_cache import KEY_FIELDS, lookup as cache_lookup
 
@@ -342,6 +350,31 @@ def demo_quarantine_dir(condition: str) -> Path:
     return real.with_name(real.name + "-demo") / condition
 
 
+def _conditions(condition):
+    """(transport, live advisories) of a run under `condition`; the demo conditions only make things worse."""
+    if condition == "tampered_wheel":
+        return TamperingTransport(TRANSPORT or HttpxTransport()), LIVE_ADVISORIES
+    if condition == "network_off":
+        return OfflineTransport(), False
+    return TRANSPORT, LIVE_ADVISORIES
+
+
+def dashboard_repair(verdict, condition):
+    """The repair block of the run's first package when it is REJECTED, else None. Blocking (network); never raises."""
+    package = next(iter(verdict.get("packages") or []), None)
+    if not package or package.get("status") != "REJECTED":
+        return None
+    try:
+        transport, live = _conditions(condition)
+        return propose_repair(verdict, package, project_dir=PROJECT_DIR,
+                              policy=requirement_gate.load_json_file(requirement_gate.POLICY_PATH), requirements_file=None,
+                              transport=transport, advisory_cache_dir=ADVISORY_CACHE_DIR or Path(DATA) / "cavr" / "advisories",
+                              live_advisories=live)
+    except Exception as exc:
+        return no_repair(package.get("package"), package.get("version"), package, "INTERNAL_ERROR",
+                         f"repair failed: {type(exc).__name__}: {exc}")
+
+
 def verify_dashboard_request(request, condition) -> dict:
     """Run the pipeline for the dashboard project. Blocking: it uses the network.
 
@@ -377,7 +410,8 @@ async def run_verification(run_id: str, body: InterceptRequest) -> dict:
         "message": f"Request received: '{shown}'. Verification started; nothing is installed.",
         "plain_explanation": f"ASENT received the request '{shown}' and is checking it before anything is installed."})
     verdict = await asyncio.to_thread(verify_dashboard_request, request, condition["id"] if condition else None)
-    for step_index, phase, substep, event_type, status, payload in verdict_events(verdict, condition):
+    repair = await asyncio.to_thread(dashboard_repair, verdict, condition["id"] if condition else None)
+    for step_index, phase, substep, event_type, status, payload in verdict_events(verdict, condition, repair):
         publish_event(run_id, step_index, phase, substep, event_type, status, payload)
 
     last_step = RUN_EVENTS[run_id][-1]["step_index"]
@@ -393,7 +427,7 @@ async def run_verification(run_id: str, body: InterceptRequest) -> dict:
                             "rule": artifact.get("rule"), "matches": HASH_MATCHES.get(artifact.get("rule"))},
         "docker_command": NOT_RUN, "container_id": NOT_RUN, "image_digest": NOT_RUN, "counterfactual_runs": [],
         "evidence_chain_root": chain.last_hash, "evidence_records_count": len(chain.records),
-        "certificate_id": certificate["certificate_id"],
+        "certificate_id": certificate["certificate_id"], "repair": repair,
     }
     publish_event(run_id, last_step, "P13", "AssuranceFinalized", "state_change", "FINALIZED", {
         "state": "DECIDED", "step_index": last_step, "verdict": ALIASES.get(verdict["status"], "NEEDS_REVIEW"),
@@ -405,7 +439,7 @@ async def run_verification(run_id: str, body: InterceptRequest) -> dict:
     return verdict
 
 
-def verdict_events(verdict: dict, condition=None) -> list[tuple]:
+def verdict_events(verdict: dict, condition=None, repair=None) -> list[tuple]:
     """The events of one verdict, in pipeline order: (step_index, phase, substep, type, status, payload).
 
     A stage that did not run has no event, so the last step index is the last stage that ran:
@@ -498,7 +532,8 @@ def verdict_events(verdict: dict, condition=None) -> list[tuple]:
         "evidence_lines": [f"{verdict['stage']} / {verdict['rule']}: {verdict['reason']}"],
         "fast_gate_ms": verdict.get("fast_gate_ms"), "cache_hit": verdict.get("cache_hit"),
         "escalated": verdict.get("escalated"), "escalation": verdict.get("escalation"), "demo_condition": condition,
-        "causal_graph": None, "violating_paths": [], "repair": None, "reverification": None,  # not run on this path
+        "causal_graph": None, "violating_paths": [], "reverification": None,  # not run on this path
+        "repair": repair,  # a proposal for a REJECTED package (dashboard_repair), else None
         "message": f"Verdict: {status} ({verdict['stage']} / {verdict['rule']}). {verdict['reason']}",
         "plain_explanation": honesty_wording(verdict)}))
     return events

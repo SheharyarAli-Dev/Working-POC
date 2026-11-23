@@ -1,0 +1,1852 @@
+{
+ "note": "Real pypi.org/pypi/pypdf/5.1.0/json body, recorded once and stored unchanged.",
+ "source": "https://pypi.org/pypi/pypdf/5.1.0/json",
+ "recorded_at": "2026-11-23T07:15:00+00:00",
+ "response_sha256": "31bfdcf314018fc0634a42003633fac7a2ad95a33ffc8cf9b91432ae21d61007",
+ "response": {
+  "info": {
+   "author": null,
+   "author_email": "Mathieu Fenniak <biziqe@mathieu.fenniak.net>",
+   "bugtrack_url": null,
+   "classifiers": [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: BSD License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Typing :: Typed"
+   ],
+   "description": "[![PyPI version](https://badge.fury.io/py/pypdf.svg)](https://badge.fury.io/py/pypdf)\n[![Python Support](https://img.shields.io/pypi/pyversions/pypdf.svg)](https://pypi.org/project/pypdf/)\n[![](https://img.shields.io/badge/-documentation-green)](https://pypdf.readthedocs.io/en/stable/)\n[![GitHub last commit](https://img.shields.io/github/last-commit/py-pdf/pypdf)](https://github.com/py-pdf/pypdf)\n[![codecov](https://codecov.io/gh/py-pdf/pypdf/branch/main/graph/badge.svg?token=id42cGNZ5Z)](https://codecov.io/gh/py-pdf/pypdf)\n\n# pypdf\n\npypdf is a free and open-source pure-python PDF library capable of splitting,\n[merging](https://pypdf.readthedocs.io/en/stable/user/merging-pdfs.html),\n[cropping, and transforming](https://pypdf.readthedocs.io/en/stable/user/cropping-and-transforming.html)\nthe pages of PDF files. It can also add\ncustom data, viewing options, and\n[passwords](https://pypdf.readthedocs.io/en/stable/user/encryption-decryption.html)\nto PDF files. pypdf can\n[retrieve text](https://pypdf.readthedocs.io/en/stable/user/extract-text.html)\nand\n[metadata](https://pypdf.readthedocs.io/en/stable/user/metadata.html)\nfrom PDFs as well.\n\nSee [pdfly](https://github.com/py-pdf/pdfly) for a CLI application that uses pypdf to interact with PDFs.\n\n## Installation\n\nInstall pypdf using pip:\n\n```\npip install pypdf\n```\n\nFor using pypdf with AES encryption or decryption, install extra dependencies:\n\n```\npip install pypdf[crypto]\n```\n\n> **NOTE**: `pypdf` 3.1.0 and above include significant improvements compared to\n> previous versions. Please refer to [the migration\n> guide](https://pypdf.readthedocs.io/en/latest/user/migration-1-to-2.html) for\n> more information.\n\n## Usage\n\n```python\nfrom pypdf import PdfReader\n\nreader = PdfReader(\"example.pdf\")\nnumber_of_pages = len(reader.pages)\npage = reader.pages[0]\ntext = page.extract_text()\n```\n\npypdf can do a lot more, e.g. splitting, merging, reading and creating\nannotations, decrypting and encrypting, and more. Check out [the\ndocumentation](https://pypdf.readthedocs.io/en/stable/) for additional usage\nexamples!\n\nFor questions and answers, visit\n[StackOverflow](https://stackoverflow.com/questions/tagged/pypdf)\n(tagged with [pypdf](https://stackoverflow.com/questions/tagged/pypdf)).\n\n## Contributions\n\nMaintaining pypdf is a collaborative effort. You can support the project by\nwriting documentation, helping to narrow down issues, and submitting code.\nSee the [CONTRIBUTING.md](https://github.com/py-pdf/pypdf/blob/main/CONTRIBUTING.md) file for more information.\n\n### Q&A\n\nThe experience pypdf users have covers the whole range from beginners who\nwant to make their live easier to experts who developed software before PDF\nexisted. You can contribute to the pypdf community by answering questions\non [StackOverflow](https://stackoverflow.com/questions/tagged/pypdf),\nhelping in [discussions](https://github.com/py-pdf/pypdf/discussions),\nand asking users who report issues for [MCVE](https://stackoverflow.com/help/minimal-reproducible-example)'s (Code + example PDF!).\n\n\n### Issues\n\nA good bug ticket includes a MCVE - a minimal complete verifiable example.\nFor pypdf, this means that you must upload a PDF that causes the bug to occur\nas well as the code you're executing with all of the output. Use\n`print(pypdf.__version__)` to tell us which version you're using.\n\n### Code\n\nAll code contributions are welcome, but smaller ones have a better chance to\nget included in a timely manner. Adding unit tests for new features or test\ncases for bugs you've fixed help us to ensure that the Pull Request (PR) is fine.\n\npypdf includes a test suite which can be executed with `pytest`:\n\n```bash\n$ pytest\n===================== test session starts =====================\nplatform linux -- Python 3.6.15, pytest-7.0.1, pluggy-1.0.0\nrootdir: /home/moose/GitHub/Martin/pypdf\nplugins: cov-3.0.0\ncollected 233 items\n\ntests/test_basic_features.py ..                         [  0%]\ntests/test_constants.py .                               [  1%]\ntests/test_filters.py .................x.....           [ 11%]\ntests/test_generic.py ................................. [ 25%]\n.............                                           [ 30%]\ntests/test_javascript.py ..                             [ 31%]\ntests/test_merger.py .                                  [ 32%]\ntests/test_page.py .........................            [ 42%]\ntests/test_pagerange.py ................                [ 49%]\ntests/test_papersizes.py ..................             [ 57%]\ntests/test_reader.py .................................. [ 72%]\n...............                                         [ 78%]\ntests/test_utils.py ....................                [ 87%]\ntests/test_workflows.py ..........                      [ 91%]\ntests/test_writer.py .................                  [ 98%]\ntests/test_xmp.py ...                                   [100%]\n\n========== 232 passed, 1 xfailed, 1 warning in 4.52s ==========\n```\n",
+   "description_content_type": "text/markdown",
+   "docs_url": null,
+   "download_url": null,
+   "downloads": {
+    "last_day": -1,
+    "last_month": -1,
+    "last_week": -1
+   },
+   "dynamic": null,
+   "home_page": null,
+   "keywords": null,
+   "license": null,
+   "license_expression": null,
+   "license_files": null,
+   "maintainer": null,
+   "maintainer_email": "Martin Thoma <info@martin-thoma.de>",
+   "name": "pypdf",
+   "package_url": "https://pypi.org/project/pypdf/",
+   "platform": null,
+   "project_url": "https://pypi.org/project/pypdf/",
+   "project_urls": {
+    "Bug Reports": "https://github.com/py-pdf/pypdf/issues",
+    "Changelog": "https://pypdf.readthedocs.io/en/latest/meta/CHANGELOG.html",
+    "Documentation": "https://pypdf.readthedocs.io/en/latest/",
+    "Source": "https://github.com/py-pdf/pypdf"
+   },
+   "provides_extra": [
+    "crypto",
+    "cryptodome",
+    "dev",
+    "docs",
+    "full",
+    "image"
+   ],
+   "release_url": "https://pypi.org/project/pypdf/5.1.0/",
+   "requires_dist": [
+    "typing_extensions>=4.0; python_version < \"3.11\"",
+    "cryptography; extra == \"crypto\"",
+    "PyCryptodome; extra == \"cryptodome\"",
+    "black; extra == \"dev\"",
+    "pip-tools; extra == \"dev\"",
+    "pre-commit<2.18.0; extra == \"dev\"",
+    "pytest-cov; extra == \"dev\"",
+    "pytest-socket; extra == \"dev\"",
+    "pytest-timeout; extra == \"dev\"",
+    "flit; extra == \"dev\"",
+    "wheel; extra == \"dev\"",
+    "pytest-xdist; extra == \"dev\"",
+    "sphinx; extra == \"docs\"",
+    "sphinx_rtd_theme; extra == \"docs\"",
+    "myst_parser; extra == \"docs\"",
+    "cryptography; extra == \"full\"",
+    "Pillow>=8.0.0; extra == \"full\"",
+    "Pillow>=8.0.0; extra == \"image\""
+   ],
+   "requires_python": ">=3.8",
+   "summary": "A pure-python PDF library capable of splitting, merging, cropping, and transforming PDF files",
+   "version": "5.1.0",
+   "yanked": false,
+   "yanked_reason": null
+  },
+  "last_serial": 43830098,
+  "ownership": {
+   "organization": null,
+   "roles": [
+    {
+     "role": "Owner",
+     "user": "Martin.Thoma"
+    },
+    {
+     "role": "Owner",
+     "user": "mfenniak"
+    },
+    {
+     "role": "Owner",
+     "user": "stefan6419846"
+    }
+   ]
+  },
+  "urls": [
+   {
+    "comment_text": null,
+    "core-metadata": {
+     "sha256": "0bafe9ac49876e3e582128f5acc9347848b12ae1c57e549f28fe0eae1faa515b"
+    },
+    "digests": {
+     "blake2b_256": "04fc6f52588ac1cb4400a7804ef88d0d4e00cfe57a7ac6793ec3b00de5a8758b",
+     "md5": "81f3ef6b95d0ae5459c903f2a488ce7f",
+     "sha256": "3bd4f503f4ebc58bae40d81e81a9176c400cbbac2ba2d877367595fb524dfdfc"
+    },
+    "downloads": -1,
+    "filename": "pypdf-5.1.0-py3-none-any.whl",
+    "has_sig": false,
+    "md5_digest": "81f3ef6b95d0ae5459c903f2a488ce7f",
+    "packagetype": "bdist_wheel",
+    "python_version": "py3",
+    "requires_python": ">=3.8",
+    "size": 297976,
+    "upload_time": "2024-10-27T19:46:44",
+    "upload_time_iso_8601": "2024-10-27T19:46:44.439477Z",
+    "url": "https://files.pythonhosted.org/packages/04/fc/6f52588ac1cb4400a7804ef88d0d4e00cfe57a7ac6793ec3b00de5a8758b/pypdf-5.1.0-py3-none-any.whl",
+    "yanked": false,
+    "yanked_reason": null
+   },
+   {
+    "comment_text": null,
+    "core-metadata": false,
+    "digests": {
+     "blake2b_256": "6b9a72d74f05f64895ebf1c7f6646cf7fe6dd124398c5c49240093f92d6f0fdd",
+     "md5": "b15c9927b1de70f373158277f126793e",
+     "sha256": "425a129abb1614183fd1aca6982f650b47f8026867c0ce7c4b9f281c443d2740"
+    },
+    "downloads": -1,
+    "filename": "pypdf-5.1.0.tar.gz",
+    "has_sig": false,
+    "md5_digest": "b15c9927b1de70f373158277f126793e",
+    "packagetype": "sdist",
+    "python_version": "source",
+    "requires_python": ">=3.8",
+    "size": 5011381,
+    "upload_time": "2024-10-27T19:46:47",
+    "upload_time_iso_8601": "2024-10-27T19:46:47.002226Z",
+    "url": "https://files.pythonhosted.org/packages/6b/9a/72d74f05f64895ebf1c7f6646cf7fe6dd124398c5c49240093f92d6f0fdd/pypdf-5.1.0.tar.gz",
+    "yanked": false,
+    "yanked_reason": null
+   }
+  ],
+  "vulnerabilities": [
+   {
+    "aliases": [
+     "CVE-2025-55197",
+     "PYSEC-2026-1830"
+    ],
+    "details": "### Impact\nAn attacker who uses this vulnerability can craft a PDF which leads to the RAM being exhausted. This requires just reading the file if a series of FlateDecode filters is used on a malicious cross-reference stream. Other content streams are affected on explicit access.\n\n### Patches\nThis has been fixed in [pypdf==6.0.0](https://github.com/py-pdf/pypdf/releases/tag/6.0.0).\n\n### Workarounds\nIf you cannot upgrade yet, you might want to implement the workaround for `pypdf.filters.decompress` yourself: https://github.com/py-pdf/pypdf/blob/0dd57738bbdcdb63f0fb43d8a6b3d222b6946595/pypdf/filters.py#L72-L143\n\n### References\nThis issue has been reported in #3429 and fixed in #3430.",
+    "fixed_in": [
+     "6.0.0"
+    ],
+    "id": "GHSA-7hfw-26vp-jp8m",
+    "link": "https://osv.dev/vulnerability/GHSA-7hfw-26vp-jp8m",
+    "source": "osv",
+    "summary": null,
+    "withdrawn": null
+   },
+   {
+    "aliases": [
+     "CVE-2025-62707",
+     "PYSEC-2026-1833"
+    ],
+    "details": "### Impact\n\nAn attacker who uses this vulnerability can craft a PDF which leads to an infinite loop. This requires parsing the content stream of a page which has an inline image using the DCTDecode filter.\n\n### Patches\nThis has been fixed in [pypdf==6.1.3](https://github.com/py-pdf/pypdf/releases/tag/6.1.3).\n\n### Workarounds\nIf you cannot upgrade yet, consider applying the changes from PR [#3501](https://github.com/py-pdf/pypdf/pull/3501).",
+    "fixed_in": [
+     "6.1.3"
+    ],
+    "id": "GHSA-vr63-x8vc-m265",
+    "link": "https://osv.dev/vulnerability/GHSA-vr63-x8vc-m265",
+    "source": "osv",
+    "summary": null,
+    "withdrawn": null
+   },
+   {
+    "aliases": [
+     "CVE-2025-62708",
+     "PYSEC-2026-1831"
+    ],
+    "details": "### Impact\n\nAn attacker who uses this vulnerability can craft a PDF which leads to large memory usage. This requires parsing the content stream of a page using the LZWDecode filter.\n\n### Patches\nThis has been fixed in [pypdf==6.1.3](https://github.com/py-pdf/pypdf/releases/tag/6.1.3).\n\n### Workarounds\nIf you cannot upgrade yet, consider applying the changes from PR [#3502](https://github.com/py-pdf/pypdf/pull/3502).",
+    "fixed_in": [
+     "6.1.3"
+    ],
+    "id": "GHSA-jfx9-29x2-rv3j",
+    "link": "https://osv.dev/vulnerability/GHSA-jfx9-29x2-rv3j",
+    "source": "osv",
+    "summary": null,
+    "withdrawn": null
+   },
+   {
+    "aliases": [
+     "CVE-2025-66019",
+     "PYSEC-2026-1832"
+    ],
+    "details": "### Impact\n\nAn attacker who uses this vulnerability can craft a PDF which leads to a memory usage of up to 1 GB per stream. This requires parsing the content stream of a page using the LZWDecode filter.\n\nThis is a follow up to [GHSA-jfx9-29x2-rv3j](https://github.com/py-pdf/pypdf/security/advisories/GHSA-jfx9-29x2-rv3j) to align the default limit with the one for *zlib*.\n\n### Patches\nThis has been fixed in [pypdf==6.4.0](https://github.com/py-pdf/pypdf/releases/tag/6.4.0).\n\n### Workarounds\nIf users cannot upgrade yet, use the line below to overwrite the default in their code:\n\n```python\npypdf.filters.LZW_MAX_OUTPUT_LENGTH = 75_000_000\n```",
+    "fixed_in": [
+     "6.4.0"
+    ],
+    "id": "GHSA-m449-cwjh-6pw7",
+    "link": "https://osv.dev/vulnerability/GHSA-m449-cwjh-6pw7",
+    "source": "osv",
+    "summary": null,
+    "withdrawn": null
+   },
+   {
+    "aliases": [
+     "CVE-2026-22690",
+     "PYSEC-2026-1829"
+    ],
+    "details": "### Impact\nAn attacker who exploits this vulnerability can craft a PDF which leads to possibly long runtimes for actually invalid files. This can be achieved by omitting the `/Root` entry in the trailer, while using a rather large `/Size` value. Only the non-strict reading mode is affected.\n\n### Patches\nThis has been fixed in [pypdf==6.6.0](https://github.com/py-pdf/pypdf/releases/tag/6.6.0).\n\n### Workarounds\n\n```python\nfrom pypdf import PdfReader, PdfWriter\n\n\n# Instead of\nreader = PdfReader(\"file.pdf\")\n# use the strict mode:\nreader = PdfReader(\"file.pdf\", strict=True)\n\n# Instead of\nwriter = PdfWriter(clone_from=\"file.pdf\")\n# use an explicit strict reader:\nwriter = PdfWriter(clone_from=PdfReader(\"file.pdf\", strict=True))\n```\n\n### Resources\nThis issue has been fixed in #3594.",
+    "fixed_in": [
+     "6.6.0"
+    ],
+    "id": "GHSA-4xc4-762w-m6cg",
+    "link": "https://osv.dev/vulnerability/GHSA-4xc4-762w-m6cg",
+    "source": "osv",
+    "summary": null,
+    "withdrawn": null
+   },
+   {
+    "aliases": [
+     "CVE-2026-22691",
+     "PYSEC-2026-1828"
+    ],
+    "details": "### Impact\nAn attacker who exploits this vulnerability can craft a PDF which leads to possibly long runtimes for invalid `startxref` entries. When rebuilding the cross-reference table, PDF files with lots of whitespace characters become problematic. Only the non-strict reading mode is affected.\n\n### Patches\nThis has been fixed in [pypdf==6.6.0](https://github.com/py-pdf/pypdf/releases/tag/6.6.0).\n\n### Workarounds\n\n```python\nfrom pypdf import PdfReader, PdfWriter\n\n\n# Instead of\nreader = PdfReader(\"file.pdf\")\n# use the strict mode:\nreader = PdfReader(\"file.pdf\", strict=True)\n\n# Instead of\nwriter = PdfWriter(clone_from=\"file.pdf\")\n# use an explicit strict reader:\nwriter = PdfWriter(clone_from=PdfReader(\"file.pdf\", strict=True))\n```\n\n### Resources\nThis issue has been fixed in #3594.",
+    "fixed_in": [
+     "6.6.0"
+    ],
+    "id": "GHSA-4f6g-68pf-7vhv",
+    "link": "https://osv.dev/vulnerability/GHSA-4f6g-68pf-7vhv",
+    "source": "osv",
+    "summary": null,
+    "withdrawn": null
+   },
+   {
+    "aliases": [
+     "CVE-2026-24688",
+     "PYSEC-2026-1827"
+    ],
+    "details": "### Impact\n\nAn attacker who uses this vulnerability can craft a PDF which leads to an infinite loop. This requires accessing the outlines/bookmarks.\n\n### Patches\n\nThis has been fixed in [pypdf 6.6.2](https://github.com/py-pdf/pypdf/releases/tag/6.6.2).\n\n### Workarounds\n\nIf projects cannot upgrade yet, consider applying the changes from PR [#3610](https://github.com/py-pdf/pypdf/pull/3610).",
+    "fixed_in": [
+     "6.6.2"
+    ],
+    "id": "GHSA-2q4j-m29v-hq73",
+    "link": "https://osv.dev/vulnerability/GHSA-2q4j-m29v-hq73",
+    "source": "osv",
+    "summary": null,
+    "withdrawn": null
+   },
+   {
+    "aliases": [
+     "CVE-2026-27026",
+     "PYSEC-2026-3015"
+    ],
+    "details": "### Impact\n\nAn attacker who uses this vulnerability can craft a PDF which leads to long runtimes. This requires a malformed `/FlateDecode` stream, where the byte-by-byte decompression is used.\n\n### Patches\n\nThis has been fixed in [pypdf==6.7.1](https://github.com/py-pdf/pypdf/releases/tag/6.7.1).\n\n### Workarounds\n\nIf you cannot upgrade yet, consider applying the changes from PR [#3644](https://github.com/py-pdf/pypdf/pull/3644).",
+    "fixed_in": [
+     "6.7.1"
+    ],
+    "id": "GHSA-9mvc-8737-8j8h",
+    "link": "https://osv.dev/vulnerability/GHSA-9mvc-8737-8j8h",
+    "source": "osv",
+    "summary": null,
+    "withdrawn": null
+   },
+   {
+    "aliases": [
+     "CVE-2026-27024",
+     "PYSEC-2026-3013"
+    ],
+    "details": "### Impact\n\nAn attacker who uses this vulnerability can craft a PDF which leads to an infinite loop. This requires accessing the children of a `TreeObject`, for example as part of outlines.\n\n### Patches\n\nThis has been fixed in [pypdf==6.7.1](https://github.com/py-pdf/pypdf/releases/tag/6.7.1).\n\n### Workarounds\n\nIf you cannot upgrade yet, consider applying the changes from PR [#3645](https://github.com/py-pdf/pypdf/pull/3645).",
+    "fixed_in": [
+     "6.7.1"
+    ],
+    "id": "GHSA-996q-pr4m-cvgq",
+    "link": "https://osv.dev/vulnerability/GHSA-996q-pr4m-cvgq",
+    "source": "osv",
+    "summary": null,
+    "withdrawn": null
+   },
+   {
+    "aliases": [
+     "CVE-2026-27025",
+     "PYSEC-2026-3024"
+    ],
+    "details": "### Impact\n\nAn attacker who uses this vulnerability can craft a PDF which leads to long runtimes and large memory consumption. This requires parsing the `/ToUnicode` entry of a font with unusually large values, for example during text extraction.\n\n### Patches\n\nThis has been fixed in [pypdf==6.7.1](https://github.com/py-pdf/pypdf/releases/tag/6.7.1).\n\n### Workarounds\n\nIf you cannot upgrade yet, consider applying the changes from PR [#3646](https://github.com/py-pdf/pypdf/pull/3646).",
+    "fixed_in": [
+     "6.7.1"
+    ],
+    "id": "GHSA-wgvp-vg3v-2xq3",
+    "link": "https://osv.dev/vulnerability/GHSA-wgvp-vg3v-2xq3",
+    "source": "osv",
+    "summary": null,
+    "withdrawn": null
+   },
+   {
+    "aliases": [
+     "CVE-2026-27628",
+     "PYSEC-2026-3005"
+    ],
+    "details": "### Impact\n\nAn attacker who uses this vulnerability can craft a PDF which leads to an infinite loop. This requires reading the file.\n\n### Patches\n\nThis has been fixed in [pypdf==6.7.2](https://github.com/py-pdf/pypdf/releases/tag/6.7.2).\n\n### Workarounds\n\nIf users cannot upgrade yet, consider applying the changes from PR [#3655](https://github.com/py-pdf/pypdf/pull/3655).",
+    "fixed_in": [
+     "6.7.2"
+    ],
+    "id": "GHSA-2rw7-x74f-jg35",
+    "link": "https://osv.dev/vulnerability/GHSA-2rw7-x74f-jg35",
+    "source": "osv",
+    "summary": null,
+    "withdrawn": null
+   },
+   {
+    "aliases": [
+     "CVE-2026-27888",
+     "PYSEC-2026-3027"
+    ],
+    "details": "### Impact\nAn attacker who uses this vulnerability can craft a PDF which leads to the RAM being exhausted. This requires accessing the `xfa` property of a reader or writer and the corresponding stream being compressed using `/FlateDecode`.\n\n### Patches\nThis has been fixed in [pypdf==6.7.3](https://github.com/py-pdf/pypdf/releases/tag/6.7.3).\n\n### Workarounds\nIf projects cannot upgrade yet, consider applying the changes from PR [#3658](https://github.com/py-pdf/pypdf/pull/3658).",
+    "fixed_in": [
+     "6.7.3"
+    ],
+    "id": "GHSA-x7hp-r3qg-r3cj",
+    "link": "https://osv.dev/vulnerability/GHSA-x7hp-r3qg-r3cj",
+    "source": "osv",
+    "summary": null,
+    "withdrawn": null
+   },
+   {
+    "aliases": [
+     "CVE-2026-28351",
+     "PYSEC-2026-3017"
+    ],
+    "details": "### Impact\n\nAn attacker who uses this vulnerability can craft a PDF which leads to large memory usage. This requires parsing the content stream using the RunLengthDecode filter.\n\n### Patches\nThis has been fixed in [pypdf==6.7.4](https://github.com/py-pdf/pypdf/releases/tag/6.7.4).\n\n### Workarounds\nIf you cannot upgrade yet, consider applying the changes from PR [#3664](https://github.com/py-pdf/pypdf/pull/3664).",
+    "fixed_in": [
+     "6.7.4"
+    ],
+    "id": "GHSA-f2v5-7jq9-h8cg",
+    "link": "https://osv.dev/vulnerability/GHSA-f2v5-7jq9-h8cg",
+    "source": "osv",
+    "summary": null,
+    "withdrawn": null
+   },
+   {
+    "aliases": [
+     "CVE-2026-28804",
+     "PYSEC-2026-3014"
+    ],
+    "details": "### Impact\nAn attacker who uses this vulnerability can craft a PDF which leads to long runtimes. This requires accessing a stream which uses the `/ASCIIHexDecode` filter.\n\n### Patches\nThis has been fixed in [pypdf==6.7.5](https://github.com/py-pdf/pypdf/releases/tag/6.7.5).\n\n### Workarounds\nIf you cannot upgrade yet, consider applying the changes from PR [#3666](https://github.com/py-pdf/pypdf/pull/3666).",
+    "fixed_in": [
+     "6.7.5"
+    ],
+    "id": "GHSA-9m86-7pmv-2852",
+    "link": "https://osv.dev/vulnerability/GHSA-9m86-7pmv-2852",
+    "source": "osv",
+    "summary": null,
+    "withdrawn": null
+   },
+   {
+    "aliases": [
+     "CVE-2026-31826",
+     "PYSEC-2026-3019"
+    ],
+    "details": "### Impact\n\nAn attacker who uses this vulnerability can craft a PDF which leads to large memory usage. This requires parsing a content stream with a rather large `/Length` value, regardless of the actual data length inside the stream.\n\n### Patches\nThis has been fixed in [pypdf==6.8.0](https://github.com/py-pdf/pypdf/releases/tag/6.8.0).\n\n### Workarounds\nIf you cannot upgrade yet, consider applying the changes from PR [#3675](https://github.com/py-pdf/pypdf/pull/3675).\n\nAs far as we are aware, this mostly affects reading from buffers of unknown size, as returned by `open(\"file.pdf\", mode=\"rb\")` for example. Passing a file path or a `BytesIO` buffer to *pypdf* instead does not seem to trigger the vulnerability.",
+    "fixed_in": [
+     "6.8.0"
+    ],
+    "id": "GHSA-hqmh-ppp3-xvm7",
+    "link": "https://osv.dev/vulnerability/GHSA-hqmh-ppp3-xvm7",
+    "source": "osv",
+    "summary": null,
+    "withdrawn": null
+   },
+   {
+    "aliases": [
+     "CVE-2026-33123",
+     "PYSEC-2026-3023"
+    ],
+    "details": "### Impact\nAn attacker who uses this vulnerability can craft a PDF which leads to long runtimes and/or large memory usage. This requires accessing an array-based stream with lots of entries.\n\n### Patches\nThis has been fixed in [pypdf==6.9.1](https://github.com/py-pdf/pypdf/releases/tag/6.9.1).\n\n### Workarounds\nIf you cannot upgrade yet, consider applying the changes from PR [#3686](https://github.com/py-pdf/pypdf/pull/3686).",
+    "fixed_in": [
+     "6.9.1"
+    ],
+    "id": "GHSA-qpxp-75px-xjcp",
+    "link": "https://osv.dev/vulnerability/GHSA-qpxp-75px-xjcp",
+    "source": "osv",
+    "summary": null,
+    "withdrawn": null
+   },
+   {
+    "aliases": [
+     "CVE-2026-33699",
+     "PYSEC-2026-3012"
+    ],
+    "details": "### Impact\n\nAn attacker who uses this vulnerability can craft a PDF which leads to an infinite loop. This requires reading a file in non-strict mode.\n\n### Patches\n\nThis has been fixed in [pypdf==6.9.2](https://github.com/py-pdf/pypdf/releases/tag/6.9.2).\n\n### Workarounds\n\nIf users cannot upgrade yet, consider applying the changes from PR [#3693](https://github.com/py-pdf/pypdf/pull/3693).",
+    "fixed_in": [
+     "6.9.2"
+    ],
+    "id": "GHSA-87mj-5ggw-8qc3",
+    "link": "https://osv.dev/vulnerability/GHSA-87mj-5ggw-8qc3",
+    "source": "osv",
+    "summary": null,
+    "withdrawn": null
+   },
+   {
+    "aliases": [
+     "CVE-2026-40260",
+     "PYSEC-2026-3006"
+    ],
+    "details": "### Impact\n\nAn attacker who uses this vulnerability can craft a PDF which leads to large memory usage. This requires parsing the XMP metadata.\n\n### Patches\nThis has been fixed in [pypdf==6.10.0](https://github.com/py-pdf/pypdf/releases/tag/6.10.0).\n\n### Workarounds\nIf you cannot upgrade yet, consider applying the changes from PR [#3724](https://github.com/py-pdf/pypdf/pull/3724).",
+    "fixed_in": [
+     "6.10.0"
+    ],
+    "id": "GHSA-3crg-w4f6-42mx",
+    "link": "https://osv.dev/vulnerability/GHSA-3crg-w4f6-42mx",
+    "source": "osv",
+    "summary": null,
+    "withdrawn": null
+   },
+   {
+    "aliases": [
+     "CVE-2026-41168",
+     "PYSEC-2026-3021"
+    ],
+    "details": "### Impact\n\nAn attacker who uses this vulnerability can craft a PDF which leads to long runtimes. This requires cross-reference streams with wrong large `/Size` values or object streams with wrong large `/N` values.\n\n### Patches\n\nThis has been fixed in [pypdf==6.10.1](https://github.com/py-pdf/pypdf/releases/tag/6.10.1).\n\n### Workarounds\n\nIf you cannot upgrade yet, consider applying the changes from PR [#3733](https://github.com/py-pdf/pypdf/pull/3733).",
+    "fixed_in": [
+     "6.10.1"
+    ],
+    "id": "GHSA-jj6c-8h6c-hppx",
+    "link": "https://osv.dev/vulnerability/GHSA-jj6c-8h6c-hppx",
+    "source": "osv",
+    "summary": null,
+    "withdrawn": null
+   },
+   {
+    "aliases": [
+     "CVE-2026-41313",
+     "PYSEC-2026-3007"
+    ],
+    "details": "### Impact\nAn attacker who uses this vulnerability can craft a PDF which leads to long runtimes. This requires loading a PDF with a large trailer `/Size` value in incremental mode.\n\n### Patches\nThis has been fixed in [pypdf==6.10.2](https://github.com/py-pdf/pypdf/releases/tag/6.10.2).\n\n### Workarounds\nIf you cannot upgrade yet, consider applying the changes from PR [#3735](https://github.com/py-pdf/pypdf/pull/3735).",
+    "fixed_in": [
+     "6.10.2"
+    ],
+    "id": "GHSA-4pxv-j86v-mhcw",
+    "link": "https://osv.dev/vulnerability/GHSA-4pxv-j86v-mhcw",
+    "source": "osv",
+    "summary": null,
+    "withdrawn": null
+   },
+   {
+    "aliases": [
+     "CVE-2026-41312",
+     "PYSEC-2026-3011"
+    ],
+    "details": "### Impact\nAn attacker who uses this vulnerability can craft a PDF which leads to the RAM being exhausted. This requires accessing a stream compressed using `/FlateDecode` with a `/Predictor` unequal 1 and large predictor parameters.\n\n### Patches\nThis has been fixed in [pypdf==6.10.2](https://github.com/py-pdf/pypdf/releases/tag/6.10.2).\n\n### Workarounds\nIf you cannot upgrade yet, consider applying the changes from PR [#3734](https://github.com/py-pdf/pypdf/pull/3734).",
+    "fixed_in": [
+     "6.10.2"
+    ],
+    "id": "GHSA-7gw9-cf7v-778f",
+    "link": "https://osv.dev/vulnerability/GHSA-7gw9-cf7v-778f",
+    "source": "osv",
+    "summary": null,
+    "withdrawn": null
+   },
+   {
+    "aliases": [
+     "CVE-2026-41314",
+     "PYSEC-2026-3026"
+    ],
+    "details": "### Impact\nAn attacker who uses this vulnerability can craft a PDF which leads to the RAM being exhausted. This requires accessing an image using `/FlateDecode` with large size values.\n\n### Patches\nThis has been fixed in [pypdf==6.10.2](https://github.com/py-pdf/pypdf/releases/tag/6.10.2).\n\n### Workarounds\nIf you cannot upgrade yet, consider applying the changes from PR [#3734](https://github.com/py-pdf/pypdf/pull/3734).",
+    "fixed_in": [
+     "6.10.2"
+    ],
+    "id": "GHSA-x284-j5p8-9c5p",
+    "link": "https://osv.dev/vulnerability/GHSA-x284-j5p8-9c5p",
+    "source": "osv",
+    "summary": null,
+    "withdrawn": null
+   },
+   {
+    "aliases": [
+     "CVE-2026-48156",
+     "PYSEC-2026-3004"
+    ],
+    "details": "### Impact\n\nAn attacker who uses this vulnerability can craft a PDF which leads to long runtimes. This requires cross-reference streams with `/W [0 0 0]` values and large `/Size` values.\n\n### Patches\n\nThis has been fixed in [pypdf==6.12.0](https://github.com/py-pdf/pypdf/releases/tag/6.12.0).\n\n### Workarounds\n\nIf developers are unable to upgrade their apps immediately, they should consider applying the changes from PR [#3791](https://github.com/py-pdf/pypdf/pull/3791).",
+    "fixed_in": [
+     "6.12.0"
+    ],
+    "id": "GHSA-248m-82v9-q6g6",
+    "link": "https://osv.dev/vulnerability/GHSA-248m-82v9-q6g6",
+    "source": "osv",
+    "summary": null,
+    "withdrawn": null
+   },
+   {
+    "aliases": [
+     "CVE-2026-48155",
+     "PYSEC-2026-3016"
+    ],
+    "details": "### Impact\n\nAn attacker who uses this vulnerability can craft a PDF which leads to large memory usage. This requires extracting text in layout mode with large character offsets.\n\n### Patches\n\nThis has been fixed in [pypdf==6.12.0](https://github.com/py-pdf/pypdf/releases/tag/6.12.0).\n\n### Workarounds\n\nIf developers are unable to immediately upgrade, they should consider applying the changes from PR [#3790](https://github.com/py-pdf/pypdf/pull/3790).",
+    "fixed_in": [
+     "6.12.0"
+    ],
+    "id": "GHSA-cj93-chg6-vgv8",
+    "link": "https://osv.dev/vulnerability/GHSA-cj93-chg6-vgv8",
+    "source": "osv",
+    "summary": null,
+    "withdrawn": null
+   },
+   {
+    "aliases": [
+     "CVE-2026-48735",
+     "PYSEC-2026-3025"
+    ],
+    "details": "### Impact\n\nAn attacker who uses this vulnerability can craft a PDF which leads to large memory usage. This requires parsing large XMP metadata, possibly with lots of unnecessary elements.\n\n### Patches\nThis has been fixed in [pypdf==6.12.1](https://github.com/py-pdf/pypdf/releases/tag/6.12.1).\n\n### Workarounds\nIf you cannot upgrade yet, consider applying the changes from PR [#3796](https://github.com/py-pdf/pypdf/pull/3796).",
+    "fixed_in": [
+     "6.12.1"
+    ],
+    "id": "GHSA-wjqc-6w8f-h24c",
+    "link": "https://osv.dev/vulnerability/GHSA-wjqc-6w8f-h24c",
+    "source": "osv",
+    "summary": null,
+    "withdrawn": null
+   },
+   {
+    "aliases": [
+     "CVE-2026-49461",
+     "PYSEC-2026-3020"
+    ],
+    "details": "### Impact\nAn attacker who uses this vulnerability can craft a PDF which leads to large memory usage. This requires extracting the text of a page which contains a form XObject with self-references.\n\n### Patches\nThis has been fixed in [pypdf==6.12.2](https://github.com/py-pdf/pypdf/releases/tag/6.12.2).\n\n### Workarounds\nIf you cannot upgrade yet, consider applying the changes from PR [#3805](https://github.com/py-pdf/pypdf/pull/3805).",
+    "fixed_in": [
+     "6.12.2"
+    ],
+    "id": "GHSA-j543-4vmf-qm7v",
+    "link": "https://osv.dev/vulnerability/GHSA-j543-4vmf-qm7v",
+    "source": "osv",
+    "summary": null,
+    "withdrawn": null
+   },
+   {
+    "aliases": [
+     "CVE-2026-49460",
+     "PYSEC-2026-3010"
+    ],
+    "details": "### Impact\nAn attacker who uses this vulnerability can craft a PDF which leads to long runtimes. This requires accessing a stream which uses the `/FlateDecode` filter with a PNG predictor.\n\n### Patches\nThis has been fixed in [pypdf==6.12.2](https://github.com/py-pdf/pypdf/releases/tag/6.12.2).\n\n### Workarounds\nIf you cannot upgrade yet, consider applying the changes from PR [#3806](https://github.com/py-pdf/pypdf/pull/3806).",
+    "fixed_in": [
+     "6.12.2"
+    ],
+    "id": "GHSA-5hgr-hg42-57jg",
+    "link": "https://osv.dev/vulnerability/GHSA-5hgr-hg42-57jg",
+    "source": "osv",
+    "summary": null,
+    "withdrawn": null
+   },
+   {
+    "aliases": [
+     "CVE-2026-54531",
+     "PYSEC-2026-3022"
+    ],
+    "details": "### Impact\n\nAn attacker who uses this vulnerability can craft a PDF which leads to an infinite loop. This requires merging a file with outlines into a writer.\n\n### Patches\n\nThis has been fixed in [pypdf==6.13.0](https://github.com/py-pdf/pypdf/releases/tag/6.13.0).\n\n### Workarounds\n\nIf you cannot upgrade yet, consider applying the changes from PR [#3830](https://github.com/py-pdf/pypdf/pull/3830).",
+    "fixed_in": [
+     "6.13.0"
+    ],
+    "id": "GHSA-m2v9-299j-rv96",
+    "link": "https://osv.dev/vulnerability/GHSA-m2v9-299j-rv96",
+    "source": "osv",
+    "summary": null,
+    "withdrawn": null
+   },
+   {
+    "aliases": [
+     "CVE-2026-54530",
+     "PYSEC-2026-3009"
+    ],
+    "details": "### Impact\n\nAn attacker who uses this vulnerability can craft a PDF which leads to an infinite loop. This requires extracting the text in layout mode.\n\n### Patches\n\nThis has been fixed in [pypdf==6.13.0](https://github.com/py-pdf/pypdf/releases/tag/6.13.0).\n\n### Workarounds\n\nIf you cannot upgrade yet, consider applying the changes from PR [#3830](https://github.com/py-pdf/pypdf/pull/3830).",
+    "fixed_in": [
+     "6.13.0"
+    ],
+    "id": "GHSA-52x6-gq3r-vpf4",
+    "link": "https://osv.dev/vulnerability/GHSA-52x6-gq3r-vpf4",
+    "source": "osv",
+    "summary": null,
+    "withdrawn": null
+   },
+   {
+    "aliases": [
+     "CVE-2026-57204"
+    ],
+    "details": "### Impact\n\nAn attacker who uses this vulnerability can craft a PDF which leads to large memory usage, as `MAX_DECLARED_STREAM_LENGTH` is sometimes ignored. This requires parsing a content stream without a `/Length` value.\n\n### Patches\nThis has been fixed in [pypdf==6.13.3](https://github.com/py-pdf/pypdf/releases/tag/6.13.3).\n\n### Workarounds\nIf you cannot upgrade yet, consider applying the changes from PR [#3871](https://github.com/py-pdf/pypdf/pull/3871).",
+    "fixed_in": [
+     "6.13.3"
+    ],
+    "id": "GHSA-jm82-fx9c-mx94",
+    "link": "https://osv.dev/vulnerability/GHSA-jm82-fx9c-mx94",
+    "source": "osv",
+    "summary": null,
+    "withdrawn": null
+   },
+   {
+    "aliases": [
+     "CVE-2025-62707",
+     "GHSA-vr63-x8vc-m265"
+    ],
+    "details": "### Impact\n\nAn attacker who uses this vulnerability can craft a PDF which leads to an infinite loop. This requires parsing the content stream of a page which has an inline image using the DCTDecode filter.\n\n### Patches\nThis has been fixed in [pypdf==6.1.3](https://github.com/py-pdf/pypdf/releases/tag/6.1.3).\n\n### Workarounds\nIf you cannot upgrade yet, consider applying the changes from PR [#3501](https://github.com/py-pdf/pypdf/pull/3501).",
+    "fixed_in": [
+     "6.1.3"
+    ],
+    "id": "PYSEC-2026-1833",
+    "link": "https://osv.dev/vulnerability/PYSEC-2026-1833",
+    "source": "osv",
+    "summary": null,
+    "withdrawn": null
+   },
+   {
+    "aliases": [
+     "CVE-2026-22690",
+     "GHSA-4xc4-762w-m6cg"
+    ],
+    "details": "### Impact\nAn attacker who exploits this vulnerability can craft a PDF which leads to possibly long runtimes for actually invalid files. This can be achieved by omitting the `/Root` entry in the trailer, while using a rather large `/Size` value. Only the non-strict reading mode is affected.\n\n### Patches\nThis has been fixed in [pypdf==6.6.0](https://github.com/py-pdf/pypdf/releases/tag/6.6.0).\n\n### Workarounds\n\n```python\nfrom pypdf import PdfReader, PdfWriter\n\n\n# Instead of\nreader = PdfReader(\"file.pdf\")\n# use the strict mode:\nreader = PdfReader(\"file.pdf\", strict=True)\n\n# Instead of\nwriter = PdfWriter(clone_from=\"file.pdf\")\n# use an explicit strict reader:\nwriter = PdfWriter(clone_from=PdfReader(\"file.pdf\", strict=True))\n```\n\n### Resources\nThis issue has been fixed in #3594.",
+    "fixed_in": [
+     "6.6.0"
+    ],
+    "id": "PYSEC-2026-1829",
+    "link": "https://osv.dev/vulnerability/PYSEC-2026-1829",
+    "source": "osv",
+    "summary": null,
+    "withdrawn": null
+   },
+   {
+    "aliases": [
+     "CVE-2025-66019",
+     "GHSA-m449-cwjh-6pw7"
+    ],
+    "details": "### Impact\n\nAn attacker who uses this vulnerability can craft a PDF which leads to a memory usage of up to 1 GB per stream. This requires parsing the content stream of a page using the LZWDecode filter.\n\nThis is a follow up to [GHSA-jfx9-29x2-rv3j](https://github.com/py-pdf/pypdf/security/advisories/GHSA-jfx9-29x2-rv3j) to align the default limit with the one for *zlib*.\n\n### Patches\nThis has been fixed in [pypdf==6.4.0](https://github.com/py-pdf/pypdf/releases/tag/6.4.0).\n\n### Workarounds\nIf users cannot upgrade yet, use the line below to overwrite the default in their code:\n\n```python\npypdf.filters.LZW_MAX_OUTPUT_LENGTH = 75_000_000\n```",
+    "fixed_in": [
+     "6.4.0"
+    ],
+    "id": "PYSEC-2026-1832",
+    "link": "https://osv.dev/vulnerability/PYSEC-2026-1832",
+    "source": "osv",
+    "summary": null,
+    "withdrawn": null
+   },
+   {
+    "aliases": [
+     "CVE-2025-55197",
+     "GHSA-7hfw-26vp-jp8m"
+    ],
+    "details": "### Impact\nAn attacker who uses this vulnerability can craft a PDF which leads to the RAM being exhausted. This requires just reading the file if a series of FlateDecode filters is used on a malicious cross-reference stream. Other content streams are affected on explicit access.\n\n### Patches\nThis has been fixed in [pypdf==6.0.0](https://github.com/py-pdf/pypdf/releases/tag/6.0.0).\n\n### Workarounds\nIf you cannot upgrade yet, you might want to implement the workaround for `pypdf.filters.decompress` yourself: https://github.com/py-pdf/pypdf/blob/0dd57738bbdcdb63f0fb43d8a6b3d222b6946595/pypdf/filters.py#L72-L143\n\n### References\nThis issue has been reported in #3429 and fixed in #3430.",
+    "fixed_in": [
+     "6.0.0"
+    ],
+    "id": "PYSEC-2026-1830",
+    "link": "https://osv.dev/vulnerability/PYSEC-2026-1830",
+    "source": "osv",
+    "summary": null,
+    "withdrawn": null
+   },
+   {
+    "aliases": [
+     "CVE-2025-62708",
+     "GHSA-jfx9-29x2-rv3j"
+    ],
+    "details": "### Impact\n\nAn attacker who uses this vulnerability can craft a PDF which leads to large memory usage. This requires parsing the content stream of a page using the LZWDecode filter.\n\n### Patches\nThis has been fixed in [pypdf==6.1.3](https://github.com/py-pdf/pypdf/releases/tag/6.1.3).\n\n### Workarounds\nIf you cannot upgrade yet, consider applying the changes from PR [#3502](https://github.com/py-pdf/pypdf/pull/3502).",
+    "fixed_in": [
+     "6.1.3"
+    ],
+    "id": "PYSEC-2026-1831",
+    "link": "https://osv.dev/vulnerability/PYSEC-2026-1831",
+    "source": "osv",
+    "summary": null,
+    "withdrawn": null
+   },
+   {
+    "aliases": [
+     "CVE-2026-24688",
+     "GHSA-2q4j-m29v-hq73"
+    ],
+    "details": "### Impact\n\nAn attacker who uses this vulnerability can craft a PDF which leads to an infinite loop. This requires accessing the outlines/bookmarks.\n\n### Patches\n\nThis has been fixed in [pypdf 6.6.2](https://github.com/py-pdf/pypdf/releases/tag/6.6.2).\n\n### Workarounds\n\nIf projects cannot upgrade yet, consider applying the changes from PR [#3610](https://github.com/py-pdf/pypdf/pull/3610).",
+    "fixed_in": [
+     "6.6.2"
+    ],
+    "id": "PYSEC-2026-1827",
+    "link": "https://osv.dev/vulnerability/PYSEC-2026-1827",
+    "source": "osv",
+    "summary": null,
+    "withdrawn": null
+   },
+   {
+    "aliases": [
+     "CVE-2026-22691",
+     "GHSA-4f6g-68pf-7vhv"
+    ],
+    "details": "### Impact\nAn attacker who exploits this vulnerability can craft a PDF which leads to possibly long runtimes for invalid `startxref` entries. When rebuilding the cross-reference table, PDF files with lots of whitespace characters become problematic. Only the non-strict reading mode is affected.\n\n### Patches\nThis has been fixed in [pypdf==6.6.0](https://github.com/py-pdf/pypdf/releases/tag/6.6.0).\n\n### Workarounds\n\n```python\nfrom pypdf import PdfReader, PdfWriter\n\n\n# Instead of\nreader = PdfReader(\"file.pdf\")\n# use the strict mode:\nreader = PdfReader(\"file.pdf\", strict=True)\n\n# Instead of\nwriter = PdfWriter(clone_from=\"file.pdf\")\n# use an explicit strict reader:\nwriter = PdfWriter(clone_from=PdfReader(\"file.pdf\", strict=True))\n```\n\n### Resources\nThis issue has been fixed in #3594.",
+    "fixed_in": [
+     "6.6.0"
+    ],
+    "id": "PYSEC-2026-1828",
+    "link": "https://osv.dev/vulnerability/PYSEC-2026-1828",
+    "source": "osv",
+    "summary": null,
+    "withdrawn": null
+   },
+   {
+    "aliases": [
+     "CVE-2026-54651",
+     "PYSEC-2026-3018"
+    ],
+    "details": "### Impact\n\nAn attacker who uses this vulnerability can craft a PDF which leads to an infinite loop. This requires merging a file with threads/articles into a writer.\n\n### Patches\n\nThis has been fixed in [pypdf==6.13.1](https://github.com/py-pdf/pypdf/releases/tag/6.13.1).\n\n### Workarounds\n\nIf users cannot upgrade yet, consider applying the changes from PR [#3839](https://github.com/py-pdf/pypdf/pull/3839).",
+    "fixed_in": [
+     "6.13.1"
+    ],
+    "id": "GHSA-g9xf-7f8q-9mcj",
+    "link": "https://osv.dev/vulnerability/GHSA-g9xf-7f8q-9mcj",
+    "source": "osv",
+    "summary": null,
+    "withdrawn": null
+   },
+   {
+    "aliases": [
+     "CVE-2026-33123",
+     "GHSA-qpxp-75px-xjcp"
+    ],
+    "details": "### Impact\nAn attacker who uses this vulnerability can craft a PDF which leads to long runtimes and/or large memory usage. This requires accessing an array-based stream with lots of entries.\n\n### Patches\nThis has been fixed in [pypdf==6.9.1](https://github.com/py-pdf/pypdf/releases/tag/6.9.1).\n\n### Workarounds\nIf you cannot upgrade yet, consider applying the changes from PR [#3686](https://github.com/py-pdf/pypdf/pull/3686).",
+    "fixed_in": [
+     "6.9.1"
+    ],
+    "id": "PYSEC-2026-3023",
+    "link": "https://osv.dev/vulnerability/PYSEC-2026-3023",
+    "source": "osv",
+    "summary": null,
+    "withdrawn": null
+   },
+   {
+    "aliases": [
+     "CVE-2026-54531",
+     "GHSA-m2v9-299j-rv96"
+    ],
+    "details": "### Impact\n\nAn attacker who uses this vulnerability can craft a PDF which leads to an infinite loop. This requires merging a file with outlines into a writer.\n\n### Patches\n\nThis has been fixed in [pypdf==6.13.0](https://github.com/py-pdf/pypdf/releases/tag/6.13.0).\n\n### Workarounds\n\nIf you cannot upgrade yet, consider applying the changes from PR [#3830](https://github.com/py-pdf/pypdf/pull/3830).",
+    "fixed_in": [
+     "6.13.0"
+    ],
+    "id": "PYSEC-2026-3022",
+    "link": "https://osv.dev/vulnerability/PYSEC-2026-3022",
+    "source": "osv",
+    "summary": null,
+    "withdrawn": null
+   },
+   {
+    "aliases": [
+     "CVE-2026-28351",
+     "GHSA-f2v5-7jq9-h8cg"
+    ],
+    "details": "### Impact\n\nAn attacker who uses this vulnerability can craft a PDF which leads to large memory usage. This requires parsing the content stream using the RunLengthDecode filter.\n\n### Patches\nThis has been fixed in [pypdf==6.7.4](https://github.com/py-pdf/pypdf/releases/tag/6.7.4).\n\n### Workarounds\nIf you cannot upgrade yet, consider applying the changes from PR [#3664](https://github.com/py-pdf/pypdf/pull/3664).",
+    "fixed_in": [
+     "6.7.4"
+    ],
+    "id": "PYSEC-2026-3017",
+    "link": "https://osv.dev/vulnerability/PYSEC-2026-3017",
+    "source": "osv",
+    "summary": null,
+    "withdrawn": null
+   },
+   {
+    "aliases": [
+     "CVE-2026-31826",
+     "GHSA-hqmh-ppp3-xvm7"
+    ],
+    "details": "### Impact\n\nAn attacker who uses this vulnerability can craft a PDF which leads to large memory usage. This requires parsing a content stream with a rather large `/Length` value, regardless of the actual data length inside the stream.\n\n### Patches\nThis has been fixed in [pypdf==6.8.0](https://github.com/py-pdf/pypdf/releases/tag/6.8.0).\n\n### Workarounds\nIf you cannot upgrade yet, consider applying the changes from PR [#3675](https://github.com/py-pdf/pypdf/pull/3675).\n\nAs far as we are aware, this mostly affects reading from buffers of unknown size, as returned by `open(\"file.pdf\", mode=\"rb\")` for example. Passing a file path or a `BytesIO` buffer to *pypdf* instead does not seem to trigger the vulnerability.",
+    "fixed_in": [
+     "6.8.0"
+    ],
+    "id": "PYSEC-2026-3019",
+    "link": "https://osv.dev/vulnerability/PYSEC-2026-3019",
+    "source": "osv",
+    "summary": null,
+    "withdrawn": null
+   },
+   {
+    "aliases": [
+     "CVE-2026-49461",
+     "GHSA-j543-4vmf-qm7v"
+    ],
+    "details": "### Impact\nAn attacker who uses this vulnerability can craft a PDF which leads to large memory usage. This requires extracting the text of a page which contains a form XObject with self-references.\n\n### Patches\nThis has been fixed in [pypdf==6.12.2](https://github.com/py-pdf/pypdf/releases/tag/6.12.2).\n\n### Workarounds\nIf you cannot upgrade yet, consider applying the changes from PR [#3805](https://github.com/py-pdf/pypdf/pull/3805).",
+    "fixed_in": [
+     "6.12.2"
+    ],
+    "id": "PYSEC-2026-3020",
+    "link": "https://osv.dev/vulnerability/PYSEC-2026-3020",
+    "source": "osv",
+    "summary": null,
+    "withdrawn": null
+   },
+   {
+    "aliases": [
+     "CVE-2026-54651",
+     "GHSA-g9xf-7f8q-9mcj"
+    ],
+    "details": "### Impact\n\nAn attacker who uses this vulnerability can craft a PDF which leads to an infinite loop. This requires merging a file with threads/articles into a writer.\n\n### Patches\n\nThis has been fixed in [pypdf==6.13.1](https://github.com/py-pdf/pypdf/releases/tag/6.13.1).\n\n### Workarounds\n\nIf users cannot upgrade yet, consider applying the changes from PR [#3839](https://github.com/py-pdf/pypdf/pull/3839).",
+    "fixed_in": [
+     "6.13.1"
+    ],
+    "id": "PYSEC-2026-3018",
+    "link": "https://osv.dev/vulnerability/PYSEC-2026-3018",
+    "source": "osv",
+    "summary": null,
+    "withdrawn": null
+   },
+   {
+    "aliases": [
+     "CVE-2026-41168",
+     "GHSA-jj6c-8h6c-hppx"
+    ],
+    "details": "### Impact\n\nAn attacker who uses this vulnerability can craft a PDF which leads to long runtimes. This requires cross-reference streams with wrong large `/Size` values or object streams with wrong large `/N` values.\n\n### Patches\n\nThis has been fixed in [pypdf==6.10.1](https://github.com/py-pdf/pypdf/releases/tag/6.10.1).\n\n### Workarounds\n\nIf you cannot upgrade yet, consider applying the changes from PR [#3733](https://github.com/py-pdf/pypdf/pull/3733).",
+    "fixed_in": [
+     "6.10.1"
+    ],
+    "id": "PYSEC-2026-3021",
+    "link": "https://osv.dev/vulnerability/PYSEC-2026-3021",
+    "source": "osv",
+    "summary": null,
+    "withdrawn": null
+   },
+   {
+    "aliases": [
+     "CVE-2026-41312",
+     "GHSA-7gw9-cf7v-778f"
+    ],
+    "details": "### Impact\nAn attacker who uses this vulnerability can craft a PDF which leads to the RAM being exhausted. This requires accessing a stream compressed using `/FlateDecode` with a `/Predictor` unequal 1 and large predictor parameters.\n\n### Patches\nThis has been fixed in [pypdf==6.10.2](https://github.com/py-pdf/pypdf/releases/tag/6.10.2).\n\n### Workarounds\nIf you cannot upgrade yet, consider applying the changes from PR [#3734](https://github.com/py-pdf/pypdf/pull/3734).",
+    "fixed_in": [
+     "6.10.2"
+    ],
+    "id": "PYSEC-2026-3011",
+    "link": "https://osv.dev/vulnerability/PYSEC-2026-3011",
+    "source": "osv",
+    "summary": null,
+    "withdrawn": null
+   },
+   {
+    "aliases": [
+     "CVE-2026-41313",
+     "GHSA-4pxv-j86v-mhcw"
+    ],
+    "details": "### Impact\nAn attacker who uses this vulnerability can craft a PDF which leads to long runtimes. This requires loading a PDF with a large trailer `/Size` value in incremental mode.\n\n### Patches\nThis has been fixed in [pypdf==6.10.2](https://github.com/py-pdf/pypdf/releases/tag/6.10.2).\n\n### Workarounds\nIf you cannot upgrade yet, consider applying the changes from PR [#3735](https://github.com/py-pdf/pypdf/pull/3735).",
+    "fixed_in": [
+     "6.10.2"
+    ],
+    "id": "PYSEC-2026-3007",
+    "link": "https://osv.dev/vulnerability/PYSEC-2026-3007",
+    "source": "osv",
+    "summary": null,
+    "withdrawn": null
+   },
+   {
+    "aliases": [
+     "CVE-2026-48156",
+     "GHSA-248m-82v9-q6g6"
+    ],
+    "details": "### Impact\n\nAn attacker who uses this vulnerability can craft a PDF which leads to long runtimes. This requires cross-reference streams with `/W [0 0 0]` values and large `/Size` values.\n\n### Patches\n\nThis has been fixed in [pypdf==6.12.0](https://github.com/py-pdf/pypdf/releases/tag/6.12.0).\n\n### Workarounds\n\nIf developers are unable to upgrade their apps immediately, they should consider applying the changes from PR [#3791](https://github.com/py-pdf/pypdf/pull/3791).",
+    "fixed_in": [
+     "6.12.0"
+    ],
+    "id": "PYSEC-2026-3004",
+    "link": "https://osv.dev/vulnerability/PYSEC-2026-3004",
+    "source": "osv",
+    "summary": null,
+    "withdrawn": null
+   },
+   {
+    "aliases": [
+     "CVE-2026-27628",
+     "GHSA-2rw7-x74f-jg35"
+    ],
+    "details": "### Impact\n\nAn attacker who uses this vulnerability can craft a PDF which leads to an infinite loop. This requires reading the file.\n\n### Patches\n\nThis has been fixed in [pypdf==6.7.2](https://github.com/py-pdf/pypdf/releases/tag/6.7.2).\n\n### Workarounds\n\nIf users cannot upgrade yet, consider applying the changes from PR [#3655](https://github.com/py-pdf/pypdf/pull/3655).",
+    "fixed_in": [
+     "6.7.2"
+    ],
+    "id": "PYSEC-2026-3005",
+    "link": "https://osv.dev/vulnerability/PYSEC-2026-3005",
+    "source": "osv",
+    "summary": null,
+    "withdrawn": null
+   },
+   {
+    "aliases": [
+     "CVE-2026-40260",
+     "GHSA-3crg-w4f6-42mx"
+    ],
+    "details": "### Impact\n\nAn attacker who uses this vulnerability can craft a PDF which leads to large memory usage. This requires parsing the XMP metadata.\n\n### Patches\nThis has been fixed in [pypdf==6.10.0](https://github.com/py-pdf/pypdf/releases/tag/6.10.0).\n\n### Workarounds\nIf you cannot upgrade yet, consider applying the changes from PR [#3724](https://github.com/py-pdf/pypdf/pull/3724).",
+    "fixed_in": [
+     "6.10.0"
+    ],
+    "id": "PYSEC-2026-3006",
+    "link": "https://osv.dev/vulnerability/PYSEC-2026-3006",
+    "source": "osv",
+    "summary": null,
+    "withdrawn": null
+   },
+   {
+    "aliases": [
+     "CVE-2026-28804",
+     "GHSA-9m86-7pmv-2852"
+    ],
+    "details": "### Impact\nAn attacker who uses this vulnerability can craft a PDF which leads to long runtimes. This requires accessing a stream which uses the `/ASCIIHexDecode` filter.\n\n### Patches\nThis has been fixed in [pypdf==6.7.5](https://github.com/py-pdf/pypdf/releases/tag/6.7.5).\n\n### Workarounds\nIf you cannot upgrade yet, consider applying the changes from PR [#3666](https://github.com/py-pdf/pypdf/pull/3666).",
+    "fixed_in": [
+     "6.7.5"
+    ],
+    "id": "PYSEC-2026-3014",
+    "link": "https://osv.dev/vulnerability/PYSEC-2026-3014",
+    "source": "osv",
+    "summary": null,
+    "withdrawn": null
+   },
+   {
+    "aliases": [
+     "CVE-2026-27025",
+     "GHSA-wgvp-vg3v-2xq3"
+    ],
+    "details": "### Impact\n\nAn attacker who uses this vulnerability can craft a PDF which leads to long runtimes and large memory consumption. This requires parsing the `/ToUnicode` entry of a font with unusually large values, for example during text extraction.\n\n### Patches\n\nThis has been fixed in [pypdf==6.7.1](https://github.com/py-pdf/pypdf/releases/tag/6.7.1).\n\n### Workarounds\n\nIf you cannot upgrade yet, consider applying the changes from PR [#3646](https://github.com/py-pdf/pypdf/pull/3646).",
+    "fixed_in": [
+     "6.7.1"
+    ],
+    "id": "PYSEC-2026-3024",
+    "link": "https://osv.dev/vulnerability/PYSEC-2026-3024",
+    "source": "osv",
+    "summary": null,
+    "withdrawn": null
+   },
+   {
+    "aliases": [
+     "CVE-2026-41314",
+     "GHSA-x284-j5p8-9c5p"
+    ],
+    "details": "### Impact\nAn attacker who uses this vulnerability can craft a PDF which leads to the RAM being exhausted. This requires accessing an image using `/FlateDecode` with large size values.\n\n### Patches\nThis has been fixed in [pypdf==6.10.2](https://github.com/py-pdf/pypdf/releases/tag/6.10.2).\n\n### Workarounds\nIf you cannot upgrade yet, consider applying the changes from PR [#3734](https://github.com/py-pdf/pypdf/pull/3734).",
+    "fixed_in": [
+     "6.10.2"
+    ],
+    "id": "PYSEC-2026-3026",
+    "link": "https://osv.dev/vulnerability/PYSEC-2026-3026",
+    "source": "osv",
+    "summary": null,
+    "withdrawn": null
+   },
+   {
+    "aliases": [
+     "CVE-2026-48155",
+     "GHSA-cj93-chg6-vgv8"
+    ],
+    "details": "### Impact\n\nAn attacker who uses this vulnerability can craft a PDF which leads to large memory usage. This requires extracting text in layout mode with large character offsets.\n\n### Patches\n\nThis has been fixed in [pypdf==6.12.0](https://github.com/py-pdf/pypdf/releases/tag/6.12.0).\n\n### Workarounds\n\nIf developers are unable to immediately upgrade, they should consider applying the changes from PR [#3790](https://github.com/py-pdf/pypdf/pull/3790).",
+    "fixed_in": [
+     "6.12.0"
+    ],
+    "id": "PYSEC-2026-3016",
+    "link": "https://osv.dev/vulnerability/PYSEC-2026-3016",
+    "source": "osv",
+    "summary": null,
+    "withdrawn": null
+   },
+   {
+    "aliases": [
+     "CVE-2026-49460",
+     "GHSA-5hgr-hg42-57jg"
+    ],
+    "details": "### Impact\nAn attacker who uses this vulnerability can craft a PDF which leads to long runtimes. This requires accessing a stream which uses the `/FlateDecode` filter with a PNG predictor.\n\n### Patches\nThis has been fixed in [pypdf==6.12.2](https://github.com/py-pdf/pypdf/releases/tag/6.12.2).\n\n### Workarounds\nIf you cannot upgrade yet, consider applying the changes from PR [#3806](https://github.com/py-pdf/pypdf/pull/3806).",
+    "fixed_in": [
+     "6.12.2"
+    ],
+    "id": "PYSEC-2026-3010",
+    "link": "https://osv.dev/vulnerability/PYSEC-2026-3010",
+    "source": "osv",
+    "summary": null,
+    "withdrawn": null
+   },
+   {
+    "aliases": [
+     "CVE-2026-27026",
+     "GHSA-9mvc-8737-8j8h"
+    ],
+    "details": "### Impact\n\nAn attacker who uses this vulnerability can craft a PDF which leads to long runtimes. This requires a malformed `/FlateDecode` stream, where the byte-by-byte decompression is used.\n\n### Patches\n\nThis has been fixed in [pypdf==6.7.1](https://github.com/py-pdf/pypdf/releases/tag/6.7.1).\n\n### Workarounds\n\nIf you cannot upgrade yet, consider applying the changes from PR [#3644](https://github.com/py-pdf/pypdf/pull/3644).",
+    "fixed_in": [
+     "6.7.1"
+    ],
+    "id": "PYSEC-2026-3015",
+    "link": "https://osv.dev/vulnerability/PYSEC-2026-3015",
+    "source": "osv",
+    "summary": null,
+    "withdrawn": null
+   },
+   {
+    "aliases": [
+     "CVE-2026-48735",
+     "GHSA-wjqc-6w8f-h24c"
+    ],
+    "details": "### Impact\n\nAn attacker who uses this vulnerability can craft a PDF which leads to large memory usage. This requires parsing large XMP metadata, possibly with lots of unnecessary elements.\n\n### Patches\nThis has been fixed in [pypdf==6.12.1](https://github.com/py-pdf/pypdf/releases/tag/6.12.1).\n\n### Workarounds\nIf you cannot upgrade yet, consider applying the changes from PR [#3796](https://github.com/py-pdf/pypdf/pull/3796).",
+    "fixed_in": [
+     "6.12.1"
+    ],
+    "id": "PYSEC-2026-3025",
+    "link": "https://osv.dev/vulnerability/PYSEC-2026-3025",
+    "source": "osv",
+    "summary": null,
+    "withdrawn": null
+   },
+   {
+    "aliases": [
+     "CVE-2026-27024",
+     "GHSA-996q-pr4m-cvgq"
+    ],
+    "details": "### Impact\n\nAn attacker who uses this vulnerability can craft a PDF which leads to an infinite loop. This requires accessing the children of a `TreeObject`, for example as part of outlines.\n\n### Patches\n\nThis has been fixed in [pypdf==6.7.1](https://github.com/py-pdf/pypdf/releases/tag/6.7.1).\n\n### Workarounds\n\nIf you cannot upgrade yet, consider applying the changes from PR [#3645](https://github.com/py-pdf/pypdf/pull/3645).",
+    "fixed_in": [
+     "6.7.1"
+    ],
+    "id": "PYSEC-2026-3013",
+    "link": "https://osv.dev/vulnerability/PYSEC-2026-3013",
+    "source": "osv",
+    "summary": null,
+    "withdrawn": null
+   },
+   {
+    "aliases": [
+     "CVE-2026-54530",
+     "GHSA-52x6-gq3r-vpf4"
+    ],
+    "details": "### Impact\n\nAn attacker who uses this vulnerability can craft a PDF which leads to an infinite loop. This requires extracting the text in layout mode.\n\n### Patches\n\nThis has been fixed in [pypdf==6.13.0](https://github.com/py-pdf/pypdf/releases/tag/6.13.0).\n\n### Workarounds\n\nIf you cannot upgrade yet, consider applying the changes from PR [#3830](https://github.com/py-pdf/pypdf/pull/3830).",
+    "fixed_in": [
+     "6.13.0"
+    ],
+    "id": "PYSEC-2026-3009",
+    "link": "https://osv.dev/vulnerability/PYSEC-2026-3009",
+    "source": "osv",
+    "summary": null,
+    "withdrawn": null
+   },
+   {
+    "aliases": [
+     "CVE-2026-33699",
+     "GHSA-87mj-5ggw-8qc3"
+    ],
+    "details": "### Impact\n\nAn attacker who uses this vulnerability can craft a PDF which leads to an infinite loop. This requires reading a file in non-strict mode.\n\n### Patches\n\nThis has been fixed in [pypdf==6.9.2](https://github.com/py-pdf/pypdf/releases/tag/6.9.2).\n\n### Workarounds\n\nIf users cannot upgrade yet, consider applying the changes from PR [#3693](https://github.com/py-pdf/pypdf/pull/3693).",
+    "fixed_in": [
+     "6.9.2"
+    ],
+    "id": "PYSEC-2026-3012",
+    "link": "https://osv.dev/vulnerability/PYSEC-2026-3012",
+    "source": "osv",
+    "summary": null,
+    "withdrawn": null
+   },
+   {
+    "aliases": [
+     "CVE-2026-27888",
+     "GHSA-x7hp-r3qg-r3cj"
+    ],
+    "details": "### Impact\nAn attacker who uses this vulnerability can craft a PDF which leads to the RAM being exhausted. This requires accessing the `xfa` property of a reader or writer and the corresponding stream being compressed using `/FlateDecode`.\n\n### Patches\nThis has been fixed in [pypdf==6.7.3](https://github.com/py-pdf/pypdf/releases/tag/6.7.3).\n\n### Workarounds\nIf projects cannot upgrade yet, consider applying the changes from PR [#3658](https://github.com/py-pdf/pypdf/pull/3658).",
+    "fixed_in": [
+     "6.7.3"
+    ],
+    "id": "PYSEC-2026-3027",
+    "link": "https://osv.dev/vulnerability/PYSEC-2026-3027",
+    "source": "osv",
+    "summary": null,
+    "withdrawn": null
+   },
+   {
+    "aliases": [
+     "CVE-2026-59938",
+     "PYSEC-2026-3611"
+    ],
+    "details": "### Impact\n\nAn attacker who uses this vulnerability can craft a PDF which leads to large memory usage. This requires loading images where the declared size values are much too large compared to the actual data.\n\n### Patches\n\nThis has been fixed in [pypdf==6.14.0](https://github.com/py-pdf/pypdf/releases/tag/6.14.0).\n\n### Workarounds\n\nIf you cannot upgrade yet, consider applying the changes from PR [#3888](https://github.com/py-pdf/pypdf/pull/3888).",
+    "fixed_in": [
+     "6.14.0"
+    ],
+    "id": "GHSA-5qjq-93h5-hrgp",
+    "link": "https://osv.dev/vulnerability/GHSA-5qjq-93h5-hrgp",
+    "source": "osv",
+    "summary": null,
+    "withdrawn": null
+   },
+   {
+    "aliases": [
+     "CVE-2026-59937",
+     "PYSEC-2026-3610"
+    ],
+    "details": "### Impact\n\nAn attacker who uses this vulnerability can craft a PDF which leads to long runtimes. This requires cross-reference streams with repeated malformed cross-reference streams.\n\n### Patches\n\nThis has been fixed in [pypdf==6.14.0](https://github.com/py-pdf/pypdf/releases/tag/6.14.0).\n\n### Workarounds\n\nIf you cannot upgrade yet, consider applying the changes from PR [#3887](https://github.com/py-pdf/pypdf/pull/3887).",
+    "fixed_in": [
+     "6.14.0"
+    ],
+    "id": "GHSA-55h5-xmcq-c37v",
+    "link": "https://osv.dev/vulnerability/GHSA-55h5-xmcq-c37v",
+    "source": "osv",
+    "summary": null,
+    "withdrawn": null
+   },
+   {
+    "aliases": [
+     "CVE-2026-59935",
+     "PYSEC-2026-3613"
+    ],
+    "details": "### Impact\n\nAn attacker who uses this vulnerability can craft a PDF which leads to an infinite loop. This requires parsing the content stream of a page with a not terminated inline image, as done when extracting the page text for example. It only affects the ASCII85 and ASCIIHex filters.\n\n### Patches\n\nThis has been fixed in [pypdf==6.14.2](https://github.com/py-pdf/pypdf/releases/tag/6.14.2).\n\n### Workarounds\n\nIf you cannot upgrade yet, consider applying the changes from PR [#3892](https://github.com/py-pdf/pypdf/pull/3892).",
+    "fixed_in": [
+     "6.14.2"
+    ],
+    "id": "GHSA-g867-7843-wf8q",
+    "link": "https://osv.dev/vulnerability/GHSA-g867-7843-wf8q",
+    "source": "osv",
+    "summary": null,
+    "withdrawn": null
+   },
+   {
+    "aliases": [
+     "CVE-2026-59936",
+     "PYSEC-2026-3612"
+    ],
+    "details": "### Impact\n\nAn attacker who uses this vulnerability can craft a PDF which leads to an infinite loop. This requires parsing the content stream of a page with a not terminated inline image, as done when extracting the page text for example.\n\n### Patches\n\nThis has been fixed in [pypdf==6.14.1](https://github.com/py-pdf/pypdf/releases/tag/6.14.1).\n\n### Workarounds\n\nIf you cannot upgrade yet, consider applying the changes from PR [#3891](https://github.com/py-pdf/pypdf/pull/3891).",
+    "fixed_in": [
+     "6.14.1"
+    ],
+    "id": "GHSA-5xf7-4p34-54qr",
+    "link": "https://osv.dev/vulnerability/GHSA-5xf7-4p34-54qr",
+    "source": "osv",
+    "summary": null,
+    "withdrawn": null
+   },
+   {
+    "aliases": [
+     "CVE-2026-59935",
+     "GHSA-g867-7843-wf8q"
+    ],
+    "details": "### Impact\n\nAn attacker who uses this vulnerability can craft a PDF which leads to an infinite loop. This requires parsing the content stream of a page with a not terminated inline image, as done when extracting the page text for example. It only affects the ASCII85 and ASCIIHex filters.\n\n### Patches\n\nThis has been fixed in [pypdf==6.14.2](https://github.com/py-pdf/pypdf/releases/tag/6.14.2).\n\n### Workarounds\n\nIf you cannot upgrade yet, consider applying the changes from PR [#3892](https://github.com/py-pdf/pypdf/pull/3892).",
+    "fixed_in": [
+     "6.14.2"
+    ],
+    "id": "PYSEC-2026-3613",
+    "link": "https://osv.dev/vulnerability/PYSEC-2026-3613",
+    "source": "osv",
+    "summary": null,
+    "withdrawn": null
+   },
+   {
+    "aliases": [
+     "CVE-2026-59937",
+     "GHSA-55h5-xmcq-c37v"
+    ],
+    "details": "### Impact\n\nAn attacker who uses this vulnerability can craft a PDF which leads to long runtimes. This requires cross-reference streams with repeated malformed cross-reference streams.\n\n### Patches\n\nThis has been fixed in [pypdf==6.14.0](https://github.com/py-pdf/pypdf/releases/tag/6.14.0).\n\n### Workarounds\n\nIf you cannot upgrade yet, consider applying the changes from PR [#3887](https://github.com/py-pdf/pypdf/pull/3887).",
+    "fixed_in": [
+     "6.14.0"
+    ],
+    "id": "PYSEC-2026-3610",
+    "link": "https://osv.dev/vulnerability/PYSEC-2026-3610",
+    "source": "osv",
+    "summary": null,
+    "withdrawn": null
+   },
+   {
+    "aliases": [
+     "CVE-2026-59936",
+     "GHSA-5xf7-4p34-54qr"
+    ],
+    "details": "### Impact\n\nAn attacker who uses this vulnerability can craft a PDF which leads to an infinite loop. This requires parsing the content stream of a page with a not terminated inline image, as done when extracting the page text for example.\n\n### Patches\n\nThis has been fixed in [pypdf==6.14.1](https://github.com/py-pdf/pypdf/releases/tag/6.14.1).\n\n### Workarounds\n\nIf you cannot upgrade yet, consider applying the changes from PR [#3891](https://github.com/py-pdf/pypdf/pull/3891).",
+    "fixed_in": [
+     "6.14.1"
+    ],
+    "id": "PYSEC-2026-3612",
+    "link": "https://osv.dev/vulnerability/PYSEC-2026-3612",
+    "source": "osv",
+    "summary": null,
+    "withdrawn": null
+   },
+   {
+    "aliases": [
+     "CVE-2026-59938",
+     "GHSA-5qjq-93h5-hrgp"
+    ],
+    "details": "### Impact\n\nAn attacker who uses this vulnerability can craft a PDF which leads to large memory usage. This requires loading images where the declared size values are much too large compared to the actual data.\n\n### Patches\n\nThis has been fixed in [pypdf==6.14.0](https://github.com/py-pdf/pypdf/releases/tag/6.14.0).\n\n### Workarounds\n\nIf you cannot upgrade yet, consider applying the changes from PR [#3888](https://github.com/py-pdf/pypdf/pull/3888).",
+    "fixed_in": [
+     "6.14.0"
+    ],
+    "id": "PYSEC-2026-3611",
+    "link": "https://osv.dev/vulnerability/PYSEC-2026-3611",
+    "source": "osv",
+    "summary": null,
+    "withdrawn": null
+   },
+   {
+    "aliases": [
+     "CVE-2026-71852",
+     "PYSEC-2026-3656"
+    ],
+    "details": "### Impact\n\nAn attacker who uses this vulnerability can craft a PDF which leads to long runtimes and large memory consumption. This requires parsing the font width entries of a font with unusually large values, for example during text extraction.\n\n### Patches\n\nThis has been fixed in [pypdf==6.15.0](https://github.com/py-pdf/pypdf/releases/tag/6.15.0).\n\n### Workarounds\n\nIf you cannot upgrade yet, consider applying the changes from PR [#3946](https://github.com/py-pdf/pypdf/pull/3946).",
+    "fixed_in": [
+     "6.15.0"
+    ],
+    "id": "GHSA-fwg2-594c-jp42",
+    "link": "https://osv.dev/vulnerability/GHSA-fwg2-594c-jp42",
+    "source": "osv",
+    "summary": null,
+    "withdrawn": null
+   },
+   {
+    "aliases": [
+     "CVE-2026-71870",
+     "PYSEC-2026-3655"
+    ],
+    "details": "### Impact\n\nAn attacker who uses this vulnerability can craft a PDF which leads to large memory consumption. This requires parsing the `/ToUnicode` entry of a font with unusually large values, for example during text extraction.\n\n### Patches\n\nThis has been fixed in [pypdf==6.15.0](https://github.com/py-pdf/pypdf/releases/tag/6.15.0).\n\n### Workarounds\n\nIf you cannot upgrade yet, consider applying the changes from PR [#3944](https://github.com/py-pdf/pypdf/pull/3944).",
+    "fixed_in": [
+     "6.15.0"
+    ],
+    "id": "GHSA-fp3f-mc75-235c",
+    "link": "https://osv.dev/vulnerability/GHSA-fp3f-mc75-235c",
+    "source": "osv",
+    "summary": null,
+    "withdrawn": null
+   },
+   {
+    "aliases": [
+     "CVE-2026-71870",
+     "GHSA-fp3f-mc75-235c"
+    ],
+    "details": "### Impact\n\nAn attacker who uses this vulnerability can craft a PDF which leads to large memory consumption. This requires parsing the `/ToUnicode` entry of a font with unusually large values, for example during text extraction.\n\n### Patches\n\nThis has been fixed in [pypdf==6.15.0](https://github.com/py-pdf/pypdf/releases/tag/6.15.0).\n\n### Workarounds\n\nIf you cannot upgrade yet, consider applying the changes from PR [#3944](https://github.com/py-pdf/pypdf/pull/3944).",
+    "fixed_in": [
+     "6.15.0"
+    ],
+    "id": "PYSEC-2026-3655",
+    "link": "https://osv.dev/vulnerability/PYSEC-2026-3655",
+    "source": "osv",
+    "summary": null,
+    "withdrawn": null
+   },
+   {
+    "aliases": [
+     "CVE-2026-71852",
+     "GHSA-fwg2-594c-jp42"
+    ],
+    "details": "### Impact\n\nAn attacker who uses this vulnerability can craft a PDF which leads to long runtimes and large memory consumption. This requires parsing the font width entries of a font with unusually large values, for example during text extraction.\n\n### Patches\n\nThis has been fixed in [pypdf==6.15.0](https://github.com/py-pdf/pypdf/releases/tag/6.15.0).\n\n### Workarounds\n\nIf you cannot upgrade yet, consider applying the changes from PR [#3946](https://github.com/py-pdf/pypdf/pull/3946).",
+    "fixed_in": [
+     "6.15.0"
+    ],
+    "id": "PYSEC-2026-3656",
+    "link": "https://osv.dev/vulnerability/PYSEC-2026-3656",
+    "source": "osv",
+    "summary": null,
+    "withdrawn": null
+   },
+   {
+    "aliases": [
+     "CVE-2026-102993"
+    ],
+    "details": "### Impact\n\nAn attacker who uses this vulnerability can craft a PDF which leads to large memory consumption. This requires accessing the page labels of a document with large Roman numerals.\n\n### Patches\n\nThis has been fixed in [pypdf==6.17.0](https://github.com/py-pdf/pypdf/releases/tag/6.17.0).\n\n### Workarounds\n\nIf you cannot upgrade yet, consider applying the changes from PR [#4047](https://github.com/py-pdf/pypdf/pull/4047).",
+    "fixed_in": [
+     "6.17.0"
+    ],
+    "id": "GHSA-qv6h-rv94-w285",
+    "link": "https://osv.dev/vulnerability/GHSA-qv6h-rv94-w285",
+    "source": "osv",
+    "summary": null,
+    "withdrawn": null
+   },
+   {
+    "aliases": [
+     "CVE-2026-103000"
+    ],
+    "details": "### Impact\n\nAn attacker who uses this vulnerability can craft a PDF which leads to large memory consumption. This requires accessing the page labels of a document with large alphabetical labels.\n\n### Patches\n\nThis has been fixed in [pypdf==6.19.0](https://github.com/py-pdf/pypdf/releases/tag/6.19.0).\n\n### Workarounds\n\nIf you cannot upgrade yet, consider applying the changes from PR [#4096](https://github.com/py-pdf/pypdf/pull/4096).",
+    "fixed_in": [
+     "6.19.0"
+    ],
+    "id": "GHSA-w23x-9jrw-r45c",
+    "link": "https://osv.dev/vulnerability/GHSA-w23x-9jrw-r45c",
+    "source": "osv",
+    "summary": null,
+    "withdrawn": null
+   },
+   {
+    "aliases": [
+     "CVE-2026-102995"
+    ],
+    "details": "### Impact\n\nAn attacker who uses this vulnerability can craft a PDF which leads to large memory consumption. This requires parsing the `/ToUnicode` entry of a font with unusually large values, for example during text extraction.\n\n### Patches\n\nThis has been fixed in [pypdf==6.18.1](https://github.com/py-pdf/pypdf/releases/tag/6.18.1).\n\n### Workarounds\n\nIf you cannot upgrade yet, consider applying the changes from PR [#4071](https://github.com/py-pdf/pypdf/pull/4071).",
+    "fixed_in": [
+     "6.18.1"
+    ],
+    "id": "GHSA-fp3h-c4fm-7vvf",
+    "link": "https://osv.dev/vulnerability/GHSA-fp3h-c4fm-7vvf",
+    "source": "osv",
+    "summary": null,
+    "withdrawn": null
+   },
+   {
+    "aliases": [
+     "CVE-2026-102994"
+    ],
+    "details": "### Impact\n\nAn attacker who uses this vulnerability can craft a PDF which leads to long runtimes. This requires reading a PDF document with long indirect object headers, not terminated by whitespace.\n\n### Patches\n\nThis has been fixed in [pypdf==6.18.0](https://github.com/py-pdf/pypdf/releases/tag/6.18.0).\n\n### Workarounds\n\nIf you cannot upgrade yet, consider applying the changes from PR [#4055](https://github.com/py-pdf/pypdf/pull/4055).",
+    "fixed_in": [
+     "6.18.0"
+    ],
+    "id": "GHSA-5jq2-8x83-x246",
+    "link": "https://osv.dev/vulnerability/GHSA-5jq2-8x83-x246",
+    "source": "osv",
+    "summary": null,
+    "withdrawn": null
+   },
+   {
+    "aliases": [
+     "CVE-2026-84309"
+    ],
+    "details": "### Impact\n\nAn attacker who uses this vulnerability can craft a PDF which leads to an infinite loop. This requires a (usually writing) code path where `TreeObject.insert_child` is involved.\n\n### Patches\n\nThis has been fixed in [pypdf==6.16.0](https://github.com/py-pdf/pypdf/releases/tag/6.16.0).\n\n### Workarounds\n\nIf you cannot upgrade yet, consider applying the changes from PR [#3964](https://github.com/py-pdf/pypdf/pull/3964).",
+    "fixed_in": [
+     "6.16.0"
+    ],
+    "id": "GHSA-jp53-mhqp-8xcg",
+    "link": "https://osv.dev/vulnerability/GHSA-jp53-mhqp-8xcg",
+    "source": "osv",
+    "summary": null,
+    "withdrawn": null
+   },
+   {
+    "aliases": [
+     "CVE-2026-84310"
+    ],
+    "details": "### Impact\n\nAn attacker who uses this vulnerability can craft a PDF which leads to long runtimes and large memory consumption. This requires accessing the outlines of a document with either lots of entries or nested outlines with long re-used nesting paths.\n\n### Patches\n\nThis has been fixed in [pypdf==6.16.1](https://github.com/py-pdf/pypdf/releases/tag/6.16.1).\n\n### Workarounds\n\nIf you cannot upgrade yet, consider applying the changes from PR [#3966](https://github.com/py-pdf/pypdf/pull/3966).",
+    "fixed_in": [
+     "6.16.1"
+    ],
+    "id": "GHSA-23w6-3w8w-8484",
+    "link": "https://osv.dev/vulnerability/GHSA-23w6-3w8w-8484",
+    "source": "osv",
+    "summary": null,
+    "withdrawn": null
+   },
+   {
+    "aliases": [
+     "CVE-2026-84311"
+    ],
+    "details": "### Impact\n\nAn attacker who uses this vulnerability can craft a PDF which leads to long runtimes and large memory consumption. This requires extracting the text of a page with lots of XForm objects, where some of them might be re-used.\n\n### Patches\n\nThis has been fixed in [pypdf==6.16.1](https://github.com/py-pdf/pypdf/releases/tag/6.16.1).\n\n### Workarounds\n\nIf you cannot upgrade yet, consider applying the changes from PR [#3966](https://github.com/py-pdf/pypdf/pull/3966).",
+    "fixed_in": [
+     "6.16.1"
+    ],
+    "id": "GHSA-763m-79hh-57f2",
+    "link": "https://osv.dev/vulnerability/GHSA-763m-79hh-57f2",
+    "source": "osv",
+    "summary": null,
+    "withdrawn": null
+   },
+   {
+    "aliases": [
+     "CVE-2026-102998"
+    ],
+    "details": "### Impact\n\nAn attacker who uses this vulnerability can craft a PDF which leads to long runtimes. This requires updating form field values with flattening enabled, which triggers appearance stream generation.\n\n### Patches\n\nThis has been fixed in [pypdf==6.19.0](https://github.com/py-pdf/pypdf/releases/tag/6.19.0).\n\n### Workarounds\n\nIf you cannot upgrade yet, consider applying the changes from PR [#4087](https://github.com/py-pdf/pypdf/pull/4087).",
+    "fixed_in": [
+     "6.19.0"
+    ],
+    "id": "GHSA-php9-fj8v-98fj",
+    "link": "https://osv.dev/vulnerability/GHSA-php9-fj8v-98fj",
+    "source": "osv",
+    "summary": null,
+    "withdrawn": null
+   },
+   {
+    "aliases": [
+     "CVE-2026-102996"
+    ],
+    "details": "### Impact\n\nAn attacker who uses this vulnerability can craft a PDF which leads to large memory consumption. This requires parsing the `/Widths` entry of a TrueType or Type1 fonts with unusually large values, for example during text extraction.\n\n### Patches\n\nThis has been fixed in [pypdf==6.18.1](https://github.com/py-pdf/pypdf/releases/tag/6.18.1).\n\n### Workarounds\n\nIf you cannot upgrade yet, consider applying the changes from PR [#4072](https://github.com/py-pdf/pypdf/pull/4072).",
+    "fixed_in": [
+     "6.18.1"
+    ],
+    "id": "GHSA-g9cg-prrw-2r8q",
+    "link": "https://osv.dev/vulnerability/GHSA-g9cg-prrw-2r8q",
+    "source": "osv",
+    "summary": null,
+    "withdrawn": null
+   },
+   {
+    "aliases": [
+     "CVE-2026-82398"
+    ],
+    "details": "### Impact\nAn attacker who uses this vulnerability can craft a PDF which leads to long runtimes. This requires a call to `read_until_whitespace` with an input which does not have whitespace for a long time.\n\n### Patches\nThis has been fixed in [pypdf==6.15.0](https://github.com/py-pdf/pypdf/releases/tag/6.15.0).\n\n### Workarounds\nIf you cannot upgrade yet, consider applying the changes from PR [#3947](https://github.com/py-pdf/pypdf/pull/3947).",
+    "fixed_in": [
+     "6.15.0"
+    ],
+    "id": "GHSA-fc8x-2rww-xw9m",
+    "link": "https://osv.dev/vulnerability/GHSA-fc8x-2rww-xw9m",
+    "source": "osv",
+    "summary": null,
+    "withdrawn": null
+   },
+   {
+    "aliases": [
+     "CVE-2026-102997"
+    ],
+    "details": "### Impact\n\nAn attacker who uses this vulnerability can craft a PDF which leads to long runtimes. This requires a partially malformed `/FlateDecode` stream, where the byte-by-byte decompression is used.\n\n### Patches\n\nThis has been fixed in [pypdf==6.18.1](https://github.com/py-pdf/pypdf/releases/tag/6.18.1).\n\n### Workarounds\n\nIf you cannot upgrade yet, consider applying the changes from PR [#4073](https://github.com/py-pdf/pypdf/pull/4073).",
+    "fixed_in": [
+     "6.18.1"
+    ],
+    "id": "GHSA-jw7q-gvrg-4vj3",
+    "link": "https://osv.dev/vulnerability/GHSA-jw7q-gvrg-4vj3",
+    "source": "osv",
+    "summary": null,
+    "withdrawn": null
+   },
+   {
+    "aliases": [
+     "CVE-2026-102999"
+    ],
+    "details": "### Impact\n\nAn attacker who uses this vulnerability can craft a PDF which leads to long runtimes. This requires accessing the embedded files through the dictionary-based API.\n\n### Patches\n\nThis has been fixed in [pypdf==6.19.0](https://github.com/py-pdf/pypdf/releases/tag/6.19.0).\n\n### Workarounds\n\nIf you cannot upgrade yet, consider applying the changes from PR [#4081](https://github.com/py-pdf/pypdf/pull/4081).",
+    "fixed_in": [
+     "6.19.0"
+    ],
+    "id": "GHSA-v247-6f48-mgcj",
+    "link": "https://osv.dev/vulnerability/GHSA-v247-6f48-mgcj",
+    "source": "osv",
+    "summary": null,
+    "withdrawn": null
+   },
+   {
+    "aliases": [
+     "CVE-2026-84310",
+     "GHSA-23w6-3w8w-8484"
+    ],
+    "details": "### Impact\n\nAn attacker who uses this vulnerability can craft a PDF which leads to long runtimes and large memory consumption. This requires accessing the outlines of a document with either lots of entries or nested outlines with long re-used nesting paths.\n\n### Patches\n\nThis has been fixed in [pypdf==6.16.1](https://github.com/py-pdf/pypdf/releases/tag/6.16.1).\n\n### Workarounds\n\nIf you cannot upgrade yet, consider applying the changes from PR [#3966](https://github.com/py-pdf/pypdf/pull/3966).",
+    "fixed_in": [
+     "6.16.1"
+    ],
+    "id": "PYSEC-2026-3910",
+    "link": "https://osv.dev/vulnerability/PYSEC-2026-3910",
+    "source": "osv",
+    "summary": null,
+    "withdrawn": null
+   },
+   {
+    "aliases": [
+     "CVE-2026-82398",
+     "GHSA-fc8x-2rww-xw9m"
+    ],
+    "details": "### Impact\nAn attacker who uses this vulnerability can craft a PDF which leads to long runtimes. This requires a call to `read_until_whitespace` with an input which does not have whitespace for a long time.\n\n### Patches\nThis has been fixed in [pypdf==6.15.0](https://github.com/py-pdf/pypdf/releases/tag/6.15.0).\n\n### Workarounds\nIf you cannot upgrade yet, consider applying the changes from PR [#3947](https://github.com/py-pdf/pypdf/pull/3947).",
+    "fixed_in": [
+     "6.15.0"
+    ],
+    "id": "PYSEC-2026-3912",
+    "link": "https://osv.dev/vulnerability/PYSEC-2026-3912",
+    "source": "osv",
+    "summary": null,
+    "withdrawn": null
+   },
+   {
+    "aliases": [
+     "CVE-2026-84311",
+     "GHSA-763m-79hh-57f2"
+    ],
+    "details": "### Impact\n\nAn attacker who uses this vulnerability can craft a PDF which leads to long runtimes and large memory consumption. This requires extracting the text of a page with lots of XForm objects, where some of them might be re-used.\n\n### Patches\n\nThis has been fixed in [pypdf==6.16.1](https://github.com/py-pdf/pypdf/releases/tag/6.16.1).\n\n### Workarounds\n\nIf you cannot upgrade yet, consider applying the changes from PR [#3966](https://github.com/py-pdf/pypdf/pull/3966).",
+    "fixed_in": [
+     "6.16.1"
+    ],
+    "id": "PYSEC-2026-3911",
+    "link": "https://osv.dev/vulnerability/PYSEC-2026-3911",
+    "source": "osv",
+    "summary": null,
+    "withdrawn": null
+   },
+   {
+    "aliases": [
+     "CVE-2026-84309",
+     "GHSA-jp53-mhqp-8xcg"
+    ],
+    "details": "### Impact\n\nAn attacker who uses this vulnerability can craft a PDF which leads to an infinite loop. This requires a (usually writing) code path where `TreeObject.insert_child` is involved.\n\n### Patches\n\nThis has been fixed in [pypdf==6.16.0](https://github.com/py-pdf/pypdf/releases/tag/6.16.0).\n\n### Workarounds\n\nIf you cannot upgrade yet, consider applying the changes from PR [#3964](https://github.com/py-pdf/pypdf/pull/3964).",
+    "fixed_in": [
+     "6.16.0"
+    ],
+    "id": "PYSEC-2026-3913",
+    "link": "https://osv.dev/vulnerability/PYSEC-2026-3913",
+    "source": "osv",
+    "summary": null,
+    "withdrawn": null
+   },
+   {
+    "aliases": [
+     "CVE-2026-102994",
+     "GHSA-5jq2-8x83-x246"
+    ],
+    "details": "### Impact\n\nAn attacker who uses this vulnerability can craft a PDF which leads to long runtimes. This requires reading a PDF document with long indirect object headers, not terminated by whitespace.\n\n### Patches\n\nThis has been fixed in [pypdf==6.18.0](https://github.com/py-pdf/pypdf/releases/tag/6.18.0).\n\n### Workarounds\n\nIf you cannot upgrade yet, consider applying the changes from PR [#4055](https://github.com/py-pdf/pypdf/pull/4055).",
+    "fixed_in": [
+     "6.18.0"
+    ],
+    "id": "PYSEC-2026-4153",
+    "link": "https://osv.dev/vulnerability/PYSEC-2026-4153",
+    "source": "osv",
+    "summary": null,
+    "withdrawn": null
+   },
+   {
+    "aliases": [
+     "CVE-2026-103000",
+     "GHSA-w23x-9jrw-r45c"
+    ],
+    "details": "### Impact\n\nAn attacker who uses this vulnerability can craft a PDF which leads to large memory consumption. This requires accessing the page labels of a document with large alphabetical labels.\n\n### Patches\n\nThis has been fixed in [pypdf==6.19.0](https://github.com/py-pdf/pypdf/releases/tag/6.19.0).\n\n### Workarounds\n\nIf you cannot upgrade yet, consider applying the changes from PR [#4096](https://github.com/py-pdf/pypdf/pull/4096).",
+    "fixed_in": [
+     "6.19.0"
+    ],
+    "id": "PYSEC-2026-4160",
+    "link": "https://osv.dev/vulnerability/PYSEC-2026-4160",
+    "source": "osv",
+    "summary": null,
+    "withdrawn": null
+   },
+   {
+    "aliases": [
+     "CVE-2026-102995",
+     "GHSA-fp3h-c4fm-7vvf"
+    ],
+    "details": "### Impact\n\nAn attacker who uses this vulnerability can craft a PDF which leads to large memory consumption. This requires parsing the `/ToUnicode` entry of a font with unusually large values, for example during text extraction.\n\n### Patches\n\nThis has been fixed in [pypdf==6.18.1](https://github.com/py-pdf/pypdf/releases/tag/6.18.1).\n\n### Workarounds\n\nIf you cannot upgrade yet, consider applying the changes from PR [#4071](https://github.com/py-pdf/pypdf/pull/4071).",
+    "fixed_in": [
+     "6.18.1"
+    ],
+    "id": "PYSEC-2026-4154",
+    "link": "https://osv.dev/vulnerability/PYSEC-2026-4154",
+    "source": "osv",
+    "summary": null,
+    "withdrawn": null
+   },
+   {
+    "aliases": [
+     "CVE-2026-102999",
+     "GHSA-v247-6f48-mgcj"
+    ],
+    "details": "### Impact\n\nAn attacker who uses this vulnerability can craft a PDF which leads to long runtimes. This requires accessing the embedded files through the dictionary-based API.\n\n### Patches\n\nThis has been fixed in [pypdf==6.19.0](https://github.com/py-pdf/pypdf/releases/tag/6.19.0).\n\n### Workarounds\n\nIf you cannot upgrade yet, consider applying the changes from PR [#4081](https://github.com/py-pdf/pypdf/pull/4081).",
+    "fixed_in": [
+     "6.19.0"
+    ],
+    "id": "PYSEC-2026-4159",
+    "link": "https://osv.dev/vulnerability/PYSEC-2026-4159",
+    "source": "osv",
+    "summary": null,
+    "withdrawn": null
+   },
+   {
+    "aliases": [
+     "CVE-2026-102997",
+     "GHSA-jw7q-gvrg-4vj3"
+    ],
+    "details": "### Impact\n\nAn attacker who uses this vulnerability can craft a PDF which leads to long runtimes. This requires a partially malformed `/FlateDecode` stream, where the byte-by-byte decompression is used.\n\n### Patches\n\nThis has been fixed in [pypdf==6.18.1](https://github.com/py-pdf/pypdf/releases/tag/6.18.1).\n\n### Workarounds\n\nIf you cannot upgrade yet, consider applying the changes from PR [#4073](https://github.com/py-pdf/pypdf/pull/4073).",
+    "fixed_in": [
+     "6.18.1"
+    ],
+    "id": "PYSEC-2026-4156",
+    "link": "https://osv.dev/vulnerability/PYSEC-2026-4156",
+    "source": "osv",
+    "summary": null,
+    "withdrawn": null
+   },
+   {
+    "aliases": [
+     "CVE-2026-102993",
+     "GHSA-qv6h-rv94-w285"
+    ],
+    "details": "### Impact\n\nAn attacker who uses this vulnerability can craft a PDF which leads to large memory consumption. This requires accessing the page labels of a document with large Roman numerals.\n\n### Patches\n\nThis has been fixed in [pypdf==6.17.0](https://github.com/py-pdf/pypdf/releases/tag/6.17.0).\n\n### Workarounds\n\nIf you cannot upgrade yet, consider applying the changes from PR [#4047](https://github.com/py-pdf/pypdf/pull/4047).",
+    "fixed_in": [
+     "6.17.0"
+    ],
+    "id": "PYSEC-2026-4158",
+    "link": "https://osv.dev/vulnerability/PYSEC-2026-4158",
+    "source": "osv",
+    "summary": null,
+    "withdrawn": null
+   },
+   {
+    "aliases": [
+     "CVE-2026-102996",
+     "GHSA-g9cg-prrw-2r8q"
+    ],
+    "details": "### Impact\n\nAn attacker who uses this vulnerability can craft a PDF which leads to large memory consumption. This requires parsing the `/Widths` entry of a TrueType or Type1 fonts with unusually large values, for example during text extraction.\n\n### Patches\n\nThis has been fixed in [pypdf==6.18.1](https://github.com/py-pdf/pypdf/releases/tag/6.18.1).\n\n### Workarounds\n\nIf you cannot upgrade yet, consider applying the changes from PR [#4072](https://github.com/py-pdf/pypdf/pull/4072).",
+    "fixed_in": [
+     "6.18.1"
+    ],
+    "id": "PYSEC-2026-4155",
+    "link": "https://osv.dev/vulnerability/PYSEC-2026-4155",
+    "source": "osv",
+    "summary": null,
+    "withdrawn": null
+   },
+   {
+    "aliases": [
+     "CVE-2026-102998",
+     "GHSA-php9-fj8v-98fj"
+    ],
+    "details": "### Impact\n\nAn attacker who uses this vulnerability can craft a PDF which leads to long runtimes. This requires updating form field values with flattening enabled, which triggers appearance stream generation.\n\n### Patches\n\nThis has been fixed in [pypdf==6.19.0](https://github.com/py-pdf/pypdf/releases/tag/6.19.0).\n\n### Workarounds\n\nIf you cannot upgrade yet, consider applying the changes from PR [#4087](https://github.com/py-pdf/pypdf/pull/4087).",
+    "fixed_in": [
+     "6.19.0"
+    ],
+    "id": "PYSEC-2026-4157",
+    "link": "https://osv.dev/vulnerability/PYSEC-2026-4157",
+    "source": "osv",
+    "summary": null,
+    "withdrawn": null
+   },
+   {
+    "aliases": [
+     "CVE-2026-113792"
+    ],
+    "details": "### Impact\n\nAn attacker who uses this vulnerability can craft a PDF which leads to an infinite loop. This requires calling `find_outline_item` on a `PdfWriter`.\n\n### Patches\n\nThis has been fixed in [pypdf==6.20.1](https://github.com/py-pdf/pypdf/releases/tag/6.20.1).\n\n### Workarounds\n\nIf you cannot upgrade yet, consider applying the changes from PR [#4188](https://github.com/py-pdf/pypdf/pull/4188).",
+    "fixed_in": [
+     "6.20.1"
+    ],
+    "id": "GHSA-qfv9-64jg-mh7p",
+    "link": "https://osv.dev/vulnerability/GHSA-qfv9-64jg-mh7p",
+    "source": "osv",
+    "summary": null,
+    "withdrawn": null
+   },
+   {
+    "aliases": [
+     "CVE-2026-113795"
+    ],
+    "details": "### Impact\n\nAn attacker who uses this vulnerability can craft a PDF which leads to large memory consumption. This requires accessing any stream with a large amount of filters or multiple filters which pass around large amounts of data.\n\n### Patches\n\nThis has been fixed in [pypdf==6.20.0](https://github.com/py-pdf/pypdf/releases/tag/6.20.0).\n\n### Workarounds\n\nIf you cannot upgrade yet, consider applying the changes from PR [#4173](https://github.com/py-pdf/pypdf/pull/4173).",
+    "fixed_in": [
+     "6.20.0"
+    ],
+    "id": "GHSA-7mh2-4gg2-979f",
+    "link": "https://osv.dev/vulnerability/GHSA-7mh2-4gg2-979f",
+    "source": "osv",
+    "summary": null,
+    "withdrawn": null
+   },
+   {
+    "aliases": [
+     "CVE-2026-113793"
+    ],
+    "details": "### Impact\n\nAn attacker who uses this vulnerability can craft a PDF which leads to an infinite loop. This requires removing an object from a tree, for example an outline item.\n\n### Patches\n\nThis has been fixed in [pypdf==6.20.1](https://github.com/py-pdf/pypdf/releases/tag/6.20.1).\n\n### Workarounds\n\nIf you cannot upgrade yet, consider applying the changes from PR [#4188](https://github.com/py-pdf/pypdf/pull/4188).",
+    "fixed_in": [
+     "6.20.1"
+    ],
+    "id": "GHSA-9mx8-4j7g-633p",
+    "link": "https://osv.dev/vulnerability/GHSA-9mx8-4j7g-633p",
+    "source": "osv",
+    "summary": null,
+    "withdrawn": null
+   },
+   {
+    "aliases": [
+     "CVE-2026-113794"
+    ],
+    "details": "### Impact\n\nAn attacker who uses this vulnerability can craft a PDF which leads to an infinite loop. This requires an incomplete file which ends inside the xref table.\n\n### Patches\n\nThis has been fixed in [pypdf==6.20.0](https://github.com/py-pdf/pypdf/releases/tag/6.20.0).\n\n### Workarounds\n\nIf you cannot upgrade yet, consider applying the changes from PR [#4170](https://github.com/py-pdf/pypdf/pull/4170).\n\n### Notes\n\nThis has been reported through both the secure channel and as a public issue at [#4169](https://github.com/py-pdf/pypdf/issues/4169).",
+    "fixed_in": [
+     "6.20.0"
+    ],
+    "id": "GHSA-39mj-jf6j-2qj3",
+    "link": "https://osv.dev/vulnerability/GHSA-39mj-jf6j-2qj3",
+    "source": "osv",
+    "summary": null,
+    "withdrawn": null
+   },
+   {
+    "aliases": [
+     "CVE-2026-113786"
+    ],
+    "details": "### Impact\n\nAn attacker who uses this vulnerability can craft a PDF which leads to arbitrary image parsers being called. This requires loading an image which claims to use the `/DCTDecode` filter (JPEG data).\n\nUsers which do not have the optional *Pillow* dependency installed in their environment are not affected.\n\n### Patches\n\nThis has been fixed in [pypdf==6.21.1](https://github.com/py-pdf/pypdf/releases/tag/6.21.1).\n\n### Workarounds\n\nIf you cannot upgrade yet, consider applying the changes from PR [#4222](https://github.com/py-pdf/pypdf/pull/4222).",
+    "fixed_in": [
+     "6.21.1"
+    ],
+    "id": "GHSA-5hx5-vpf9-5wcv",
+    "link": "https://osv.dev/vulnerability/GHSA-5hx5-vpf9-5wcv",
+    "source": "osv",
+    "summary": null,
+    "withdrawn": null
+   },
+   {
+    "aliases": [
+     "CVE-2026-113791"
+    ],
+    "details": "### Impact\n\nAn attacker who uses this vulnerability can craft a PDF which leads to large memory usage. This requires parsing content streams with many small operations.\n\n### Patches\n\nThis has been fixed in [pypdf==6.21.0](https://github.com/py-pdf/pypdf/releases/tag/6.21.0).\n\n### Workarounds\n\nIf you cannot upgrade yet, consider applying the changes from PR [#4218](https://github.com/py-pdf/pypdf/pull/4218).",
+    "fixed_in": [
+     "6.21.0"
+    ],
+    "id": "GHSA-cgf9-327m-v77c",
+    "link": "https://osv.dev/vulnerability/GHSA-cgf9-327m-v77c",
+    "source": "osv",
+    "summary": null,
+    "withdrawn": null
+   },
+   {
+    "aliases": [
+     "CVE-2026-113790"
+    ],
+    "details": "### Impact\n\nAn attacker who uses this vulnerability can craft a PDF which leads to large memory usage. This requires parsing arrays and/or dictionaries with lots of elements.\n\n### Patches\n\nThis has been fixed in [pypdf==6.21.0](https://github.com/py-pdf/pypdf/releases/tag/6.21.0).\n\n### Workarounds\n\nIf you cannot upgrade yet, consider applying the changes from PR [#4218](https://github.com/py-pdf/pypdf/pull/4218).",
+    "fixed_in": [
+     "6.21.0"
+    ],
+    "id": "GHSA-f54x-cmq8-qg57",
+    "link": "https://osv.dev/vulnerability/GHSA-f54x-cmq8-qg57",
+    "source": "osv",
+    "summary": null,
+    "withdrawn": null
+   },
+   {
+    "aliases": [
+     "CVE-2026-113789"
+    ],
+    "details": "### Impact\n\nAn attacker who uses this vulnerability can craft a PDF which leads to large memory usage and/or long runtimes. This requires retrieving the form fields of a document.\n\n### Patches\n\nThis has been fixed in [pypdf==6.21.0](https://github.com/py-pdf/pypdf/releases/tag/6.21.0).\n\n### Workarounds\n\nIf you cannot upgrade yet, consider applying the changes from PR [#4219](https://github.com/py-pdf/pypdf/pull/4219).",
+    "fixed_in": [
+     "6.21.0"
+    ],
+    "id": "GHSA-6vvc-x485-93v7",
+    "link": "https://osv.dev/vulnerability/GHSA-6vvc-x485-93v7",
+    "source": "osv",
+    "summary": null,
+    "withdrawn": null
+   },
+   {
+    "aliases": [
+     "CVE-2026-115572"
+    ],
+    "details": "### Impact\n\nAn attacker who uses this vulnerability can craft a PDF which leads to long runtimes. This requires loading relevant parts of a file (like their pages) where the same, but non-existent indirect object is referenced multiple times.\n\n### Patches\n\nThis has been fixed in [pypdf==6.21.2](https://github.com/py-pdf/pypdf/releases/tag/6.21.2).\n\n### Workarounds\n\nIf you cannot upgrade yet, consider applying the changes from PR [#4240](https://github.com/py-pdf/pypdf/pull/4240).",
+    "fixed_in": [
+     "6.21.2"
+    ],
+    "id": "GHSA-6c7f-9265-g8fw",
+    "link": "https://osv.dev/vulnerability/GHSA-6c7f-9265-g8fw",
+    "source": "osv",
+    "summary": null,
+    "withdrawn": null
+   },
+   {
+    "aliases": [
+     "CVE-2026-115585"
+    ],
+    "details": "### Impact\n\nAn attacker who uses this vulnerability can craft a PDF which leads to long runtimes. This requires cross-reference streams with repeated malformed cross-reference streams.\n\n### Patches\n\nThis has been fixed in [pypdf==6.21.2](https://github.com/py-pdf/pypdf/releases/tag/6.21.2).\n\n### Workarounds\n\nIf you cannot upgrade yet, consider applying the changes from PR [#4240](https://github.com/py-pdf/pypdf/pull/4240).\n\n### Notes\n\nThis is a follow-up to https://github.com/py-pdf/pypdf/security/advisories/GHSA-55h5-xmcq-c37v, which had the side-effect of still loading the whole stream again despite the cache being present.",
+    "fixed_in": [
+     "6.21.2"
+    ],
+    "id": "GHSA-jr96-gvgh-j3r4",
+    "link": "https://osv.dev/vulnerability/GHSA-jr96-gvgh-j3r4",
+    "source": "osv",
+    "summary": null,
+    "withdrawn": null
+   },
+   {
+    "aliases": [
+     "CVE-2026-115580"
+    ],
+    "details": "### Impact\n\nAn attacker who uses this vulnerability can craft a PDF which leads to long runtimes. This requires opening a file with large/wrong upper limits in the xref table.\n\n### Patches\n\nThis has been fixed in [pypdf==6.21.2](https://github.com/py-pdf/pypdf/releases/tag/6.21.2).\n\n### Workarounds\n\nIf you cannot upgrade yet, consider applying the changes from PR [#4239](https://github.com/py-pdf/pypdf/pull/4239).",
+    "fixed_in": [
+     "6.21.2"
+    ],
+    "id": "GHSA-gmh7-3g9r-mjh5",
+    "link": "https://osv.dev/vulnerability/GHSA-gmh7-3g9r-mjh5",
+    "source": "osv",
+    "summary": null,
+    "withdrawn": null
+   },
+   {
+    "aliases": [
+     "CVE-2026-119208"
+    ],
+    "details": "### Impact\n\nAn attacker who uses this vulnerability can craft a PDF which leads to large runtimes/memory usage. This requires accessing the page count of an encrypted PDF file, which itself declares a wrong `/Count` value.\n\n### Patches\n\nThis has been fixed in [pypdf==6.21.3](https://github.com/py-pdf/pypdf/releases/tag/6.21.3).\n\n### Workarounds\n\nIf you cannot upgrade yet, consider applying the changes from PR [#4270](https://github.com/py-pdf/pypdf/pull/4270).",
+    "fixed_in": [
+     "6.21.3"
+    ],
+    "id": "GHSA-62m5-6wh8-28x7",
+    "link": "https://osv.dev/vulnerability/GHSA-62m5-6wh8-28x7",
+    "source": "osv",
+    "summary": null,
+    "withdrawn": null
+   },
+   {
+    "aliases": [
+     "CVE-2026-119206"
+    ],
+    "details": "### Impact\n\nAn attacker who uses this vulnerability can craft a PDF which leads to large runtimes. This requires retrieving the page labels of a file.\n\n### Patches\n\nThis has been fixed in [pypdf==6.21.3](https://github.com/py-pdf/pypdf/releases/tag/6.21.3).\n\n### Workarounds\n\nIf you cannot upgrade yet, consider applying the changes from PR [#4251](https://github.com/py-pdf/pypdf/pull/4251).",
+    "fixed_in": [
+     "6.21.3"
+    ],
+    "id": "GHSA-42gh-23hr-vphw",
+    "link": "https://osv.dev/vulnerability/GHSA-42gh-23hr-vphw",
+    "source": "osv",
+    "summary": null,
+    "withdrawn": null
+   },
+   {
+    "aliases": [
+     "CVE-2026-119209"
+    ],
+    "details": "### Impact\n\nAn attacker who uses this vulnerability can craft a PDF which leads to large memory usage. This requires opening a file with cross-reference streams.\n\n### Patches\n\nThis has been fixed in [pypdf==6.21.3](https://github.com/py-pdf/pypdf/releases/tag/6.21.3).\n\n### Workarounds\n\nIf you cannot upgrade yet, consider applying the changes from PR [#4269](https://github.com/py-pdf/pypdf/pull/4269).",
+    "fixed_in": [
+     "6.21.3"
+    ],
+    "id": "GHSA-x3rh-gjgm-fmqc",
+    "link": "https://osv.dev/vulnerability/GHSA-x3rh-gjgm-fmqc",
+    "source": "osv",
+    "summary": null,
+    "withdrawn": null
+   },
+   {
+    "aliases": [
+     "CVE-2026-119207"
+    ],
+    "details": "### Impact\n\nAn attacker who uses this vulnerability can craft a PDF which leads to large memory usage. This requires loading an invalid dictionary.\n\n### Patches\n\nThis has been fixed in [pypdf==6.21.3](https://github.com/py-pdf/pypdf/releases/tag/6.21.3).\n\n### Workarounds\n\nIf you cannot upgrade yet, consider applying the changes from PR [#4265](https://github.com/py-pdf/pypdf/pull/4265).",
+    "fixed_in": [
+     "6.21.3"
+    ],
+    "id": "GHSA-4vqv-7265-gm2w",
+    "link": "https://osv.dev/vulnerability/GHSA-4vqv-7265-gm2w",
+    "source": "osv",
+    "summary": null,
+    "withdrawn": null
+   },
+   {
+    "aliases": [
+     "CVE-2026-119203"
+    ],
+    "details": "### Impact\n\nAn attacker who uses this vulnerability can craft a PDF which leads to an infinite loop. This requires opening an incomplete file without a `trailer`.\n\n### Patches\n\nThis has been fixed in [pypdf==6.21.4](https://github.com/py-pdf/pypdf/releases/tag/6.21.4).\n\n### Workarounds\n\nIf you cannot upgrade yet, consider applying the changes from PR [#4289](https://github.com/py-pdf/pypdf/pull/4289).",
+    "fixed_in": [
+     "6.21.4"
+    ],
+    "id": "GHSA-5849-834g-hvw5",
+    "link": "https://osv.dev/vulnerability/GHSA-5849-834g-hvw5",
+    "source": "osv",
+    "summary": null,
+    "withdrawn": null
+   },
+   {
+    "aliases": [
+     "CVE-2026-119205"
+    ],
+    "details": "### Impact\n\nAn attacker who uses this vulnerability can craft a PDF which leads to an infinite loop. This requires cloning/duplicating a `DictionaryObject`.\n\n### Patches\n\nThis has been fixed in [pypdf==6.21.4](https://github.com/py-pdf/pypdf/releases/tag/6.21.4).\n\n### Workarounds\n\nIf you cannot upgrade yet, consider applying the changes from PR [#4288](https://github.com/py-pdf/pypdf/pull/4288).",
+    "fixed_in": [
+     "6.21.4"
+    ],
+    "id": "GHSA-mfr5-77xh-9j7h",
+    "link": "https://osv.dev/vulnerability/GHSA-mfr5-77xh-9j7h",
+    "source": "osv",
+    "summary": null,
+    "withdrawn": null
+   },
+   {
+    "aliases": [
+     "CVE-2026-119204"
+    ],
+    "details": "### Impact\n\nAn attacker who uses this vulnerability can craft a PDF which leads to large memory usage. This requires parsing the page tree with many shared resources.\n\n### Patches\n\nThis has been fixed in [pypdf==6.21.4](https://github.com/py-pdf/pypdf/releases/tag/6.21.4).\n\n### Workarounds\n\nIf you cannot upgrade yet, consider applying the changes from PR [#4290](https://github.com/py-pdf/pypdf/pull/4290).",
+    "fixed_in": [
+     "6.21.4"
+    ],
+    "id": "GHSA-cggf-277g-3q54",
+    "link": "https://osv.dev/vulnerability/GHSA-cggf-277g-3q54",
+    "source": "osv",
+    "summary": null,
+    "withdrawn": null
+   }
+  ]
+ }
+}
