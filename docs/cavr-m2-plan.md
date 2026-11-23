@@ -332,6 +332,10 @@ counterfactual run; the §6.6 three-package canary path is found; unexplored tri
 - Tests first: one positive and one negative sample per family; the §6.3 high / low examples rank as in the design;
   helper-call predicates stay `unsupported`; priority is deterministic.
 - Docker: no.
+- As built (Maryam, 2026-11-23, Phase 3a): a new module `trigger_frontier.py` instead of changing `trigger_discovery`
+  (the fast gate's `ast_scan` and the LOCAL lab use it; changing it would change PR 9 verdicts). `triggers.py` goes
+  in PR 11 with `counterfactual.py`, its only user. The import-closure link to `reachability`, `sleep` and the cloud
+  metadata address are not in it (PR 12 / limitations, Step M2-15).
 
 ### PR 11 — `feat(cavr): safe environment synthesis with per-run canaries`
 
@@ -343,6 +347,13 @@ counterfactual run; the §6.6 three-package canary path is found; unexplored tri
 - Docker: one test that the spec is what the container sees.
 
 ### PR 12 — `feat(cavr): budgeted counterfactual activation loop` (FR-4)
+
+- Recorded for PR 12 (Maryam, 2026-11-23, Phase 3a plan): the loop calls `trigger_frontier.frontier_residual(frontier,
+  explored)`; an unsimulable entry (any risk) can never give VERIFIED (tested in PR 10). `other_guards` that guard a
+  high-risk sink count as unexplored -> UNRESOLVED, unless the sink was exercised by a run. `sandbox_deep.high_risk_triggers`
+  (fast-gate `trigger_discovery.scan` triggers) is replaced by the frontier here, which is also when
+  `trigger_discovery.py` (LOCAL lab, `ast_scan`) and `sandbox_runner.py` (with `docker/asent-sandbox/`) can go.
+  Sandbox-evasion checks (`/.dockerenv`, files outside the sandbox HOME) are unsimulable and so UNRESOLVED by design.
 
 - Part: §6.4 loop: highest-priority unexplored trigger -> synthesized environment -> fresh container -> merge events;
   newly seen predicates join the frontier; early stop on a decisive violation (-> REJECTED); budget 8 runs, 20 s per
@@ -486,7 +497,7 @@ Stated as limitations in the report and on the dashboard, not implemented in M2:
 - [x] PR 9 one observed run for escalated packages (branch `cavr-m2-deep`, 2026-11-23; report notes Step M2-14): `sandbox_deep.py`; gate default `deep: "sandbox"`, off without the image; one `asent report` line per deep result; Flask / InvoiceHub verdicts unchanged
 
 ### Phase 3 — Counterfactual activation and causal graph
-- [ ] PR 10 trigger frontier
+- [x] PR 10 trigger frontier (branch `cavr-m2-frontier`, 2026-11-23; report notes Step M2-15): `trigger_frontier.py` (static scan of the verified wheel, activation by evaluating the condition, risk from the contract, bounded order); `frontier_residual` for PR 12; `trigger_discovery.py` kept (fast gate `ast_scan`, LOCAL lab)
 - [ ] PR 11 environment synthesis (libfaketime, per-run canaries)
 - [ ] PR 12 counterfactual loop
 - [ ] PR 13 causal graph

@@ -5529,3 +5529,133 @@ failed once in `.venv/bin/python -m pytest -q` (1716 s run, alongside CAVR's Doc
 (the run's output was cut to its last lines), so the cause is not known; the long, varying file times suggest a
 timeout or Docker-load dependency. Suggested check: run the file under load (e.g. with CAVR_DOCKER=1 tests in
 parallel) with `-x --tb=long`.
+
+
+## Step M2-15 — Trigger frontier from the verified wheel (PR 10) (2026-11-23)
+
+Plan: `docs/cavr-m2-plan.md` PR 10, Q8 frontier rule; Phase 3a plan approved by Maryam, 2026-11-23 (decisions 1–4
+and the additions: `frontier_residual` for PR 12, the `other_guards` rule recorded for PR 12, sandbox-evasion checks
+UNRESOLVED by design).
+
+### Ch 6 Implementation
+
+- `backend/cavr/trigger_frontier.py` (new). `frontier(nodes, contract, now=, limit=32)` re-hashes each wheel of the
+  verified tree (mismatch -> `ARTIFACT_CHANGED`), parses every `.py` entry after `wheel_meta.check_entries` (nothing
+  imported or run) and returns the ordered, bounded list of conditions that guard a sink.
+  - `FileScan` walks each module's statements with a path of enclosing guards: `if` body / `else`, `while` body,
+    early exits (`if X: return` puts `not X` in front of the rest of the block), nested guards; calls to module-level
+    functions of the same file are followed (`CALL_DEPTH` 5). Sinks: threat-repo `python_sinks` with import aliases
+    resolved, plus reads of a secret path named by a string constant (`SECRET_READ`).
+  - `build_scope` / `Scope`: import aliases and names assigned exactly once per scope (module, function, class).
+  - `families_of`: the families a condition reads (env, time, file, host, user, argv, platform, obfuscated); a guard
+    with none is an `other_guard`, not a trigger.
+  - `Evaluator`: an AST walk (never `eval`) with Kleene logic for unknown values; `search` tries candidate
+    environments built from the condition's constants (at most 512, in rounds so that a key read only behind
+    another is found); `activate` gives the smallest change from the baseline run, or why there is none (another
+    platform, UID 0, os.getlogin, a file outside the sandbox HOME, an invalid hostname, computed / obfuscated values).
+  - Risk from the worst sink against the contract (`contract_check.read_contract`): high / medium / low; priority
+    = sink_risk × reachability_confidence × novelty / run_cost, all factors in the entry.
+  - `frontier_residual(frontier, explored)`: the pure check PR 12 calls; missing / incomplete / truncated frontier,
+    any unsimulable entry, or an unexplored simulable entry -> UNRESOLVED, `verified_possible: False`.
+- Key algorithm: for each sink with a non-empty guard path -> split the path into trigger guards and opaque guards ->
+  evaluate the conjunction of the trigger guards (with polarity) in the baseline world and in every candidate world
+  (also at t + 60 s for clocks) -> smallest true candidate = activation -> risk and score -> sort (risk, −score,
+  package, file, line, id) -> novelty 0.5 for a repeated activation -> sort again -> cut at `limit`.
+- `docs/cavr-m2-plan.md`: PR 10 "as built", the PR 12 records, progress.
+
+### Design decisions
+
+- **New module, `trigger_discovery.py` unchanged.** It feeds `ast_scan` (fast gate, cached) and the PR 9
+  `high_risk_triggers`; changing its output would change PR 9 verdicts. Alternative (extend it in place) rejected for
+  that reason; PR 12 swaps `high_risk_triggers` onto the frontier.
+- **Activation by evaluating the condition**, not by pattern rules per family: `and` / `or` / `not`, `.lower()`, day
+  counts and `in (…)` fall out of one evaluator, and "simulable" means "a candidate environment was found that makes
+  the condition true", checked, not assumed. Trade-off: only modelled calls are known; anything else is unknown ->
+  unsimulable (fail closed).
+- **Kleene logic** so that `sys.platform == 'win32' or os.getenv('CI') == 'true'` is simulable through its second side
+  while `… and …` is not.
+- **The baseline world has the PR 11 canary files** (`CANARY_FILES`), so a check for `~/.aws/credentials` is taken by
+  the canary run itself (`baseline_takes_it`).
+- **Files only under the sandbox HOME**; any other path is unsimulable (whether the image has it is not known
+  statically). Consequence: sandbox-evasion checks such as `/.dockerenv` are UNRESOLVED by design.
+- **Bound 32 entries, `dropped` counted per risk**: PR 12's `frontier_residual` treats a cut frontier as UNRESOLVED,
+  so the bound can never hide a trigger.
+- **Deterministic**: sorted nodes and files, stable ids (SHA-256 of package, version, file, guard lines), `now` is an
+  argument and recorded.
+
+### Requirements covered
+
+- FR-12 trigger frontier: env / time / file / host / user / argv / platform conditions in front of a sink, each with
+  risk, priority factors and an activation or an unsimulable reason. Check: `tests/test_cavr_trigger_frontier.py`.
+- Q8 frontier rule (prepared for PR 12): an unsimulable trigger can never give VERIFIED. Check:
+  `test_an_unsimulable_entry_is_always_unresolved` (all risks, explored or not).
+- FR-6 fail closed: hash mismatch, unparsed source, native code, unreadable contract all fail closed.
+
+### Ch 7 Test cases
+
+| Test ID | Purpose | Input | Expected | Result |
+|---|---|---|---|---|
+| test_ci_true_is_a_simulable_env_trigger | env wheel | `os.environ.get('CI') == 'true'` | env {CI: true}, high | pass |
+| test_after_a_date_is_a_simulable_time_trigger | time wheel | `date.today() >= date(2027,1,1)` | time ≥ 2027-01-01 | pass |
+| test_kube_config_exists_is_a_simulable_file_trigger | file wheel | `exists(expanduser('~/.kube/config'))` | file /tmp/home/.kube/config | pass |
+| test_a_hostname_is_a_simulable_host_trigger | host wheel | `gethostname() == 'build-prod-7'` | hostname build-prod-7 | pass |
+| test_win32_platform_check_is_unsimulable_and_says_so | platform wheel | `sys.platform == 'win32'` | unsimulable, reason names win32 / Linux | pass |
+| test_reading_the_aws_key_and_sending_it_is_a_secret_read_sink | canary wheel | read ~/.aws/credentials + connect | SECRET_READ and NETWORK_CONNECT sinks | pass |
+| test_env_predicates_get_the_value_that_makes_them_true (6) | env forms | truthiness, in, [], .lower(), and, in tuple | the right values | pass |
+| test_time_predicates_with_constants_are_simulable (5) | time forms | datetime, timestamp, day count, timedelta, fromisoformat | simulable, after now | pass |
+| test_a_date_already_passed_is_taken_by_the_baseline | edge | date in the past | baseline_takes_it | pass |
+| test_a_time_compared_with_a_computed_value_is_unsimulable | failure | `time.time() - getmtime(__file__)` | unsimulable | pass |
+| test_file_predicates_under_home_are_simulable (3) | file forms | os.path.join, joinpath().is_dir(), `/` | file / dir | pass |
+| test_a_canary_file_is_there_in_every_run_so_the_baseline_takes_it | edge | exists(~/.aws/credentials) | baseline_takes_it | pass |
+| test_a_file_outside_the_sandbox_home_is_unsimulable (3) | evasion | /.dockerenv, not /.dockerenv, /etc/... | unsimulable | pass |
+| test_other_hostname_reads_are_simulable (2), test_an_invalid_hostname_constant_is_unsimulable | host | platform.node, uname, `bad_host!` | simulable / unsimulable | pass |
+| test_getuser_is_set_through_the_login_variables, test_root_and_login_checks_are_unsimulable (3) | user | getuser, getuid==0, getlogin | LOGNAME/USER / unsimulable | pass |
+| test_argv_predicates_are_simulable (3) | argv | in, len, slice | argv lists | pass |
+| test_platform_checks (5) | platform | linux, != win32, nt, Darwin, startswith('win') | baseline or unsimulable | pass |
+| else / early exit / nested / or / and / call / opaque / alias / once / twice / while (11 tests) | guard shapes | — | polarity, how, confidence, families | pass |
+| test_obfuscated_or_computed_reads_are_unsimulable (4) | failure | getattr, __import__, join, chr | unsimulable | pass |
+| test_risk_follows_the_contract (3), test_an_unreadable_contract_makes_every_entry_high | risk | denied / scoped / * / unreadable | high / medium / low / high | pass |
+| test_the_design_high_and_low_examples_rank_as_in_section_6_3 | §6.3 | exec (denied) vs connect (*) | exec first | pass |
+| test_the_same_activation_twice_halves_the_novelty_of_the_second | novelty | two `getenv('CI')` | 1.0, 0.5 | pass |
+| test_the_frontier_is_bounded_and_counts_what_it_dropped | bound | 10 triggers, limit 4 | 4 kept, 6 dropped high | pass |
+| test_the_frontier_is_deterministic_and_does_not_depend_on_node_order | determinism | shuffled nodes ×4 | identical JSON | pass |
+| test_a_wheel_whose_bytes_changed_is_artifact_changed, …_cannot_be_parsed…, test_native_code…, test_no_nodes… | failure | wrong sha, bad .py, .so, [] | not ok, rule | pass |
+| test_an_unsimulable_entry_is_always_unresolved (6), …_wins_over_everything_else | Q8 for PR 12 | unsimulable × risk × explored | UNRESOLVED TRIGGER_UNSIMULABLE | pass |
+| test_an_unexplored_simulable_entry_is_unresolved_and_a_baseline_one_is_not | PR 12 check | explored [] / [s1] | UNEXPLORED / EXPLORED | pass |
+| test_a_missing_incomplete_or_truncated_frontier_is_unresolved (4), test_a_real_frontier_with_a_win32_check_cannot_give_verified | PR 12 check | — | UNRESOLVED | pass |
+
+84 tests, 84 passed. No existing result changed. `CAVR_DOCKER=1 pytest tests/test_cavr_trigger_frontier.py
+tests/test_cavr_sandbox_*.py tests/test_cavr_deep_stage.py`: 545 passed, 240 s. Full suite `.venv/bin/python -m pytest -q`: 2852 passed, 73 skipped, 1 xfailed, 1 failed, 1828 s; the failure was
+`tests/test_cli_packaging.py::test_wheel_holds_nothing_else` (the built wheel held the new modules, which git did not
+track yet); after `git add` that file passed (12 passed, 9 s).
+
+### Defects found and fixed
+
+- Between activations of equal size the first test run picked by JSON text (`dir` before `file`, a longer argv list);
+  4 tests failed. Fixed: ties go to the first candidate in candidate order.
+- The full suite's packaging check failed while the new modules were untracked (see Ch 7); no code change needed.
+
+### Known limitations / deferred
+
+- Sandbox-evasion checks (`/.dockerenv`, any file outside the sandbox HOME) are unsimulable, so UNRESOLVED by design.
+- Not scanned for guards: `try` / `import` guards, `match` cases, conditional expressions (`a if c else b`), `sleep`
+  delays, the cloud metadata address; calls are followed only within the same file; a sink reached through a method
+  of an object (`s.connect`) is found only if the threat-repo rules name it.
+- Values are known only for the modelled calls; everything else (a file's content, a computed name, `os.getlogin`) is
+  unknown -> unsimulable.
+- The link from a trigger to the project's import closure (`reachability`) and the `other_guards` rule are PR 12.
+
+### Tool disclosure (Ch 8.7)
+
+- **Generated by Claude Code:** `trigger_frontier.py`, its tests, these notes and the plan edits, from the approved
+  plan. **Reviewed by Maryam:** the plan and decisions 1–4; the code not yet. **Verified by:** the runs above.
+
+### Supervisor Q&A prep
+
+1. **How do you know a trigger is simulable, rather than guessing from its shape?** The evaluator computes the
+   condition in the candidate environment and the entry is simulable only if it comes out true (also 60 s later for
+   clocks); PR 11's Docker tests then show the branch really runs under that spec.
+2. **Why is `sys.platform == 'win32'` not just skipped as irrelevant on Linux?** Code CAVR cannot run is code CAVR
+   has not observed; Q8 says incomplete -> UNRESOLVED, and `frontier_residual` enforces it.
+3. **Can the bound of 32 hide a malicious trigger?** No: anything cut is counted in `dropped`, and a non-zero
+   `dropped` makes `frontier_residual` UNRESOLVED.
