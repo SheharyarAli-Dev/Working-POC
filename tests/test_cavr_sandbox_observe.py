@@ -139,13 +139,15 @@ def test_the_steps_install_offline_by_hash_then_import(quarantine, captured):
     install, imports = captured["steps"]
     assert install["name"] == "install" and imports["name"] == "imports"
     argv = install["argv"]
-    assert argv[:4] == ["/usr/local/bin/python", "-I", "-m", "pip"]
-    for flag in ("--no-index", "--no-deps", "--require-hashes", "--no-compile"):
+    # pip is run through PIP_CODE, which only replaces its User-Agent builder (PR 7); -B: no .pyc is written.
+    assert argv[:5] == ["/usr/local/bin/python", "-I", "-B", "-c", sandbox_observe.PIP_CODE] and argv[5] == "install"
+    assert "session.user_agent = lambda: 'cavr-sandbox'" in sandbox_observe.PIP_CODE
+    for flag in ("--isolated", "--no-index", "--no-deps", "--require-hashes", "--no-compile", "--no-cache-dir"):
         assert flag in argv
     assert argv[argv.index("--only-binary") + 1] == ":all:" and argv[argv.index("--target") + 1] == "/site/lib"
     assert argv[argv.index("-r") + 1] == "/pkg/hashes.txt" and argv[argv.index("--find-links") + 1] == "/pkg"
-    assert imports["argv"][:4] == ["/usr/local/bin/python", "-I", "-S", "-c"] and imports["argv"][-2:] == ["demo", "helper"]
-    assert "site.addsitedir('/site/lib')" in imports["argv"][4]
+    assert imports["argv"][:5] == ["/usr/local/bin/python", "-I", "-S", "-B", "-c"] and imports["argv"][-2:] == ["demo", "helper"]
+    assert "site.addsitedir('/site/lib')" in imports["argv"][5]
     assert install["env"] == {} and imports["env"] == {}
 
 

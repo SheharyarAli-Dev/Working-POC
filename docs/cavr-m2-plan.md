@@ -28,7 +28,7 @@ update it as each PR lands.
 | Q2 | The VERIFIED demo pin becomes **`pypdf==6.21.4`**; `pypdf==6.19.0` and `pypdf==5.1.0` stay as REJECTED demo cases. Checked 2026-11-22: 6.21.4 has a wheel (`pypdf-6.21.4-py3-none-any.whl`, uploaded 2026-10-28), is not yanked, and has 0 advisories on PyPI's JSON and on OSV. The real wheel, registry JSON and OSV answer are recorded for offline tests; if any of them changes before PR 1, stop and ask. | PR 1 |
 | Q3 | Out of M2, listed under "Future work": npm, eBPF, Tree-sitter, Sigstore, level-4 package replacement, RESTRICTED enforcement. | Checklist row 34, PR 14, PR 15, "Future work" |
 | Q4 | Edits outside the CAVR scope are approved (`docker/`, `.github/workflows/`, `tests/test_modules.py`, `frontend/src/components/CavrModule.tsx`, demo project data). Every commit touching a shared file carries **`[owner review: <file or area>]`** at the end of its subject line. | Working rules; PRs 1, 3, 12, 19 |
-| Q5 | Tracer: strace as container root with only `SYS_PTRACE`, `SETUID`, `SETGID`, `no-new-privileges`; package code as UID 10001. NFR-1 is reworded to **"package code never runs as root"**. | NFR-1, sandbox rule 3, PR 5 |
+| Q5 | Tracer: strace as container root with only four capabilities and `no-new-privileges`: `SYS_PTRACE` (trace), `SETUID` + `SETGID` (`strace -u cavr` drops to UID/GID 10001), `DAC_READ_SEARCH` (read `/proc/<pid>/fd` of a UID 10001 process, mode 0500, so that `strace -y` prints each fd's path; added 2026-11-23, PR 7, Maryam). Package code runs as UID 10001 and holds no capability (the drop clears every set); the image has no setuid / setgid file and no file capability (Docker test). NFR-1 is reworded to **"package code never runs as root"**. | NFR-1, sandbox rule 3, PR 5, PR 7 |
 | Q6 | Separate image `asent-cavr-sandbox:local`, base pinned by digest. | PR 3 |
 | Q7 | Time triggers through **libfaketime** in the image. | PR 3, PR 11 |
 | Q8 | Budget accepted: 8 runs, 20 s per run, 120 s per package; deep runs only on escalation. Deep **VERIFIED only if** every run completed within budget, every trace is complete, and no event falls outside the contract in any run context. Any violation -> **REJECTED**; anything incomplete -> **UNRESOLVED**. | PR 2, PR 9, PR 12 |
@@ -42,6 +42,12 @@ If the budget ends while a high-risk trigger is still unexplored, or a trigger c
 incomplete -> UNRESOLVED, with those triggers listed. Accepted consequence: until PR 12 adds the frontier loop, PR 9
 returns UNRESOLVED for an escalated package that has such a trigger. Packages that are not escalated never reach the
 deep stage, so their fast-gate verdicts do not change.
+
+Q8 escalation rule (Maryam, 2026-11-23, after the review of PRs 7-9): a deep VERIFIED is possible only when every
+escalation reason (each reachable denied sink) was exercised by the run: its call is module-level code and the run
+shows an event of its capability. A sink that only the project's call sites reach -> UNRESOLVED
+`DEEP_SINK_NOT_EXERCISED` until Phase 3 drives the call sites. This replaces PR 9's "a benign wheel with a reachable
+sink and a clean complete run -> VERIFIED".
 
 ## Requirement IDs
 
@@ -167,8 +173,8 @@ The 21 PRs are grouped into five phases. A phase is done when all its PRs are me
 2. **Read-only.** `--read-only` root; wheels at `/pkg:ro`, project at `/project:ro`; writable only `tmpfs` with
    `noexec,nosuid,nodev` and a size cap; the trace directory is not writable or readable by the package's user.
 3. **Least privilege; package code never runs as root (NFR-1).** Package code runs as UID 10001. Only the trusted
-   tracer (strace) runs as container root, with `--cap-drop ALL --cap-add SYS_PTRACE --cap-add SETUID --cap-add SETGID`
-   and nothing else (Q5); `--security-opt no-new-privileges`; the repository seccomp profile (its SHA-256 goes into
+   tracer (strace) runs as container root, with `--cap-drop ALL --cap-add SYS_PTRACE --cap-add SETUID --cap-add SETGID
+   --cap-add DAC_READ_SEARCH` and nothing else (Q5); `--security-opt no-new-privileges`; the repository seccomp profile (its SHA-256 goes into
    `analyzer_version`); no Docker socket, no host home, no SSH agent, no host environment variables. Test: every
    process of the package in the trace has UID 10001.
 4. **Limits.** `--pids-limit 64`, `--memory 256m --memory-swap 256m`, `--cpus`, `--ulimit nofile,fsize`;
@@ -275,7 +281,8 @@ sandbox security rule above has a passing Docker test; violation -> REJECTED, in
 
 ### PR 7 — `fix(cavr): every attempted sensitive syscall becomes an event`
 
-- Part (review of PRs 3-6, MAJOR 1): strace gets `-yy` and a larger `-s`, and an event whose path or address is
+- Part (review of PRs 3-6, MAJOR 1): strace gets `-y` (as built: `-yy` would need netlink `sendmsg` / `recvmsg` for
+  strace, which the profile does not give packages either; sockets print as `socket:[n]`) and `-s 4096`, and an event whose path or address is
   truncated (`"..."...`) or relative to a dirfd that cannot be resolved is unknown -> UNRESOLVED.
 - Part: `runtime_monitor.normalize` keeps failed attempts with their errno; real endpoints from `sockaddr`
   (IPv4, IPv6, Unix); SECRET_ACCESS from the run's canary path set; harness processes excluded by PID from the trace,
@@ -298,7 +305,8 @@ sandbox security rule above has a passing Docker test; violation -> REJECTED, in
   Verdict rule (Q8): VERIFIED only if the run completed within budget (20 s per run, 120 s per package), its trace is
   complete, and no event falls outside the contract; any violation -> REJECTED; anything incomplete -> UNRESOLVED with
   the reason. `gate_adapter` passes the deep analyzer when the engine and image check pass; otherwise UNRESOLVED
-  "no isolation", as today. Deep time in `deep_analysis_ms` (NFR-4). Until PR 12 there is no frontier, so under the
+  "no isolation", as today. Deep time per package in the deep evidence (`elapsed_seconds`; as built in PR 9; a
+  `deep_analysis_ms` metric in `pipeline.metrics` is still open, NFR-4). Until PR 12 there is no frontier, so under the
   confirmed Q8 frontier rule an escalated package with a high-risk trigger in front of a reachable sink is incomplete
   -> UNRESOLVED (accepted). Packages that are not escalated are unaffected: they never reach the deep stage and keep
   their fast-gate verdict.
@@ -473,9 +481,9 @@ Stated as limitations in the report and on the dashboard, not implemented in M2:
 - [x] PR 4 runner deadline / kill / limits (branch `cavr-m2-sandbox`, 2026-11-23; report notes Step M2-8): `sandbox_exec.run_container`
 - [x] PR 5 trusted trace channel (package code never runs as root) (branch `cavr-m2-sandbox`, 2026-11-23; report notes Step M2-9): strace's stderr is the trace, `sandbox_trace.check_trace`
 - [x] PR 6 wheel install + import harness (branch `cavr-m2-sandbox`, 2026-11-23; report notes Step M2-10): `sandbox_observe.observe`; exec tmpfs only for the install target; `harness.py` kept until PR 12 (`docker/asent-sandbox/Dockerfile` still copies it; review 2026-11-23); refused syscalls and ptrace checked (Step M2-11)
-- [ ] PR 7 normalisation v2
-- [ ] PR 8 runtime contract check
-- [ ] PR 9 one observed run for escalated packages
+- [x] PR 7 normalisation v2 (branch `cavr-m2-deep`, 2026-11-23; report notes Step M2-12): `sandbox_events.py`; strace `-y -s 4096` with `DAC_READ_SEARCH`; pip's User-Agent replaced; `normalizer.py` deleted, `runtime_monitor.py` kept (LOCAL lab, PR 12)
+- [x] PR 8 runtime contract check (branch `cavr-m2-deep`, 2026-11-23; report notes Step M2-13): `contract_check.py`; label scopes -> UNRESOLVED (D5); `policy.verify_runtime` kept for the LOCAL lab (PR 12)
+- [x] PR 9 one observed run for escalated packages (branch `cavr-m2-deep`, 2026-11-23; report notes Step M2-14): `sandbox_deep.py`; gate default `deep: "sandbox"`, off without the image; one `asent report` line per deep result; Flask / InvoiceHub verdicts unchanged
 
 ### Phase 3 — Counterfactual activation and causal graph
 - [ ] PR 10 trigger frontier

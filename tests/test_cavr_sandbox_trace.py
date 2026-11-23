@@ -8,6 +8,7 @@ packages that try to reach, forge, fill or cut the trace.
 import ast
 import json
 import os
+import re
 import subprocess
 import sys
 import threading
@@ -484,7 +485,8 @@ def test_package_cannot_open_strace_fds_and_the_trace_stays_complete_and_unforge
     assert got["rule"] == "DEEP_NOT_JUDGED", got["reason"]
     assert got["evidence"]["trace_check"] == "TRACE_COMPLETE"
     trace = got["trace"]
-    assert 'openat(AT_FDCWD, "/proc/1/fd/2", O_WRONLY|O_CREAT|O_TRUNC|O_CLOEXEC, 0666) = -1 EACCES' in trace
+    # strace -y (PR 7) prints the directory of AT_FDCWD: `AT_FDCWD</tmp>`.
+    assert re.search(r'openat\(AT_FDCWD</[^>]*>, "/proc/1/fd/2", O_WRONLY\|O_CREAT\|O_TRUNC\|O_CLOEXEC, 0666\) = -1 EACCES', trace)
     assert '"/.cavr/' + "e" * 32 + '/end:ok"' in trace  # the guess is recorded, from the probe's PID, and ignored
     root = got["evidence"]["root_pid"]
     forged = [line for line in trace.splitlines() if line.startswith(f"{root} ") and "exited with 0" in line]
