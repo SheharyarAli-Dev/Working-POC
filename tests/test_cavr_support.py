@@ -7,11 +7,14 @@ A test that wants a mismatch has to change the bytes or the response itself.
 import base64
 import hashlib
 import json
+import os
 import shutil
+import subprocess
 import zipfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import pytest
 from packaging.utils import canonicalize_name
 from packaging.version import InvalidVersion, Version
 
@@ -323,3 +326,50 @@ def recorded_demo_settings(directory) -> dict:
     write_osv_cache(osv, "pypdf", PIN_VERSION, RECORDED_6_21_4)
     write_osv_cache(osv, "pypdf", "6.19.0", RECORDED_6_19_0_NOW)
     return {"transport": index, "osv": None, "advisory_cache_dir": osv, "live_advisories": False}
+
+
+# --- Docker sandbox tests (docs/cavr-m2-plan.md, "Docker tests") --------------------------------------------------------
+
+def docker_skip_reason() -> str | None:
+    """None when Docker tests may run: CAVR_DOCKER=1 and an engine that answers. Otherwise why they are skipped.
+
+    Docker is only asked when CAVR_DOCKER=1, so a normal run never starts a process for this."""
+    if os.environ.get("CAVR_DOCKER") != "1":
+        return "Docker sandbox test: set CAVR_DOCKER=1 to run it (needs a working Docker engine)"
+    try:
+        done = subprocess.run(["docker", "info", "--format", "{{.ServerVersion}}"], capture_output=True, text=True, timeout=20)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return f"CAVR_DOCKER=1 but Docker cannot be started: {exc}"
+    if done.returncode != 0:
+        return f"CAVR_DOCKER=1 but the Docker engine does not answer: {(done.stderr or done.stdout).strip()[:200]}"
+    return None
+
+
+_DOCKER_SKIP = docker_skip_reason()
+requires_docker = pytest.mark.skipif(_DOCKER_SKIP is not None, reason=_DOCKER_SKIP or "")
+
+_SANDBOX_IDENTITY = {}
+
+
+def sandbox_identity() -> dict:
+    """The checked identity of `asent-cavr-sandbox:local`, built once per session if it is missing or stale."""
+    from backend.cavr import sandbox_image
+    if not _SANDBOX_IDENTITY:
+        found = sandbox_image.image_identity()
+        # Build only an image that is missing, unrecorded or built from an older Dockerfile; an ID mismatch means
+        # someone re-tagged it, which a test must not paper over by rebuilding and overwriting the record.
+        if not found["ok"] and found["rule"] in ("IMAGE_MISSING", "IMAGE_NOT_RECORDED", "IMAGE_STALE"):
+            built = sandbox_image.build(emit=lambda line: None)
+            assert built["ok"], built
+            found = sandbox_image.image_identity()
+        assert found["ok"], found
+        _SANDBOX_IDENTITY.update(found)
+    return dict(_SANDBOX_IDENTITY)
+
+
+def cavr_containers() -> list[str]:
+    """Names of every container, running or stopped, whose name starts with cavr-."""
+    done = subprocess.run(["docker", "ps", "-a", "--filter", "name=^cavr-", "--format", "{{.Names}}"],
+                          capture_output=True, text=True, timeout=30)
+    assert done.returncode == 0, done.stderr
+    return [line for line in done.stdout.split() if line.startswith("cavr-")]

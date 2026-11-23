@@ -1,0 +1,706 @@
+9     execve("/usr/local/bin/python", ["/usr/local/bin/python", "-I", "-S", "/opt/cavr/harness.py", "/job/job.json"], 0x7fffebee2d70 /* 12 vars */) = 0
+9     readlinkat(AT_FDCWD, "/proc/self/exe", "/usr/local/bin/python3.12", 4096) = 25
+9     access("/etc/ld.so.preload", R_OK) = -1 ENOENT (No such file or directory)
+9     openat(AT_FDCWD, "/usr/local/bin/../lib/glibc-hwcaps/x86-64-v4/libpython3.12.so.1.0", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+9     newfstatat(AT_FDCWD, "/usr/local/bin/../lib/glibc-hwcaps/x86-64-v4/", 0x7ffe0348df60, 0) = -1 ENOENT (No such file or directory)
+9     openat(AT_FDCWD, "/usr/local/bin/../lib/glibc-hwcaps/x86-64-v3/libpython3.12.so.1.0", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+9     newfstatat(AT_FDCWD, "/usr/local/bin/../lib/glibc-hwcaps/x86-64-v3/", 0x7ffe0348df60, 0) = -1 ENOENT (No such file or directory)
+9     openat(AT_FDCWD, "/usr/local/bin/../lib/glibc-hwcaps/x86-64-v2/libpython3.12.so.1.0", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+9     newfstatat(AT_FDCWD, "/usr/local/bin/../lib/glibc-hwcaps/x86-64-v2/", 0x7ffe0348df60, 0) = -1 ENOENT (No such file or directory)
+9     openat(AT_FDCWD, "/usr/local/bin/../lib/libpython3.12.so.1.0", O_RDONLY|O_CLOEXEC) = 3
+9     openat(AT_FDCWD, "/usr/local/bin/../lib/libc.so.6", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+9     openat(AT_FDCWD, "/etc/ld.so.cache", O_RDONLY|O_CLOEXEC) = 3
+9     openat(AT_FDCWD, "/lib/x86_64-linux-gnu/libc.so.6", O_RDONLY|O_CLOEXEC) = 3
+9     openat(AT_FDCWD, "/lib/x86_64-linux-gnu/libm.so.6", O_RDONLY|O_CLOEXEC) = 3
+9     openat(AT_FDCWD, "/usr/lib/locale/locale-archive", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+9     openat(AT_FDCWD, "/usr/share/locale/locale.alias", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+9     openat(AT_FDCWD, "/usr/lib/locale/C.UTF-8/LC_CTYPE", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+9     openat(AT_FDCWD, "/usr/lib/locale/C.utf8/LC_CTYPE", O_RDONLY|O_CLOEXEC) = 3
+9     openat(AT_FDCWD, "/usr/lib/x86_64-linux-gnu/gconv/gconv-modules.cache", O_RDONLY|O_CLOEXEC) = 3
+9     openat(AT_FDCWD, "/usr/local/pyvenv.cfg", O_RDONLY) = -1 ENOENT (No such file or directory)
+9     openat(AT_FDCWD, "/usr/local/bin/pyvenv.cfg", O_RDONLY) = -1 ENOENT (No such file or directory)
+9     readlink("/usr/local/bin/python", "python3", 4096) = 7
+9     readlink("/usr/local/bin/python3", "python3.12", 4096) = 10
+9     readlink("/usr/local/bin/python3.12", 0x7ffe03489430, 4096) = -1 EINVAL (Invalid argument)
+9     openat(AT_FDCWD, "/usr/local/bin/python._pth", O_RDONLY) = -1 ENOENT (No such file or directory)
+9     openat(AT_FDCWD, "/usr/local/bin/python3.12._pth", O_RDONLY) = -1 ENOENT (No such file or directory)
+9     openat(AT_FDCWD, "/usr/local/bin/pybuilddir.txt", O_RDONLY) = -1 ENOENT (No such file or directory)
+9     newfstatat(AT_FDCWD, "/usr/local/bin/lib/python312.zip", 0x7ffe0348e110, 0) = -1 ENOENT (No such file or directory)
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python312.zip", 0x7ffe0348e190, 0) = -1 ENOENT (No such file or directory)
+9     newfstatat(AT_FDCWD, "/usr/lib/python312.zip", 0x7ffe0348e190, 0) = -1 ENOENT (No such file or directory)
+9     newfstatat(AT_FDCWD, "/usr/local/bin/lib/python3.12/os.py", 0x7ffe0348e190, 0) = -1 ENOENT (No such file or directory)
+9     newfstatat(AT_FDCWD, "/usr/local/bin/lib/python3.12/os.pyc", 0x7ffe0348e190, 0) = -1 ENOENT (No such file or directory)
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/os.py", {st_mode=S_IFREG|0644, st_size=40858, ...}, 0) = 0
+9     newfstatat(AT_FDCWD, "/usr/local/bin/lib/python3.12/lib-dynload", 0x7ffe0348e198, 0) = -1 ENOENT (No such file or directory)
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/lib-dynload", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/lib-dynload", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+9     openat(AT_FDCWD, "/etc/localtime", O_RDONLY|O_CLOEXEC) = 3
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python312.zip", 0x7ffe0348dbc0, 0) = -1 ENOENT (No such file or directory)
+9     newfstatat(AT_FDCWD, "/usr/local/lib", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python312.zip", 0x7ffe0348df70, 0) = -1 ENOENT (No such file or directory)
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+9     openat(AT_FDCWD, "/usr/local/lib/python3.12", O_RDONLY|O_NONBLOCK|O_CLOEXEC|O_DIRECTORY) = 3
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/encodings/__init__.cpython-312-x86_64-linux-gnu.so", 0x7ffe0348df70, 0) = -1 ENOENT (No such file or directory)
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/encodings/__init__.abi3.so", 0x7ffe0348df70, 0) = -1 ENOENT (No such file or directory)
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/encodings/__init__.so", 0x7ffe0348df70, 0) = -1 ENOENT (No such file or directory)
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/encodings/__init__.py", {st_mode=S_IFREG|0644, st_size=5884, ...}, 0) = 0
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/encodings/__init__.py", {st_mode=S_IFREG|0644, st_size=5884, ...}, 0) = 0
+9     openat(AT_FDCWD, "/usr/local/lib/python3.12/encodings/__pycache__/__init__.cpython-312.pyc", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+9     openat(AT_FDCWD, "/usr/local/lib/python3.12/encodings/__init__.py", O_RDONLY|O_CLOEXEC) = 3
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/encodings/__init__.py", {st_mode=S_IFREG|0644, st_size=5884, ...}, 0) = 0
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/encodings/__pycache__", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+9     openat(AT_FDCWD, "/usr/local/lib/python3.12/encodings/__pycache__/__init__.cpython-312.pyc.135369679638320", O_WRONLY|O_CREAT|O_EXCL|O_CLOEXEC, 0644) = -1 EROFS (Read-only file system)
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/encodings", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/encodings", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/encodings", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+9     openat(AT_FDCWD, "/usr/local/lib/python3.12/encodings", O_RDONLY|O_NONBLOCK|O_CLOEXEC|O_DIRECTORY) = 3
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/encodings/aliases.py", {st_mode=S_IFREG|0644, st_size=15677, ...}, 0) = 0
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/encodings/aliases.py", {st_mode=S_IFREG|0644, st_size=15677, ...}, 0) = 0
+9     openat(AT_FDCWD, "/usr/local/lib/python3.12/encodings/__pycache__/aliases.cpython-312.pyc", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+9     openat(AT_FDCWD, "/usr/local/lib/python3.12/encodings/aliases.py", O_RDONLY|O_CLOEXEC) = 3
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/encodings/aliases.py", {st_mode=S_IFREG|0644, st_size=15677, ...}, 0) = 0
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/encodings/__pycache__", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+9     openat(AT_FDCWD, "/usr/local/lib/python3.12/encodings/__pycache__/aliases.cpython-312.pyc.135369679261680", O_WRONLY|O_CREAT|O_EXCL|O_CLOEXEC, 0644) = -1 EROFS (Read-only file system)
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/encodings", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/encodings/utf_8.py", {st_mode=S_IFREG|0644, st_size=1005, ...}, 0) = 0
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/encodings/utf_8.py", {st_mode=S_IFREG|0644, st_size=1005, ...}, 0) = 0
+9     openat(AT_FDCWD, "/usr/local/lib/python3.12/encodings/__pycache__/utf_8.cpython-312.pyc", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+9     openat(AT_FDCWD, "/usr/local/lib/python3.12/encodings/utf_8.py", O_RDONLY|O_CLOEXEC) = 3
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/encodings/utf_8.py", {st_mode=S_IFREG|0644, st_size=1005, ...}, 0) = 0
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/encodings/__pycache__", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+9     openat(AT_FDCWD, "/usr/local/lib/python3.12/encodings/__pycache__/utf_8.cpython-312.pyc.135369679261904", O_WRONLY|O_CREAT|O_EXCL|O_CLOEXEC, 0644) = -1 EROFS (Read-only file system)
+9     newfstatat(AT_FDCWD, "/opt/cavr/harness.py", {st_mode=S_IFREG|0644, st_size=6324, ...}, 0) = 0
+9     openat(AT_FDCWD, "/opt/cavr/harness.py", O_RDONLY|O_CLOEXEC) = 3
+9     newfstatat(AT_FDCWD, "/opt/cavr/harness.py", {st_mode=S_IFREG|0644, st_size=6324, ...}, 0) = 0
+9     openat(AT_FDCWD, "/opt/cavr/harness.py", O_RDONLY) = 3
+9     openat(AT_FDCWD, "/dev/null", O_WRONLY|O_CLOEXEC) = 3
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/json/__init__.cpython-312-x86_64-linux-gnu.so", 0x7ffe0348e210, 0) = -1 ENOENT (No such file or directory)
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/json/__init__.abi3.so", 0x7ffe0348e210, 0) = -1 ENOENT (No such file or directory)
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/json/__init__.so", 0x7ffe0348e210, 0) = -1 ENOENT (No such file or directory)
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/json/__init__.py", {st_mode=S_IFREG|0644, st_size=14020, ...}, 0) = 0
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/json/__init__.py", {st_mode=S_IFREG|0644, st_size=14020, ...}, 0) = 0
+9     openat(AT_FDCWD, "/usr/local/lib/python3.12/json/__pycache__/__init__.cpython-312.pyc", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+9     openat(AT_FDCWD, "/usr/local/lib/python3.12/json/__init__.py", O_RDONLY|O_CLOEXEC) = 4
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/json/__init__.py", {st_mode=S_IFREG|0644, st_size=14020, ...}, 0) = 0
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/json/__pycache__", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+9     openat(AT_FDCWD, "/usr/local/lib/python3.12/json/__pycache__/__init__.cpython-312.pyc.135369679263248", O_WRONLY|O_CREAT|O_EXCL|O_CLOEXEC, 0644) = -1 EROFS (Read-only file system)
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/json", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/json", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/json", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+9     openat(AT_FDCWD, "/usr/local/lib/python3.12/json", O_RDONLY|O_NONBLOCK|O_CLOEXEC|O_DIRECTORY) = 4
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/json/decoder.py", {st_mode=S_IFREG|0644, st_size=12525, ...}, 0) = 0
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/json/decoder.py", {st_mode=S_IFREG|0644, st_size=12525, ...}, 0) = 0
+9     openat(AT_FDCWD, "/usr/local/lib/python3.12/json/__pycache__/decoder.cpython-312.pyc", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+9     openat(AT_FDCWD, "/usr/local/lib/python3.12/json/decoder.py", O_RDONLY|O_CLOEXEC) = 4
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/json/decoder.py", {st_mode=S_IFREG|0644, st_size=12525, ...}, 0) = 0
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/json/__pycache__", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+9     openat(AT_FDCWD, "/usr/local/lib/python3.12/json/__pycache__/decoder.cpython-312.pyc.135369679264704", O_WRONLY|O_CREAT|O_EXCL|O_CLOEXEC, 0644) = -1 EROFS (Read-only file system)
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/re/__init__.cpython-312-x86_64-linux-gnu.so", 0x7ffe0348d370, 0) = -1 ENOENT (No such file or directory)
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/re/__init__.abi3.so", 0x7ffe0348d370, 0) = -1 ENOENT (No such file or directory)
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/re/__init__.so", 0x7ffe0348d370, 0) = -1 ENOENT (No such file or directory)
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/re/__init__.py", {st_mode=S_IFREG|0644, st_size=16315, ...}, 0) = 0
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/re/__init__.py", {st_mode=S_IFREG|0644, st_size=16315, ...}, 0) = 0
+9     openat(AT_FDCWD, "/usr/local/lib/python3.12/re/__pycache__/__init__.cpython-312.pyc", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+9     openat(AT_FDCWD, "/usr/local/lib/python3.12/re/__init__.py", O_RDONLY|O_CLOEXEC) = 4
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/re/__init__.py", {st_mode=S_IFREG|0644, st_size=16315, ...}, 0) = 0
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/re/__pycache__", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+9     openat(AT_FDCWD, "/usr/local/lib/python3.12/re/__pycache__/__init__.cpython-312.pyc.135369679265712", O_WRONLY|O_CREAT|O_EXCL|O_CLOEXEC, 0644) = -1 EROFS (Read-only file system)
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/enum.py", {st_mode=S_IFREG|0644, st_size=81540, ...}, 0) = 0
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/enum.py", {st_mode=S_IFREG|0644, st_size=81540, ...}, 0) = 0
+9     openat(AT_FDCWD, "/usr/local/lib/python3.12/__pycache__/enum.cpython-312.pyc", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+9     openat(AT_FDCWD, "/usr/local/lib/python3.12/enum.py", O_RDONLY|O_CLOEXEC) = 4
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/enum.py", {st_mode=S_IFREG|0644, st_size=81540, ...}, 0) = 0
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/__pycache__", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+9     openat(AT_FDCWD, "/usr/local/lib/python3.12/__pycache__/enum.cpython-312.pyc.135369679266384", O_WRONLY|O_CREAT|O_EXCL|O_CLOEXEC, 0644) = -1 EROFS (Read-only file system)
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/types.py", {st_mode=S_IFREG|0644, st_size=10993, ...}, 0) = 0
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/types.py", {st_mode=S_IFREG|0644, st_size=10993, ...}, 0) = 0
+9     openat(AT_FDCWD, "/usr/local/lib/python3.12/__pycache__/types.cpython-312.pyc", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+9     openat(AT_FDCWD, "/usr/local/lib/python3.12/types.py", O_RDONLY|O_CLOEXEC) = 4
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/types.py", {st_mode=S_IFREG|0644, st_size=10993, ...}, 0) = 0
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/__pycache__", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+9     openat(AT_FDCWD, "/usr/local/lib/python3.12/__pycache__/types.cpython-312.pyc.135369679267392", O_WRONLY|O_CREAT|O_EXCL|O_CLOEXEC, 0644) = -1 EROFS (Read-only file system)
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/operator.py", {st_mode=S_IFREG|0644, st_size=10965, ...}, 0) = 0
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/operator.py", {st_mode=S_IFREG|0644, st_size=10965, ...}, 0) = 0
+9     openat(AT_FDCWD, "/usr/local/lib/python3.12/__pycache__/operator.cpython-312.pyc", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+9     openat(AT_FDCWD, "/usr/local/lib/python3.12/operator.py", O_RDONLY|O_CLOEXEC) = 4
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/operator.py", {st_mode=S_IFREG|0644, st_size=10965, ...}, 0) = 0
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/__pycache__", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+9     openat(AT_FDCWD, "/usr/local/lib/python3.12/__pycache__/operator.cpython-312.pyc.135369679267616", O_WRONLY|O_CREAT|O_EXCL|O_CLOEXEC, 0644) = -1 EROFS (Read-only file system)
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/functools.py", {st_mode=S_IFREG|0644, st_size=37940, ...}, 0) = 0
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/functools.py", {st_mode=S_IFREG|0644, st_size=37940, ...}, 0) = 0
+9     openat(AT_FDCWD, "/usr/local/lib/python3.12/__pycache__/functools.cpython-312.pyc", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+9     openat(AT_FDCWD, "/usr/local/lib/python3.12/functools.py", O_RDONLY|O_CLOEXEC) = 4
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/functools.py", {st_mode=S_IFREG|0644, st_size=37940, ...}, 0) = 0
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/__pycache__", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+9     openat(AT_FDCWD, "/usr/local/lib/python3.12/__pycache__/functools.cpython-312.pyc.135369679267616", O_WRONLY|O_CREAT|O_EXCL|O_CLOEXEC, 0644) = -1 EROFS (Read-only file system)
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/collections/__init__.cpython-312-x86_64-linux-gnu.so", 0x7ffe0348bd80, 0) = -1 ENOENT (No such file or directory)
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/collections/__init__.abi3.so", 0x7ffe0348bd80, 0) = -1 ENOENT (No such file or directory)
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/collections/__init__.so", 0x7ffe0348bd80, 0) = -1 ENOENT (No such file or directory)
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/collections/__init__.py", {st_mode=S_IFREG|0644, st_size=52378, ...}, 0) = 0
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/collections/__init__.py", {st_mode=S_IFREG|0644, st_size=52378, ...}, 0) = 0
+9     openat(AT_FDCWD, "/usr/local/lib/python3.12/collections/__pycache__/__init__.cpython-312.pyc", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+9     openat(AT_FDCWD, "/usr/local/lib/python3.12/collections/__init__.py", O_RDONLY|O_CLOEXEC) = 4
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/collections/__init__.py", {st_mode=S_IFREG|0644, st_size=52378, ...}, 0) = 0
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/collections/__pycache__", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+9     openat(AT_FDCWD, "/usr/local/lib/python3.12/collections/__pycache__/__init__.cpython-312.pyc.135369677772080", O_WRONLY|O_CREAT|O_EXCL|O_CLOEXEC, 0644) = -1 EROFS (Read-only file system)
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/keyword.py", {st_mode=S_IFREG|0644, st_size=1073, ...}, 0) = 0
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/keyword.py", {st_mode=S_IFREG|0644, st_size=1073, ...}, 0) = 0
+9     openat(AT_FDCWD, "/usr/local/lib/python3.12/__pycache__/keyword.cpython-312.pyc", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+9     openat(AT_FDCWD, "/usr/local/lib/python3.12/keyword.py", O_RDONLY|O_CLOEXEC) = 4
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/keyword.py", {st_mode=S_IFREG|0644, st_size=1073, ...}, 0) = 0
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/__pycache__", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+9     openat(AT_FDCWD, "/usr/local/lib/python3.12/__pycache__/keyword.cpython-312.pyc.135369678201536", O_WRONLY|O_CREAT|O_EXCL|O_CLOEXEC, 0644) = -1 EROFS (Read-only file system)
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/reprlib.py", {st_mode=S_IFREG|0644, st_size=7148, ...}, 0) = 0
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/reprlib.py", {st_mode=S_IFREG|0644, st_size=7148, ...}, 0) = 0
+9     openat(AT_FDCWD, "/usr/local/lib/python3.12/__pycache__/reprlib.cpython-312.pyc", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+9     openat(AT_FDCWD, "/usr/local/lib/python3.12/reprlib.py", O_RDONLY|O_CLOEXEC) = 4
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/reprlib.py", {st_mode=S_IFREG|0644, st_size=7148, ...}, 0) = 0
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/__pycache__", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+9     openat(AT_FDCWD, "/usr/local/lib/python3.12/__pycache__/reprlib.cpython-312.pyc.135369678201536", O_WRONLY|O_CREAT|O_EXCL|O_CLOEXEC, 0644) = -1 EROFS (Read-only file system)
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/re", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/re", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/re", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+9     openat(AT_FDCWD, "/usr/local/lib/python3.12/re", O_RDONLY|O_NONBLOCK|O_CLOEXEC|O_DIRECTORY) = 4
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/re/_compiler.py", {st_mode=S_IFREG|0644, st_size=26399, ...}, 0) = 0
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/re/_compiler.py", {st_mode=S_IFREG|0644, st_size=26399, ...}, 0) = 0
+9     openat(AT_FDCWD, "/usr/local/lib/python3.12/re/__pycache__/_compiler.cpython-312.pyc", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+9     openat(AT_FDCWD, "/usr/local/lib/python3.12/re/_compiler.py", O_RDONLY|O_CLOEXEC) = 4
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/re/_compiler.py", {st_mode=S_IFREG|0644, st_size=26399, ...}, 0) = 0
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/re/__pycache__", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+9     openat(AT_FDCWD, "/usr/local/lib/python3.12/re/__pycache__/_compiler.cpython-312.pyc.135369679265824", O_WRONLY|O_CREAT|O_EXCL|O_CLOEXEC, 0644) = -1 EROFS (Read-only file system)
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/re", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/re/_parser.py", {st_mode=S_IFREG|0644, st_size=41201, ...}, 0) = 0
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/re/_parser.py", {st_mode=S_IFREG|0644, st_size=41201, ...}, 0) = 0
+9     openat(AT_FDCWD, "/usr/local/lib/python3.12/re/__pycache__/_parser.cpython-312.pyc", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+9     openat(AT_FDCWD, "/usr/local/lib/python3.12/re/_parser.py", O_RDONLY|O_CLOEXEC) = 4
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/re/_parser.py", {st_mode=S_IFREG|0644, st_size=41201, ...}, 0) = 0
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/re/__pycache__", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+9     openat(AT_FDCWD, "/usr/local/lib/python3.12/re/__pycache__/_parser.cpython-312.pyc.135369679270304", O_WRONLY|O_CREAT|O_EXCL|O_CLOEXEC, 0644) = -1 EROFS (Read-only file system)
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/re", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/re/_constants.py", {st_mode=S_IFREG|0644, st_size=5930, ...}, 0) = 0
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/re/_constants.py", {st_mode=S_IFREG|0644, st_size=5930, ...}, 0) = 0
+9     openat(AT_FDCWD, "/usr/local/lib/python3.12/re/__pycache__/_constants.cpython-312.pyc", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+9     openat(AT_FDCWD, "/usr/local/lib/python3.12/re/_constants.py", O_RDONLY|O_CLOEXEC) = 4
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/re/_constants.py", {st_mode=S_IFREG|0644, st_size=5930, ...}, 0) = 0
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/re/__pycache__", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+9     openat(AT_FDCWD, "/usr/local/lib/python3.12/re/__pycache__/_constants.cpython-312.pyc.135369678204448", O_WRONLY|O_CREAT|O_EXCL|O_CLOEXEC, 0644) = -1 EROFS (Read-only file system)
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/re", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/re/_casefix.py", {st_mode=S_IFREG|0644, st_size=5444, ...}, 0) = 0
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/re/_casefix.py", {st_mode=S_IFREG|0644, st_size=5444, ...}, 0) = 0
+9     openat(AT_FDCWD, "/usr/local/lib/python3.12/re/__pycache__/_casefix.cpython-312.pyc", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+9     openat(AT_FDCWD, "/usr/local/lib/python3.12/re/_casefix.py", O_RDONLY|O_CLOEXEC) = 4
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/re/_casefix.py", {st_mode=S_IFREG|0644, st_size=5444, ...}, 0) = 0
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/re/__pycache__", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+9     openat(AT_FDCWD, "/usr/local/lib/python3.12/re/__pycache__/_casefix.cpython-312.pyc.135369678204448", O_WRONLY|O_CREAT|O_EXCL|O_CLOEXEC, 0644) = -1 EROFS (Read-only file system)
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/copyreg.py", {st_mode=S_IFREG|0644, st_size=7614, ...}, 0) = 0
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/copyreg.py", {st_mode=S_IFREG|0644, st_size=7614, ...}, 0) = 0
+9     openat(AT_FDCWD, "/usr/local/lib/python3.12/__pycache__/copyreg.cpython-312.pyc", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+9     openat(AT_FDCWD, "/usr/local/lib/python3.12/copyreg.py", O_RDONLY|O_CLOEXEC) = 4
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/copyreg.py", {st_mode=S_IFREG|0644, st_size=7614, ...}, 0) = 0
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/__pycache__", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+9     openat(AT_FDCWD, "/usr/local/lib/python3.12/__pycache__/copyreg.cpython-312.pyc.135369678204896", O_WRONLY|O_CREAT|O_EXCL|O_CLOEXEC, 0644) = -1 EROFS (Read-only file system)
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/json", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/json/scanner.py", {st_mode=S_IFREG|0644, st_size=2434, ...}, 0) = 0
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/json/scanner.py", {st_mode=S_IFREG|0644, st_size=2434, ...}, 0) = 0
+9     openat(AT_FDCWD, "/usr/local/lib/python3.12/json/__pycache__/scanner.cpython-312.pyc", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+9     openat(AT_FDCWD, "/usr/local/lib/python3.12/json/scanner.py", O_RDONLY|O_CLOEXEC) = 4
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/json/scanner.py", {st_mode=S_IFREG|0644, st_size=2434, ...}, 0) = 0
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/json/__pycache__", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+9     openat(AT_FDCWD, "/usr/local/lib/python3.12/json/__pycache__/scanner.cpython-312.pyc.135369679265488", O_WRONLY|O_CREAT|O_EXCL|O_CLOEXEC, 0644) = -1 EROFS (Read-only file system)
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/lib-dynload", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/lib-dynload", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/lib-dynload", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+9     openat(AT_FDCWD, "/usr/local/lib/python3.12/lib-dynload", O_RDONLY|O_NONBLOCK|O_CLOEXEC|O_DIRECTORY) = 4
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/lib-dynload/_json.cpython-312-x86_64-linux-gnu.so", {st_mode=S_IFREG|0755, st_size=40688, ...}, 0) = 0
+9     openat(AT_FDCWD, "/usr/local/lib/python3.12/lib-dynload/_json.cpython-312-x86_64-linux-gnu.so", O_RDONLY|O_CLOEXEC) = 4
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/json", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/json/encoder.py", {st_mode=S_IFREG|0644, st_size=16075, ...}, 0) = 0
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/json/encoder.py", {st_mode=S_IFREG|0644, st_size=16075, ...}, 0) = 0
+9     openat(AT_FDCWD, "/usr/local/lib/python3.12/json/__pycache__/encoder.cpython-312.pyc", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+9     openat(AT_FDCWD, "/usr/local/lib/python3.12/json/encoder.py", O_RDONLY|O_CLOEXEC) = 4
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/json/encoder.py", {st_mode=S_IFREG|0644, st_size=16075, ...}, 0) = 0
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/json/__pycache__", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+9     openat(AT_FDCWD, "/usr/local/lib/python3.12/json/__pycache__/encoder.cpython-312.pyc.135369679265488", O_WRONLY|O_CREAT|O_EXCL|O_CLOEXEC, 0644) = -1 EROFS (Read-only file system)
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/signal.py", {st_mode=S_IFREG|0644, st_size=2495, ...}, 0) = 0
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/signal.py", {st_mode=S_IFREG|0644, st_size=2495, ...}, 0) = 0
+9     openat(AT_FDCWD, "/usr/local/lib/python3.12/__pycache__/signal.cpython-312.pyc", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+9     openat(AT_FDCWD, "/usr/local/lib/python3.12/signal.py", O_RDONLY|O_CLOEXEC) = 4
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/signal.py", {st_mode=S_IFREG|0644, st_size=2495, ...}, 0) = 0
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/__pycache__", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+9     openat(AT_FDCWD, "/usr/local/lib/python3.12/__pycache__/signal.cpython-312.pyc.135369678205232", O_WRONLY|O_CREAT|O_EXCL|O_CLOEXEC, 0644) = -1 EROFS (Read-only file system)
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/subprocess.py", {st_mode=S_IFREG|0644, st_size=88747, ...}, 0) = 0
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/subprocess.py", {st_mode=S_IFREG|0644, st_size=88747, ...}, 0) = 0
+9     openat(AT_FDCWD, "/usr/local/lib/python3.12/__pycache__/subprocess.cpython-312.pyc", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+9     openat(AT_FDCWD, "/usr/local/lib/python3.12/subprocess.py", O_RDONLY|O_CLOEXEC) = 4
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/subprocess.py", {st_mode=S_IFREG|0644, st_size=88747, ...}, 0) = 0
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/__pycache__", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+9     openat(AT_FDCWD, "/usr/local/lib/python3.12/__pycache__/subprocess.cpython-312.pyc.135369678206016", O_WRONLY|O_CREAT|O_EXCL|O_CLOEXEC, 0644) = -1 EROFS (Read-only file system)
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/locale.py", {st_mode=S_IFREG|0644, st_size=78599, ...}, 0) = 0
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/locale.py", {st_mode=S_IFREG|0644, st_size=78599, ...}, 0) = 0
+9     openat(AT_FDCWD, "/usr/local/lib/python3.12/__pycache__/locale.cpython-312.pyc", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+9     openat(AT_FDCWD, "/usr/local/lib/python3.12/locale.py", O_RDONLY|O_CLOEXEC) = 4
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/locale.py", {st_mode=S_IFREG|0644, st_size=78599, ...}, 0) = 0
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/__pycache__", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+9     openat(AT_FDCWD, "/usr/local/lib/python3.12/__pycache__/locale.cpython-312.pyc.135369678208256", O_WRONLY|O_CREAT|O_EXCL|O_CLOEXEC, 0644) = -1 EROFS (Read-only file system)
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/threading.py", {st_mode=S_IFREG|0644, st_size=60200, ...}, 0) = 0
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/threading.py", {st_mode=S_IFREG|0644, st_size=60200, ...}, 0) = 0
+9     openat(AT_FDCWD, "/usr/local/lib/python3.12/__pycache__/threading.cpython-312.pyc", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+9     openat(AT_FDCWD, "/usr/local/lib/python3.12/threading.py", O_RDONLY|O_CLOEXEC) = 4
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/threading.py", {st_mode=S_IFREG|0644, st_size=60200, ...}, 0) = 0
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/__pycache__", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+9     openat(AT_FDCWD, "/usr/local/lib/python3.12/__pycache__/threading.cpython-312.pyc.135369677148480", O_WRONLY|O_CREAT|O_EXCL|O_CLOEXEC, 0644) = -1 EROFS (Read-only file system)
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/_weakrefset.py", {st_mode=S_IFREG|0644, st_size=5893, ...}, 0) = 0
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/_weakrefset.py", {st_mode=S_IFREG|0644, st_size=5893, ...}, 0) = 0
+9     openat(AT_FDCWD, "/usr/local/lib/python3.12/__pycache__/_weakrefset.cpython-312.pyc", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+9     openat(AT_FDCWD, "/usr/local/lib/python3.12/_weakrefset.py", O_RDONLY|O_CLOEXEC) = 4
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/_weakrefset.py", {st_mode=S_IFREG|0644, st_size=5893, ...}, 0) = 0
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/__pycache__", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+9     openat(AT_FDCWD, "/usr/local/lib/python3.12/__pycache__/_weakrefset.cpython-312.pyc.135369677153072", O_WRONLY|O_CREAT|O_EXCL|O_CLOEXEC, 0644) = -1 EROFS (Read-only file system)
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/warnings.py", {st_mode=S_IFREG|0644, st_size=21909, ...}, 0) = 0
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/warnings.py", {st_mode=S_IFREG|0644, st_size=21909, ...}, 0) = 0
+9     openat(AT_FDCWD, "/usr/local/lib/python3.12/__pycache__/warnings.cpython-312.pyc", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+9     openat(AT_FDCWD, "/usr/local/lib/python3.12/warnings.py", O_RDONLY|O_CLOEXEC) = 4
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/warnings.py", {st_mode=S_IFREG|0644, st_size=21909, ...}, 0) = 0
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/__pycache__", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+9     openat(AT_FDCWD, "/usr/local/lib/python3.12/__pycache__/warnings.cpython-312.pyc.135369677150384", O_WRONLY|O_CREAT|O_EXCL|O_CLOEXEC, 0644) = -1 EROFS (Read-only file system)
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/contextlib.py", {st_mode=S_IFREG|0644, st_size=27637, ...}, 0) = 0
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/contextlib.py", {st_mode=S_IFREG|0644, st_size=27637, ...}, 0) = 0
+9     openat(AT_FDCWD, "/usr/local/lib/python3.12/__pycache__/contextlib.cpython-312.pyc", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+9     openat(AT_FDCWD, "/usr/local/lib/python3.12/contextlib.py", O_RDONLY|O_CLOEXEC) = 4
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/contextlib.py", {st_mode=S_IFREG|0644, st_size=27637, ...}, 0) = 0
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/__pycache__", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+9     openat(AT_FDCWD, "/usr/local/lib/python3.12/__pycache__/contextlib.cpython-312.pyc.135369677150384", O_WRONLY|O_CREAT|O_EXCL|O_CLOEXEC, 0644) = -1 EROFS (Read-only file system)
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/lib-dynload", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/lib-dynload/fcntl.cpython-312-x86_64-linux-gnu.so", {st_mode=S_IFREG|0755, st_size=22984, ...}, 0) = 0
+9     openat(AT_FDCWD, "/usr/local/lib/python3.12/lib-dynload/fcntl.cpython-312-x86_64-linux-gnu.so", O_RDONLY|O_CLOEXEC) = 4
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/lib-dynload", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/lib-dynload", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/lib-dynload/_posixsubprocess.cpython-312-x86_64-linux-gnu.so", {st_mode=S_IFREG|0755, st_size=27240, ...}, 0) = 0
+9     openat(AT_FDCWD, "/usr/local/lib/python3.12/lib-dynload/_posixsubprocess.cpython-312-x86_64-linux-gnu.so", O_RDONLY|O_CLOEXEC) = 4
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/lib-dynload", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/lib-dynload/select.cpython-312-x86_64-linux-gnu.so", {st_mode=S_IFREG|0755, st_size=32768, ...}, 0) = 0
+9     openat(AT_FDCWD, "/usr/local/lib/python3.12/lib-dynload/select.cpython-312-x86_64-linux-gnu.so", O_RDONLY|O_CLOEXEC) = 4
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/selectors.py", {st_mode=S_IFREG|0644, st_size=19671, ...}, 0) = 0
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/selectors.py", {st_mode=S_IFREG|0644, st_size=19671, ...}, 0) = 0
+9     openat(AT_FDCWD, "/usr/local/lib/python3.12/__pycache__/selectors.cpython-312.pyc", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+9     openat(AT_FDCWD, "/usr/local/lib/python3.12/selectors.py", O_RDONLY|O_CLOEXEC) = 4
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/selectors.py", {st_mode=S_IFREG|0644, st_size=19671, ...}, 0) = 0
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/__pycache__", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+9     openat(AT_FDCWD, "/usr/local/lib/python3.12/__pycache__/selectors.cpython-312.pyc.135369677159344", O_WRONLY|O_CREAT|O_EXCL|O_CLOEXEC, 0644) = -1 EROFS (Read-only file system)
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/collections", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/collections", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/collections", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+9     openat(AT_FDCWD, "/usr/local/lib/python3.12/collections", O_RDONLY|O_NONBLOCK|O_CLOEXEC|O_DIRECTORY) = 4
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/collections/abc.py", {st_mode=S_IFREG|0644, st_size=119, ...}, 0) = 0
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/collections/abc.py", {st_mode=S_IFREG|0644, st_size=119, ...}, 0) = 0
+9     openat(AT_FDCWD, "/usr/local/lib/python3.12/collections/__pycache__/abc.cpython-312.pyc", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+9     openat(AT_FDCWD, "/usr/local/lib/python3.12/collections/abc.py", O_RDONLY|O_CLOEXEC) = 4
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/collections/abc.py", {st_mode=S_IFREG|0644, st_size=119, ...}, 0) = 0
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/collections/__pycache__", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+9     openat(AT_FDCWD, "/usr/local/lib/python3.12/collections/__pycache__/abc.cpython-312.pyc.135369675376208", O_WRONLY|O_CREAT|O_EXCL|O_CLOEXEC, 0644) = -1 EROFS (Read-only file system)
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/lib-dynload", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/lib-dynload/math.cpython-312-x86_64-linux-gnu.so", {st_mode=S_IFREG|0755, st_size=70424, ...}, 0) = 0
+9     openat(AT_FDCWD, "/usr/local/lib/python3.12/lib-dynload/math.cpython-312-x86_64-linux-gnu.so", O_RDONLY|O_CLOEXEC) = 4
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/ctypes/__init__.cpython-312-x86_64-linux-gnu.so", 0x7ffe0348e210, 0) = -1 ENOENT (No such file or directory)
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/ctypes/__init__.abi3.so", 0x7ffe0348e210, 0) = -1 ENOENT (No such file or directory)
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/ctypes/__init__.so", 0x7ffe0348e210, 0) = -1 ENOENT (No such file or directory)
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/ctypes/__init__.py", {st_mode=S_IFREG|0644, st_size=18210, ...}, 0) = 0
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/ctypes/__init__.py", {st_mode=S_IFREG|0644, st_size=18210, ...}, 0) = 0
+9     openat(AT_FDCWD, "/usr/local/lib/python3.12/ctypes/__pycache__/__init__.cpython-312.pyc", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+9     openat(AT_FDCWD, "/usr/local/lib/python3.12/ctypes/__init__.py", O_RDONLY|O_CLOEXEC) = 0
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/ctypes/__init__.py", {st_mode=S_IFREG|0644, st_size=18210, ...}, 0) = 0
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/ctypes/__pycache__", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+9     openat(AT_FDCWD, "/usr/local/lib/python3.12/ctypes/__pycache__/__init__.cpython-312.pyc.135369678207024", O_WRONLY|O_CREAT|O_EXCL|O_CLOEXEC, 0644) = -1 EROFS (Read-only file system)
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/lib-dynload", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/lib-dynload/_ctypes.cpython-312-x86_64-linux-gnu.so", {st_mode=S_IFREG|0755, st_size=129536, ...}, 0) = 0
+9     openat(AT_FDCWD, "/usr/local/lib/python3.12/lib-dynload/_ctypes.cpython-312-x86_64-linux-gnu.so", O_RDONLY|O_CLOEXEC) = 0
+9     openat(AT_FDCWD, "/etc/ld.so.cache", O_RDONLY|O_CLOEXEC) = 0
+9     openat(AT_FDCWD, "/lib/x86_64-linux-gnu/libffi.so.8", O_RDONLY|O_CLOEXEC) = 0
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/struct.py", {st_mode=S_IFREG|0644, st_size=257, ...}, 0) = 0
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/struct.py", {st_mode=S_IFREG|0644, st_size=257, ...}, 0) = 0
+9     openat(AT_FDCWD, "/usr/local/lib/python3.12/__pycache__/struct.cpython-312.pyc", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+9     openat(AT_FDCWD, "/usr/local/lib/python3.12/struct.py", O_RDONLY|O_CLOEXEC) = 0
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/struct.py", {st_mode=S_IFREG|0644, st_size=257, ...}, 0) = 0
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/__pycache__", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+9     openat(AT_FDCWD, "/usr/local/lib/python3.12/__pycache__/struct.cpython-312.pyc.135369675376768", O_WRONLY|O_CREAT|O_EXCL|O_CLOEXEC, 0644) = -1 EROFS (Read-only file system)
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/lib-dynload", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/lib-dynload/_struct.cpython-312-x86_64-linux-gnu.so", {st_mode=S_IFREG|0755, st_size=54992, ...}, 0) = 0
+9     openat(AT_FDCWD, "/usr/local/lib/python3.12/lib-dynload/_struct.cpython-312-x86_64-linux-gnu.so", O_RDONLY|O_CLOEXEC) = 0
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/ctypes", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/ctypes", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/ctypes", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+9     openat(AT_FDCWD, "/usr/local/lib/python3.12/ctypes", O_RDONLY|O_NONBLOCK|O_CLOEXEC|O_DIRECTORY) = 0
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/ctypes/_endian.py", {st_mode=S_IFREG|0644, st_size=2535, ...}, 0) = 0
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/ctypes/_endian.py", {st_mode=S_IFREG|0644, st_size=2535, ...}, 0) = 0
+9     openat(AT_FDCWD, "/usr/local/lib/python3.12/ctypes/__pycache__/_endian.cpython-312.pyc", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+9     openat(AT_FDCWD, "/usr/local/lib/python3.12/ctypes/_endian.py", O_RDONLY|O_CLOEXEC) = 0
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/ctypes/_endian.py", {st_mode=S_IFREG|0644, st_size=2535, ...}, 0) = 0
+9     newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/ctypes/__pycache__", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+9     openat(AT_FDCWD, "/usr/local/lib/python3.12/ctypes/__pycache__/_endian.cpython-312.pyc.135369675376768", O_WRONLY|O_CREAT|O_EXCL|O_CLOEXEC, 0644) = -1 EROFS (Read-only file system)
+9     prctl(PR_SET_DUMPABLE, SUID_DUMP_DISABLE) = 0
+9     newfstatat(AT_FDCWD, "/.cavr/0123456789abcdef0123456789abcdef/start", 0x7ffe0348e5d0, 0) = -1 ENOENT (No such file or directory)
+9     openat(AT_FDCWD, "/job/job.json", O_RDONLY|O_CLOEXEC) = 0
+9     getuid()                          = 10001
+9     newfstatat(AT_FDCWD, "/.cavr/0123456789abcdef0123456789abcdef/step:probe:begin", 0x7ffe0348e650, 0) = -1 ENOENT (No such file or directory)
+9     openat(AT_FDCWD, "/dev/null", O_RDWR|O_CLOEXEC) = 0
+9     vfork( <unfinished ...>
+10    execve("/usr/local/bin/python", ["/usr/local/bin/python", "-I", "-S", "-c", "import subprocess, os\nsubprocess.run(['/bin/sh', '-c', 'true'])\nprint(os.getuid())"], 0x7b1e35690490 /* 8 vars */ <unfinished ...>
+9     <... vfork resumed>)              = 10
+10    <... execve resumed>)             = 0
+10    readlinkat(AT_FDCWD, "/proc/self/exe", "/usr/local/bin/python3.12", 4096) = 25
+10    access("/etc/ld.so.preload", R_OK) = -1 ENOENT (No such file or directory)
+10    openat(AT_FDCWD, "/usr/local/bin/../lib/glibc-hwcaps/x86-64-v4/libpython3.12.so.1.0", O_RDONLY|O_CLOEXEC <unfinished ...>
+9     wait4(10,  <unfinished ...>
+10    <... openat resumed>)             = -1 ENOENT (No such file or directory)
+10    newfstatat(AT_FDCWD, "/usr/local/bin/../lib/glibc-hwcaps/x86-64-v4/", 0x7ffcf74e2e30, 0) = -1 ENOENT (No such file or directory)
+10    openat(AT_FDCWD, "/usr/local/bin/../lib/glibc-hwcaps/x86-64-v3/libpython3.12.so.1.0", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+10    newfstatat(AT_FDCWD, "/usr/local/bin/../lib/glibc-hwcaps/x86-64-v3/", 0x7ffcf74e2e30, 0) = -1 ENOENT (No such file or directory)
+10    openat(AT_FDCWD, "/usr/local/bin/../lib/glibc-hwcaps/x86-64-v2/libpython3.12.so.1.0", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+10    newfstatat(AT_FDCWD, "/usr/local/bin/../lib/glibc-hwcaps/x86-64-v2/", 0x7ffcf74e2e30, 0) = -1 ENOENT (No such file or directory)
+10    openat(AT_FDCWD, "/usr/local/bin/../lib/libpython3.12.so.1.0", O_RDONLY|O_CLOEXEC) = 3
+10    openat(AT_FDCWD, "/usr/local/bin/../lib/libc.so.6", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+10    openat(AT_FDCWD, "/etc/ld.so.cache", O_RDONLY|O_CLOEXEC) = 3
+10    openat(AT_FDCWD, "/lib/x86_64-linux-gnu/libc.so.6", O_RDONLY|O_CLOEXEC) = 3
+10    openat(AT_FDCWD, "/lib/x86_64-linux-gnu/libm.so.6", O_RDONLY|O_CLOEXEC) = 3
+10    openat(AT_FDCWD, "/usr/lib/locale/locale-archive", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+10    openat(AT_FDCWD, "/usr/share/locale/locale.alias", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+10    openat(AT_FDCWD, "/usr/lib/locale/C.UTF-8/LC_CTYPE", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+10    openat(AT_FDCWD, "/usr/lib/locale/C.utf8/LC_CTYPE", O_RDONLY|O_CLOEXEC) = 3
+10    openat(AT_FDCWD, "/usr/lib/x86_64-linux-gnu/gconv/gconv-modules.cache", O_RDONLY|O_CLOEXEC) = 3
+10    openat(AT_FDCWD, "/usr/local/pyvenv.cfg", O_RDONLY) = -1 ENOENT (No such file or directory)
+10    openat(AT_FDCWD, "/usr/local/bin/pyvenv.cfg", O_RDONLY) = -1 ENOENT (No such file or directory)
+10    readlink("/usr/local/bin/python", "python3", 4096) = 7
+10    readlink("/usr/local/bin/python3", "python3.12", 4096) = 10
+10    readlink("/usr/local/bin/python3.12", 0x7ffcf74de300, 4096) = -1 EINVAL (Invalid argument)
+10    openat(AT_FDCWD, "/usr/local/bin/python._pth", O_RDONLY) = -1 ENOENT (No such file or directory)
+10    openat(AT_FDCWD, "/usr/local/bin/python3.12._pth", O_RDONLY) = -1 ENOENT (No such file or directory)
+10    openat(AT_FDCWD, "/usr/local/bin/pybuilddir.txt", O_RDONLY) = -1 ENOENT (No such file or directory)
+10    newfstatat(AT_FDCWD, "/usr/local/bin/lib/python312.zip", 0x7ffcf74e2fe0, 0) = -1 ENOENT (No such file or directory)
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python312.zip", 0x7ffcf74e3060, 0) = -1 ENOENT (No such file or directory)
+10    newfstatat(AT_FDCWD, "/usr/lib/python312.zip", 0x7ffcf74e3060, 0) = -1 ENOENT (No such file or directory)
+10    newfstatat(AT_FDCWD, "/usr/local/bin/lib/python3.12/os.py", 0x7ffcf74e3060, 0) = -1 ENOENT (No such file or directory)
+10    newfstatat(AT_FDCWD, "/usr/local/bin/lib/python3.12/os.pyc", 0x7ffcf74e3060, 0) = -1 ENOENT (No such file or directory)
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/os.py", {st_mode=S_IFREG|0644, st_size=40858, ...}, 0) = 0
+10    newfstatat(AT_FDCWD, "/usr/local/bin/lib/python3.12/lib-dynload", 0x7ffcf74e3068, 0) = -1 ENOENT (No such file or directory)
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/lib-dynload", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/lib-dynload", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+10    openat(AT_FDCWD, "/etc/localtime", O_RDONLY|O_CLOEXEC) = 3
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python312.zip", 0x7ffcf74e2a90, 0) = -1 ENOENT (No such file or directory)
+10    newfstatat(AT_FDCWD, "/usr/local/lib", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python312.zip", 0x7ffcf74e2e40, 0) = -1 ENOENT (No such file or directory)
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+10    openat(AT_FDCWD, "/usr/local/lib/python3.12", O_RDONLY|O_NONBLOCK|O_CLOEXEC|O_DIRECTORY) = 3
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/encodings/__init__.cpython-312-x86_64-linux-gnu.so", 0x7ffcf74e2e40, 0) = -1 ENOENT (No such file or directory)
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/encodings/__init__.abi3.so", 0x7ffcf74e2e40, 0) = -1 ENOENT (No such file or directory)
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/encodings/__init__.so", 0x7ffcf74e2e40, 0) = -1 ENOENT (No such file or directory)
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/encodings/__init__.py", {st_mode=S_IFREG|0644, st_size=5884, ...}, 0) = 0
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/encodings/__init__.py", {st_mode=S_IFREG|0644, st_size=5884, ...}, 0) = 0
+10    openat(AT_FDCWD, "/usr/local/lib/python3.12/encodings/__pycache__/__init__.cpython-312.pyc", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+10    openat(AT_FDCWD, "/usr/local/lib/python3.12/encodings/__init__.py", O_RDONLY|O_CLOEXEC) = 3
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/encodings/__init__.py", {st_mode=S_IFREG|0644, st_size=5884, ...}, 0) = 0
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/encodings/__pycache__", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+10    openat(AT_FDCWD, "/usr/local/lib/python3.12/encodings/__pycache__/__init__.cpython-312.pyc.134382910656432", O_WRONLY|O_CREAT|O_EXCL|O_CLOEXEC, 0644) = -1 EROFS (Read-only file system)
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/encodings", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/encodings", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/encodings", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+10    openat(AT_FDCWD, "/usr/local/lib/python3.12/encodings", O_RDONLY|O_NONBLOCK|O_CLOEXEC|O_DIRECTORY) = 3
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/encodings/aliases.py", {st_mode=S_IFREG|0644, st_size=15677, ...}, 0) = 0
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/encodings/aliases.py", {st_mode=S_IFREG|0644, st_size=15677, ...}, 0) = 0
+10    openat(AT_FDCWD, "/usr/local/lib/python3.12/encodings/__pycache__/aliases.cpython-312.pyc", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+10    openat(AT_FDCWD, "/usr/local/lib/python3.12/encodings/aliases.py", O_RDONLY|O_CLOEXEC) = 3
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/encodings/aliases.py", {st_mode=S_IFREG|0644, st_size=15677, ...}, 0) = 0
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/encodings/__pycache__", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+10    openat(AT_FDCWD, "/usr/local/lib/python3.12/encodings/__pycache__/aliases.cpython-312.pyc.134382910279440", O_WRONLY|O_CREAT|O_EXCL|O_CLOEXEC, 0644) = -1 EROFS (Read-only file system)
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/encodings", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/encodings/utf_8.py", {st_mode=S_IFREG|0644, st_size=1005, ...}, 0) = 0
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/encodings/utf_8.py", {st_mode=S_IFREG|0644, st_size=1005, ...}, 0) = 0
+10    openat(AT_FDCWD, "/usr/local/lib/python3.12/encodings/__pycache__/utf_8.cpython-312.pyc", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+10    openat(AT_FDCWD, "/usr/local/lib/python3.12/encodings/utf_8.py", O_RDONLY|O_CLOEXEC) = 3
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/encodings/utf_8.py", {st_mode=S_IFREG|0644, st_size=1005, ...}, 0) = 0
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/encodings/__pycache__", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+10    openat(AT_FDCWD, "/usr/local/lib/python3.12/encodings/__pycache__/utf_8.cpython-312.pyc.134382910279664", O_WRONLY|O_CREAT|O_EXCL|O_CLOEXEC, 0644) = -1 EROFS (Read-only file system)
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/subprocess.py", {st_mode=S_IFREG|0644, st_size=88747, ...}, 0) = 0
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/subprocess.py", {st_mode=S_IFREG|0644, st_size=88747, ...}, 0) = 0
+10    openat(AT_FDCWD, "/usr/local/lib/python3.12/__pycache__/subprocess.cpython-312.pyc", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+10    openat(AT_FDCWD, "/usr/local/lib/python3.12/subprocess.py", O_RDONLY|O_CLOEXEC) = 3
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/subprocess.py", {st_mode=S_IFREG|0644, st_size=88747, ...}, 0) = 0
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/__pycache__", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+10    openat(AT_FDCWD, "/usr/local/lib/python3.12/__pycache__/subprocess.cpython-312.pyc.134382910280224", O_WRONLY|O_CREAT|O_EXCL|O_CLOEXEC, 0644) = -1 EROFS (Read-only file system)
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/locale.py", {st_mode=S_IFREG|0644, st_size=78599, ...}, 0) = 0
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/locale.py", {st_mode=S_IFREG|0644, st_size=78599, ...}, 0) = 0
+10    openat(AT_FDCWD, "/usr/local/lib/python3.12/__pycache__/locale.cpython-312.pyc", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+10    openat(AT_FDCWD, "/usr/local/lib/python3.12/locale.py", O_RDONLY|O_CLOEXEC) = 3
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/locale.py", {st_mode=S_IFREG|0644, st_size=78599, ...}, 0) = 0
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/__pycache__", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+10    openat(AT_FDCWD, "/usr/local/lib/python3.12/__pycache__/locale.cpython-312.pyc.134382910283360", O_WRONLY|O_CREAT|O_EXCL|O_CLOEXEC, 0644) = -1 EROFS (Read-only file system)
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/re/__init__.cpython-312-x86_64-linux-gnu.so", 0x7ffcf74e22e0, 0) = -1 ENOENT (No such file or directory)
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/re/__init__.abi3.so", 0x7ffcf74e22e0, 0) = -1 ENOENT (No such file or directory)
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/re/__init__.so", 0x7ffcf74e22e0, 0) = -1 ENOENT (No such file or directory)
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/re/__init__.py", {st_mode=S_IFREG|0644, st_size=16315, ...}, 0) = 0
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/re/__init__.py", {st_mode=S_IFREG|0644, st_size=16315, ...}, 0) = 0
+10    openat(AT_FDCWD, "/usr/local/lib/python3.12/re/__pycache__/__init__.cpython-312.pyc", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+10    openat(AT_FDCWD, "/usr/local/lib/python3.12/re/__init__.py", O_RDONLY|O_CLOEXEC) = 3
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/re/__init__.py", {st_mode=S_IFREG|0644, st_size=16315, ...}, 0) = 0
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/re/__pycache__", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+10    openat(AT_FDCWD, "/usr/local/lib/python3.12/re/__pycache__/__init__.cpython-312.pyc.134382910287840", O_WRONLY|O_CREAT|O_EXCL|O_CLOEXEC, 0644) = -1 EROFS (Read-only file system)
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/enum.py", {st_mode=S_IFREG|0644, st_size=81540, ...}, 0) = 0
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/enum.py", {st_mode=S_IFREG|0644, st_size=81540, ...}, 0) = 0
+10    openat(AT_FDCWD, "/usr/local/lib/python3.12/__pycache__/enum.cpython-312.pyc", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+10    openat(AT_FDCWD, "/usr/local/lib/python3.12/enum.py", O_RDONLY|O_CLOEXEC) = 3
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/enum.py", {st_mode=S_IFREG|0644, st_size=81540, ...}, 0) = 0
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/__pycache__", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+10    openat(AT_FDCWD, "/usr/local/lib/python3.12/__pycache__/enum.cpython-312.pyc.134382910287952", O_WRONLY|O_CREAT|O_EXCL|O_CLOEXEC, 0644) = -1 EROFS (Read-only file system)
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/types.py", {st_mode=S_IFREG|0644, st_size=10993, ...}, 0) = 0
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/types.py", {st_mode=S_IFREG|0644, st_size=10993, ...}, 0) = 0
+10    openat(AT_FDCWD, "/usr/local/lib/python3.12/__pycache__/types.cpython-312.pyc", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+10    openat(AT_FDCWD, "/usr/local/lib/python3.12/types.py", O_RDONLY|O_CLOEXEC) = 3
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/types.py", {st_mode=S_IFREG|0644, st_size=10993, ...}, 0) = 0
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/__pycache__", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+10    openat(AT_FDCWD, "/usr/local/lib/python3.12/__pycache__/types.cpython-312.pyc.134382910290752", O_WRONLY|O_CREAT|O_EXCL|O_CLOEXEC, 0644) = -1 EROFS (Read-only file system)
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/operator.py", {st_mode=S_IFREG|0644, st_size=10965, ...}, 0) = 0
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/operator.py", {st_mode=S_IFREG|0644, st_size=10965, ...}, 0) = 0
+10    openat(AT_FDCWD, "/usr/local/lib/python3.12/__pycache__/operator.cpython-312.pyc", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+10    openat(AT_FDCWD, "/usr/local/lib/python3.12/operator.py", O_RDONLY|O_CLOEXEC) = 3
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/operator.py", {st_mode=S_IFREG|0644, st_size=10965, ...}, 0) = 0
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/__pycache__", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+10    openat(AT_FDCWD, "/usr/local/lib/python3.12/__pycache__/operator.cpython-312.pyc.134382910290976", O_WRONLY|O_CREAT|O_EXCL|O_CLOEXEC, 0644) = -1 EROFS (Read-only file system)
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/functools.py", {st_mode=S_IFREG|0644, st_size=37940, ...}, 0) = 0
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/functools.py", {st_mode=S_IFREG|0644, st_size=37940, ...}, 0) = 0
+10    openat(AT_FDCWD, "/usr/local/lib/python3.12/__pycache__/functools.cpython-312.pyc", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+10    openat(AT_FDCWD, "/usr/local/lib/python3.12/functools.py", O_RDONLY|O_CLOEXEC) = 3
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/functools.py", {st_mode=S_IFREG|0644, st_size=37940, ...}, 0) = 0
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/__pycache__", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+10    openat(AT_FDCWD, "/usr/local/lib/python3.12/__pycache__/functools.cpython-312.pyc.134382910290976", O_WRONLY|O_CREAT|O_EXCL|O_CLOEXEC, 0644) = -1 EROFS (Read-only file system)
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/collections/__init__.cpython-312-x86_64-linux-gnu.so", 0x7ffcf74e0cf0, 0) = -1 ENOENT (No such file or directory)
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/collections/__init__.abi3.so", 0x7ffcf74e0cf0, 0) = -1 ENOENT (No such file or directory)
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/collections/__init__.so", 0x7ffcf74e0cf0, 0) = -1 ENOENT (No such file or directory)
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/collections/__init__.py", {st_mode=S_IFREG|0644, st_size=52378, ...}, 0) = 0
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/collections/__init__.py", {st_mode=S_IFREG|0644, st_size=52378, ...}, 0) = 0
+10    openat(AT_FDCWD, "/usr/local/lib/python3.12/collections/__pycache__/__init__.cpython-312.pyc", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+10    openat(AT_FDCWD, "/usr/local/lib/python3.12/collections/__init__.py", O_RDONLY|O_CLOEXEC) = 3
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/collections/__init__.py", {st_mode=S_IFREG|0644, st_size=52378, ...}, 0) = 0
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/collections/__pycache__", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+10    openat(AT_FDCWD, "/usr/local/lib/python3.12/collections/__pycache__/__init__.cpython-312.pyc.134382909552560", O_WRONLY|O_CREAT|O_EXCL|O_CLOEXEC, 0644) = -1 EROFS (Read-only file system)
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/keyword.py", {st_mode=S_IFREG|0644, st_size=1073, ...}, 0) = 0
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/keyword.py", {st_mode=S_IFREG|0644, st_size=1073, ...}, 0) = 0
+10    openat(AT_FDCWD, "/usr/local/lib/python3.12/__pycache__/keyword.cpython-312.pyc", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+10    openat(AT_FDCWD, "/usr/local/lib/python3.12/keyword.py", O_RDONLY|O_CLOEXEC) = 3
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/keyword.py", {st_mode=S_IFREG|0644, st_size=1073, ...}, 0) = 0
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/__pycache__", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+10    openat(AT_FDCWD, "/usr/local/lib/python3.12/__pycache__/keyword.cpython-312.pyc.134382908732480", O_WRONLY|O_CREAT|O_EXCL|O_CLOEXEC, 0644) = -1 EROFS (Read-only file system)
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/reprlib.py", {st_mode=S_IFREG|0644, st_size=7148, ...}, 0) = 0
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/reprlib.py", {st_mode=S_IFREG|0644, st_size=7148, ...}, 0) = 0
+10    openat(AT_FDCWD, "/usr/local/lib/python3.12/__pycache__/reprlib.cpython-312.pyc", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+10    openat(AT_FDCWD, "/usr/local/lib/python3.12/reprlib.py", O_RDONLY|O_CLOEXEC) = 3
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/reprlib.py", {st_mode=S_IFREG|0644, st_size=7148, ...}, 0) = 0
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/__pycache__", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+10    openat(AT_FDCWD, "/usr/local/lib/python3.12/__pycache__/reprlib.cpython-312.pyc.134382908732480", O_WRONLY|O_CREAT|O_EXCL|O_CLOEXEC, 0644) = -1 EROFS (Read-only file system)
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/re", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/re", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/re", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+10    openat(AT_FDCWD, "/usr/local/lib/python3.12/re", O_RDONLY|O_NONBLOCK|O_CLOEXEC|O_DIRECTORY) = 3
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/re/_compiler.py", {st_mode=S_IFREG|0644, st_size=26399, ...}, 0) = 0
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/re/_compiler.py", {st_mode=S_IFREG|0644, st_size=26399, ...}, 0) = 0
+10    openat(AT_FDCWD, "/usr/local/lib/python3.12/re/__pycache__/_compiler.cpython-312.pyc", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+10    openat(AT_FDCWD, "/usr/local/lib/python3.12/re/_compiler.py", O_RDONLY|O_CLOEXEC) = 3
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/re/_compiler.py", {st_mode=S_IFREG|0644, st_size=26399, ...}, 0) = 0
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/re/__pycache__", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+10    openat(AT_FDCWD, "/usr/local/lib/python3.12/re/__pycache__/_compiler.cpython-312.pyc.134382908726096", O_WRONLY|O_CREAT|O_EXCL|O_CLOEXEC, 0644) = -1 EROFS (Read-only file system)
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/re", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/re/_parser.py", {st_mode=S_IFREG|0644, st_size=41201, ...}, 0) = 0
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/re/_parser.py", {st_mode=S_IFREG|0644, st_size=41201, ...}, 0) = 0
+10    openat(AT_FDCWD, "/usr/local/lib/python3.12/re/__pycache__/_parser.cpython-312.pyc", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+10    openat(AT_FDCWD, "/usr/local/lib/python3.12/re/_parser.py", O_RDONLY|O_CLOEXEC) = 3
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/re/_parser.py", {st_mode=S_IFREG|0644, st_size=41201, ...}, 0) = 0
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/re/__pycache__", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+10    openat(AT_FDCWD, "/usr/local/lib/python3.12/re/__pycache__/_parser.cpython-312.pyc.134382908730576", O_WRONLY|O_CREAT|O_EXCL|O_CLOEXEC, 0644) = -1 EROFS (Read-only file system)
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/re", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/re/_constants.py", {st_mode=S_IFREG|0644, st_size=5930, ...}, 0) = 0
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/re/_constants.py", {st_mode=S_IFREG|0644, st_size=5930, ...}, 0) = 0
+10    openat(AT_FDCWD, "/usr/local/lib/python3.12/re/__pycache__/_constants.cpython-312.pyc", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+10    openat(AT_FDCWD, "/usr/local/lib/python3.12/re/_constants.py", O_RDONLY|O_CLOEXEC) = 3
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/re/_constants.py", {st_mode=S_IFREG|0644, st_size=5930, ...}, 0) = 0
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/re/__pycache__", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+10    openat(AT_FDCWD, "/usr/local/lib/python3.12/re/__pycache__/_constants.cpython-312.pyc.134382907441424", O_WRONLY|O_CREAT|O_EXCL|O_CLOEXEC, 0644) = -1 EROFS (Read-only file system)
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/re", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/re/_casefix.py", {st_mode=S_IFREG|0644, st_size=5444, ...}, 0) = 0
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/re/_casefix.py", {st_mode=S_IFREG|0644, st_size=5444, ...}, 0) = 0
+10    openat(AT_FDCWD, "/usr/local/lib/python3.12/re/__pycache__/_casefix.cpython-312.pyc", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+10    openat(AT_FDCWD, "/usr/local/lib/python3.12/re/_casefix.py", O_RDONLY|O_CLOEXEC) = 3
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/re/_casefix.py", {st_mode=S_IFREG|0644, st_size=5444, ...}, 0) = 0
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/re/__pycache__", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+10    openat(AT_FDCWD, "/usr/local/lib/python3.12/re/__pycache__/_casefix.cpython-312.pyc.134382908734496", O_WRONLY|O_CREAT|O_EXCL|O_CLOEXEC, 0644) = -1 EROFS (Read-only file system)
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/copyreg.py", {st_mode=S_IFREG|0644, st_size=7614, ...}, 0) = 0
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/copyreg.py", {st_mode=S_IFREG|0644, st_size=7614, ...}, 0) = 0
+10    openat(AT_FDCWD, "/usr/local/lib/python3.12/__pycache__/copyreg.cpython-312.pyc", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+10    openat(AT_FDCWD, "/usr/local/lib/python3.12/copyreg.py", O_RDONLY|O_CLOEXEC) = 3
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/copyreg.py", {st_mode=S_IFREG|0644, st_size=7614, ...}, 0) = 0
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/__pycache__", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+10    openat(AT_FDCWD, "/usr/local/lib/python3.12/__pycache__/copyreg.cpython-312.pyc.134382907441760", O_WRONLY|O_CREAT|O_EXCL|O_CLOEXEC, 0644) = -1 EROFS (Read-only file system)
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/signal.py", {st_mode=S_IFREG|0644, st_size=2495, ...}, 0) = 0
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/signal.py", {st_mode=S_IFREG|0644, st_size=2495, ...}, 0) = 0
+10    openat(AT_FDCWD, "/usr/local/lib/python3.12/__pycache__/signal.cpython-312.pyc", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+10    openat(AT_FDCWD, "/usr/local/lib/python3.12/signal.py", O_RDONLY|O_CLOEXEC) = 3
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/signal.py", {st_mode=S_IFREG|0644, st_size=2495, ...}, 0) = 0
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/__pycache__", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+10    openat(AT_FDCWD, "/usr/local/lib/python3.12/__pycache__/signal.cpython-312.pyc.134382910289408", O_WRONLY|O_CREAT|O_EXCL|O_CLOEXEC, 0644) = -1 EROFS (Read-only file system)
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/threading.py", {st_mode=S_IFREG|0644, st_size=60200, ...}, 0) = 0
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/threading.py", {st_mode=S_IFREG|0644, st_size=60200, ...}, 0) = 0
+10    openat(AT_FDCWD, "/usr/local/lib/python3.12/__pycache__/threading.cpython-312.pyc", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+10    openat(AT_FDCWD, "/usr/local/lib/python3.12/threading.py", O_RDONLY|O_CLOEXEC) = 3
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/threading.py", {st_mode=S_IFREG|0644, st_size=60200, ...}, 0) = 0
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/__pycache__", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+10    openat(AT_FDCWD, "/usr/local/lib/python3.12/__pycache__/threading.cpython-312.pyc.134382907442096", O_WRONLY|O_CREAT|O_EXCL|O_CLOEXEC, 0644) = -1 EROFS (Read-only file system)
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/_weakrefset.py", {st_mode=S_IFREG|0644, st_size=5893, ...}, 0) = 0
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/_weakrefset.py", {st_mode=S_IFREG|0644, st_size=5893, ...}, 0) = 0
+10    openat(AT_FDCWD, "/usr/local/lib/python3.12/__pycache__/_weakrefset.cpython-312.pyc", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+10    openat(AT_FDCWD, "/usr/local/lib/python3.12/_weakrefset.py", O_RDONLY|O_CLOEXEC) = 3
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/_weakrefset.py", {st_mode=S_IFREG|0644, st_size=5893, ...}, 0) = 0
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/__pycache__", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+10    openat(AT_FDCWD, "/usr/local/lib/python3.12/__pycache__/_weakrefset.cpython-312.pyc.134382907447248", O_WRONLY|O_CREAT|O_EXCL|O_CLOEXEC, 0644) = -1 EROFS (Read-only file system)
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/warnings.py", {st_mode=S_IFREG|0644, st_size=21909, ...}, 0) = 0
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/warnings.py", {st_mode=S_IFREG|0644, st_size=21909, ...}, 0) = 0
+10    openat(AT_FDCWD, "/usr/local/lib/python3.12/__pycache__/warnings.cpython-312.pyc", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+10    openat(AT_FDCWD, "/usr/local/lib/python3.12/warnings.py", O_RDONLY|O_CLOEXEC) = 3
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/warnings.py", {st_mode=S_IFREG|0644, st_size=21909, ...}, 0) = 0
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/__pycache__", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+10    openat(AT_FDCWD, "/usr/local/lib/python3.12/__pycache__/warnings.cpython-312.pyc.134382907444448", O_WRONLY|O_CREAT|O_EXCL|O_CLOEXEC, 0644) = -1 EROFS (Read-only file system)
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/contextlib.py", {st_mode=S_IFREG|0644, st_size=27637, ...}, 0) = 0
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/contextlib.py", {st_mode=S_IFREG|0644, st_size=27637, ...}, 0) = 0
+10    openat(AT_FDCWD, "/usr/local/lib/python3.12/__pycache__/contextlib.cpython-312.pyc", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+10    openat(AT_FDCWD, "/usr/local/lib/python3.12/contextlib.py", O_RDONLY|O_CLOEXEC) = 3
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/contextlib.py", {st_mode=S_IFREG|0644, st_size=27637, ...}, 0) = 0
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/__pycache__", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+10    openat(AT_FDCWD, "/usr/local/lib/python3.12/__pycache__/contextlib.cpython-312.pyc.134382907444448", O_WRONLY|O_CREAT|O_EXCL|O_CLOEXEC, 0644) = -1 EROFS (Read-only file system)
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/lib-dynload", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/lib-dynload", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/lib-dynload", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+10    openat(AT_FDCWD, "/usr/local/lib/python3.12/lib-dynload", O_RDONLY|O_NONBLOCK|O_CLOEXEC|O_DIRECTORY) = 3
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/lib-dynload/fcntl.cpython-312-x86_64-linux-gnu.so", {st_mode=S_IFREG|0755, st_size=22984, ...}, 0) = 0
+10    openat(AT_FDCWD, "/usr/local/lib/python3.12/lib-dynload/fcntl.cpython-312-x86_64-linux-gnu.so", O_RDONLY|O_CLOEXEC) = 3
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/lib-dynload", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/lib-dynload", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/lib-dynload/_posixsubprocess.cpython-312-x86_64-linux-gnu.so", {st_mode=S_IFREG|0755, st_size=27240, ...}, 0) = 0
+10    openat(AT_FDCWD, "/usr/local/lib/python3.12/lib-dynload/_posixsubprocess.cpython-312-x86_64-linux-gnu.so", O_RDONLY|O_CLOEXEC) = 3
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/lib-dynload", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/lib-dynload/select.cpython-312-x86_64-linux-gnu.so", {st_mode=S_IFREG|0755, st_size=32768, ...}, 0) = 0
+10    openat(AT_FDCWD, "/usr/local/lib/python3.12/lib-dynload/select.cpython-312-x86_64-linux-gnu.so", O_RDONLY|O_CLOEXEC) = 3
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/selectors.py", {st_mode=S_IFREG|0644, st_size=19671, ...}, 0) = 0
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/selectors.py", {st_mode=S_IFREG|0644, st_size=19671, ...}, 0) = 0
+10    openat(AT_FDCWD, "/usr/local/lib/python3.12/__pycache__/selectors.cpython-312.pyc", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+10    openat(AT_FDCWD, "/usr/local/lib/python3.12/selectors.py", O_RDONLY|O_CLOEXEC) = 3
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/selectors.py", {st_mode=S_IFREG|0644, st_size=19671, ...}, 0) = 0
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/__pycache__", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+10    openat(AT_FDCWD, "/usr/local/lib/python3.12/__pycache__/selectors.cpython-312.pyc.134382907453520", O_WRONLY|O_CREAT|O_EXCL|O_CLOEXEC, 0644) = -1 EROFS (Read-only file system)
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/collections", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/collections", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/collections", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+10    openat(AT_FDCWD, "/usr/local/lib/python3.12/collections", O_RDONLY|O_NONBLOCK|O_CLOEXEC|O_DIRECTORY) = 3
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/collections/abc.py", {st_mode=S_IFREG|0644, st_size=119, ...}, 0) = 0
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/collections/abc.py", {st_mode=S_IFREG|0644, st_size=119, ...}, 0) = 0
+10    openat(AT_FDCWD, "/usr/local/lib/python3.12/collections/__pycache__/abc.cpython-312.pyc", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+10    openat(AT_FDCWD, "/usr/local/lib/python3.12/collections/abc.py", O_RDONLY|O_CLOEXEC) = 3
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/collections/abc.py", {st_mode=S_IFREG|0644, st_size=119, ...}, 0) = 0
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/collections/__pycache__", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+10    openat(AT_FDCWD, "/usr/local/lib/python3.12/collections/__pycache__/abc.cpython-312.pyc.134382907456096", O_WRONLY|O_CREAT|O_EXCL|O_CLOEXEC, 0644) = -1 EROFS (Read-only file system)
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/lib-dynload", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+10    newfstatat(AT_FDCWD, "/usr/local/lib/python3.12/lib-dynload/math.cpython-312-x86_64-linux-gnu.so", {st_mode=S_IFREG|0755, st_size=70424, ...}, 0) = 0
+10    openat(AT_FDCWD, "/usr/local/lib/python3.12/lib-dynload/math.cpython-312-x86_64-linux-gnu.so", O_RDONLY|O_CLOEXEC) = 3
+10    vfork( <unfinished ...>
+11    execve("/bin/sh", ["/bin/sh", "-c", "true"], 0x7ffcf74e3d88 /* 8 vars */ <unfinished ...>
+10    <... vfork resumed>)              = 11
+11    <... execve resumed>)             = 0
+11    access("/etc/ld.so.preload", R_OK) = -1 ENOENT (No such file or directory)
+10    wait4(11,  <unfinished ...>
+11    openat(AT_FDCWD, "/etc/ld.so.cache", O_RDONLY|O_CLOEXEC) = 3
+11    openat(AT_FDCWD, "/lib/x86_64-linux-gnu/libc.so.6", O_RDONLY|O_CLOEXEC) = 3
+11    getuid()                          = 10001
+11    getgid()                          = 10001
+11    geteuid()                         = 10001
+11    getcwd("/tmp", 4096)              = 5
+11    geteuid()                         = 10001
+11    getegid()                         = 10001
+11    exit_group(0)                     = ?
+11    +++ exited with 0 +++
+10    <... wait4 resumed>[{WIFEXITED(s) && WEXITSTATUS(s) == 0}], 0, NULL) = 11
+10    --- SIGCHLD {si_signo=SIGCHLD, si_code=CLD_EXITED, si_pid=11, si_uid=10001, si_status=0, si_utime=0, si_stime=0} ---
+10    getuid()                          = 10001
+10    exit_group(0)                     = ?
+10    +++ exited with 0 +++
+9     <... wait4 resumed>[{WIFEXITED(s) && WEXITSTATUS(s) == 0}], 0, NULL) = 10
+9     --- SIGCHLD {si_signo=SIGCHLD, si_code=CLD_EXITED, si_pid=10, si_uid=10001, si_status=0, si_utime=9 /* 0.09 s */, si_stime=4 /* 0.04 s */} ---
+9     kill(-1, SIGKILL)                 = -1 ESRCH (No such process)
+9     newfstatat(AT_FDCWD, "/.cavr/0123456789abcdef0123456789abcdef/step:probe:end:0", 0x7ffe0348e650, 0) = -1 ENOENT (No such file or directory)
+9     newfstatat(AT_FDCWD, "/.cavr/0123456789abcdef0123456789abcdef/step:second:begin", 0x7ffe0348e650, 0) = -1 ENOENT (No such file or directory)
+9     openat(AT_FDCWD, "/dev/null", O_RDWR|O_CLOEXEC) = 0
+9     vfork( <unfinished ...>
+12    execve("/bin/true", ["/bin/true"], 0x7b1e35690490 /* 8 vars */ <unfinished ...>
+9     <... vfork resumed>)              = 12
+12    <... execve resumed>)             = 0
+12    access("/etc/ld.so.preload", R_OK) = -1 ENOENT (No such file or directory)
+9     wait4(12,  <unfinished ...>
+12    openat(AT_FDCWD, "/etc/ld.so.cache", O_RDONLY|O_CLOEXEC) = 3
+12    openat(AT_FDCWD, "/lib/x86_64-linux-gnu/libc.so.6", O_RDONLY|O_CLOEXEC) = 3
+12    exit_group(0)                     = ?
+12    +++ exited with 0 +++
+9     <... wait4 resumed>[{WIFEXITED(s) && WEXITSTATUS(s) == 0}], 0, NULL) = 12
+9     --- SIGCHLD {si_signo=SIGCHLD, si_code=CLD_EXITED, si_pid=12, si_uid=10001, si_status=0, si_utime=0, si_stime=0} ---
+9     kill(-1, SIGKILL)                 = -1 ESRCH (No such process)
+9     newfstatat(AT_FDCWD, "/.cavr/0123456789abcdef0123456789abcdef/step:second:end:0", 0x7ffe0348e650, 0) = -1 ENOENT (No such file or directory)
+9     newfstatat(AT_FDCWD, "/.cavr/0123456789abcdef0123456789abcdef/end:ok", 0x7ffe0348e650, 0) = -1 ENOENT (No such file or directory)
+9     exit_group(0)                     = ?
+9     +++ exited with 0 +++

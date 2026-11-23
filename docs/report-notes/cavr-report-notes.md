@@ -4301,3 +4301,637 @@ Run before the commit, as asked (repair and gate tests only: `tests/test_cavr_re
 
 1. **Can a gate run with many vulnerable packages take forever in repair?** No: at most 120 s of repair per run
    (plus one candidate check in progress); later packages say NOT_ATTEMPTED with the reason.
+
+## Step M2-7 — PR 3: CAVR's own sandbox image and its identity check (2026-11-23)
+
+Plan: `docs/cavr-m2-plan.md` PR 3, decisions Q5 to Q7. Not wired into `verify_request` or the gate yet (Phase 2b).
+
+### Ch 6 Implementation
+
+- `docker/cavr-sandbox/Dockerfile` (new): `FROM python:3.12-slim@sha256:5e2bdb1b0d542d5039cffb8181c65930093949194a65c365dfb1b0fe13a4fa5b`
+  (Debian 13), installs `strace` (6.13) and `libfaketime`, adds user `cavr` UID/GID 10001. No ENTRYPOINT.
+- `docker/cavr-sandbox/build.sh` (new): runs `python -m backend.cavr.sandbox_image build`.
+- `docker/cavr-sandbox/cavr-seccomp.json` (new): CAVR-only copy of the shared profile plus 47 measured syscalls,
+  in commented groups (see design decisions).
+- `backend/cavr/sandbox_image.py` (new): `IMAGE = "asent-cavr-sandbox:local"`; `build()` runs `docker build --label
+  org.asent.cavr.recipe-sha256=<SHA-256 of the Dockerfile>`, reads the ID with `docker image inspect`, writes
+  `{image, image_id, recipe_sha256, base, built_at}` to `DATA/cavr/sandbox-image.json`; `image_identity()` is ok only
+  when the image exists, its ID equals the recorded one and its label equals the current Dockerfile's SHA-256.
+  Rules: ENGINE_UNAVAILABLE, IMAGE_MISSING, IMAGE_NOT_RECORDED, IMAGE_ID_MISMATCH, IMAGE_STALE, SECCOMP_MISSING,
+  ENGINE_ERROR. Never raises.
+- `backend/cavr/sandbox_exec.py` (new): `lockdown_flags()` and `docker_command(name, image_id, command, mounts, env)`,
+  the only builder of a CAVR `docker run`: the image is passed by its checked ID, every mount is a `readonly` bind,
+  only listed variables are passed, a bad name / tag / mount / variable raises ValueError.
+- `backend/cavr/sandbox_runner.py`: the hardcoded `image_digest` constant is removed; the legacy result field is
+  `image_id: None` (that runner never checked its image; it goes with PR 12).
+- `tests/test_cavr_support.py`: `docker_skip_reason`, `requires_docker`, `sandbox_identity()` (builds once per
+  session if missing), `cavr_containers()`.
+- `.github/workflows/ci.yml`: new job `cavr-docker` (builds the image, runs `tests/test_cavr_sandbox_*.py` with
+  `CAVR_DOCKER=1`, fails if a `cavr-*` container is left).
+
+### Design decisions
+
+- **Expected image ID recorded at build time, not a constant** (alternative: commit the ID): `docker build` is not
+  reproducible (apt packages change), so a committed ID would be wrong on every other machine. The recipe label ties
+  the image to the Dockerfile in this checkout, so an image built from an older Dockerfile is IMAGE_STALE.
+- **Run by image ID, not tag** (alternative: `asent-cavr-sandbox:local`): the tag could be moved between the check and
+  the run.
+- **CAVR-only seccomp profile.** The shared `docker/asent-seccomp.json` (57 syscalls, default ERRNO) cannot start a
+  container on this engine: runc fails at init with `fstatfs fsmount:fscontext:proc: operation not permitted`
+  (exit 125, Docker 29.9.3, 2026-11-23). It also lacks `execve`, `clone`, `wait4`, `ptrace`, `socket`, `connect`.
+  The shared file is not changed; the CAVR copy keeps its first entry byte-identical and adds 47 names. Method: the
+  full flow (strace -u, pip install of a wheel, import, connect/sendto/IPv6/Unix attempts, os.system, threads, fork,
+  setuid(0), prctl, kill) was measured with `strace -c` under Docker's default profile (72 syscalls), and the runc and
+  strace needs were found by removing each candidate in turn and comparing the output with the default-profile run.
+  Groups, each with its reason in the JSON `comment`: runc init (`close_range`, `execve`, `fstatfs`, `statx`);
+  strace (`kill`, `ptrace`, `setgroups`, `setregid`, `setreuid`, `wait4`); strace start-up (`process_vm_writev`,
+  `rt_sigsuspend`: removing them gave one failed run in 40); process starts (`clone`, `clone3`, `prctl`,
+  `set_tid_address`, `setuid`, `vfork`); sockets (`bind`, `connect`, `getpeername`, `getsockname`, `sendto`,
+  `setsockopt`, `socket`), allowed so that attempts reach the kernel and are recorded, while `--network none` makes
+  them fail; Python, pip and import (22 file and process syscalls). Never added: mount, namespaces, modules, BPF,
+  keyrings, clock setting, reboot (test). With the profile, 20 of 20 runs of the flow gave the same output as
+  Docker's default profile.
+- **The profile works only with CAVR's flags.** Without `--cap-drop ALL`, runc also needs `capget`; CAVR always drops
+  all capabilities, so it is not added.
+- **Container user is root** (`Config.User` empty): strace is the container's process (Q5); package code runs as
+  10001 through `strace -u cavr` (PR 5 proves it per process).
+
+### Requirements covered
+
+| ID | Acceptance check |
+|---|---|
+| NFR-1 (rule 5, pinned image) | `test_dockerfile_base_is_pinned_by_digest`; missing / mismatched / stale / unrecorded image -> not ok (6 tests) |
+| NFR-1 (rules 1-4) | `test_running_container_has_every_lockdown_flag` reads `docker inspect` of a running container |
+| NFR-1 (rule 1) | `test_container_has_only_loopback`: `/sys/class/net` is `lo` only |
+| FR-6 fail closed | no engine, inspect error, unreadable record, missing seccomp profile -> not ok, never raises |
+| Q6, Q7 | image `asent-cavr-sandbox:local` != SATRA's; strace and libfaketime present (Docker test) |
+
+### Ch 7 Test cases
+
+`tests/test_cavr_sandbox_image.py`: 41 tests, 35 unit (fake `sandbox_image.RUN`) and 6 Docker.
+
+| Test ID | Purpose | Input | Expected | Result |
+|---|---|---|---|---|
+| `test_recorded_image_built_from_the_current_dockerfile_is_ok` | happy path | inspect ID = record, label = Dockerfile SHA | ok, IMAGE_OK | pass |
+| `test_missing_image_is_unresolved` | no image | inspect "No such image" | IMAGE_MISSING | pass |
+| `test_image_id_mismatch_is_unresolved` | rebuilt / re-tagged | inspect ID != record | IMAGE_ID_MISMATCH | pass |
+| `test_no_build_record_is_unresolved`, `test_unreadable_build_record_is_unresolved` (4) | built another way | no / bad record | IMAGE_NOT_RECORDED | pass |
+| `test_stale_recipe_label_is_unresolved`, `test_image_without_labels_is_stale` | old Dockerfile | wrong / no label | IMAGE_STALE | pass |
+| `test_no_engine_is_unresolved` (4) | no engine | no binary, timeout, permission, daemon down | ENGINE_UNAVAILABLE | pass |
+| `test_inspect_error_is_unresolved` (4) | odd engine | exit 2, garbage, non-sha256 ID, exception | ENGINE_ERROR | pass |
+| `test_missing_seccomp_profile_is_unresolved` | profile gone | absent file | SECCOMP_MISSING, engine not asked | pass |
+| `test_build_records_the_built_image_id`, `test_failed_build_writes_no_record`, `test_build_without_engine_is_not_ok` | build | fake build | record written only on success | pass |
+| `test_dockerfile_base_is_pinned_by_digest`, `test_image_is_cavr_own_not_satra` | recipe | Dockerfile | digest pin, strace, libfaketime, UID 10001 | pass |
+| `test_sandbox_runner_has_no_hardcoded_digest` | Q12 | `sandbox_runner.py` | no constant | pass |
+| `test_shared_profile_lacks_what_strace_and_runc_need` | finding | shared profile | 9 needed names missing | pass |
+| `test_cavr_profile_is_the_shared_profile_plus_listed_additions` | smallest addition | CAVR profile | shared entry identical, 47 commented additions, no dangerous names | pass |
+| `test_lockdown_flags_are_the_planned_set`, `test_docker_command_runs_the_image_by_id_with_read_only_mounts` | flags | — | exact list; ID last; readonly; no --user/-v/-i/--privileged | pass |
+| `test_docker_command_refuses_what_it_cannot_pass_safely` (6) | bad input | bad name, tag, comma mount, relative path, bad variable | ValueError | pass |
+| `test_real_image_identity_is_its_inspected_id` (Docker) | real check | built image | ok, ID = `docker image inspect` | pass |
+| `test_image_has_strace_and_libfaketime` (Docker) | Q7 | image | strace, `libfaketime.so.1`, `id -u cavr` = 10001 | pass |
+| `test_python_and_strace_start_under_the_cavr_profile` (Docker) | profile | `strace -f -u cavr python -c` | `10001 10001`, `+++ exited with 0 +++` | pass |
+| `test_the_shared_profile_is_not_used_and_would_not_start_python` (Docker) | finding | shared profile | non-zero exit; not in CAVR flags | pass |
+| `test_running_container_has_every_lockdown_flag` (Docker) | rules 1-4, 9 | running container | every HostConfig field as planned | pass |
+| `test_container_has_only_loopback` (Docker) | rule 1 | `/sys/class/net` | `lo` | pass |
+
+Runs before the commit: `CAVR_DOCKER=1 pytest tests/test_cavr_sandbox_image.py`: 41 passed;
+`CAVR_DOCKER=1 pytest tests/test_cavr_*.py`: 1478 passed, 11 skipped (live, `CAVR_LIVE` unset) in 424 s; CI, packaging and resource tests
+(`test_satra_runner_image`, `test_gate_packaging`, `test_cli_workflow`, `test_cli_packaging`, `test_cli_resources`,
+`test_cli_doctor`): 61 passed. No existing result changed.
+
+### Defects found and fixed
+
+- First profile candidate failed at runc init (`statx … could not get mount id`) and then in strace
+  (`setregid: Operation not permitted`); both added with their reasons.
+- Tests: none failed after the code was written.
+
+### Known limitations / deferred
+
+- The CI job is not verified: nothing is pushed (GitHub's Ubuntu runner may need other syscalls for its runc).
+- `process_vm_writev` and `rt_sigsuspend` are kept on one failed run in 40 without them; the cause was not found.
+- The profile is denied-by-default: a package whose import needs a syscall outside it fails, which is UNRESOLVED
+  (fail closed), never VERIFIED.
+- The legacy `SandboxRunner`, `docker/asent-sandbox/Dockerfile` and `counterfactual.py` stay until PR 12 (Q12).
+
+### Note for Sheharyar (owner of the shared `docker/asent-seccomp.json`)
+
+The shared profile cannot start a container on current runc (Docker 29.9.3): runc's init needs `fstatfs` and `statx`
+after the filter is loaded, and fails with `error closing exec fds: get handle to /proc/thread-self/fd: fstatfs
+fsmount:fscontext:proc: operation not permitted`. CAVR does not use it and did not change it.
+
+### Tool disclosure (Ch 8.7)
+
+- **Generated by Claude Code:** the image, profile, build script, both modules, the CI job, the tests and these notes.
+  **Reviewed by Maryam:** the plan and decisions (2026-11-23). **Verified by:** the runs above on Docker 29.9.3.
+
+### Supervisor Q&A prep
+
+1. **Why not use the repository's seccomp profile?** It cannot start a container on current runc; CAVR uses a copy
+   with 47 measured additions, each group explained, and the shared one is unchanged.
+2. **How do you know the image a run uses is the one you built?** The run names the image by the ID recorded at
+   build time, after checking that the local image still has that ID and carries the current Dockerfile's SHA-256.
+
+## Step M2-8 — PR 4: deadline, kill, output caps and removal of the real container (2026-11-23)
+
+Plan: `docs/cavr-m2-plan.md` PR 4 (Q8: 20 s per run). Closes the three M1 deferred runner items (silent container
+not timed out, kill stops the docker CLI and not the container, invalid UTF-8 leaves the process un-waited) for
+CAVR's new runner; the legacy `SandboxRunner` keeps them until PR 12.
+
+### Ch 6 Implementation
+
+- `backend/cavr/sandbox_exec.py`: `run_container(cmd, name, deadline=20, grace=5, stdout_cap=1 MiB,
+  stderr_cap=16 MiB)`, `completed(result)`, `new_run_id()` (12 hex), `container_name(run_id, n)` = `cavr-<run>-<n>`.
+  Algorithm: `Popen` with stdin `/dev/null`; two reader threads drain stdout and stderr as bytes into capped buffers
+  (bytes past the cap are counted, not kept, and wake the main thread); the main thread waits on the host's
+  monotonic clock. At the deadline or a cap: `docker kill <name>`, then kill and wait for the docker CLI. In a
+  `finally`: `docker rm -f <name>` until `docker ps -a --filter name=^/<name>$` is empty, or LEFT_BEHIND.
+  Statuses: COMPLETED (own exit; code kept), TIMEOUT, OUTPUT_CAP, KILLED (137 not sent by CAVR: memory limit),
+  ENGINE_ERROR (no docker, or `docker run` exit 125/126/127), LEFT_BEHIND. Only COMPLETED with exit 0 is usable.
+
+### Design decisions
+
+- **Deadline independent of output** (alternative, M1: check the clock after each `readline`): a silent container
+  never returns from `readline`; the reader threads make the deadline a plain clock check.
+- **Kill by container name, then the CLI** (M1 killed only the CLI, which leaves the container running).
+- **Any stream over its cap is UNRESOLVED and killed at once** (alternative: keep reading and truncate): an untrusted
+  flood of stdout or a trace past 16 MiB cannot be judged; killing early also bounds the run.
+- **Removal is checked, not assumed** (`--rm` removes asynchronously): a container still listed after removal is
+  LEFT_BEHIND, which is UNRESOLVED.
+- **Docker tests use a 2-3 s deadline** to keep the suite fast; the 20 s default is checked by a unit test.
+
+### Requirements covered
+
+| ID | Acceptance check |
+|---|---|
+| NFR-1 rule 4 (limits, deadline) | infinite loop TIMEOUT after 3.37 s with a 3 s deadline (<= deadline + 5 s); fork bomb stops at the pids limit (EAGAIN, < 64 forks); memory hog KILLED |
+| NFR-1 rule 9 (disposable) | `docker ps -a` lists no `cavr-*` container after every Docker test, including failed runs |
+| FR-6 fail closed | timeout, cap, foreign kill, engine error, leftover container: never usable |
+| Q8 | `DEADLINE_SECONDS == 20.0` |
+
+### Ch 7 Test cases
+
+`tests/test_cavr_sandbox_exec.py`: 30 tests, 22 unit (fake `docker run` with real OS pipes, fake `docker kill/rm/ps`)
+and 8 Docker.
+
+| Test ID | Purpose | Input | Expected | Result |
+|---|---|---|---|---|
+| `test_the_default_deadline_is_twenty_seconds_per_run` | Q8 | constants | 20 s, grace 5 s | pass |
+| `test_silent_container_is_killed_at_the_deadline` | silent run | no output, 0.3 s deadline | TIMEOUT within deadline + grace; CLI killed and waited | pass |
+| `test_kill_and_removal_target_the_container_name`, `test_kill_happens_before_the_cli_process_is_killed` | kill target | timeout | `docker kill <name>` before the CLI kill; `ps -a` by name | pass |
+| `test_output_does_not_keep_a_container_alive_past_its_deadline` | chatter | output every 10 ms | TIMEOUT < 1.5 s | pass |
+| `test_finished_container_is_completed_with_its_exit_code`, `test_non_zero_exit_is_completed_but_not_usable` | own exit | exit 0 / 3 | COMPLETED, usable only for 0 | pass |
+| `test_docker_failure_and_foreign_kill_are_not_completed` (5) | engine / OOM | 125, 126, 127, 137, -9 | ENGINE_ERROR / KILLED | pass |
+| `test_invalid_utf8_is_replaced_not_fatal` | M1 item | `\xff\xfe`, `\xc3(` | U+FFFD in text, bytes kept | pass |
+| `test_output_over_the_cap_is_killed_and_unresolved` (2), `test_output_over_the_cap_at_exit_is_still_unresolved` | cap | 5000 bytes, cap 1000 | OUTPUT_CAP, 1000 bytes kept | pass |
+| `test_docker_that_cannot_start_is_an_engine_error_and_is_still_cleaned_up` (3), `test_no_docker_binary_at_all_returns_without_waiting` | no engine | Popen raises | ENGINE_ERROR, removal still checked, < 1 s | pass |
+| `test_container_still_listed_after_removal_is_left_behind` | leak | `ps -a` keeps listing | LEFT_BEHIND, `rm -f` tried | pass |
+| `test_names_are_unique_and_well_formed` | names | 1000 names | 1000 distinct `cavr-<12 hex>-<n>` | pass |
+| `test_infinite_loop_is_killed_within_deadline_plus_grace` (Docker) | deadline | `while True: pass`, 3 s | TIMEOUT, 3.0 <= elapsed <= 8.0, no container | pass |
+| `test_sleeping_container_is_killed_and_removed` (Docker) | deadline | `sleep 600`, 2 s | TIMEOUT, removed | pass |
+| `test_failed_run_leaves_no_container` (2, Docker) | failed run | `/nonexistent`; exit 3 | ENGINE_ERROR / COMPLETED not usable; none left | pass |
+| `test_fork_bomb_stops_at_the_pids_limit` (Docker) | pids | fork until error | < 64 forks, errno 11 | pass |
+| `test_memory_hog_is_killed_and_unresolved` (Docker) | memory | 16 MiB blocks | KILLED | pass |
+| `test_flood_of_output_is_capped_and_killed` (Docker) | cap | `yes` | OUTPUT_CAP, 1 MiB kept | pass |
+| `test_invalid_utf8_from_a_real_container_is_replaced` (Docker) | UTF-8 | `a\xffb` | `a�b` | pass |
+
+Runs before the commit: `CAVR_DOCKER=1 pytest tests/test_cavr_sandbox_exec.py`: 30 passed;
+`CAVR_DOCKER=1 pytest tests/test_cavr_*.py`: 1508 passed, 11 skipped (live) in 403 s. No existing result changed.
+
+### Defects found and fixed
+
+- None found by the tests after the code was written; the order test was rewritten once to be readable.
+
+### Known limitations / deferred
+
+- `docker kill` needs the engine: if the daemon dies mid-run, removal cannot be checked and the run is LEFT_BEHIND
+  (UNRESOLVED) after grace + 20 s.
+- The legacy `SandboxRunner` (used only by `counterfactual.py` and its tests) still has the M1 runner items; PR 12.
+
+### Tool disclosure (Ch 8.7)
+
+- **Generated by Claude Code:** the runner, the tests and these notes. **Reviewed by Maryam:** the plan (20 s,
+  unique names, TIMEOUT -> UNRESOLVED, no container left). **Verified by:** the runs above on Docker 29.9.3.
+
+### Supervisor Q&A prep
+
+1. **What stops a package from hanging the gate?** The host's clock: at 20 s the container is killed by name and
+   removed, whatever it prints or does not print; the result is TIMEOUT, which is UNRESOLVED.
+2. **How do you know no container is left?** After every run the runner lists containers of that name with
+   `docker ps -a`; each Docker test also asserts that no `cavr-*` container exists.
+
+## Step M2-9 — PR 5: behaviour evidence from a trace the package cannot write (2026-11-23)
+
+Plan: `docs/cavr-m2-plan.md` PR 5, decision Q5. Closes the M1 "report forgery" item for the new path: the result is
+read only from strace's trace; the package's output is shown as untrusted and never parsed.
+
+### Ch 6 Implementation
+
+- `backend/cavr/sandbox_harness.py` (new, trusted, stdlib only, mounted read-only at `/opt/cavr/harness.py`). Its first
+  statement (`if __name__ == "__main__": posix.dup2(open("/dev/null"), 2)`) points fd 2, strace's stderr, at
+  /dev/null before any import. `main`: closes stdin, pops `CAVR_RUN_NONCE`, makes itself non-dumpable (`prctl
+  PR_SET_DUMPABLE 0`), runs each job step as a child (env from `CHILD_ENV` + the job's own, stdin /dev/null, stdout and
+  stderr to the container's stdout), refuses a step whose argv or env would carry the nonce, after each step sends
+  `kill(-1, SIGKILL)` until ESRCH (only as UID 10001 from `/opt/cavr/harness.py`), and marks each phase with a failed
+  `stat("/.cavr/<nonce>/<phase>")`. Exit 0 / 3 bad job / 4 step failed / 5 internal.
+- `backend/cavr/sandbox_trace.py` (new): `check_trace(data, nonce, steps)`. Every line must be a strace line with a
+  PID; the first is the harness's execve; every PID is the harness's or returned by clone/clone3/fork/vfork of a known
+  PID (resolved over the whole trace, since a child's first line can come before its parent's clone returns); every
+  process has one exit line and nothing after it; the last line is the harness's `+++ exited with 0 +++`; the harness's
+  markers are exactly `start, step:<s>:begin, step:<s>:end:0 ..., end:ok` with this nonce; no other process uses the
+  nonce. Returns each process's parent and step (by PID).
+- `backend/cavr/sandbox_observe.py` (new): `run_harness(steps, mounts, tmpfs, deadline, stderr_cap, run_id, n)`.
+  Checks the image, makes a 32-hex nonce, writes `job.json` into a temporary directory mounted read-only at `/job`,
+  runs `strace -f -q --always-show-pid -s 1024 -e trace=%file,%network,%process,%creds -u cavr -- /usr/local/bin/python
+  -I -S /opt/cavr/harness.py /job/job.json` with `--env CAVR_RUN_NONCE=<nonce>`, then `check_trace`. Always UNRESOLVED
+  in Phase 2a: a complete run is `DEEP_NOT_JUDGED` (judging is PR 7 / PR 8); the evidence has image ID, seccomp and
+  harness SHA-256, container name, exit code, elapsed time, trace SHA-256, lines and the process map.
+- `tests/test_cavr_data/traces/harness-two-steps.{txt,json}`: a real trace (706 lines) recorded 2026-11-23 from
+  `run_harness` with a fixed nonce, with the docker command, image ID and SHA-256.
+
+### Design decisions
+
+- **The trace is strace's stderr stream, not a file in a root-only tmpfs** (plan text; changed in the plan review,
+  approved 2026-11-23): a file in a tmpfs needs a second root process to carry it out after strace ends, which would
+  break "only strace runs as root". Only strace holds the stream: the harness drops its copy first, children get
+  /dev/null and the stdout pipe, and `/proc/1/fd` (strace, root) is EACCES for UID 10001 (Docker test).
+- **`--always-show-pid`** (strace 6.13): without it, lines of a single live process have no PID, so they cannot be
+  attributed; with it every line is `<pid> ...`.
+- **The harness never runs package code itself and is non-dumpable**: a child of the same UID cannot read its
+  environment (the nonce) or write its memory through `/proc/<pid>/mem` (EACCES, Docker test). Only lines with the
+  harness's PID count as markers.
+- **Nonce only in strace's environment** (owner's request): not in the job file, not in any child's argv or env
+  (unit tests on both the host's `job_file` and the harness's `read_job`); new per run.
+- **Fill the trace**: there is no file to fill; a flood of syscalls passes the 16 MiB stderr cap and the run is
+  OUTPUT_CAP (Docker test with a 512 KiB cap). **Delete the trace**: there is no file; unlinking `/proc/1/fd/2` is EACCES.
+- **Leftover processes are killed by the harness after each step** (kill(-1) as UID 10001 reaches no root process):
+  otherwise strace waits for them and the run times out.
+- **`chdir` is not in the seccomp profile**, so the harness passes no `cwd` (the image's WORKDIR is /tmp) instead of
+  widening the profile. Likewise `setsid` is not allowed: `start_new_session=True` fails with EPERM.
+
+### Requirements covered
+
+| ID | Acceptance check |
+|---|---|
+| NFR-1 (package code never runs as root) | `test_package_code_never_runs_as_root`: `docker top` during the run lists only `strace` as root, every other process UID 10001; `setuid(0) = -1 EPERM`; every getuid/geteuid in the trace is 10001 |
+| FR-13 (trusted observation) | a package cannot open, list or unlink strace's fds, read the harness's environ or mem, or write the job or harness (9 attempts refused); the trace stays complete with one harness exit line |
+| FR-6 fail closed | truncated, tampered, forged, filled or cut traces and a killed harness are UNRESOLVED (unit + Docker) |
+| M1 report-forgery item | `test_report_markers_in_the_package_output_change_nothing`, `test_package_printing_a_fake_report_is_ignored` |
+
+### Ch 7 Test cases
+
+`tests/test_cavr_sandbox_trace.py`: 64 tests, 56 unit and 8 Docker.
+
+| Test ID | Purpose | Input | Expected | Result |
+|---|---|---|---|---|
+| `test_recorded_trace_is_what_its_metadata_says`, `test_recorded_trace_is_complete_and_maps_each_process_to_its_step` | baseline | recorded trace | complete; root 9; steps probe [10], second [12]; 11 child of 10 | pass |
+| `test_empty_trace_is_incomplete` | empty | "" | TRACE_EMPTY | pass |
+| `test_trace_cut_in_the_middle_of_a_line_is_incomplete`, `..._without_its_last_lines_...`, `..._without_the_harness_exit_line_...`, `test_trace_cut_at_half_is_incomplete` | truncation | cut traces | TRACE_TRUNCATED / incomplete | pass |
+| `test_harness_exit_code_other_than_zero_is_incomplete`, `test_line_after_the_harness_exited_is_incomplete`, `test_child_without_an_exit_line_is_incomplete` | tamper | edited exits | TRACE_TRUNCATED | pass |
+| `test_line_from_a_pid_nobody_created_is_incomplete` | injection | PID 77 line | TRACE_UNKNOWN_PID | pass |
+| `test_a_line_that_is_not_a_strace_line_is_incomplete` (5) | stray text | traceback, bare exit line, strace message, ... | TRACE_MALFORMED | pass |
+| `test_first_line_that_is_not_the_harness_execve_is_incomplete` | other program | execve of /tmp/evil.py | TRACE_NOT_HARNESS | pass |
+| `test_missing_end_marker_is_incomplete`, `test_a_failed_step_marker_is_incomplete`, `test_wrong_nonce_is_incomplete`, `test_steps_other_than_the_job_are_incomplete` | markers | edited markers | TRACE_MARKERS | pass |
+| `test_marker_with_this_runs_nonce_from_a_package_process_is_incomplete` / `test_marker_guess_from_a_package_process_changes_nothing` | forgery | marker from PID 12 | nonce used -> TRACE_MARKERS; a guess -> still complete | pass |
+| `test_unreadable_input_is_incomplete_not_an_exception` | robustness | None, bad bytes | incomplete | pass |
+| `test_the_harness_sends_fd_2_to_dev_null_before_any_import` | first statement | AST of the harness | statement 0 is the dup2; imports after; `os.close(0)` in main | pass |
+| `test_strace_starts_the_harness_with_isolated_python_and_no_site` | `-I -S`, `-u cavr` | STRACE | as planned | pass |
+| `test_the_nonce_is_in_no_child_argv_or_environment` | nonce | job + host env with a fake secret | no nonce, no host variable in any child | pass |
+| `test_a_step_that_would_carry_the_nonce_is_refused` (3), `test_a_malformed_job_is_refused` (5) | job | nonce in argv / env value / env key; bad jobs | ValueError (harness and host) | pass |
+| `test_leftover_processes_are_killed_until_none_is_left`, `test_kill_minus_one_is_never_sent_outside_the_sandbox` | cleanup | fake kill; this host | 3 rounds; never on the host | pass |
+| `test_harness_writes_nothing_to_its_stderr_even_when_a_step_does`, `test_harness_exit_codes` (4) | harness run on the host | steps writing stderr; failing / missing / bad nonce / empty | stderr empty; exit 0, 4, 4, 3, 3 | pass |
+| `test_complete_run_is_unresolved_not_judged`, `test_report_markers_in_the_package_output_change_nothing`, `test_the_nonce_is_passed_only_to_the_container_environment` | run_harness | fake run with the recorded trace | DEEP_NOT_JUDGED; forged stdout changes nothing; nonce once, in `--env`, new per run | pass |
+| `test_a_run_that_did_not_complete_is_unresolved` (5), `test_harness_exit_other_than_zero_is_unresolved`, `test_incomplete_trace_is_unresolved`, `test_image_problem_runs_nothing`, `test_a_fault_is_unresolved_internal_error`, `test_a_bad_step_is_unresolved` | fail closed | each failure | its rule, UNRESOLVED; nothing run on an image problem | pass |
+| `test_benign_step_gives_a_complete_trace` (Docker) | happy path | print | DEEP_NOT_JUDGED, trace complete | pass |
+| `test_package_code_never_runs_as_root` (Docker) | NFR-1 | 2 forks + sh + setuid(0) | only strace root; all others 10001 | pass |
+| `test_package_cannot_open_strace_fds_and_the_trace_stays_complete_and_unforged` (Docker) | owner's test | 9 attempts on /proc/1/fd, harness /proc, mounts; forged lines on stdout and stderr | 9 refused (EACCES 13 x8, EROFS 30 x1); complete; one harness exit line, last | pass |
+| `test_package_that_fills_the_trace_is_unresolved` (Docker) | fill | stat loop, cap 512 KiB | SANDBOX_OUTPUT_CAP | pass |
+| `test_package_that_kills_the_harness_is_unresolved` (Docker) | cut | kill(ppid, SIGKILL) | SANDBOX_KILLED (exit 137) | pass |
+| `test_package_that_exits_with_an_error_is_unresolved` (Docker) | failure | exit 7 | SANDBOX_EXIT_NONZERO, `step:probe:end:7` | pass |
+| `test_package_printing_a_fake_report_is_ignored` (Docker) | forgery | old report markers | DEEP_NOT_JUDGED; markers only in output | pass |
+| `test_background_process_left_by_a_step_is_killed_and_the_run_ends` (Docker) | leftovers | forked child sleeps 600 s | complete < 15 s; `killed by SIGKILL` in trace | pass |
+
+Runs before the commit: `CAVR_DOCKER=1 pytest tests/test_cavr_sandbox_trace.py`: 64 passed;
+`CAVR_DOCKER=1 pytest tests/test_cavr_*.py`: 1 failed, 1571 passed, 11 skipped (the failure is the strace defect below); after the fix, `CAVR_DOCKER=1 pytest tests/test_cavr_sandbox_{image,exec,trace}.py`: 135 passed; 80 of 80 benign runs and 80 of 80 runs with fork, threads and subprocess complete. No existing result changed.
+
+### Defects found and fixed
+
+- **strace start-up race (found by the CAVR suite):** `test_benign_step_gives_a_complete_trace` failed once with exit 1;
+  40 repeated runs reproduced it once: `strace: test_ptrace_seize: unexpected wait status 0`. strace's self-test forks a
+  child that calls `pause()` and expects to kill it; `pause` was not in the CAVR profile, so the child got EPERM and
+  sometimes exited first. Fix: `pause` added to the profile (comment says why). The same race explains the one failed
+  run in 40 of the PR 3 measurement, so `process_vm_writev` and `rt_sigsuspend`, kept then for that run, are removed
+  (80 of 80 runs without them). The profile now has **46** additions, not 47 as written in Step M2-7;
+  `test_cavr_profile_is_the_shared_profile_plus_listed_additions` checks 46. The failure was UNRESOLVED, never VERIFIED.
+- First smoke run: the step failed with `chdir("/tmp") = -1 EPERM` (not in the profile); `cwd` removed.
+- Without `--always-show-pid` the single-process lines had no PID (found before the checker was written).
+- `test_background_process_left_by_a_step_is_killed_and_the_run_ends` first used `start_new_session=True`, which
+  fails under the profile (setsid EPERM); changed to a plain fork.
+
+### Known limitations / deferred
+
+- A package can end its own import early (`os._exit(0)`); what it did before is in the trace, but the early exit is
+  not detected as such.
+- `chdir`, `setsid` and other syscalls outside the profile fail with EPERM: such a package's run is incomplete
+  (UNRESOLVED), never VERIFIED.
+- Events are not normalised (PR 7) or judged (PR 8); the result is never VERIFIED until PR 9.
+- strace's `+++ superseded by execve +++` (execve from a non-leader thread) is accepted as an exit line but no test
+  produces it.
+
+### Tool disclosure (Ch 8.7)
+
+- **Generated by Claude Code:** harness, trace check, run_harness, recorded trace, tests and these notes.
+  **Reviewed by Maryam:** the trace-channel design and the first-statement / nonce rules (2026-11-23).
+  **Verified by:** the runs above on Docker 29.9.3.
+
+### Supervisor Q&A prep
+
+1. **Can the package write a fake clean trace?** No process of UID 10001 holds the trace stream or can reach strace's
+   fds; a forged line printed to stdout or stderr goes to the untrusted output. A missing, cut or reordered line makes
+   the trace incomplete, which is UNRESOLVED.
+2. **How do you know package code never ran as root?** strace starts the harness as 10001; `docker top`, the host's
+   view, listed only strace as root while the package's processes ran; `setuid(0)` failed with EPERM.
+3. **Why not trust the harness's own report?** It shares a UID with the package's processes; the verdict reads only
+   what strace (root) wrote, and the harness's lines count only by its PID.
+
+## Step M2-10 — PR 6: install the verified wheels and import their top-level modules in the sandbox (2026-11-23)
+
+Plan: `docs/cavr-m2-plan.md` PR 6, sandbox rules 2 and 6. Closes the M1 item "`harness.py` reports
+`test_passed: True` without importing" by deleting `harness.py`. Not wired into `verify_request` or the gate (2b).
+
+### Ch 6 Implementation
+
+- `backend/cavr/sandbox_observe.py`: `observe(nodes, modules, quarantine_dir, deadline, run_id, n)`,
+  `stage_wheels(nodes, quarantine_dir, stage_dir)`, `install_steps(modules)`, `check_modules(modules)`, `NotStaged`.
+  Algorithm: (1) each tree node must be a verified wheel: name and version of safe characters, a `.whl` filename equal
+  to the file's own name, a 64-hex sha256, a regular file (no symlink) inside CAVR's quarantine, no name twice;
+  (2) its bytes are read once, hashed and compared with the tree's sha256, then written to a per-run staging directory
+  (0644) with `hashes.txt` (`name==version --hash=sha256:...`); (3) `run_harness` mounts the staging directory read-only
+  at `/pkg` and adds the tmpfs `/site:rw,exec,nosuid,nodev,size=128m`; step `install` = `pip install --no-index
+  --no-deps --only-binary :all: --require-hashes --no-compile --find-links /pkg --target /site/lib -r
+  /pkg/hashes.txt` (pip re-checks every hash); step `imports` = `python -I -S -c` with `site.addsitedir('/site/lib')`
+  (which runs `.pth` files) and `importlib.import_module` for each top-level module. Rules: WHEEL_NOT_VERIFIED,
+  WHEEL_HASH_MISMATCH, MODULES_UNKNOWN, INTERNAL_ERROR, otherwise `run_harness`'s (never VERIFIED in Phase 2a).
+  Evidence adds the staged wheels, modules, hash-file SHA-256, install target and site tmpfs.
+- `backend/cavr/harness.py`: **deleted** (Q12: nothing imported it; it never installed a wheel).
+
+### Design decisions
+
+- **Deviation from sandbox rule 2 (owner's decision 5, 2026-11-23):** rule 2 says every writable tmpfs is `noexec`.
+  The pip install target `/site` is `exec` (still `nosuid,nodev`, 128 MiB); `/tmp` stays `noexec`. Reason: a wheel's
+  native extension is loaded with `mmap(PROT_EXEC)`, which a noexec mount refuses. Shown by two Docker tests on the
+  same wheel (a copy of the image's own `_bisect` CPython extension): installed into `/site` it imports and the trace
+  is complete; installed into `/tmp` the import fails with `failed to map segment from shared object`. Trade-off: a
+  package can write and execute a file under `/site`; every such execve is in the trace, and the run is still
+  network-less, read-only elsewhere, UID 10001 and limited.
+- **Staging copy instead of mounting the quarantine file directly** (alternative: bind-mount each quarantine file):
+  quarantine files are written by `mkstemp` with mode 0600 and the sandbox user is 10001, so they cannot be read in
+  place. The copy is made from the same bytes that were hashed, so what is mounted is exactly what was checked.
+- **Top-level modules only** (owner: "import its top-level modules"): `demo.sub` is refused; a str is refused too
+  (it would split into letters, a defect the tests caught).
+- **One run, two steps**: install and import in the same container, so the `.pth` and import behaviour is traced from
+  the same installed bytes; harness processes are told apart by PID in the trace (`processes[pid].step`).
+
+### Requirements covered
+
+| ID | Acceptance check |
+|---|---|
+| NFR-1 rule 6 (exact bytes) | changed quarantine bytes -> WHEEL_HASH_MISMATCH before mounting; pip inside refuses a wrong hash (`step:install:end:1`) |
+| NFR-1 rule 2 (read-only) | wheels at `/pkg` read-only; only `/site` executable (unit + Docker contrast) |
+| FR-13 | connect to 198.51.100.24:443 recorded as `= -1 ENETUNREACH`; read of `~/.aws/credentials` recorded; `.pth` at start-up recorded |
+| FR-6 fail closed | Docker hidden, bad node, bad module names, a fault -> UNRESOLVED |
+| M1 harness item | `test_the_old_harness_is_gone`; a real import of each wheel's modules, seen in the trace |
+
+### Ch 7 Test cases
+
+`tests/test_cavr_sandbox_observe.py`: 36 tests, 29 unit (real wheels from `build_wheel`, fake `run_harness`) and 7 Docker.
+
+| Test ID | Purpose | Input | Expected | Result |
+|---|---|---|---|---|
+| `test_hash_file_holds_exactly_the_trees_sha256_values` | hash file | demo 1.0 + helper 2.0 | two lines with the tree's sha256 | pass |
+| `test_staged_wheels_are_the_exact_quarantine_bytes_readable_by_the_sandbox_user` | staging | tree | same bytes, 0644, dir 0755, only wheels + hashes.txt, removed after | pass |
+| `test_a_wheel_whose_quarantine_bytes_changed_is_refused_before_mounting` | rule 6 | bytes appended | WHEEL_HASH_MISMATCH, nothing run | pass |
+| `test_a_node_that_is_not_a_verified_wheel_is_refused` (8) | verified only | sdist name, no / bad sha, no path, absent file, `../` name, bad name, bad version | WHEEL_NOT_VERIFIED, nothing run | pass |
+| `test_a_wheel_outside_the_quarantine_is_refused`, `test_a_symlink_in_the_quarantine_is_refused`, `test_a_name_twice_in_the_tree_is_refused`, `test_no_wheel_is_refused` (3) | provenance | outside file, symlink, Helper twice, empty | WHEEL_NOT_VERIFIED | pass |
+| `test_modules_that_are_not_top_level_names_are_refused` (7) | modules | [], None, `demo.sub`, twice, code, "", a str | MODULES_UNKNOWN | pass |
+| `test_the_steps_install_offline_by_hash_then_import` | steps | — | pip flags as planned; import argv ends with the modules; no env | pass |
+| `test_only_the_install_target_is_executable` | rule 2 deviation | — | only `/site` exec; `/tmp` noexec | pass |
+| `test_docker_hidden_is_unresolved_and_nothing_runs`, `test_a_fault_is_unresolved_internal_error` | fail closed | no engine; raising stage | ENGINE_UNAVAILABLE / INTERNAL_ERROR | pass |
+| `test_the_old_harness_is_gone` | Q12 | — | `backend/cavr/harness.py` absent | pass |
+| `test_benign_wheel_installs_imports_and_gives_a_complete_trace` (Docker) | happy path | demo imports helper | DEEP_NOT_JUDGED; both `__init__.py` opened by the import step | pass |
+| `test_import_that_connects_out_is_a_recorded_failed_connect` (Docker) | rule 1 | connect at import | `connect(... 198.51.100.24 ... 443) = -1 ENETUNREACH` | pass |
+| `test_import_that_reads_aws_credentials_is_recorded` (Docker) | secret read | open `~/.aws/credentials` | `/tmp/home/.aws/credentials` in the import step's lines | pass |
+| `test_a_pth_file_runs_at_start_up_and_is_recorded` (Docker) | .pth | `demo-startup.pth` | its stat in the import step's lines | pass |
+| `test_pip_inside_refuses_a_wheel_whose_hash_does_not_match` (Docker) | rule 6 inside | wrong hash in hashes.txt | SANDBOX_EXIT_NONZERO, `step:install:end:1` | pass |
+| `test_a_wheel_with_a_native_so_imports_and_gives_a_complete_trace` (Docker) | owner's test | `_bisect` extension, tag cp312-cp312-linux_x86_64 | DEEP_NOT_JUDGED; .so opened without error (4.1 s, 5848 lines) | pass |
+| `test_the_same_native_wheel_cannot_load_from_the_noexec_tmp` (Docker) | why `/site` is exec | same wheel into `/tmp/lib` | install 0, import fails "failed to map segment" | pass |
+
+Runs before the commit: `CAVR_DOCKER=1 pytest tests/test_cavr_sandbox_observe.py`: 36 passed;
+`CAVR_DOCKER=1 pytest tests/test_cavr_*.py`: 1608 passed, 11 skipped (live) in 441 s. No existing result changed.
+
+### Defects found and fixed
+
+- `check_modules("demo")` accepted a str as the letters `d, e, m, o`; now only a list or tuple is accepted (test above).
+
+### Known limitations / deferred
+
+- Events are kept as raw trace lines; normalisation (PR 7), judging against the contract (PR 8) and the deep verdict
+  through `verify_request` (PR 9) are next. Phase 2a returns UNRESOLVED `DEEP_NOT_JUDGED` at best.
+- The import runs as one process for all modules; a module that ends the process early stops later imports (its own
+  behaviour up to then is traced).
+- Native wheels whose import needs a syscall outside the profile fail and are UNRESOLVED.
+- CI on GitHub's runner is not verified (nothing pushed).
+
+### Q12: legacy parts after PRs 3-6
+
+| Part | Status |
+|---|---|
+| `sandbox_runner.SandboxRunner.image_digest` | deleted (PR 3) |
+| `backend/cavr/harness.py` | deleted (PR 6) |
+| rest of `sandbox_runner.py` (run loop, stdout markers, `_extract_report`, `SECCOMP_PROFILE`) | still used by `counterfactual.py` (only its tests use it) and `tests/test_cli_resources.py`; PR 12 |
+| `sandbox.py`, `lab_harness.py`, `runtime_monitor.py` | used by the LOCAL lab (`analyzer.py`, orchestrator `service.py`, `test_modules.py`, `test_cavr_targeted.py`, `test_cavr_lab_pins.py`); PR 12 (`runtime_monitor` PR 7) |
+| `docker/asent-sandbox/Dockerfile` | listed by `doctor.py`, `check_wheel.py` and the packaging tests; PR 12 with owner review |
+
+### Tool disclosure (Ch 8.7)
+
+- **Generated by Claude Code:** the staging and install/import code, the tests and these notes. **Reviewed by
+  Maryam:** decision 5 (exec only for the install target, native .so test). **Verified by:** the runs above.
+
+### Supervisor Q&A prep
+
+1. **Could the sandbox install something other than what was verified?** No: the host refuses any file whose bytes
+   differ from the tree's sha256 before mounting, and pip inside installs only with `--require-hashes --no-index
+   --no-deps --only-binary :all:` from the read-only copy.
+2. **Why is one tmpfs executable when the rules say noexec?** Native extensions are mapped executable; on a noexec
+   mount the import fails (shown by a test). Only the install target is exec, still nosuid and nodev, and every
+   execve is traced.
+
+## Review of steps M2-7 to M2-10 — fixes (2026-11-23)
+
+Review outcomes (one cavr-reviewer pass over PRs 3-6, 2026-11-23):
+- Step M2-7 (PR 3): 1 pass, fix first (BLOCKER 1, seccomp part); fixed below; 0 open MINOR.
+- Step M2-8 (PR 4): 1 pass, fix first (BLOCKER 2); fixed below; 0 open MINOR.
+- Step M2-9 (PR 5): 1 pass, fix first (BLOCKER 1, trace-check part); fixed below; MAJOR 1 deferred to PR 7; 0 open MINOR.
+- Step M2-10 (PR 6): 1 pass, MINORs 5 and 7 fixed below; 0 open MINOR.
+
+### Ch 6 Implementation
+
+- `docker/cavr-sandbox/cavr-seccomp.json`: `clone` allowed only with `SCMP_CMP_MASKED_EQ` on argument 0, mask
+  0x7E820000 (Docker's namespace mask 0x7E020000 + `CLONE_UNTRACED` 0x00800000), result 0; `clone3` is
+  `SCMP_ACT_ERRNO` with `errnoRet` 38 (ENOSYS; glibc falls back to `clone`). Still 46 names in the additions.
+- `backend/cavr/sandbox_trace.py`: new rule TRACE_UNFOLLOWED: every PID a known process's clone / fork / vfork
+  returned must have lines in the trace; every created PID (not only those seen) must have an exit line.
+- `backend/cavr/sandbox_exec.py`: `run_container` joins both readers before deciding a run that exited by itself; a
+  reader still alive -> ENGINE_ERROR, bytes over a cap -> OUTPUT_CAP; `wake.clear()` after each wait; a run that was
+  not COMPLETED is listed twice (`RECHECK_SECONDS` = 0.5) before it counts as removed; `docker_command` refuses a tmpfs
+  that is not `<path>:rw,[no]exec,nosuid,nodev,size=<n>m,mode=1777` or that targets /tmp, /, /pkg, /job, /opt/cavr, /proc.
+- `backend/cavr/sandbox_observe.py`: SECCOMP_CHANGED when the profile's SHA-256 differs from the one the image check
+  read; `top_level_names(data, filename)` from the wheel archive; a module no staged wheel provides -> MODULES_UNKNOWN;
+  an unreadable wheel -> WHEEL_NOT_VERIFIED.
+- `backend/cavr/harness.py`: **restored** (deleted in `c3d384a`). `docker/asent-sandbox/Dockerfile` still does
+  `COPY harness.py` with `backend/cavr` as its documented build context (`docs/cavr-m1-plan.md`), so it is used;
+  Q12 ("delete only what nothing uses") keeps it until PR 12, with that Dockerfile and `SandboxRunner`.
+- `tests/test_cavr_support.py`: `sandbox_identity()` rebuilds only a missing, unrecorded or stale image; an ID mismatch
+  fails the test instead of overwriting the build record.
+
+### Design decisions
+
+- **Filter clone's flags, refuse clone3** (alternative: drop clone and keep only vfork/fork): Python threads and
+  `fork` need `clone`; seccomp can read clone's flags (a register) but not clone3's (a struct in memory), which is why
+  Docker's own default profile does the same.
+- **Both layers**: the profile refuses CLONE_UNTRACED, and the trace check would still notice a created PID with no
+  lines, so one layer failing is not enough to hide a process.
+- **Restore rather than keep the deletion**: the owner's rule is about use, and a Dockerfile that copies the file is a use.
+
+### Requirements covered
+
+| ID | Acceptance check |
+|---|---|
+| NFR-1 / FR-13 | `clone(CLONE_UNTRACED)`, `CLONE_NEWUSER`, `NEWNET`, `NEWNS`, `NEWPID` -> EPERM, recorded; no child ran (Docker) |
+| FR-6 fail closed | a created PID with no lines -> TRACE_UNFOLLOWED; over-cap output at exit never COMPLETED (50 of 50) |
+
+### Ch 7 Test cases
+
+| Test ID | Purpose | Input | Expected | Result |
+|---|---|---|---|---|
+| `test_a_child_strace_never_followed_is_incomplete` | BLOCKER 1 | recorded trace + `clone(...) = 99`, no line of 99 | TRACE_UNFOLLOWED | pass |
+| `test_a_failed_clone_creates_nothing` | no false alarm | `clone(...) = -1 EPERM` | complete | pass |
+| `test_untraced_and_namespace_clones_are_refused_and_recorded` (Docker) | BLOCKER 1 | ctypes clone with 5 flags; clone3; a thread | 5 x EPERM, clone3 ENOSYS, thread ok, no child line | pass |
+| `test_cavr_profile_is_the_shared_profile_plus_listed_additions` (changed) | filter | profile | clone masked 0x7E820000; clone3 ERRNO 38; neither allowed unconditionally | pass |
+| `test_output_over_the_cap_at_exit_is_never_completed` | BLOCKER 2 | 50 runs: 5000 bytes then exit, cap 1000 | OUTPUT_CAP every time | pass |
+| `test_output_not_read_to_its_end_is_not_completed` | BLOCKER 2 | exited, streams never closed | ENGINE_ERROR | pass |
+| `test_a_stopped_run_is_listed_twice_before_it_counts_as_gone`, `test_a_completed_run_is_listed_once` | MINOR 2 | late container | `rm -f` after the second listing; one listing when completed | pass |
+| `test_a_tmpfs_without_nosuid_nodev_and_a_size_is_refused` (6), `test_the_install_target_tmpfs_is_accepted` | MINOR 4 | bad / good tmpfs | ValueError / accepted | pass |
+| `test_a_seccomp_profile_changed_after_the_image_check_runs_nothing` | MINOR 3 | other SHA-256 | SECCOMP_CHANGED, nothing run | pass |
+| `test_a_module_no_staged_wheel_provides_is_refused`, `test_top_level_names_come_from_the_wheel_archive`, `test_an_unreadable_wheel_is_refused` | MINOR 5 | `os`; mixed wheel; not a zip | MODULES_UNKNOWN; `fast, pkg_a, single`; WHEEL_NOT_VERIFIED | pass |
+| `test_the_old_harness_is_gone` | removed | — | `harness.py` stays until PR 12 | removed |
+
+Runs before the commit: `CAVR_DOCKER=1 pytest tests/test_cavr_sandbox_{exec,image,trace,observe}.py`: 188 passed;
+`CAVR_DOCKER=1 pytest tests/test_cavr_*.py`: 1625 passed, 11 skipped (live) in 456 s.
+
+### Defects found and fixed
+
+- BLOCKER 1 (confirmed on Docker before the fix): a ctypes `clone(CLONE_UNTRACED|SIGCHLD)` child ran, its stat was
+  not in the trace, and the trace was TRACE_COMPLETE; `clone(CLONE_NEWUSER)` succeeded. Fixed in the profile and in
+  `check_trace` (above). Corrections: Step M2-7's "Never added: namespaces" and Step M2-10's "every such execve is in
+  the trace" were not true before this fix.
+- BLOCKER 2: `run_container` could return COMPLETED for output over a cap when the CLI exited before the readers
+  caught up (reviewer: `test_output_over_the_cap_at_exit_is_still_unresolved` failed 8 of 100 runs under load). Fixed.
+- MINOR 7: deleting `harness.py` broke the legacy `docker/asent-sandbox` recipe; restored. The dashboard's
+  `proof.image_digest` (`ProofDrawer.tsx`, `CavrModule.tsx`) is unchanged: it shows `api.py`'s NOT_RUN value, which
+  never came from `SandboxRunner`.
+
+### Known limitations / deferred
+
+- MAJOR 1 (truncated `-s 1024` strings, dirfd-relative paths) does not affect completeness in Phase 2a; it is now a
+  Part of PR 7 in the plan (`-yy`, larger `-s`, truncated or unresolvable path -> UNRESOLVED).
+- The profile's SHA-256 is re-checked right before `docker run`; Docker reads the file by path a moment later, so a
+  change in that window is not detected. PR 9 puts the SHA-256 into `analyzer_version`.
+- The clone filter uses argument 0, which is the flags on x86_64 and aarch64 (the profile's architectures).
+
+### Tool disclosure (Ch 8.7)
+
+- **Generated by Claude Code:** the fixes, tests and these notes, from the cavr-reviewer report. **Reviewed by
+  Maryam:** not yet. **Verified by:** the BLOCKER 1 probe on Docker before and after the fix, and the runs above.
+
+### Supervisor Q&A prep
+
+1. **Can a package start a process strace does not follow?** The usual way is `clone(CLONE_UNTRACED)`; the profile
+   refuses it (EPERM, recorded), and if a created PID ever had no lines the trace check says TRACE_UNFOLLOWED.
+2. **Why is clone3 refused?** seccomp cannot look inside clone3's argument struct, so it cannot refuse namespace or
+   untraced flags there; with ENOSYS glibc uses clone, whose flags it can check (as Docker's default profile does).
+
+## Step M2-11 — Refused syscalls and ptrace checked in the sandbox (2026-11-23)
+
+Owner's check before the push: io_uring, process_vm_*, userfaultfd, bpf, perf_event_open refused, and no ptrace by a
+UID 10001 package process, each attempt visible in the trace.
+
+### Ch 6 Implementation
+
+- `backend/cavr/sandbox_observe.py`: `TRACED_BY_NAME` = ptrace, process_vm_readv, process_vm_writev, io_uring_setup,
+  io_uring_enter, io_uring_register, userfaultfd, bpf, perf_event_open, added to strace's `-e trace=` after
+  `%file,%network,%process,%creds`. None of them is in those classes, so before this change an attempt was refused but
+  not in the trace.
+- `tests/test_cavr_sandbox_trace.py`: `test_a_package_process_is_refused_dangerous_syscalls_and_ptrace` (13 cases,
+  Docker; x86_64 and aarch64 numbers) and `test_the_refused_syscalls_are_traced_by_name_and_not_in_the_profile` (unit).
+
+### Design decisions
+
+- **Profile unchanged**: the eight syscalls were never in `docker/cavr-sandbox/cavr-seccomp.json`, so its default
+  action refuses them (ERRNO, EPERM); nothing was removed.
+- **ptrace stays allowed in the profile**: the filter also applies to strace, which needs ptrace to trace at all, and
+  seccomp cannot tell strace's calls from a package's. The kernel refuses it to package processes: each one is already
+  traced by strace (TRACEME, ATTACH / SEIZE of its own child), the harness is non-dumpable and traced, PID 1 is root.
+
+### Requirements covered
+
+| ID | Acceptance check |
+|---|---|
+| NFR-1 rule 3 | 13 attempts from a UID 10001 package process, each `-1 EPERM` in the trace from the probe's PID |
+| FR-13 | every attempt of the nine syscalls is in the trace (traced by name) |
+
+### Ch 7 Test cases
+
+`test_a_package_process_is_refused_dangerous_syscalls_and_ptrace` (Docker): the probe forks a sleeping child, makes
+one call, prints its return and errno. Trace lines recorded 2026-11-23 (x86_64):
+
+| Test ID | Input | Expected | Trace line (from the probe's PID) | Result |
+|---|---|---|---|---|
+| `[io_uring_setup]` | `io_uring_setup(0, NULL)` | EPERM / ENOSYS | `io_uring_setup(0, NULL) = -1 EPERM` | pass |
+| `[io_uring_enter]` | zeros | EPERM / ENOSYS | `io_uring_enter(0, 0, 0, 0, NULL, ...) = -1 EPERM` | pass |
+| `[io_uring_register]` | zeros | EPERM / ENOSYS | `io_uring_register(0, IORING_REGISTER_BUFFERS, NULL, 0) = -1 EPERM` | pass |
+| `[process_vm_readv]` | the harness's PID | EPERM / ENOSYS | `process_vm_readv(9, NULL, 0, NULL, 0, ...) = -1 EPERM` | pass |
+| `[process_vm_writev]` | the harness's PID | EPERM / ENOSYS | `process_vm_writev(9, NULL, 0, NULL, 0, ...) = -1 EPERM` | pass |
+| `[userfaultfd]` | `userfaultfd(0)` | EPERM / ENOSYS | `userfaultfd(0) = -1 EPERM` | pass |
+| `[bpf]` | `bpf(0, NULL, 0)` | EPERM / ENOSYS | `bpf(BPF_MAP_CREATE, NULL, 0) = -1 EPERM` | pass |
+| `[perf_event_open]` | `perf_event_open(NULL, 0, -1, -1, 0)` | EPERM / ENOSYS | `perf_event_open(NULL, 0, -1, -1, 0) = -1 EPERM` | pass |
+| `[ptrace_traceme]` | PTRACE_TRACEME | EPERM | `ptrace(PTRACE_TRACEME) = -1 EPERM` | pass |
+| `[ptrace_attach_strace]` | PTRACE_ATTACH 1 | EPERM | `ptrace(PTRACE_ATTACH, 1) = -1 EPERM` | pass |
+| `[ptrace_attach_harness]` | PTRACE_ATTACH ppid | EPERM | `ptrace(PTRACE_ATTACH, 9) = -1 EPERM` | pass |
+| `[ptrace_attach_own_child]` | PTRACE_ATTACH child | EPERM | `ptrace(PTRACE_ATTACH, 11) = -1 EPERM` | pass |
+| `[ptrace_seize_own_child]` | PTRACE_SEIZE child | EPERM | `ptrace(PTRACE_SEIZE, 11, NULL, 0) = -1 EPERM` | pass |
+| `test_the_refused_syscalls_are_traced_by_name_and_not_in_the_profile` | profile, STRACE | 8 not allowed, ptrace allowed, all 9 traced | — | pass |
+
+Run before the commit (as the owner asked, sandbox tests only): `CAVR_DOCKER=1 pytest tests/test_cavr_sandbox_*.py`:
+278 passed; no `cavr-*` container left. In every case the trace was complete (`DEEP_NOT_JUDGED`).
+
+### Defects found and fixed
+
+- Refused attempts of these nine syscalls were not in the trace (not in strace's traced classes); now traced by name.
+- Review: no cavr-reviewer pass for this step (owner asked for the check and the sandbox tests only).
+
+### Known limitations / deferred
+
+- ptrace is refused by the kernel, not by seccomp; the test shows each way in for this layout (all package processes
+  traced from creation by `strace -f`, harness non-dumpable, PID 1 root).
+- The probe's numbers cover x86_64 and aarch64 only; on another architecture the Docker test is skipped.
+
+### Tool disclosure (Ch 8.7)
+
+- **Generated by Claude Code:** the trace-set change, the tests and these notes. **Reviewed by Maryam:** the list of
+  syscalls to check. **Verified by:** the run above on Docker 29.9.3.
+
+### Supervisor Q&A prep
+
+1. **Why is ptrace allowed in the seccomp profile at all?** The profile also applies to strace, which traces with
+   ptrace; a package process's ptrace fails because it and every process it starts are already traced, the harness
+   is non-dumpable and strace is root (13 Docker cases, each EPERM in the trace).

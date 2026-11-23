@@ -16,7 +16,6 @@ class SandboxRunner:
         self.use_gvisor = use_gvisor
         self.timeout_seconds = 30
         self.image_name = "asent-sandbox"
-        self.image_digest = "sha256:7f9a2e8c1b50493817f5492d001e3b6289410ac0219582d92138a0f918e932b1"
 
     def get_docker_command(self, quarantine_dir: Path | str, run_id: str) -> list[str]:
         cmd = [
@@ -129,7 +128,9 @@ class SandboxRunner:
             "run_id": run_id,
             "docker_command": docker_cmd_str,
             "container_id": f"asent-{container_id}",
-            "image_digest": self.image_digest,
+            # This legacy runner never checks its image (the old hardcoded digest is gone, PR 3). CAVR's
+            # sandbox runs check theirs with sandbox_image.image_identity; this runner goes with PR 12.
+            "image_id": None,
             "use_gvisor": self.use_gvisor,
             "observed": observed,
             "isolation": isolation,

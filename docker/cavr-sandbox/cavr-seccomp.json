@@ -1,0 +1,177 @@
+{
+  "defaultAction": "SCMP_ACT_ERRNO",
+  "architectures": [
+    "SCMP_ARCH_X86_64",
+    "SCMP_ARCH_X86",
+    "SCMP_ARCH_X32",
+    "SCMP_ARCH_AARCH64"
+  ],
+  "syscalls": [
+    {
+      "names": [
+        "read",
+        "write",
+        "open",
+        "openat",
+        "close",
+        "stat",
+        "fstat",
+        "lstat",
+        "newfstatat",
+        "poll",
+        "lseek",
+        "mmap",
+        "mprotect",
+        "munmap",
+        "brk",
+        "rt_sigaction",
+        "rt_sigprocmask",
+        "rt_sigreturn",
+        "ioctl",
+        "pread64",
+        "pwrite64",
+        "readv",
+        "writev",
+        "access",
+        "faccessat",
+        "faccessat2",
+        "pipe",
+        "pipe2",
+        "select",
+        "pselect6",
+        "sched_yield",
+        "mremap",
+        "dup",
+        "dup2",
+        "dup3",
+        "nanosleep",
+        "clock_nanosleep",
+        "gettimeofday",
+        "getpid",
+        "getppid",
+        "getuid",
+        "geteuid",
+        "getgid",
+        "getegid",
+        "gettid",
+        "exit",
+        "exit_group",
+        "arch_prctl",
+        "futex",
+        "set_robust_list",
+        "get_robust_list",
+        "clock_gettime",
+        "clock_getres",
+        "tgkill",
+        "getrandom",
+        "memfd_create",
+        "prlimit64"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "comment": "unchanged copy of docker/asent-seccomp.json (shared)"
+    },
+    {
+      "names": [
+        "close_range",
+        "execve",
+        "fstatfs",
+        "statx"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "comment": "CAVR addition: runc init after the profile is loaded: checks /proc/thread-self is not overmounted (statx, fstatfs), closes inherited fds (close_range) and starts the container process (execve)"
+    },
+    {
+      "names": [
+        "kill",
+        "ptrace",
+        "setgroups",
+        "setregid",
+        "setreuid",
+        "wait4"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "comment": "CAVR addition: strace as container root: traces with ptrace, waits with wait4, signals tracees with kill, and `strace -u cavr` drops to UID/GID 10001 (setgroups, setregid, setreuid)"
+    },
+    {
+      "names": [
+        "pause"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "comment": "CAVR addition: strace's own start-up: its self-test test_ptrace_seize forks a child that calls pause() and expects it to be killed; without pause the child exits first about 1 run in 40 and strace aborts"
+    },
+    {
+      "names": [
+        "prctl",
+        "set_tid_address",
+        "setuid",
+        "vfork"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "comment": "CAVR addition: processes the harness and packages start (pip, the import child, threads, os.system, fork); allowed so that each attempt is in the trace, not hidden by EPERM (clone and clone3: see their own entries)"
+    },
+    {
+      "names": [
+        "clone"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "args": [
+        {
+          "index": 0,
+          "value": 2122448896,
+          "valueTwo": 0,
+          "op": "SCMP_CMP_MASKED_EQ"
+        }
+      ],
+      "comment": "CAVR addition: clone only without CLONE_UNTRACED and without namespace flags (mask 0x7E820000 = Docker's namespace mask 0x7E020000 + CLONE_UNTRACED 0x00800000): an untraced child would run outside strace, and a new user or network namespace opens kernel attack surface; such a clone fails with EPERM, recorded"
+    },
+    {
+      "names": [
+        "clone3"
+      ],
+      "action": "SCMP_ACT_ERRNO",
+      "errnoRet": 38,
+      "comment": "CAVR addition: clone3 answers ENOSYS (as in Docker's default profile): its flags are in memory, which seccomp cannot inspect; glibc then falls back to clone, which is filtered above"
+    },
+    {
+      "names": [
+        "bind",
+        "connect",
+        "getpeername",
+        "getsockname",
+        "sendto",
+        "setsockopt",
+        "socket"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "comment": "CAVR addition: sockets: allowed so that connect / sendto attempts reach the kernel and are recorded; --network none makes them fail (ENETUNREACH)"
+    },
+    {
+      "names": [
+        "chmod",
+        "epoll_create1",
+        "fadvise64",
+        "fcntl",
+        "fsync",
+        "getcwd",
+        "getdents64",
+        "listxattr",
+        "madvise",
+        "mkdir",
+        "readlink",
+        "readlinkat",
+        "rename",
+        "rmdir",
+        "rseq",
+        "sendfile",
+        "statfs",
+        "umask",
+        "uname",
+        "unlink",
+        "unlinkat",
+        "utimensat"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "comment": "CAVR addition: Python start-up, pip install --target and import (measured with strace -c under Docker's default profile, 2026-11-23)"
+    }
+  ]
+}
