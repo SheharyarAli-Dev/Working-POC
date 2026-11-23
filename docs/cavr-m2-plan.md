@@ -28,7 +28,7 @@ update it as each PR lands.
 | Q2 | The VERIFIED demo pin becomes **`pypdf==6.21.4`**; `pypdf==6.19.0` and `pypdf==5.1.0` stay as REJECTED demo cases. Checked 2026-11-22: 6.21.4 has a wheel (`pypdf-6.21.4-py3-none-any.whl`, uploaded 2026-10-28), is not yanked, and has 0 advisories on PyPI's JSON and on OSV. The real wheel, registry JSON and OSV answer are recorded for offline tests; if any of them changes before PR 1, stop and ask. | PR 1 |
 | Q3 | Out of M2, listed under "Future work": npm, eBPF, Tree-sitter, Sigstore, level-4 package replacement, RESTRICTED enforcement. | Checklist row 34, PR 14, PR 15, "Future work" |
 | Q4 | Edits outside the CAVR scope are approved (`docker/`, `.github/workflows/`, `tests/test_modules.py`, `frontend/src/components/CavrModule.tsx`, demo project data). Every commit touching a shared file carries **`[owner review: <file or area>]`** at the end of its subject line. | Working rules; PRs 1, 3, 12, 19 |
-| Q5 | Tracer: strace as container root with only `SYS_PTRACE`, `SETUID`, `SETGID`, `no-new-privileges`; package code as UID 10001. NFR-1 is reworded to **"package code never runs as root"**. | NFR-1, sandbox rule 3, PR 5 |
+| Q5 | Tracer: strace as container root with only four capabilities and `no-new-privileges`: `SYS_PTRACE` (trace), `SETUID` + `SETGID` (`strace -u cavr` drops to UID/GID 10001), `DAC_READ_SEARCH` (read `/proc/<pid>/fd` of a UID 10001 process, mode 0500, so that `strace -y` prints each fd's path; added 2026-11-23, PR 7, Maryam). Package code runs as UID 10001 and holds no capability (the drop clears every set); the image has no setuid / setgid file and no file capability (Docker test). NFR-1 is reworded to **"package code never runs as root"**. | NFR-1, sandbox rule 3, PR 5, PR 7 |
 | Q6 | Separate image `asent-cavr-sandbox:local`, base pinned by digest. | PR 3 |
 | Q7 | Time triggers through **libfaketime** in the image. | PR 3, PR 11 |
 | Q8 | Budget accepted: 8 runs, 20 s per run, 120 s per package; deep runs only on escalation. Deep **VERIFIED only if** every run completed within budget, every trace is complete, and no event falls outside the contract in any run context. Any violation -> **REJECTED**; anything incomplete -> **UNRESOLVED**. | PR 2, PR 9, PR 12 |
@@ -167,8 +167,8 @@ The 21 PRs are grouped into five phases. A phase is done when all its PRs are me
 2. **Read-only.** `--read-only` root; wheels at `/pkg:ro`, project at `/project:ro`; writable only `tmpfs` with
    `noexec,nosuid,nodev` and a size cap; the trace directory is not writable or readable by the package's user.
 3. **Least privilege; package code never runs as root (NFR-1).** Package code runs as UID 10001. Only the trusted
-   tracer (strace) runs as container root, with `--cap-drop ALL --cap-add SYS_PTRACE --cap-add SETUID --cap-add SETGID`
-   and nothing else (Q5); `--security-opt no-new-privileges`; the repository seccomp profile (its SHA-256 goes into
+   tracer (strace) runs as container root, with `--cap-drop ALL --cap-add SYS_PTRACE --cap-add SETUID --cap-add SETGID
+   --cap-add DAC_READ_SEARCH` and nothing else (Q5); `--security-opt no-new-privileges`; the repository seccomp profile (its SHA-256 goes into
    `analyzer_version`); no Docker socket, no host home, no SSH agent, no host environment variables. Test: every
    process of the package in the trace has UID 10001.
 4. **Limits.** `--pids-limit 64`, `--memory 256m --memory-swap 256m`, `--cpus`, `--ulimit nofile,fsize`;
@@ -473,7 +473,7 @@ Stated as limitations in the report and on the dashboard, not implemented in M2:
 - [x] PR 4 runner deadline / kill / limits (branch `cavr-m2-sandbox`, 2026-11-23; report notes Step M2-8): `sandbox_exec.run_container`
 - [x] PR 5 trusted trace channel (package code never runs as root) (branch `cavr-m2-sandbox`, 2026-11-23; report notes Step M2-9): strace's stderr is the trace, `sandbox_trace.check_trace`
 - [x] PR 6 wheel install + import harness (branch `cavr-m2-sandbox`, 2026-11-23; report notes Step M2-10): `sandbox_observe.observe`; exec tmpfs only for the install target; `harness.py` kept until PR 12 (`docker/asent-sandbox/Dockerfile` still copies it; review 2026-11-23); refused syscalls and ptrace checked (Step M2-11)
-- [ ] PR 7 normalisation v2
+- [x] PR 7 normalisation v2 (branch `cavr-m2-deep`, 2026-11-23; report notes Step M2-12): `sandbox_events.py`; strace `-y -s 4096` with `DAC_READ_SEARCH`; pip's User-Agent replaced; `normalizer.py` deleted, `runtime_monitor.py` kept (LOCAL lab, PR 12)
 - [ ] PR 8 runtime contract check
 - [ ] PR 9 one observed run for escalated packages
 

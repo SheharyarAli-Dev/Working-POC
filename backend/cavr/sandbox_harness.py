@@ -24,6 +24,10 @@ import signal
 import subprocess
 import sys
 
+# No .pyc is written by the harness (its lazy `import ctypes` would try, and fail on the read-only root): a clean
+# empty-harness baseline has no FILE_WRITE event (PR 7). `-I` ignores PYTHONDONTWRITEBYTECODE.
+sys.dont_write_bytecode = True
+
 NONCE_VARIABLE = "CAVR_RUN_NONCE"
 SANDBOX_UID = 10001
 INSTALLED_AT = "/opt/cavr/harness.py"
@@ -78,7 +82,7 @@ def read_job(path, nonce) -> list:
 
 
 def run_step(argv, env) -> int:
-    # No cwd: the image's WORKDIR is /tmp, and chdir is not in CAVR's seccomp profile.
+    # No cwd: every step starts in the image's WORKDIR, /tmp (the events' relative paths are resolved from there).
     done = subprocess.run(argv, env=env, stdin=subprocess.DEVNULL, stdout=1, stderr=subprocess.STDOUT, close_fds=True)
     return done.returncode
 

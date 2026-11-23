@@ -5,8 +5,10 @@
     --rm --name cavr-<run>-<n>       disposable, findable by name (rule 9)
     --network none                   no network, no DNS (rule 1)
     --read-only + tmpfs /tmp         read-only root; /tmp writable, noexec,nosuid,nodev, 64 MiB (rule 2)
-    --cap-drop ALL + SYS_PTRACE,     only what strace needs to trace and to drop to UID 10001 (rule 3, Q5)
-      SETUID, SETGID
+    --cap-drop ALL + SYS_PTRACE,     only what strace needs: trace (SYS_PTRACE), drop to UID 10001 (SETUID, SETGID)
+      SETUID, SETGID,                and read /proc/<pid>/fd of a UID 10001 process so that `strace -y` can print each
+      DAC_READ_SEARCH                fd's path (DAC_READ_SEARCH, PR 7) (rule 3, Q5). Package processes hold none of
+                                     them: the drop to UID 10001 clears every set, and the image has no setuid file
     no-new-privileges + seccomp      CAVR's profile docker/cavr-sandbox/cavr-seccomp.json (see the notes, Step M2-7)
     --pids-limit 64, --memory 256m,  limits (rule 4)
       --memory-swap 256m, --cpus 1,
@@ -15,7 +17,7 @@
     no host environment              only the variables passed in `env`; docker run passes none of its own
     read-only bind mounts only       every mount is `readonly`; no Docker socket, no host home
 
-The container has no `--user`: strace is its process and runs as container root with the three capabilities
+The container has no `--user`: strace is its process and runs as container root with the four capabilities
 above; it starts the package's processes as UID 10001 (`strace -u cavr`). The image is named by its checked ID
 (`sandbox_image.image_identity`), never by tag.
 """
@@ -34,7 +36,7 @@ MEMORY = "256m"
 CPUS = "1"
 TMP_TMPFS = "/tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777"
 ULIMITS = ("nofile=256:256", "fsize=67108864:67108864", "core=0:0")
-CAPABILITIES = ("SYS_PTRACE", "SETUID", "SETGID")
+CAPABILITIES = ("SYS_PTRACE", "SETUID", "SETGID", "DAC_READ_SEARCH")
 NAME = re.compile(r"^cavr-[0-9a-f]{12}-[0-9]{1,3}$")
 TMPFS = re.compile(r"^/[a-z][a-z0-9_-]*:rw,(?:noexec|exec),nosuid,nodev,size=[0-9]{1,4}m,mode=1777$")
 _UNSAFE_MOUNT = re.compile(r"[,\n\r\0]")

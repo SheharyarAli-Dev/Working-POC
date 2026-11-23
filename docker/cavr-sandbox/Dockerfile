@@ -14,6 +14,18 @@ RUN apt-get update \
  && useradd -u 10001 -g 10001 -M -d /nonexistent -s /usr/sbin/nologin cavr \
  && mkdir -p /opt/cavr /pkg /site
 
+# No setuid / setgid file and no file capability anywhere (PR 7): strace holds DAC_READ_SEARCH (to read
+# /proc/<pid>/fd for -y), and with these bits gone nothing a package process can exec could ever gain a privilege,
+# on top of no-new-privileges. tests/test_cavr_sandbox_image.py checks the built image.
+RUN find / -xdev -type f -perm /6000 -exec chmod ug-s {} + \
+ && test -z "$(find / -xdev -type f -perm /6000)"
+
+# pip is the base image's own (pinned by the digest above). The sandbox's install command replaces pip's
+# User-Agent builder (sandbox_observe.PIP_CODE), which is written for this version: the build fails if it differs.
+ARG PIP_VERSION=25.0.1
+RUN test "$(python -m pip --version | cut -d' ' -f2)" = "$PIP_VERSION"
+LABEL org.asent.cavr.pip-version="25.0.1"
+
 # No ENTRYPOINT: the runner passes the whole command. The harness is mounted read-only at run time.
 ENV PYTHONDONTWRITEBYTECODE=1 PIP_DISABLE_PIP_VERSION_CHECK=1 PIP_NO_CACHE_DIR=1 PIP_NO_INPUT=1
 WORKDIR /tmp

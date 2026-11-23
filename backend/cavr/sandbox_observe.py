@@ -2,10 +2,10 @@
 
 `run_harness(steps, ...)` checks the image (`sandbox_image.image_identity`), writes the job file, starts
 
-    strace -f -q --always-show-pid -s 1024 -e trace=%file,%network,%process,%creds,<TRACED_BY_NAME> -u cavr --
+    strace -f -q --always-show-pid -y -s 4096 -e trace=%file,%network,%process,%creds,<TRACED_BY_NAME>,fchdir -u cavr --
         /usr/local/bin/python -I -S /opt/cavr/harness.py /job/job.json
 
-as the container's process (root, with only SYS_PTRACE, SETUID, SETGID and no-new-privileges, Q5), keeps the
+as the container's process (root, with only SYS_PTRACE, SETUID, SETGID, DAC_READ_SEARCH and no-new-privileges, Q5), keeps the
 deadline (`sandbox_exec.run_container`) and checks the trace (`sandbox_trace.check_trace`). strace starts the
 harness, and with it every package process, as UID 10001.
 
@@ -48,8 +48,15 @@ JOB_INSIDE = "/job"
 # refuses it to package processes) and eight the profile refuses (EPERM).
 TRACED_BY_NAME = ("ptrace", "process_vm_readv", "process_vm_writev", "io_uring_setup", "io_uring_enter",
                   "io_uring_register", "userfaultfd", "bpf", "perf_event_open")
-STRACE = ["strace", "-f", "-q", "--always-show-pid", "-s", "1024",
-          "-e", "trace=%file,%network,%process,%creds," + ",".join(TRACED_BY_NAME),
+# fchdir is not in %file (it takes an fd, not a path); it is traced so that each process's current directory, and
+# with it every relative path, can be followed (PR 7).
+FOLLOWED_BY_NAME = ("fchdir",)
+# -s 4096: strings up to PATH_MAX are printed whole; a longer one is cut and marked `"..."...`, which the normaliser
+# treats as an incomplete event (PR 7). -y: every fd argument is printed with its path (`3</site/lib>`), so a path
+# relative to a directory fd can be resolved.
+STRING_LIMIT = 4096
+STRACE = ["strace", "-f", "-q", "--always-show-pid", "-y", "-s", str(STRING_LIMIT),
+          "-e", "trace=%file,%network,%process,%creds," + ",".join(TRACED_BY_NAME + FOLLOWED_BY_NAME),
           "-u", "cavr", "--", "/usr/local/bin/python", "-I", "-S", HARNESS_INSIDE, f"{JOB_INSIDE}/job.json"]
 NONCE_VARIABLE = "CAVR_RUN_NONCE"
 OUTPUT_SHOWN = 4000
@@ -123,14 +130,21 @@ def _run(steps, mounts, tmpfs, deadline, stderr_cap, run_id, n) -> dict:
                      "trace_sha256": hashlib.sha256(run["stderr"]).hexdigest(), "trace_bytes": len(run["stderr"])})
     output = {"text": run["stdout_text"][:OUTPUT_SHOWN], "bytes": len(run["stdout"]), "trusted": False}
     trace_text = run["stderr_text"]
+    ended_well = run["status"] == "COMPLETED" and run["exit_code"] == 0
+    checked = check_trace(run["stderr"], nonce, evidence["steps"]) if ended_well else None
+    if checked is None or not checked["complete"]:
+        # D6: a run that did not end well (or whose trace is not complete) is still read in partial mode, so that a
+        # violation it shows can be judged; its result stays UNRESOLVED here (never VERIFIED).
+        partial = check_trace(run["stderr"], nonce, evidence["steps"], partial=True)
+        checked = partial if checked is None else {**partial, "rule": checked["rule"], "reason": checked["reason"]}
+    evidence.update({"trace_check": checked["rule"], "trace_reason": checked["reason"], "trace_lines": checked["lines"],
+                     "trace_attributable": checked["attributable"], "root_pid": checked["root_pid"],
+                     "processes": checked["processes"], "step_pids": checked["steps"], "job_steps": job["steps"]})
     if run["status"] != "COMPLETED":
         return _result(RUN_RULES.get(run["status"], "SANDBOX_ENGINE_ERROR"), run["reason"], evidence, trace_text, output)
     if run["exit_code"] != 0:
         return _result("SANDBOX_EXIT_NONZERO", f"the harness exited with {run['exit_code']} (a step failed or the run "
                        "was cut short)", evidence, trace_text, output)
-    checked = check_trace(run["stderr"], nonce, evidence["steps"])
-    evidence.update({"trace_check": checked["rule"], "trace_reason": checked["reason"], "trace_lines": checked["lines"],
-                     "root_pid": checked["root_pid"], "processes": checked["processes"], "step_pids": checked["steps"]})
     if not checked["complete"]:
         return _result("TRACE_INCOMPLETE", f"the trace is incomplete: {checked['reason']}", evidence, trace_text, output)
     return _result("DEEP_NOT_JUDGED", "the run completed and its trace is complete; judging the events against the "
@@ -158,9 +172,9 @@ def _result(rule, reason, evidence, trace="", output=None) -> dict:
 # is 10001), which is mounted read-only at /pkg with `hashes.txt` (`name==version --hash=sha256:<sha256>` per node).
 # In the sandbox the harness runs two steps:
 #
-#   install   python -I -m pip install --no-index --no-deps --only-binary :all: --require-hashes --no-compile
+#   install   python -I -B -c <PIP_CODE> install --no-index --no-deps --only-binary :all: --require-hashes --no-compile
 #             --find-links /pkg --target /site/lib -r /pkg/hashes.txt         (pip re-checks every hash)
-#   imports   python -I -S -c <site.addsitedir('/site/lib'); import each module>   (addsitedir runs .pth files)
+#   imports   python -I -S -B -c <site.addsitedir('/site/lib'); import each module>   (addsitedir runs .pth files)
 #
 # /site is its own tmpfs (rw,exec,nosuid,nodev,128 MiB): exec only there, so a wheel's native .so can be mapped;
 # /tmp stays noexec (sandbox rule 2 deviation, see the notes, Step M2-10). Never an sdist, never setup.py.
@@ -174,11 +188,23 @@ SITE_TMPFS = "/site:rw,exec,nosuid,nodev,size=128m,mode=1777"
 SITE_LIB = "/site/lib"
 PKG_INSIDE = "/pkg"
 HASH_FILE = "hashes.txt"
-PIP_INSTALL = ["/usr/local/bin/python", "-I", "-m", "pip", "install", "--no-index", "--no-deps", "--only-binary", ":all:",
-               "--require-hashes", "--no-compile", "--find-links", PKG_INSIDE, "--target", SITE_LIB,
+# pip builds a User-Agent for its HTTP session even with --no-index, which never sends one: its vendored `distro` execs
+# `lsb_release -a` and `uname -rs` and stats every file in /etc (measured, pip 25.0.1, 2026-11-23). The install
+# command replaces that builder with a constant, so the install step has no exec and no /etc scan. If a pip ever
+# ignored the replacement, those events fall outside the install envelope (contract_check) -> UNRESOLVED.
+PIP_VERSION = "25.0.1"  # the image's pip (Dockerfile checks it); the replacement is written for this version
+PIP_CODE = ("import sys\nimport pip._internal.network.session as session\n"
+            "session.user_agent = lambda: 'cavr-sandbox'\n"
+            "from pip._internal.cli.main import main\nsys.exit(main(sys.argv[1:]))\n")
+# --isolated: no pip.conf and no PIP_* variable is read, so the flags below are the whole configuration.
+PIP_INSTALL = ["/usr/local/bin/python", "-I", "-B", "-c", PIP_CODE, "install", "--isolated", "--disable-pip-version-check",
+               "--no-cache-dir", "--no-input", "--no-index", "--no-deps",
+               "--only-binary", ":all:", "--require-hashes", "--no-compile", "--find-links", PKG_INSIDE, "--target", SITE_LIB,
                "-r", f"{PKG_INSIDE}/{HASH_FILE}"]
 IMPORT_CODE = (f"import importlib, site, sys\nsite.addsitedir({SITE_LIB!r})\n"
                "for name in sys.argv[1:]:\n    importlib.import_module(name)\n")
+# -B: no .pyc is written (-I ignores PYTHONDONTWRITEBYTECODE), so a clean import has no FILE_WRITE event.
+IMPORT_ARGV = ["/usr/local/bin/python", "-I", "-S", "-B", "-c", IMPORT_CODE]
 _NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 _VERSION = re.compile(r"^[A-Za-z0-9][A-Za-z0-9.+!_-]*$")
 
@@ -191,7 +217,7 @@ class NotStaged(Exception):
 
 def install_steps(modules) -> list[dict]:
     return [step("install", PIP_INSTALL),
-            step("imports", ["/usr/local/bin/python", "-I", "-S", "-c", IMPORT_CODE, *modules])]
+            step("imports", IMPORT_ARGV + list(modules))]
 
 
 def check_modules(modules) -> list[str]:

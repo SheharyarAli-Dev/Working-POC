@@ -36,7 +36,8 @@ SIGNAL = re.compile(r"^--- .* ---$")
 SYSCALL = re.compile(r"^[a-z_][a-z0-9_]*\(")
 RESUMED = re.compile(r"^<\.\.\. ([a-z_][a-z0-9_]*) resumed>")
 CREATED = re.compile(r"^(?:(?:clone|clone3|fork|vfork)\(.*|<\.\.\. (?:clone|clone3|fork|vfork) resumed>.*) = (\d+)(?: |$)")
-MARKER = re.compile(r'^(?:newfstatat|statx|stat|lstat)\((?:AT_FDCWD, )?"/\.cavr/([^"/]*)/([^"]*)"')
+# `AT_FDCWD</cwd>` with strace -y (PR 7), `AT_FDCWD` without it (recorded traces of Phase 2a).
+MARKER = re.compile(r'^(?:newfstatat|statx|stat|lstat)\((?:AT_FDCWD(?:<[^>\n]*>)?, )?"/\.cavr/([^"/]*)/([^"]*)"')
 HARNESS_EXEC = re.compile(r'^execve\("/usr/local/bin/python", \["/usr/local/bin/python", "-I", "-S", '
                           r'"/opt/cavr/harness\.py", .*\) = 0$')
 
@@ -45,24 +46,37 @@ def expected_markers(steps) -> list[str]:
     return ["start", *[m for name in steps for m in (f"step:{name}:begin", f"step:{name}:end:0")], "end:ok"]
 
 
-def check_trace(data, nonce: str, steps) -> dict:
-    """{complete, rule, reason, root_pid, processes, steps, lines, sha256}. Never raises."""
+def check_trace(data, nonce: str, steps, partial: bool = False) -> dict:
+    """{complete, attributable, rule, reason, root_pid, processes, steps, lines, sha256}. Never raises.
+
+    `partial` (PR 7, decision D6) is for a run that did not end well (a failed step, the deadline, a kill): the trace
+    is never complete, but it is `attributable` (rule TRACE_PARTIAL) when every line that is there can be trusted
+    and placed: a final cut line is dropped; every other line must still be a strace line, the first the harness's
+    execve, every PID created by a known process, no line after a PID's exit line; the markers must be the expected
+    ones in order up to where the run stopped (a step that ended non-zero, then `end:fail`, is accepted there), and
+    no other process may use the nonce. Exit lines, followed children and the harness's exit are not required. Such
+    a trace can show a violation (REJECTED); it can never give VERIFIED.
+    """
     try:
         raw = data if isinstance(data, bytes) else str(data).encode("utf-8", errors="surrogateescape")
-        return _check(raw, nonce, list(steps))
+        return _check(raw, nonce, list(steps), partial)
     except Exception as exc:
         return _result(False, "TRACE_MALFORMED", f"the trace could not be read: {type(exc).__name__}: {exc}",
                        sha256=None)
 
 
-def _check(raw: bytes, nonce: str, steps: list) -> dict:
+def _check(raw: bytes, nonce: str, steps: list, partial: bool = False) -> dict:
     sha = hashlib.sha256(raw).hexdigest()
     bad = lambda rule, reason, **more: _result(False, rule, reason, sha256=sha, **more)  # noqa: E731
     text = raw.decode("utf-8", errors="replace")
     if not text.strip():
         return bad("TRACE_EMPTY", "the trace is empty")
     if not text.endswith("\n"):
-        return bad("TRACE_TRUNCATED", "the trace does not end with a complete line")
+        if not partial:
+            return bad("TRACE_TRUNCATED", "the trace does not end with a complete line")
+        text = text[:text.rfind("\n") + 1]  # the cut last line is dropped
+        if not text.strip():
+            return bad("TRACE_EMPTY", "the trace has no complete line")
     parsed = []
     for number, line in enumerate(text[:-1].split("\n"), 1):
         match = LINE.match(line)
@@ -100,13 +114,13 @@ def _check(raw: bytes, nonce: str, steps: list) -> dict:
             exited[pid] = index
             exit_code[pid] = int(ended.group(1)) if ended.group(1) is not None else None
     seen = {pid for pid, _ in parsed}
-    unfollowed = sorted(set(parent) - seen)
+    unfollowed = [] if partial else sorted(set(parent) - seen)
     if unfollowed:  # e.g. clone(CLONE_UNTRACED): the child ran, but strace never saw it
         return bad("TRACE_UNFOLLOWED", f"PIDs {unfollowed[:5]} were created but have no line in the trace", lines=lines)
-    missing = sorted(set(parent) - set(exited))
+    missing = [] if partial else sorted(set(parent) - set(exited))
     if missing:
         return bad("TRACE_TRUNCATED", f"PIDs {missing[:5]} have no exit line", lines=lines)
-    if exited.get(root) != lines - 1 or exit_code.get(root) != 0:
+    if not partial and (exited.get(root) != lines - 1 or exit_code.get(root) != 0):
         return bad("TRACE_TRUNCATED", f"the last line is not the harness's `+++ exited with 0 +++` "
                    f"(harness exit: {exit_code.get(root, 'none')})", lines=lines)
 
@@ -127,8 +141,9 @@ def _check(raw: bytes, nonce: str, steps: list) -> dict:
         created = CREATED.match(body)
         if created and current is not None:
             step_pids.setdefault(current, []).append(int(created.group(1)))
-    if markers != expected_markers(steps):
-        return bad("TRACE_MARKERS", f"harness markers {markers} are not {expected_markers(steps)}", lines=lines)
+    if not (_markers_so_far(markers, expected_markers(steps)) if partial else markers == expected_markers(steps)):
+        return bad("TRACE_MARKERS", f"harness markers {markers} are not {expected_markers(steps)}"
+                   + (" (or the start of them)" if partial else ""), lines=lines)
 
     processes = {root: {"parent": None, "step": None, "role": "harness"}}
     owner = {pid: name for name, pids in step_pids.items() for pid in pids}
@@ -136,9 +151,24 @@ def _check(raw: bytes, nonce: str, steps: list) -> dict:
         mother = parent[pid]
         step = owner.get(pid) or processes.get(mother, {}).get("step")
         processes[pid] = {"parent": mother, "step": step, "role": "step" if step else "harness"}
+    found = {"sha256": sha, "lines": lines, "root_pid": root, "processes": processes,
+             "steps": {name: step_pids.get(name, []) for name in steps}}
+    if partial:
+        return _result(False, "TRACE_PARTIAL", f"attributable, not complete: {lines} lines, {len(known)} processes, "
+                       f"markers {markers}", attributable=True, **found)
     return _result(True, "TRACE_COMPLETE", f"complete: {lines} lines, {len(known)} processes, every marker in order",
-                   sha256=sha, lines=lines, root_pid=root, processes=processes,
-                   steps={name: step_pids.get(name, []) for name in steps})
+                   **found)
+
+
+def _markers_so_far(markers: list, expected: list) -> bool:
+    """`markers` is the start of `expected`, or that start up to a step that ended non-zero, then maybe `end:fail`."""
+    for index, marker in enumerate(markers):
+        if index < len(expected) and marker == expected[index]:
+            continue
+        failed = re.match(r"^step:([^:]+):end:(\d+)$", marker)
+        return (failed is not None and failed.group(2) != "0" and index < len(expected)
+                and expected[index] == f"step:{failed.group(1)}:end:0" and markers[index + 1:] in ([], ["end:fail"]))
+    return True
 
 
 def _depth(pid, parent) -> int:
@@ -148,6 +178,8 @@ def _depth(pid, parent) -> int:
     return depth
 
 
-def _result(complete, rule, reason, sha256=None, lines=0, root_pid=None, processes=None, steps=None) -> dict:
-    return {"complete": complete, "rule": rule, "reason": reason, "sha256": sha256, "lines": lines,
+def _result(complete, rule, reason, sha256=None, lines=0, root_pid=None, processes=None, steps=None,
+            attributable=None) -> dict:
+    return {"complete": complete, "attributable": complete if attributable is None else attributable, "rule": rule,
+            "reason": reason, "sha256": sha256, "lines": lines,
             "root_pid": root_pid, "processes": processes or {}, "steps": steps or {}}

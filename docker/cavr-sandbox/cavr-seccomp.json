@@ -172,6 +172,14 @@
       ],
       "action": "SCMP_ACT_ALLOW",
       "comment": "CAVR addition: Python start-up, pip install --target and import (measured with strace -c under Docker's default profile, 2026-11-23)"
+    },
+    {
+      "names": [
+        "chdir",
+        "fchdir"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "comment": "CAVR addition: chdir and fchdir (PR 7): packages that change directory are traced instead of failing with EPERM; the normaliser follows each process's current directory to resolve relative paths"
     }
   ]
 }

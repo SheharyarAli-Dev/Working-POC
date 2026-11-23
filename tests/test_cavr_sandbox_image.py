@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from backend.cavr import sandbox_exec, sandbox_image, sandbox_runner
+from backend.cavr import sandbox_exec, sandbox_image, sandbox_observe, sandbox_runner
 from tests.test_cavr_support import cavr_containers, requires_docker, sandbox_identity
 
 REPO = Path(__file__).resolve().parents[1]
@@ -184,7 +184,9 @@ def test_cavr_profile_is_the_shared_profile_plus_listed_additions():
     added = cavr["syscalls"][1:]
     assert all(entry["comment"].startswith("CAVR addition: ") for entry in added)
     names = _names({"syscalls": added})
-    assert len(names) == len(set(names)) == 46 and not set(names) & set(shared["syscalls"][0]["names"])
+    # 46 until PR 7, which added chdir and fchdir (packages that change directory are traced, not refused).
+    assert len(names) == len(set(names)) == 48 and not set(names) & set(shared["syscalls"][0]["names"])
+    assert {"chdir", "fchdir"} <= set(names)
     # clone only without CLONE_UNTRACED and namespace flags; clone3 answers ENOSYS (glibc falls back to clone).
     by_name = {name: entry for entry in added for name in entry["names"]}
     assert by_name["clone"]["names"] == ["clone"] and by_name["clone"]["action"] == "SCMP_ACT_ALLOW"
@@ -204,6 +206,7 @@ def test_lockdown_flags_are_the_planned_set():
     flags = sandbox_exec.lockdown_flags()
     assert flags == ["--network", "none", "--read-only", "--tmpfs", "/tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777",
                      "--cap-drop", "ALL", "--cap-add", "SYS_PTRACE", "--cap-add", "SETUID", "--cap-add", "SETGID",
+                     "--cap-add", "DAC_READ_SEARCH",
                      "--security-opt", "no-new-privileges", "--security-opt", f"seccomp={sandbox_image.SECCOMP_PROFILE}",
                      "--pids-limit", "64", "--memory", "256m", "--memory-swap", "256m", "--cpus", "1",
                      "--ulimit", "nofile=256:256", "--ulimit", "fsize=67108864:67108864", "--ulimit", "core=0:0",
@@ -258,6 +261,64 @@ def test_image_has_strace_and_libfaketime():
     assert cavr_containers() == []
 
 
+SETUID_SCAN = r'''
+import os, stat
+found = []
+for top, dirs, files in os.walk("/"):
+    if top in ("/proc", "/sys", "/dev"):
+        dirs[:] = []
+        continue
+    for name in dirs + files:
+        path = os.path.join(top, name)
+        try:
+            info = os.lstat(path)
+        except OSError as exc:
+            found.append(f"UNREADABLE {path} {exc}")
+            continue
+        if stat.S_ISREG(info.st_mode) and info.st_mode & (stat.S_ISUID | stat.S_ISGID):
+            found.append(f"SETID {path}")
+        if not stat.S_ISLNK(info.st_mode):
+            try:
+                os.getxattr(path, "security.capability", follow_symlinks=False)
+                found.append(f"FILECAP {path}")
+            except OSError:
+                pass
+print("\n".join(found) or "NONE")
+'''
+
+
+@requires_docker
+def test_no_file_in_the_image_has_setuid_setgid_or_file_capabilities():
+    """strace holds DAC_READ_SEARCH (PR 7); nothing a package process can exec may gain a privilege (Q5)."""
+    done = _run(sandbox_identity(), ["/usr/local/bin/python", "-I", "-S", "-c", SETUID_SCAN])
+    assert done.returncode == 0, done.stderr
+    assert done.stdout.strip() == "NONE", done.stdout[:2000]
+
+
+@requires_docker
+def test_a_package_process_holds_no_capability():
+    """`strace -u cavr` drops to UID 10001: every capability set is empty, so DAC_READ_SEARCH stays with strace."""
+    done = _run(sandbox_identity(), ["strace", "-f", "-q", "-e", "trace=none", "-u", "cavr", "--", "/bin/sh", "-c",
+                                     "grep -E '^Cap(Inh|Prm|Eff|Amb)' /proc/self/status; cat /etc/shadow 2>&1 || true"])
+    assert done.returncode == 0, done.stderr
+    sets = dict(line.split(":\t") for line in done.stdout.splitlines() if line.startswith("Cap"))
+    assert sets == {"CapInh": "0000000000000000", "CapPrm": "0000000000000000", "CapEff": "0000000000000000",
+                    "CapAmb": "0000000000000000"}
+    assert "Permission denied" in done.stdout
+
+
+@requires_docker
+def test_the_image_pip_is_the_pinned_version():
+    """sandbox_observe.PIP_CODE replaces pip's User-Agent builder; it is written for this pip (PR 7)."""
+    identity = sandbox_identity()
+    done = _run(identity, ["/usr/local/bin/python", "-I", "-m", "pip", "--version"])
+    assert done.returncode == 0 and done.stdout.split()[:2] == ["pip", sandbox_observe.PIP_VERSION], done.stdout
+    labels = json.loads(subprocess.run(["docker", "image", "inspect", "--format", "{{json .Config.Labels}}",
+                                        identity["image_id"]], capture_output=True, text=True, timeout=30).stdout)
+    assert labels["org.asent.cavr.pip-version"] == sandbox_observe.PIP_VERSION
+    assert f'ARG PIP_VERSION={sandbox_observe.PIP_VERSION}' in sandbox_image.DOCKERFILE.read_text()
+
+
 @requires_docker
 def test_python_and_strace_start_under_the_cavr_profile():
     done = _run(sandbox_identity(), ["strace", "-f", "-q", "-u", "cavr", "--", "/usr/local/bin/python", "-I", "-S", "-c",
@@ -298,7 +359,7 @@ def test_running_container_has_every_lockdown_flag(tmp_path):
         host = info["HostConfig"]
         assert host["ReadonlyRootfs"] is True and host["NetworkMode"] == "none"
         assert host["CapDrop"] == ["ALL"]
-        assert sorted(c.removeprefix("CAP_") for c in host["CapAdd"]) == ["SETGID", "SETUID", "SYS_PTRACE"]
+        assert sorted(c.removeprefix("CAP_") for c in host["CapAdd"]) == ["DAC_READ_SEARCH", "SETGID", "SETUID", "SYS_PTRACE"]
         assert "no-new-privileges" in host["SecurityOpt"]
         seccomp = [opt for opt in host["SecurityOpt"] if opt.startswith("seccomp=")]
         assert len(seccomp) == 1

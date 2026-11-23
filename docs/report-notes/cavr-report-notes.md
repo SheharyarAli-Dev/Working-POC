@@ -4935,3 +4935,164 @@ Run before the commit (as the owner asked, sandbox tests only): `CAVR_DOCKER=1 p
 1. **Why is ptrace allowed in the seccomp profile at all?** The profile also applies to strace, which traces with
    ptrace; a package process's ptrace fails because it and every process it starts are already traced, the harness
    is non-dumpable and strace is root (13 Docker cases, each EPERM in the trace).
+
+## Step M2-12 — Trace normalised into typed events (PR 7) (2026-11-23)
+
+Plan: `docs/cavr-m2-plan.md` PR 7, decisions D1–D7 (Maryam, 2026-11-23) plus two decisions taken during the step
+(Q5: `DAC_READ_SEARCH` for strace; pip's User-Agent builder replaced), both from measured Docker runs.
+
+### Ch 6 Implementation
+
+- `backend/cavr/sandbox_events.py` (new): `normalise(trace, processes, step_pids, steps)` turns every strace line
+  into one typed event (FILE_READ, FILE_WRITE, CODE_LOAD, PROCESS_EXEC, NETWORK_CONNECT, NETWORK_BIND,
+  NETWORK_LISTEN, CREDENTIAL_CHANGE, REFUSED_SYSCALL, UNKNOWN, plus structure types) with path, real path (`-y`),
+  access, sensitivity, persistence, address, argv, outcome and errno; `make_baseline`, `check_baseline`,
+  `subtract_baseline`. Algorithm: join `<unfinished ...>` / `<... resumed>` lines; split each call into arguments
+  with a small tokenizer (quotes, brackets, `-y` fd paths, comments); look the syscall up in fixed tables; resolve
+  each path (absolute, `AT_FDCWD</cwd>`, `fd</dir>`, or the process's tracked directory); classify; anything without
+  a rule or unreadable is UNKNOWN / incomplete.
+- `backend/cavr/sandbox_trace.py`: `check_trace(..., partial=False)`; `partial=True` gives TRACE_PARTIAL with
+  `attributable: True` for a run that did not end well (D6); every result has `attributable`. The marker regex
+  accepts `AT_FDCWD</cwd>` (strace -y).
+- `backend/cavr/sandbox_observe.py`: strace `-y -s 4096` and `fchdir` traced; import step `python -I -S -B`;
+  install step `python -I -B -c PIP_CODE install --isolated ...` (PIP_CODE replaces pip's `user_agent`); a run that
+  did not end well is read in partial mode; evidence carries `trace_attributable`, `processes`, `step_pids`, `job_steps`.
+- `backend/cavr/sandbox_exec.py`: `CAPABILITIES` + `DAC_READ_SEARCH`.
+- `backend/cavr/sandbox_harness.py`: `sys.dont_write_bytecode = True` (the harness's lazy `import ctypes` tried to
+  write .pyc); comments.
+- `docker/cavr-sandbox/cavr-seccomp.json`: + `chdir`, `fchdir`. `docker/cavr-sandbox/Dockerfile`: setuid / setgid bits
+  removed (11 files, e.g. `su`, `mount`, `passwd`), build fails unless pip is 25.0.1, label `org.asent.cavr.pip-version`.
+  New image `sha256:0e88dd461ca4…`.
+- `docs/cavr-m2-plan.md`: Q5 lists the four capabilities with the reason; sandbox rule 3.
+- Deleted (Q12): `backend/cavr/normalizer.py` (nothing imported it). Kept: `runtime_monitor.py` (`sandbox.py` LOCAL
+  lab and `tests/test_modules.py` use it; PR 12).
+- Tests: `tests/test_cavr_sandbox_events.py` (new), traces `tests/test_cavr_data/traces/events-{probe,benign,baseline}`
+  recorded by `tests/test_cavr_data/traces/record_events.py`.
+
+### Design decisions
+
+- **`DAC_READ_SEARCH` for strace** (Maryam's choice): `/proc/<pid>/fd` of a UID 10001 process is 0500, so root without
+  it printed no fd path (`openat(3, "x")`); the alternatives were non-dumpable steps (packages lose `/proc/self`) or
+  rebuilding fd tables from the trace (more code, close/dup/fcntl traced). Measured: the package process has empty
+  Inh/Prm/Eff/Amb sets and cannot read `/etc/shadow`; the image now has no setuid/setgid file and no file capability.
+- **pip's User-Agent replaced** (Maryam's choice): pip 25.0.1 execs `lsb_release -a`, `uname -rs` and stats every file
+  in `/etc` to build a User-Agent it never sends with `--no-index`. `PIP_CODE` sets `user_agent` to a constant; pip
+  still checks every hash. A pip that ignored this would exec → INSTALL_OUTSIDE_ENVELOPE (PR 8), never a pass.
+  Pinned: the Dockerfile fails unless pip is 25.0.1.
+- **No cwd tracking from scratch**: strace `-y` prints the kernel's directory for `AT_FDCWD` (`AT_FDCWD</tmp>`), so
+  most relative paths are resolved from the kernel; calls without a dirfd use the last directory seen for the
+  process; after any chdir every other process's directory is unknown (threads can share it) -> incomplete.
+- **CODE_LOAD locations (D1, refined with the measured baseline)**: `/usr/local/`, `/usr/lib/`, `/lib/`,
+  `/usr/share/locale/`, `/usr/share/zoneinfo/`, `/opt/cavr/`, `/job/`, `/pkg/`, `/site/lib/`, and five exact files
+  (`/etc/ld.so.cache`, `/etc/ld.so.preload`, `/etc/localtime`, `/dev/null`, `/proc/self/exe`); a stat of an ancestor
+  (`/`, `/usr`, ...) only. Both the asked path and the real path must be inside; sensitive paths are checked first.
+  Without the five files the empty baseline would never be clean (measured: its only non-code reads are these).
+- **Kept as attempts**: every failed syscall (ENETUNREACH, ENOENT, EACCES, EPERM) is an event; a `sendmsg` refused
+  by the profile is a network attempt.
+- **bind is its own type** (NETWORK_BIND): pip's urllib3 binds `::1` port 0 to probe IPv6 support; PR 8 decides.
+- **Baseline key**: (step, type, call, path, real path, access, address, argv, outcome, errno, complete), counted;
+  PIDs and line numbers are not in it.
+
+### Requirements covered
+
+| ID | Acceptance check |
+|---|---|
+| FR-13 | failed `connect … ENETUNREACH`, DNS to port 53, `sendto`, refused `sendmsg`, IPv6, Unix: NETWORK_CONNECT events (`test_failed_connect_enetunreach_is_a_network_attempt` …) |
+| FR-13 | `~/.aws/credentials` (ENOENT), stat of `~/.ssh/id_rsa`, `/etc/passwd`, `.env` resolved to `/tmp/.env`: sensitive reads |
+| FR-13 / MAJOR 1 | 4000-character path kept whole; a cut path or an unreadable dirfd is incomplete |
+| FR-6 | unknown syscall, unreadable line, call that never returned -> UNKNOWN; baseline not clean -> BASELINE_NOT_CLEAN |
+| NFR-1 | no setuid/setgid/file-capability file in the image; package process holds no capability (Docker) |
+
+### Ch 7 Test cases
+
+`tests/test_cavr_sandbox_events.py`: 86 tests (80 unit on the three recordings and hand-made lines, 6 Docker);
+`tests/test_cavr_sandbox_image.py`: 3 new Docker tests. Recordings: image `sha256:0e88dd461ca4…`, 2026-11-23.
+
+| Test ID | Purpose | Input | Expected | Result |
+|---|---|---|---|---|
+| `test_failed_connect_enetunreach_is_a_network_attempt` | attempts kept | probe: connect 198.51.100.24:443 | NETWORK_CONNECT, ENETUNREACH, address parsed | pass |
+| `test_ipv6_and_unix_addresses_are_parsed` | sockaddr | probe: `2001:db8::1`, `/run/cavr-probe.sock` | both addresses | pass |
+| `test_dns_lookup_is_a_network_attempt_to_port_53` | DNS | probe: `getaddrinfo("example.com")` | connect to port 53, `dns` set | pass |
+| `test_sendto_…`, `test_refused_sendmsg_is_still_a_network_attempt` | send | probe | NETWORK_CONNECT, ENETUNREACH / EPERM | pass |
+| `test_bind_is_its_own_event_with_its_address` | pip's IPv6 probe | benign | one NETWORK_BIND `::1` port 0, install step | pass |
+| `test_sendfile_into_a_file_copies_and_into_a_socket_sends` | sendfile | hand-made | NO_EFFECT / NETWORK_CONNECT | pass |
+| `test_read_of_aws_credentials_is_a_secret_read` | secrets | probe ENOENT; ok; EACCES | SECRET_READ each time | pass |
+| `test_sensitive_path_table` (17) | table | `.ssh`, `.aws`, `.env`, `/proc/*/environ`, `/etc/passwd`, … and 5 negatives | level / None | pass |
+| `test_stat_of_a_sensitive_path_is_a_sensitive_read_attempt` | D4 | probe: stat `~/.ssh/id_rsa` | SECRET_READ, metadata | pass |
+| `test_a_symlink_to_a_secret_is_caught_by_its_real_path` | -y real path | `/tmp/innocent` -> `.aws/credentials` | SECRET_READ | pass |
+| `test_code_reads_are_code_load_not_file_read` | D1 | benign + hand-made | own module, stdlib = CODE_LOAD; `/etc/os-release`, `/usr` listing = FILE_READ | pass |
+| `test_writes_creat_rename_unlink_mkdir_are_file_writes`, `test_persistence_paths` (10), `test_append_to_bashrc_…` | writes | probe + table | FILE_WRITE, persistence flag | pass |
+| `test_execve_of_a_shell_is_process_exec`, `test_step_launch_is_not_a_package_exec` | exec | probe `/bin/sh -c true`; job argv | PROCESS_EXEC; STEP_START only for the step's first exec with the job's argv | pass |
+| `test_credential_change_even_when_it_fails`, `test_refused_dangerous_syscalls_are_events` | creds, refused | probe setuid(0), ptrace, bpf; hand-made io_uring, unshare, mount | EPERM events | pass |
+| `test_clone_with_and_without_clone_thread_is_structure` | clone | probe thread + fork | PROCESS; child's open in the step | pass |
+| `test_relative_path_resolved_against_cwd`, `test_a_child_inherits_…`, `test_dirfd_relative_path` | paths | probe `.env`, `rel*.txt`, `child.txt`; chdir / getcwd lines | resolved; unknown directory -> incomplete | pass |
+| `test_unresolvable_dirfd_is_incomplete`, `test_truncated_path_is_incomplete` | MAJOR 1 | `openat(3, …)`, `"…"...` | incomplete | pass |
+| `test_a_4000_character_path_is_kept_whole` | MAJOR 1 | probe | 4001-character path, ENAMETOOLONG | pass |
+| `test_unknown_syscall_…`, `test_unreadable_line_…` (4), `test_an_unfinished_call_…` | fail closed | inotify, broken lines, never returned | UNKNOWN, incomplete | pass |
+| `test_every_recorded_syscall_has_a_rule` | coverage | probe, benign | no UNKNOWN, all complete | pass |
+| `test_recorded_baseline_is_clean`, `test_benign_import_has_no_file_write_and_nothing_judged_after_the_baseline` | baseline | baseline, benign | BASELINE_OK; import step: 0 judged events, 0 FILE_WRITE | pass |
+| `test_baseline_subtraction_is_exact_and_counted`, `test_baseline_of_another_identity_is_refused` | D2 | hand-made | one of two reads left; mismatch / invalid | pass |
+| `test_a_baseline_with_anything_but_code_and_structure_is_not_clean` (8) | Maryam's rule | secret read, connect, exec, setuid, ptrace, unknown, write, unreadable dirfd | BASELINE_NOT_CLEAN | pass |
+| `test_a_markers_nonce_is_not_part_of_its_key` | determinism | two nonces | same key | pass |
+| `test_partial_trace_of_a_killed_run_is_attributable`, `…_still_refuses_unknown_pids_and_foreign_markers`, `test_failed_step_trace_…` | D6 | cut / edited benign trace | TRACE_PARTIAL; TRACE_UNKNOWN_PID / TRACE_MARKERS | pass |
+| `test_two_empty_harness_runs_give_the_same_events` (Docker) | determinism | 2 live baseline runs | same keys, BASELINE_OK | fail, then pass (see defects) |
+| `test_package_that_calls_chdir_is_traced_not_refused` (Docker) | chdir | chdir, fchdir, relative stat | both succeed, paths resolved | pass |
+| `test_y_prints_the_path_of_every_fd` (Docker) | -y | `openat(fd, "nope")` | `openat(3</tmp>, "nope")`, complete | pass |
+| `test_benign_wheel_import_produces_zero_file_write_events` (Docker) | -B (Maryam) | `def run()` wheel | 0 FILE_WRITE in the import step | pass |
+| `test_install_step_has_no_exec_and_reads_only_the_measured_etc_files` (Docker) | pip override | plain wheel | no exec, no sensitive read, the 9 listed `/etc` paths exactly, no `/etc` listing | pass |
+| `test_install_step_still_refuses_a_wrong_hash_without_exec_or_other_etc_reads` (Docker) | rule 6 | hash file with zeros | SANDBOX_EXIT_NONZERO, "DO NOT MATCH THE HASHES", attributable, no exec | pass |
+| `test_no_file_in_the_image_has_setuid_setgid_or_file_capabilities` (Docker) | Q5 | whole image | none | pass |
+| `test_a_package_process_holds_no_capability` (Docker) | Q5 | `strace -u cavr sh` | Inh/Prm/Eff/Amb all 0; `/etc/shadow` denied | pass |
+| `test_the_image_pip_is_the_pinned_version` (Docker) | pin | image | pip 25.0.1, label, Dockerfile ARG | pass |
+| `test_the_old_normalizer_is_gone` | Q12 | — | file absent | pass |
+
+Existing results that changed (all from approved changes): `test_cavr_profile_is_the_shared_profile_plus_listed_additions`
+(46 -> 48 names: chdir, fchdir), `test_lockdown_flags_are_the_planned_set` and the Docker
+`test_running_container_has_every_lockdown_flag` (+ DAC_READ_SEARCH), `test_the_steps_install_offline_by_hash_then_import`
+(pip through PIP_CODE with `--isolated`; import with `-B`),
+`test_package_cannot_open_strace_fds_and_the_trace_stays_complete_and_unforged` (the expected line is now
+`openat(AT_FDCWD</tmp>, "/proc/1/fd/2", …) = -1 EACCES`: strace -y prints the directory; still EACCES).
+
+Run before the commit: `CAVR_DOCKER=1 pytest tests/test_cavr_*.py tests/test_orchestrator_config.py tests/test_gate_*.py
+tests/test_cli_gate.py`: 1828 passed, 1 failed (`test_two_empty_harness_runs_give_the_same_events`), 12 skipped (live),
+610 s; after the fix `tests/test_cavr_sandbox_events.py` 80 passed + the Docker test passed.
+
+### Defects found and fixed
+
+- With `-y`, the harness markers (`newfstatat(AT_FDCWD</tmp>, "/.cavr/…")`) no longer matched `sandbox_trace.MARKER`
+  (first probe run: TRACE_MARKERS); regex fixed.
+- strace printed no fd paths (root without `DAC_READ_SEARCH`); fixed as above.
+- The first draft of `_State.cwd_of` let a process inherit its parent's *new* directory after the parent's chdir
+  (`test_a_child_inherits_the_directory_and_another_process_forgets_it` failed); fixed with `forget_others`.
+- Two live empty-harness runs differed only in the harness's marker paths (`/.cavr/<nonce>/…`, a new nonce per run;
+  four runs compared): `event_key` now replaces a marker's nonce with `<nonce>`.
+- The empty baseline was not clean: the harness's `import ctypes` tried two `.pyc` writes (EROFS) and opened
+  `/dev/null` for writing; fixed with `sys.dont_write_bytecode` in the harness and `/dev/null` as NO_EFFECT.
+
+- Review: one cavr-reviewer pass over PRs 7-9 at the end of Phase 2b (recorded in Step M2-14).
+
+### Known limitations / deferred
+
+- Label scopes (`invoice_documents`, `scratch_tmp`) cannot be mapped to paths, so a file event under them is
+  UNRESOLVED (D5, PR 8). Mapping labels to paths is future work.
+- The install step still reads nine non-sensitive `/etc` files (pip's global `pip.conf` ×2, which `--isolated`
+  does not skip; the stdlib `mimetypes` search ×5; OpenSSL's config and CA bundle ×2); the Docker test pins that
+  exact set.
+- strace's `+++ superseded by execve +++` is still accepted without a producing test.
+
+### Tool disclosure (Ch 8.7)
+
+- **Generated by Claude Code:** `sandbox_events.py`, the trace-check partial mode, the flag / profile / Dockerfile
+  changes, the tests, the recordings and these notes. **Reviewed by Maryam:** D1–D7, `DAC_READ_SEARCH`, the pip
+  User-Agent replacement, the setuid and pip-pin tests. **Verified by:** the runs above on Docker 29.9.3.
+
+### Supervisor Q&A prep
+
+1. **Why does strace now have DAC_READ_SEARCH, and can a package use it?** Without it root cannot read a UID 10001
+   process's `/proc/<pid>/fd`, so dirfd paths were blank. The drop to UID 10001 empties every capability set
+   (measured), and the image has no setuid file or file capability that could give one back.
+2. **Why are failed syscalls events?** Under `--network none` every connect fails; dropping failures (the old
+   `runtime_monitor`) made network attempts invisible. An attempt shows intent, so it is judged like a success.
+3. **What is in the baseline, and why must it be clean?** Only what the interpreter and harness do with nothing to
+   import: 317 code loads and structure lines (recorded). If it contained a secret read or a connect, subtracting it
+   would hide the same event in a package run, so such a baseline is refused.
