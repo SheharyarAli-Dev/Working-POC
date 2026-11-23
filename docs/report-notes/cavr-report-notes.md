@@ -4652,3 +4652,115 @@ Runs before the commit: `CAVR_DOCKER=1 pytest tests/test_cavr_sandbox_trace.py`:
    view, listed only strace as root while the package's processes ran; `setuid(0)` failed with EPERM.
 3. **Why not trust the harness's own report?** It shares a UID with the package's processes; the verdict reads only
    what strace (root) wrote, and the harness's lines count only by its PID.
+
+## Step M2-10 — PR 6: install the verified wheels and import their top-level modules in the sandbox (2026-11-23)
+
+Plan: `docs/cavr-m2-plan.md` PR 6, sandbox rules 2 and 6. Closes the M1 item "`harness.py` reports
+`test_passed: True` without importing" by deleting `harness.py`. Not wired into `verify_request` or the gate (2b).
+
+### Ch 6 Implementation
+
+- `backend/cavr/sandbox_observe.py`: `observe(nodes, modules, quarantine_dir, deadline, run_id, n)`,
+  `stage_wheels(nodes, quarantine_dir, stage_dir)`, `install_steps(modules)`, `check_modules(modules)`, `NotStaged`.
+  Algorithm: (1) each tree node must be a verified wheel: name and version of safe characters, a `.whl` filename equal
+  to the file's own name, a 64-hex sha256, a regular file (no symlink) inside CAVR's quarantine, no name twice;
+  (2) its bytes are read once, hashed and compared with the tree's sha256, then written to a per-run staging directory
+  (0644) with `hashes.txt` (`name==version --hash=sha256:...`); (3) `run_harness` mounts the staging directory read-only
+  at `/pkg` and adds the tmpfs `/site:rw,exec,nosuid,nodev,size=128m`; step `install` = `pip install --no-index
+  --no-deps --only-binary :all: --require-hashes --no-compile --find-links /pkg --target /site/lib -r
+  /pkg/hashes.txt` (pip re-checks every hash); step `imports` = `python -I -S -c` with `site.addsitedir('/site/lib')`
+  (which runs `.pth` files) and `importlib.import_module` for each top-level module. Rules: WHEEL_NOT_VERIFIED,
+  WHEEL_HASH_MISMATCH, MODULES_UNKNOWN, INTERNAL_ERROR, otherwise `run_harness`'s (never VERIFIED in Phase 2a).
+  Evidence adds the staged wheels, modules, hash-file SHA-256, install target and site tmpfs.
+- `backend/cavr/harness.py`: **deleted** (Q12: nothing imported it; it never installed a wheel).
+
+### Design decisions
+
+- **Deviation from sandbox rule 2 (owner's decision 5, 2026-11-23):** rule 2 says every writable tmpfs is `noexec`.
+  The pip install target `/site` is `exec` (still `nosuid,nodev`, 128 MiB); `/tmp` stays `noexec`. Reason: a wheel's
+  native extension is loaded with `mmap(PROT_EXEC)`, which a noexec mount refuses. Shown by two Docker tests on the
+  same wheel (a copy of the image's own `_bisect` CPython extension): installed into `/site` it imports and the trace
+  is complete; installed into `/tmp` the import fails with `failed to map segment from shared object`. Trade-off: a
+  package can write and execute a file under `/site`; every such execve is in the trace, and the run is still
+  network-less, read-only elsewhere, UID 10001 and limited.
+- **Staging copy instead of mounting the quarantine file directly** (alternative: bind-mount each quarantine file):
+  quarantine files are written by `mkstemp` with mode 0600 and the sandbox user is 10001, so they cannot be read in
+  place. The copy is made from the same bytes that were hashed, so what is mounted is exactly what was checked.
+- **Top-level modules only** (owner: "import its top-level modules"): `demo.sub` is refused; a str is refused too
+  (it would split into letters, a defect the tests caught).
+- **One run, two steps**: install and import in the same container, so the `.pth` and import behaviour is traced from
+  the same installed bytes; harness processes are told apart by PID in the trace (`processes[pid].step`).
+
+### Requirements covered
+
+| ID | Acceptance check |
+|---|---|
+| NFR-1 rule 6 (exact bytes) | changed quarantine bytes -> WHEEL_HASH_MISMATCH before mounting; pip inside refuses a wrong hash (`step:install:end:1`) |
+| NFR-1 rule 2 (read-only) | wheels at `/pkg` read-only; only `/site` executable (unit + Docker contrast) |
+| FR-13 | connect to 198.51.100.24:443 recorded as `= -1 ENETUNREACH`; read of `~/.aws/credentials` recorded; `.pth` at start-up recorded |
+| FR-6 fail closed | Docker hidden, bad node, bad module names, a fault -> UNRESOLVED |
+| M1 harness item | `test_the_old_harness_is_gone`; a real import of each wheel's modules, seen in the trace |
+
+### Ch 7 Test cases
+
+`tests/test_cavr_sandbox_observe.py`: 36 tests, 29 unit (real wheels from `build_wheel`, fake `run_harness`) and 7 Docker.
+
+| Test ID | Purpose | Input | Expected | Result |
+|---|---|---|---|---|
+| `test_hash_file_holds_exactly_the_trees_sha256_values` | hash file | demo 1.0 + helper 2.0 | two lines with the tree's sha256 | pass |
+| `test_staged_wheels_are_the_exact_quarantine_bytes_readable_by_the_sandbox_user` | staging | tree | same bytes, 0644, dir 0755, only wheels + hashes.txt, removed after | pass |
+| `test_a_wheel_whose_quarantine_bytes_changed_is_refused_before_mounting` | rule 6 | bytes appended | WHEEL_HASH_MISMATCH, nothing run | pass |
+| `test_a_node_that_is_not_a_verified_wheel_is_refused` (8) | verified only | sdist name, no / bad sha, no path, absent file, `../` name, bad name, bad version | WHEEL_NOT_VERIFIED, nothing run | pass |
+| `test_a_wheel_outside_the_quarantine_is_refused`, `test_a_symlink_in_the_quarantine_is_refused`, `test_a_name_twice_in_the_tree_is_refused`, `test_no_wheel_is_refused` (3) | provenance | outside file, symlink, Helper twice, empty | WHEEL_NOT_VERIFIED | pass |
+| `test_modules_that_are_not_top_level_names_are_refused` (7) | modules | [], None, `demo.sub`, twice, code, "", a str | MODULES_UNKNOWN | pass |
+| `test_the_steps_install_offline_by_hash_then_import` | steps | — | pip flags as planned; import argv ends with the modules; no env | pass |
+| `test_only_the_install_target_is_executable` | rule 2 deviation | — | only `/site` exec; `/tmp` noexec | pass |
+| `test_docker_hidden_is_unresolved_and_nothing_runs`, `test_a_fault_is_unresolved_internal_error` | fail closed | no engine; raising stage | ENGINE_UNAVAILABLE / INTERNAL_ERROR | pass |
+| `test_the_old_harness_is_gone` | Q12 | — | `backend/cavr/harness.py` absent | pass |
+| `test_benign_wheel_installs_imports_and_gives_a_complete_trace` (Docker) | happy path | demo imports helper | DEEP_NOT_JUDGED; both `__init__.py` opened by the import step | pass |
+| `test_import_that_connects_out_is_a_recorded_failed_connect` (Docker) | rule 1 | connect at import | `connect(... 198.51.100.24 ... 443) = -1 ENETUNREACH` | pass |
+| `test_import_that_reads_aws_credentials_is_recorded` (Docker) | secret read | open `~/.aws/credentials` | `/tmp/home/.aws/credentials` in the import step's lines | pass |
+| `test_a_pth_file_runs_at_start_up_and_is_recorded` (Docker) | .pth | `demo-startup.pth` | its stat in the import step's lines | pass |
+| `test_pip_inside_refuses_a_wheel_whose_hash_does_not_match` (Docker) | rule 6 inside | wrong hash in hashes.txt | SANDBOX_EXIT_NONZERO, `step:install:end:1` | pass |
+| `test_a_wheel_with_a_native_so_imports_and_gives_a_complete_trace` (Docker) | owner's test | `_bisect` extension, tag cp312-cp312-linux_x86_64 | DEEP_NOT_JUDGED; .so opened without error (4.1 s, 5848 lines) | pass |
+| `test_the_same_native_wheel_cannot_load_from_the_noexec_tmp` (Docker) | why `/site` is exec | same wheel into `/tmp/lib` | install 0, import fails "failed to map segment" | pass |
+
+Runs before the commit: `CAVR_DOCKER=1 pytest tests/test_cavr_sandbox_observe.py`: 36 passed;
+`CAVR_DOCKER=1 pytest tests/test_cavr_*.py`: 1608 passed, 11 skipped (live) in 441 s. No existing result changed.
+
+### Defects found and fixed
+
+- `check_modules("demo")` accepted a str as the letters `d, e, m, o`; now only a list or tuple is accepted (test above).
+
+### Known limitations / deferred
+
+- Events are kept as raw trace lines; normalisation (PR 7), judging against the contract (PR 8) and the deep verdict
+  through `verify_request` (PR 9) are next. Phase 2a returns UNRESOLVED `DEEP_NOT_JUDGED` at best.
+- The import runs as one process for all modules; a module that ends the process early stops later imports (its own
+  behaviour up to then is traced).
+- Native wheels whose import needs a syscall outside the profile fail and are UNRESOLVED.
+- CI on GitHub's runner is not verified (nothing pushed).
+
+### Q12: legacy parts after PRs 3-6
+
+| Part | Status |
+|---|---|
+| `sandbox_runner.SandboxRunner.image_digest` | deleted (PR 3) |
+| `backend/cavr/harness.py` | deleted (PR 6) |
+| rest of `sandbox_runner.py` (run loop, stdout markers, `_extract_report`, `SECCOMP_PROFILE`) | still used by `counterfactual.py` (only its tests use it) and `tests/test_cli_resources.py`; PR 12 |
+| `sandbox.py`, `lab_harness.py`, `runtime_monitor.py` | used by the LOCAL lab (`analyzer.py`, orchestrator `service.py`, `test_modules.py`, `test_cavr_targeted.py`, `test_cavr_lab_pins.py`); PR 12 (`runtime_monitor` PR 7) |
+| `docker/asent-sandbox/Dockerfile` | listed by `doctor.py`, `check_wheel.py` and the packaging tests; PR 12 with owner review |
+
+### Tool disclosure (Ch 8.7)
+
+- **Generated by Claude Code:** the staging and install/import code, the tests and these notes. **Reviewed by
+  Maryam:** decision 5 (exec only for the install target, native .so test). **Verified by:** the runs above.
+
+### Supervisor Q&A prep
+
+1. **Could the sandbox install something other than what was verified?** No: the host refuses any file whose bytes
+   differ from the tree's sha256 before mounting, and pip inside installs only with `--require-hashes --no-index
+   --no-deps --only-binary :all:` from the read-only copy.
+2. **Why is one tmpfs executable when the rules say noexec?** Native extensions are mapped executable; on a noexec
+   mount the import fails (shown by a test). Only the install target is exec, still nosuid and nodev, and every
+   execve is traced.

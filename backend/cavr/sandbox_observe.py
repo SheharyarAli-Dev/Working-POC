@@ -31,6 +31,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import secrets
 import tempfile
 from pathlib import Path
@@ -136,3 +137,119 @@ def _sha256(path) -> str | None:
 def _result(rule, reason, evidence, trace="", output=None) -> dict:
     return {"status": "UNRESOLVED", "stage": "deep", "rule": rule, "reason": reason, "evidence": evidence,
             "trace": trace, "output": output or {"text": "", "bytes": 0, "trusted": False}}
+
+
+# --- install the verified wheels and import their top-level modules (PR 6) ---------------------------------------------
+#
+# `observe(nodes, modules)` is the deep run of one verified tree. On the host, before anything is mounted, every node
+# must be a verified wheel in CAVR's quarantine (name, version, a .whl filename that is the file's own name, a
+# 64-hex sha256, a regular file inside the quarantine directory). Its bytes are read once, hashed, compared with the
+# tree's sha256 and written to a per-run staging directory (0644: the quarantine's files are 0600 and the sandbox user
+# is 10001), which is mounted read-only at /pkg with `hashes.txt` (`name==version --hash=sha256:<sha256>` per node).
+# In the sandbox the harness runs two steps:
+#
+#   install   python -I -m pip install --no-index --no-deps --only-binary :all: --require-hashes --no-compile
+#             --find-links /pkg --target /site/lib -r /pkg/hashes.txt         (pip re-checks every hash)
+#   imports   python -I -S -c <site.addsitedir('/site/lib'); import each module>   (addsitedir runs .pth files)
+#
+# /site is its own tmpfs (rw,exec,nosuid,nodev,128 MiB): exec only there, so a wheel's native .so can be mapped;
+# /tmp stays noexec (sandbox rule 2 deviation, see the notes, Step M2-10). Never an sdist, never setup.py.
+#
+#     WHEEL_NOT_VERIFIED    a node is not a verified wheel in the quarantine (or a name repeats)
+#     WHEEL_HASH_MISMATCH   the quarantine file's bytes no longer have the tree's sha256
+#     MODULES_UNKNOWN       no top-level module to import, or a name that is not one
+#     otherwise             run_harness's result (never VERIFIED in Phase 2a)
+
+SITE_TMPFS = "/site:rw,exec,nosuid,nodev,size=128m,mode=1777"
+SITE_LIB = "/site/lib"
+PKG_INSIDE = "/pkg"
+HASH_FILE = "hashes.txt"
+PIP_INSTALL = ["/usr/local/bin/python", "-I", "-m", "pip", "install", "--no-index", "--no-deps", "--only-binary", ":all:",
+               "--require-hashes", "--no-compile", "--find-links", PKG_INSIDE, "--target", SITE_LIB,
+               "-r", f"{PKG_INSIDE}/{HASH_FILE}"]
+IMPORT_CODE = (f"import importlib, site, sys\nsite.addsitedir({SITE_LIB!r})\n"
+               "for name in sys.argv[1:]:\n    importlib.import_module(name)\n")
+_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+_VERSION = re.compile(r"^[A-Za-z0-9][A-Za-z0-9.+!_-]*$")
+
+
+class NotStaged(Exception):
+    def __init__(self, rule, reason):
+        super().__init__(reason)
+        self.rule, self.reason = rule, reason
+
+
+def install_steps(modules) -> list[dict]:
+    return [step("install", PIP_INSTALL),
+            step("imports", ["/usr/local/bin/python", "-I", "-S", "-c", IMPORT_CODE, *modules])]
+
+
+def check_modules(modules) -> list[str]:
+    names = list(modules) if isinstance(modules, (list, tuple)) else []  # a str would split into letters
+    if not names or len(set(names)) != len(names) or not all(isinstance(m, str) and m.isidentifier() for m in names):
+        raise NotStaged("MODULES_UNKNOWN", f"no usable top-level modules to import: {names!r}")
+    return names
+
+
+def stage_wheels(nodes, quarantine_dir, stage_dir) -> list[dict]:
+    """Copy each verified wheel's checked bytes into `stage_dir` and write the hash file. Raises NotStaged."""
+    quarantine = Path(quarantine_dir).resolve()
+    staged, seen = [], set()
+    for node in nodes or []:
+        if not isinstance(node, dict):
+            raise NotStaged("WHEEL_NOT_VERIFIED", f"a tree node is not a dict: {node!r}"[:200])
+        name, version, filename, path, sha = (node.get(k) for k in ("name", "version", "filename", "path", "sha256"))
+        label = f"{name} {version}"
+        if not (isinstance(name, str) and _NAME.match(name) and isinstance(version, str) and _VERSION.match(version)):
+            raise NotStaged("WHEEL_NOT_VERIFIED", f"node {label!r} has no usable name and version")
+        if not (isinstance(filename, str) and filename.endswith(".whl") and "/" not in filename and "\\" not in filename):
+            raise NotStaged("WHEEL_NOT_VERIFIED", f"{label}: {filename!r} is not a wheel file name (no sdist is ever installed)")
+        if not (isinstance(sha, str) and re.fullmatch(r"[0-9a-f]{64}", sha)):
+            raise NotStaged("WHEEL_NOT_VERIFIED", f"{label}: no verified sha256")
+        key = re.sub(r"[-_.]+", "-", name).lower()
+        if key in seen:
+            raise NotStaged("WHEEL_NOT_VERIFIED", f"{name} appears twice in the tree")
+        seen.add(key)
+        source = Path(str(path)) if path else None
+        if source is None or source.name != filename or source.is_symlink() or not source.is_file():
+            raise NotStaged("WHEEL_NOT_VERIFIED", f"{label}: {path!r} is not the regular file {filename}")
+        if not source.resolve().is_relative_to(quarantine):
+            raise NotStaged("WHEEL_NOT_VERIFIED", f"{label}: {path} is not in CAVR's quarantine {quarantine}")
+        data = source.read_bytes()
+        actual = hashlib.sha256(data).hexdigest()
+        if actual != sha:
+            raise NotStaged("WHEEL_HASH_MISMATCH", f"{filename} in the quarantine has SHA-256 {actual}; the verified tree "
+                            f"says {sha}; it was not mounted")
+        target = Path(stage_dir) / filename
+        target.write_bytes(data)
+        os.chmod(target, 0o644)
+        staged.append({"name": name, "version": version, "filename": filename, "sha256": sha, "size": len(data)})
+    if not staged:
+        raise NotStaged("WHEEL_NOT_VERIFIED", "the tree has no wheel to install")
+    (Path(stage_dir) / HASH_FILE).write_text("".join(f"{w['name']}=={w['version']} --hash=sha256:{w['sha256']}\n"
+                                                     for w in staged), encoding="utf-8")
+    os.chmod(Path(stage_dir) / HASH_FILE, 0o644)
+    os.chmod(stage_dir, 0o755)
+    return staged
+
+
+def observe(nodes, modules, *, quarantine_dir=None, deadline: float = sandbox_exec.DEADLINE_SECONDS,
+            run_id: str | None = None, n: int = 1) -> dict:
+    """Install the verified tree and import `modules` in one sandbox run. Never raises; never VERIFIED."""
+    try:
+        if quarantine_dir is None:
+            from backend.cavr.pipeline import default_quarantine_dir
+            quarantine_dir = default_quarantine_dir()
+        names = check_modules(modules)
+        with tempfile.TemporaryDirectory(prefix="cavr-pkg-") as directory:
+            staged = stage_wheels(nodes, quarantine_dir, directory)
+            hash_sha = hashlib.sha256((Path(directory) / HASH_FILE).read_bytes()).hexdigest()
+            result = run_harness(install_steps(names), mounts=[(directory, PKG_INSIDE)], tmpfs=[SITE_TMPFS],
+                                 deadline=deadline, run_id=run_id, n=n)
+        result["evidence"].update({"wheels": staged, "modules": names, "hash_file_sha256": hash_sha,
+                                   "install_target": SITE_LIB, "site_tmpfs": SITE_TMPFS})
+        return result
+    except NotStaged as exc:
+        return _result(exc.rule, exc.reason, {"modules": modules if isinstance(modules, list) else None})
+    except Exception as exc:
+        return _result("INTERNAL_ERROR", f"the sandbox run failed: {type(exc).__name__}: {exc}", {})
