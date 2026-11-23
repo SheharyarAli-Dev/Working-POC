@@ -2,7 +2,7 @@
 
 `run_harness(steps, ...)` checks the image (`sandbox_image.image_identity`), writes the job file, starts
 
-    strace -f -q --always-show-pid -s 1024 -e trace=%file,%network,%process,%creds -u cavr --
+    strace -f -q --always-show-pid -s 1024 -e trace=%file,%network,%process,%creds,<TRACED_BY_NAME> -u cavr --
         /usr/local/bin/python -I -S /opt/cavr/harness.py /job/job.json
 
 as the container's process (root, with only SYS_PTRACE, SETUID, SETGID and no-new-privileges, Q5), keeps the
@@ -43,7 +43,13 @@ from backend.cavr.sandbox_trace import check_trace
 HARNESS = Path(__file__).resolve().with_name("sandbox_harness.py")
 HARNESS_INSIDE = "/opt/cavr/harness.py"
 JOB_INSIDE = "/job"
-STRACE = ["strace", "-f", "-q", "--always-show-pid", "-s", "1024", "-e", "trace=%file,%network,%process,%creds",
+# Refused or kernel-blocked syscalls that are not in strace's %file/%network/%process/%creds classes, traced by
+# name so that every attempt is in the trace: ptrace (allowed by the profile because strace needs it; the kernel
+# refuses it to package processes) and eight the profile refuses (EPERM).
+TRACED_BY_NAME = ("ptrace", "process_vm_readv", "process_vm_writev", "io_uring_setup", "io_uring_enter",
+                  "io_uring_register", "userfaultfd", "bpf", "perf_event_open")
+STRACE = ["strace", "-f", "-q", "--always-show-pid", "-s", "1024",
+          "-e", "trace=%file,%network,%process,%creds," + ",".join(TRACED_BY_NAME),
           "-u", "cavr", "--", "/usr/local/bin/python", "-I", "-S", HARNESS_INSIDE, f"{JOB_INSIDE}/job.json"]
 NONCE_VARIABLE = "CAVR_RUN_NONCE"
 OUTPUT_SHOWN = 4000

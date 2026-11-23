@@ -472,7 +472,7 @@ Stated as limitations in the report and on the dashboard, not implemented in M2:
 - [x] PR 3 CAVR sandbox image `asent-cavr-sandbox:local` + identity check (branch `cavr-m2-sandbox`, 2026-11-23; report notes Step M2-7): own seccomp copy, the shared profile cannot start a container
 - [x] PR 4 runner deadline / kill / limits (branch `cavr-m2-sandbox`, 2026-11-23; report notes Step M2-8): `sandbox_exec.run_container`
 - [x] PR 5 trusted trace channel (package code never runs as root) (branch `cavr-m2-sandbox`, 2026-11-23; report notes Step M2-9): strace's stderr is the trace, `sandbox_trace.check_trace`
-- [x] PR 6 wheel install + import harness (branch `cavr-m2-sandbox`, 2026-11-23; report notes Step M2-10): `sandbox_observe.observe`; exec tmpfs only for the install target; `harness.py` kept until PR 12 (`docker/asent-sandbox/Dockerfile` still copies it; review 2026-11-23)
+- [x] PR 6 wheel install + import harness (branch `cavr-m2-sandbox`, 2026-11-23; report notes Step M2-10): `sandbox_observe.observe`; exec tmpfs only for the install target; `harness.py` kept until PR 12 (`docker/asent-sandbox/Dockerfile` still copies it; review 2026-11-23); refused syscalls and ptrace checked (Step M2-11)
 - [ ] PR 7 normalisation v2
 - [ ] PR 8 runtime contract check
 - [ ] PR 9 one observed run for escalated packages

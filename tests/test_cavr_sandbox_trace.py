@@ -566,3 +566,71 @@ def test_untraced_and_namespace_clones_are_refused_and_recorded(tmp_path):
     assert "cavr-child-ran" not in got["trace"]
     refused = [line for line in got["trace"].splitlines() if "clone(" in line and "= -1 EPERM" in line]
     assert any("CLONE_UNTRACED" in line for line in refused) and any("CLONE_NEWUSER" in line for line in refused)
+
+
+# Syscall numbers (x86_64, aarch64) for the refused-syscall probe.
+SYSCALLS = {"io_uring_setup": (425, 425), "io_uring_enter": (426, 426), "io_uring_register": (427, 427),
+            "process_vm_readv": (310, 270), "process_vm_writev": (311, 271), "userfaultfd": (323, 282),
+            "bpf": (321, 280), "perf_event_open": (298, 241), "ptrace": (101, 117)}
+# (case, syscall, arguments as Python source; `child` is a sleeping child of the probe, `ppid` the harness)
+REFUSED = [
+    ("io_uring_setup", "io_uring_setup", "0, 0"),
+    ("io_uring_enter", "io_uring_enter", "0, 0, 0, 0, 0, 0"),
+    ("io_uring_register", "io_uring_register", "0, 0, 0, 0"),
+    ("process_vm_readv", "process_vm_readv", "ppid, 0, 0, 0, 0, 0"),
+    ("process_vm_writev", "process_vm_writev", "ppid, 0, 0, 0, 0, 0"),
+    ("userfaultfd", "userfaultfd", "0"),
+    ("bpf", "bpf", "0, 0, 0"),
+    ("perf_event_open", "perf_event_open", "0, 0, -1, -1, 0"),
+    ("ptrace_traceme", "ptrace", "0, 0, 0, 0"),                 # PTRACE_TRACEME: it is already traced by strace
+    ("ptrace_attach_strace", "ptrace", "16, 1, 0, 0"),          # PTRACE_ATTACH to PID 1, strace (root)
+    ("ptrace_attach_harness", "ptrace", "16, ppid, 0, 0"),      # the harness: non-dumpable and already traced
+    ("ptrace_attach_own_child", "ptrace", "16, child, 0, 0"),   # its own child: already traced by strace -f
+    ("ptrace_seize_own_child", "ptrace", "0x4206, child, 0, 0"),  # PTRACE_SEIZE
+]
+
+REFUSED_PROBE = """import ctypes, os, signal, time
+libc = ctypes.CDLL(None, use_errno=True)
+ppid = os.getppid()
+child = os.fork()
+if child == 0:
+    time.sleep(10)
+    os._exit(0)
+time.sleep(0.2)
+ret = libc.syscall({number}, {args})
+print("RESULT", ret, ctypes.get_errno())
+os.kill(child, signal.SIGKILL)
+os.waitpid(child, 0)
+"""
+
+
+@requires_docker
+@pytest.mark.parametrize("case, name, args", REFUSED, ids=[case for case, _, _ in REFUSED])
+def test_a_package_process_is_refused_dangerous_syscalls_and_ptrace(tmp_path, case, name, args):
+    """io_uring, process_vm_*, userfaultfd, bpf, perf_event_open are refused by the profile; ptrace (which strace
+    needs, so the profile allows it) is refused by the kernel. Each attempt fails and is in the trace."""
+    import platform
+    machine = platform.machine()
+    if machine not in ("x86_64", "aarch64"):
+        pytest.skip(f"no syscall numbers for {machine}")
+    number = SYSCALLS[name][0 if machine == "x86_64" else 1]
+    got = observed(tmp_path, REFUSED_PROBE.format(number=number, args=args))
+    assert got["rule"] == "DEEP_NOT_JUDGED", (got["reason"], got["output"]["text"])
+    result = next(line.split() for line in got["output"]["text"].splitlines() if line.startswith("RESULT"))
+    assert result[1] == "-1" and result[2] in ("1", "38"), result  # EPERM or ENOSYS
+    probe_pid = got["evidence"]["step_pids"]["probe"][0]
+    attempts = [line for line in got["trace"].splitlines()
+                if line.split(None, 1)[0] == str(probe_pid) and line.split(None, 1)[1].startswith(f"{name}(")]
+    assert len(attempts) == 1, attempts
+    assert attempts[0].split(" = ")[-1].startswith(("-1 EPERM", "-1 ENOSYS")), attempts[0]
+
+
+def test_the_refused_syscalls_are_traced_by_name_and_not_in_the_profile():
+    profile = json.loads(sandbox_observe.sandbox_image.SECCOMP_PROFILE.read_text())
+    allowed = {n for entry in profile["syscalls"] if entry["action"] == "SCMP_ACT_ALLOW" for n in entry["names"]}
+    assert profile["defaultAction"] == "SCMP_ACT_ERRNO"
+    assert not allowed & {"io_uring_setup", "io_uring_enter", "io_uring_register", "process_vm_readv",
+                          "process_vm_writev", "userfaultfd", "bpf", "perf_event_open"}
+    assert "ptrace" in allowed  # strace needs it; the kernel refuses it to package processes (Docker test above)
+    traced = sandbox_observe.STRACE[sandbox_observe.STRACE.index("-e") + 1].removeprefix("trace=").split(",")
+    assert set(SYSCALLS) <= set(traced)
