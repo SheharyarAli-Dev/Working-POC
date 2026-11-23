@@ -13,7 +13,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from packaging.utils import canonicalize_name
-from packaging.version import Version
+from packaging.version import InvalidVersion, Version
 
 from backend.cavr.advisories import package_cache_path, package_query
 from backend.cavr.pipeline import verify_request
@@ -192,8 +192,17 @@ def write_package_osv_cache(cache_dir, name, vulns, age_hours=0.0) -> Path:
 
 def project_response(name, releases: dict) -> dict:
     """A whole-project registry body: `releases` maps version -> list of `urls` entries (see `file_entry`)."""
-    latest = max(releases, key=Version) if releases else None
+    valid = [version for version in releases if _is_version(version)]
+    latest = max(valid, key=Version) if valid else None
     return {"info": {"name": name, "version": latest}, "releases": {version: list(files) for version, files in releases.items()}}
+
+
+def _is_version(text) -> bool:
+    try:
+        Version(text)
+    except InvalidVersion:
+        return False
+    return True
 
 
 def synthetic_advisory(advisory_id, name, introduced="0", fixed=None) -> dict:

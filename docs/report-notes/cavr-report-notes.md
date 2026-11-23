@@ -4143,3 +4143,96 @@ Before the commit (same set as step M2-3): 1493 passed, 11 skipped; no earlier r
 
 1. **Why keep `rank_repairs` if repair was replaced?** Q12: a module is deleted only when nothing uses it; the
    `cross_module` demo still does, until PR 12 removes the LOCAL lab path.
+
+## Review of steps M2-3 to M2-5 — fixes (2026-11-23)
+
+Review: 1 pass of cavr-reviewer over 3d241ed..5773e09, verdict "Fix first" (1 BLOCKER, 12 MINOR of which 3 marked
+major); BLOCKER and 9 MINOR fixed in this commit, 3 MINOR open (below).
+
+### Ch 6 Implementation
+
+- `repair_proposal._copy_problem` also compares the bytes (`_file_digest`) of the lockfile and of the requirements
+  file in the project and in the copy; a link out of the project is not copied, so the difference is
+  `COPY_DIFFERS` (BLOCKER). `copy_project` skips the directories `context_extractor` does not read (dot-directories,
+  virtual environments, `__pycache__`, `node_modules`); a copy failure is `COPY_FAILED`.
+- Removal: another package of the verdict without a complete tree blocks removal; `REMOVAL_LIMITATION` (Python
+  imports only) is added to a block with a removal; the lockfile patch also drops the removed package's edges.
+- Patches: requirements and lockfile read and written as bytes (a CRLF file keeps CRLF); an approved exact pin is
+  matched by version (`_is_exact_pin`: `demo==1` matches 1.0, a wildcard is not a pin).
+- The budget clock starts before the release list is read. A `--hash` line limitation is stated.
+- `advisories._post_capped`: the live package-wide OSV page is read in chunks, at most 20 MB.
+
+### Design decisions
+
+- **Bytes of the two files, not only the link list**: whatever the cause (a link, an unreadable file), a re-check
+  with other inputs than the project's is not evidence about the project.
+- **Explicit `edges: []` is trusted** as the lockfile's own statement (review MINOR 4, second half: not changed);
+  a missing `edges` key with other packages locked is still "cannot rule out".
+
+### Ch 7 Test cases
+
+`tests/test_cavr_repair_edges.py` (new) and changes in `tests/test_cavr_repair.py`.
+
+| Test ID | Purpose | Input | Expected | Result |
+|---|---|---|---|---|
+| `test_lockfile_that_links_out_of_the_project_gives_no_repair_found` | BLOCKER | lockfile is a link out | `COPY_DIFFERS` | pass |
+| `test_requirements_file_that_links_out_of_the_project_gives_no_repair_found` | same, requirements | link made after judging | `COPY_DIFFERS` | pass |
+| `test_virtualenv_dot_directories_and_node_modules_are_not_copied` | copy | `.venv`, `env/pyvenv.cfg`, `.secrets/.env`, `node_modules` | skipped, proposal made, project unchanged | pass |
+| `test_project_over_the_copy_budget_gives_no_repair_found` | copy budget | `MAX_COPY_FILES = 1` | `COPY_FAILED` | pass |
+| `test_fetch_releases_reads_yanked_and_wheel_flags` | reader | yanked, sdist-only, no files, bad version | flags per release; bad version last | pass |
+| `test_fetch_releases_failures_are_unresolved` (6) | reader | 404, transport error, bad JSON, other package, bad shapes | `PROJECT_NOT_FOUND` / `REGISTRY_UNAVAILABLE` / `REGISTRY_INVALID` | pass |
+| `test_fetch_releases_over_the_size_cap_is_unresolved` | reader | cap 10 bytes; bad name | `REGISTRY_INVALID`; `INVALID_REQUEST` | pass |
+| `test_release_wheel_names_the_wheel_and_its_registry_digest_without_downloading` | reader | one wheel | digest, no download | pass |
+| `test_release_wheel_failures_are_unresolved` (5) | reader | yanked release / file, no digest, no wheel, other version | `YANKED`, `REGISTRY_DIGEST_MISSING`, `NO_WHEEL`, `REGISTRY_INVALID`; 404 `RELEASE_NOT_FOUND` | pass |
+| `test_package_advisories_reads_a_fresh_cache` | OSV | fresh cache | OK, DATED CACHE | pass |
+| `test_package_advisories_without_a_cache_or_with_a_damaged_one_is_unavailable` | OSV | none; digest broken | `ADVISORIES_UNAVAILABLE` | pass |
+| `test_package_advisories_invalid_list_future_date_and_bad_name` | OSV | bad list, +2 h, unparsable date, bad name | `ADVISORIES_INVALID`, `ADVISORIES_STALE`, `INVALID_REQUEST` | pass |
+| `test_package_advisories_stub_without_a_package_query_never_reaches_the_network` | OSV | per-version stub, live | unavailable, nothing cached | pass |
+| `test_pin_rewrites_a_continued_line_with_extras_marker_and_hash_and_keeps_crlf` | rewrite | CRLF, `\` continuation, extras, marker, `--hash` | one line, new hash, CRLF kept | pass |
+| `test_remove_deletes_every_physical_line_of_the_requirement` | rewrite | continued line | both lines gone | pass |
+| `test_requirement_line_must_be_exactly_one_line` | rewrite | two marker lines; other version | None | pass |
+| `test_lockfile_patches` | lockfile | pin, removal, edges, bad edges, no lockfile | entry replaced; edges of removed package dropped; reasons | pass |
+| `test_policy_exact_pin_is_matched_by_version_not_by_text` | policy | `demo==1`, `demo==1.*` | `demo==1` replaced; wildcard kept | pass |
+| `test_pre_release_is_excluded` | rule | 1.1rc1 | `PRE_RELEASE`, 1.2 proposed | pass |
+| `test_advisory_range_that_cannot_be_evaluated_excludes_the_release` | rule | GIT range advisory | `ADVISORY_RANGE_UNKNOWN`, no repair | pass |
+| `test_requirement_from_an_included_file_gives_no_pin` | rule | `-r base.txt` | `REQUIREMENT_LINE_NOT_FOUND`, nothing tried | pass |
+| `test_recheck_wheel_that_differs_from_the_registry_listing_is_skipped` | rule | listing digest replaced | `RECHECK_DIGEST_DIFFERS` | pass |
+| `test_removal_is_not_proposed_when_another_package_of_the_request_depends_on_it` | removal | top requires demo | reason names top==1.0 | pass |
+| `test_removal_is_not_proposed_when_another_package_has_no_complete_tree` | removal | top unreadable | "not complete" | pass |
+| `test_hash_mismatch_is_repaired_but_never_removed` (tightened) | — | demo 1.0 tampered, used | pin 1.1, no removal | pass |
+| `test_budget_limits_the_time` (tightened) | — | fake clock | exactly 1.1 tried, `not_tried` [1.2, 1.3], `BUDGET_EXHAUSTED` | pass |
+
+`tests/test_cavr_repair_edges.py`: 33 passed. Before the commit (same set as step M2-3): 1526 passed, 11 skipped;
+no earlier result changed.
+
+### Defects found and fixed
+
+- BLOCKER (reviewer): a lockfile linked out of the project was dropped from the copy and the re-check ran without
+  it while the copy check passed. Fixed as above; two tests.
+- Found by the new tests: a CRLF requirements file lost its CRs in the patch (`read_text` / `write_text` translate
+  newlines). Fixed by reading and writing bytes. The test helper `project_response` failed on an unparsable
+  version (test fix).
+- Reviewer's platform-wheel point (MINOR 5, first half) does not apply: `dep_tree` and `release_wheel` both use the
+  host's default tags. The `--hash` half is now a stated limitation.
+
+### Known limitations / deferred (review MINORs left open)
+
+- No overall repair cap per gate run: each REJECTED package gets its own 60 s budget (MINOR 8). The dashboard
+  publishes the verdict events after the repair has run (same MINOR).
+- A rewritten requirements line drops an inline comment; a pinned lockfile entry keeps only name, version,
+  ecosystem, sha256 (MINOR 6).
+- Commit `cabee91`'s `[owner review: …]` tag does not name `vscode-asent/test/unit/report.test.ts` (MINOR 11); history
+  is not rewritten, recorded here. `docs/cavr-m2-plan.md` is CAVR's own plan (the plan's rule allows it).
+
+### Tool disclosure (Ch 8.7)
+
+- **Generated by Claude Code:** the fixes, the tests and these notes; review by the cavr-reviewer agent.
+  **Reviewed by Maryam:** not yet. **Verified by:** the runs above.
+
+### Supervisor Q&A prep
+
+1. **If the lockfile is a link out of the project, what did the re-check check?** Nothing is proposed: the copy has
+   no lockfile, its bytes differ from the project's, so the result is `COPY_DIFFERS`.
+2. **What does a removal's `NOTHING_TO_VERIFY` prove?** Only that the patched requirements file asks for nothing new.
+   The evidence for the removal is the import scan and the dependents check; the block states that only Python
+   imports are seen.

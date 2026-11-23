@@ -152,6 +152,7 @@ def match_advisory(name: str, version: str, vuln: dict) -> dict:
 PACKAGE_MAX_AGE_HOURS = 24
 OSV_QUERY_URL = "https://api.osv.dev/v1/query"
 MAX_OSV_PAGES = 20
+MAX_OSV_PAGE_BYTES = 20 * 1024 * 1024
 
 
 def package_query(name: str) -> dict:
@@ -219,6 +220,21 @@ def package_advisories(name, cache_dir, live: bool = False, osv=None, max_age_ho
     return result("OK", "PACKAGE_ADVISORIES_READ", f"OSV lists {len(vulns)} advisories for {name} (all versions)")
 
 
+def _post_capped(client, request) -> dict:
+    """One OSV page, read in chunks; more than MAX_OSV_PAGE_BYTES is an error, not a partial answer."""
+    with client.stream("POST", OSV_QUERY_URL, json=request) as response:
+        response.raise_for_status()
+        body = bytearray()
+        for chunk in response.iter_bytes():
+            body.extend(chunk)
+            if len(body) > MAX_OSV_PAGE_BYTES:
+                raise ValueError(f"OSV answer is larger than {MAX_OSV_PAGE_BYTES} bytes")
+    page = json.loads(bytes(body).decode("utf-8"))
+    if not isinstance(page, dict):
+        raise ValueError("OSV answer is not a JSON object")
+    return page
+
+
 def _package_answer(name: str, cache_dir, live: bool) -> dict:
     """OSV's package-wide answer: live (stored in the cache) or from the cache. The age is judged by the caller."""
     query = package_query(name)
@@ -229,9 +245,7 @@ def _package_answer(name: str, cache_dir, live: bool) -> dict:
             vulns, pages, request = [], [], query
             with httpx.Client(timeout=8) as client:
                 for _ in range(MAX_OSV_PAGES):
-                    response = client.post(OSV_QUERY_URL, json=request)
-                    response.raise_for_status()
-                    page = response.json()
+                    page = _post_capped(client, request)
                     pages.append(page)
                     vulns.extend(page.get("vulns", []))
                     if not page.get("next_page_token"):

@@ -34,6 +34,7 @@ NO_REPAIR_FOUND / INTERNAL_ERROR. Project tests are not run (Q10), which every b
 from __future__ import annotations
 import copy
 import difflib
+import hashlib
 import json
 import os
 import shutil
@@ -48,7 +49,7 @@ from packaging.version import InvalidVersion, Version
 
 from backend.cavr.advisories import match_advisory, package_advisories, summarise_ids
 from backend.cavr.capture import parse_requirements_text
-from backend.cavr.context_extractor import extract_project_context
+from backend.cavr.context_extractor import SKIPPED_DIRECTORY_NAMES, _is_virtualenv, extract_project_context
 from backend.cavr.manifest_parser import snapshot_requirements
 from backend.cavr.pipeline import LOCKFILE_NAME, verify_request
 from backend.cavr.pypi_client import fetch_releases, release_wheel
@@ -59,14 +60,17 @@ MAX_CANDIDATES = 5
 BUDGET_SECONDS = 60.0
 MAX_COPY_FILES = 20000
 MAX_COPY_BYTES = 200 * 1024 * 1024
-COPY_SKIPPED = (".git", "__pycache__")
+COPY_SKIPPED = SKIPPED_DIRECTORY_NAMES   # and every dot-directory and virtual environment, as context_extractor
 LIMITATIONS = (
     "project tests were not run on the proposal (Q10: waiting for SATRA's project image builder)",
     "fast-gate re-check only: no sandbox and no deep analysis; an escalated candidate is skipped",
     "only newer releases of the same package are considered: no downgrades, no pre-releases, no other package",
     "a candidate's new dependencies must already be pinned in the lockfile; there is no resolver",
     "the time budget is checked before each candidate; a candidate being checked is not interrupted",
+    "a rewritten `--hash` line carries the hash of the wheel this host would install only",
 )
+REMOVAL_LIMITATION = ("removal is judged from the project's Python imports only: command-line use, plugins, entry points "
+                      "and imports by string are not seen")
 
 
 def propose_repair(verdict, package, *, project_dir, policy, requirements_file=None, lockfile_name=LOCKFILE_NAME,
@@ -110,8 +114,11 @@ def _propose(verdict, package, name, version, run) -> dict:
     work = Path(tempfile.mkdtemp(prefix="cavr-repair-", dir=_work_parent(run.work_dir)))
     try:
         copied = work / "project"
-        block["project_copy"] = copy_project(project_dir, copied)
-        problem = _copy_problem(verdict, copied)
+        try:
+            block["project_copy"] = copy_project(project_dir, copied)
+        except OSError as exc:
+            return _finish(block, "NO_REPAIR_FOUND", "COPY_FAILED", f"the project could not be copied for the re-check: {exc}")
+        problem = _copy_problem(verdict, project_dir, copied, run.requirements_file, run.lockfile_name)
         block["project_copy"]["matches_project"] = problem is None
         if problem:
             return _finish(block, "NO_REPAIR_FOUND", "COPY_DIFFERS", problem)
@@ -134,6 +141,7 @@ def _repairable(package: dict) -> bool:
 
 def _search_pins(block, package, name, version, files, work, run):
     """Fill `block` with the pin search; return (rule, reason) for the case that no pin is found."""
+    started = run.clock()   # the budget covers the release list, the advisory screen and every re-check
     releases = fetch_releases(name, transport=run.transport)
     block["registry"] = {key: releases.get(key) for key in ("result", "rule", "reason", "url", "response_sha256")}
     if releases["result"] != "OK":
@@ -181,7 +189,6 @@ def _search_pins(block, package, name, version, files, work, run):
     if not candidates:
         return "NO_SAFE_CANDIDATE", f"every newer release of {name} with a wheel is affected by a known advisory"
 
-    started = run.clock()
     budget = block["budget"]
     budget.update(max_candidates=run.max_candidates, seconds=run.budget_seconds)
     for position, release in enumerate(candidates):
@@ -280,6 +287,7 @@ def _search_removal(block, verdict, package, name, version, files, work, run):
                                    "approved_requirements": {"before": list(run.policy.get("approved_requirements") or []),
                                                              "after": list(run.policy.get("approved_requirements") or [])}},
                         "recheck": _recheck_evidence(checked, None, shown, None)}
+    block["limitations"].append(REMOVAL_LIMITATION)
 
 
 def _removal_problem(verdict, package, name, version, files):
@@ -305,7 +313,11 @@ def _removal_problem(verdict, package, name, version, files):
     for other in (verdict or {}).get("packages") or []:
         if other is package:
             continue
-        nodes = (((other.get("evidence") or {}).get("tree") or {}).get("nodes")) or []
+        tree = (other.get("evidence") or {}).get("tree") or {}
+        if tree.get("result") != "OK":
+            return (f"the dependency tree of {other.get('package')}=={other.get('version')} is not complete, so it may "
+                    f"depend on {name}")
+        nodes = tree.get("nodes") or []
         if any(canonicalize_name(str(node.get("name"))) == name for node in nodes):
             return f"{other.get('package')}=={other.get('version')} depends on it (its dependency tree contains {name})"
     return files.lockfile_dependents_problem(name)
@@ -317,8 +329,9 @@ def copy_project(source: Path, target: Path) -> dict:
     """Copy `source` to `target` without following any symbolic link. Returns what was copied and skipped.
 
     A link whose target lies inside the project is recreated as a relative link (it is never followed, so the
-    copy reads it exactly as the project does). A link that points outside the project is not copied. `.git` and
-    `__pycache__` are not copied (nothing of the re-check reads them). Only regular files are copied.
+    copy reads it exactly as the project does). A link that points outside the project is not copied. The
+    directories `context_extractor` does not read are not copied either: dot-directories (`.git`, `.env` folders),
+    virtual environments, `__pycache__`, `node_modules`. Only regular files are copied.
     """
     root = source.resolve(strict=True)
     if not stat.S_ISDIR(os.lstat(root).st_mode):
@@ -336,7 +349,7 @@ def copy_project(source: Path, target: Path) -> dict:
             if stat.S_ISLNK(info.st_mode):
                 _copy_link(root, path, target / relative_base / name, relative, summary)
             elif stat.S_ISDIR(info.st_mode):
-                if name in COPY_SKIPPED:
+                if name.startswith(".") or name in COPY_SKIPPED or _is_virtualenv(path):
                     summary["skipped_directories"].append(relative)
                 else:
                     (target / relative_base / name).mkdir()
@@ -361,8 +374,17 @@ def _copy_link(root: Path, path: Path, destination: Path, relative: str, summary
     summary["symlinks_kept"].append(relative)
 
 
-def _copy_problem(verdict, copied: Path):
-    """None when the copy reads exactly as the project did for the verdict; otherwise why not."""
+def _copy_problem(verdict, project_dir: Path, copied: Path, requirements_file, lockfile_name):
+    """None when the copy reads exactly as the project did for the verdict; otherwise why not.
+
+    Compared: the project context (result, rule, sources digest), and the bytes of the lockfile and of the
+    requirements file. A lockfile or requirements file that is a link out of the project is not copied, so the
+    re-check would run without it: that is a difference, not a pass.
+    """
+    for relative in [lockfile_name] + ([requirements_file] if requirements_file else []):
+        if _file_digest(project_dir / relative) != _file_digest(copied / relative):
+            return (f"{relative} in the project copy differs from the project's (for example a link out of the "
+                    "project, which is not copied); a re-check of the copy would not be about this project")
     original = (verdict or {}).get("project") or {}
     now = extract_project_context(copied)
     seen = (now["result"], now["rule"], now["sources_digest"])
@@ -371,6 +393,20 @@ def _copy_problem(verdict, copied: Path):
         return (f"the project copy does not read like the project did (project {expected[0]} {expected[1]}, "
                 f"copy {seen[0]} {seen[1]}); a re-check of the copy would not be about this project")
     return None
+
+
+def _read_text(path: Path) -> str:
+    return path.read_bytes().decode("utf-8")
+
+
+def _file_digest(path: Path):
+    """(exists, SHA-256 of the bytes) of a file as the pipeline would read it; ("unreadable", reason) on an error."""
+    try:
+        return True, hashlib.sha256(path.read_bytes()).hexdigest()
+    except FileNotFoundError:
+        return False, None
+    except OSError as exc:
+        return "unreadable", exc.strerror or str(exc)
 
 
 def _work_parent(work_dir):
@@ -387,9 +423,10 @@ class _ProjectFiles:
         self.root, self.requirements_file, self.lockfile_name = root, requirements_file, lockfile_name
         self.requirements_path = root / requirements_file if requirements_file else None
         self.lockfile_path = root / lockfile_name
-        self.requirements_text = (self.requirements_path.read_text(encoding="utf-8")
+        # Bytes, decoded without newline translation: a CRLF file keeps its line endings in the patch and the diff.
+        self.requirements_text = (_read_text(self.requirements_path)
                                   if self.requirements_path is not None and self.requirements_path.is_file() else None)
-        self.lockfile_text = self.lockfile_path.read_text(encoding="utf-8") if self.lockfile_path.is_file() else None
+        self.lockfile_text = _read_text(self.lockfile_path) if self.lockfile_path.is_file() else None
         self.lockfile = load_json_file(self.lockfile_path)
 
     # requirements
@@ -415,7 +452,8 @@ class _ProjectFiles:
             return None
         entry, start, end = self.requirement_line(name, rejected)
         lines = self.requirements_text.splitlines(keepends=True)
-        ending = "\n" if lines[end - 1].endswith("\n") else ""
+        last = lines[end - 1]
+        ending = "\r\n" if last.endswith("\r\n") else "\n" if last.endswith("\n") else ""
         extras = f"[{','.join(entry['extras'])}]" if entry.get("extras") else ""
         line = f"{entry['name']}{extras}=={candidate}"
         if entry.get("marker"):
@@ -457,6 +495,9 @@ class _ProjectFiles:
         if position is None:
             return None
         before = lockfile["packages"].pop(position)
+        if isinstance(lockfile.get("edges"), list):
+            lockfile["edges"] = [edge for edge in lockfile["edges"]
+                                 if not (isinstance(edge, dict) and canonicalize_name(str(edge.get("source"))) == name)]
         return {"before": before, "after": None, "lockfile": lockfile}
 
     def lockfile_dependents_problem(self, name):
@@ -493,10 +534,10 @@ class _ProjectFiles:
     def apply(self, requirements, lock, fallback=None):
         """Write the patch into the copy; return (request for `verify_request`, the request as text)."""
         if lock is not None:
-            self.lockfile_path.write_text(json.dumps(lock["lockfile"], indent=2) + "\n", encoding="utf-8")
+            self.lockfile_path.write_bytes((json.dumps(lock["lockfile"], indent=2) + "\n").encode("utf-8"))
         if requirements is not None:
             before = snapshot_requirements(self.requirements_path)
-            self.requirements_path.write_text(requirements["text"], encoding="utf-8")
+            self.requirements_path.write_bytes(requirements["text"].encode("utf-8"))
             after = snapshot_requirements(self.requirements_path)
             before["path"] = after["path"] = self.requirements_file
             return {"requirements_edit": {"before": before, "after": after}}, f"requirements edit of {self.requirements_file}"
@@ -504,9 +545,9 @@ class _ProjectFiles:
 
     def restore(self):
         if self.lockfile_text is not None:
-            self.lockfile_path.write_text(self.lockfile_text, encoding="utf-8")
+            self.lockfile_path.write_bytes(self.lockfile_text.encode("utf-8"))
         if self.requirements_text is not None:
-            self.requirements_path.write_text(self.requirements_text, encoding="utf-8")
+            self.requirements_path.write_bytes(self.requirements_text.encode("utf-8"))
 
 
 # --- small pieces ------------------------------------------------------------------------------------------------
@@ -522,7 +563,7 @@ def _policy_for_pin(policy, name, rejected, candidate):
     added, removed = [], []
     if not covered:
         exact = next((i for i, item in enumerate(after) if (entry := _approved_entry(item)) is not None
-                      and entry.name == name and str(entry.specifier) == f"=={rejected}"), None)
+                      and entry.name == name and _is_exact_pin(entry.specifier, rejected)), None)
         new = f"{name}=={candidate}"
         if exact is None:
             after.append(new)
@@ -551,6 +592,13 @@ def _recheck_evidence(checked, package, shown, wheel) -> dict:
                                                       "retrieved_at", "response_sha256")}
                                for a in evidence.get("advisories") or []],
                 "contract_rule": (evidence.get("contract") or {}).get("rule")}}
+
+
+def _is_exact_pin(specifier, version) -> bool:
+    """`specifier` is one `==` clause for exactly `version` (`==5.1` matches 5.1.0)."""
+    clauses = list(specifier)
+    return (len(clauses) == 1 and clauses[0].operator == "==" and "*" not in clauses[0].version
+            and _same_version(clauses[0].version, version))
 
 
 def _same_version(left, right) -> bool:

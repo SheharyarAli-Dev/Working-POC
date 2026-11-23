@@ -249,6 +249,7 @@ def test_unused_package_gets_a_removal(tmp_path):
     assert removal["lockfile_entry"]["before"]["name"] == "demo" and removal["lockfile_entry"]["after"] is None
     assert removal["policy"]["changed"] is False
     assert (removal["recheck"]["status"], removal["recheck"]["rule"]) == ("VERIFIED", "NOTHING_TO_VERIFY")
+    assert repair_proposal.REMOVAL_LIMITATION in block["limitations"]
     # A newer demo is not proposed: the project never uses it, so no contract can be inferred for it.
     assert block["pin"] is None and all(c["rule"] == "NO_CALL_SITE_AUTHORITY" for c in block["candidates_tried"])
 
@@ -258,6 +259,7 @@ def test_used_package_never_gets_a_removal(tmp_path):
     verdict, package = judged(world)
     block = repair(world, verdict, package)
     assert block["removal"] is None and "app/uses_demo.py" in block["removal_reason"]
+    assert repair_proposal.REMOVAL_LIMITATION not in block["limitations"]
 
 
 def test_removal_is_not_proposed_when_a_locked_package_depends_on_it(tmp_path):
@@ -284,13 +286,13 @@ def test_removal_is_not_proposed_when_the_lockfile_records_no_dependencies(tmp_p
 
 
 def test_hash_mismatch_is_repaired_but_never_removed(tmp_path):
-    world = demo_world(tmp_path, used=False)
+    world = demo_world(tmp_path, used=True)
     url = next(u for u in world.index.routes if u.endswith("demo-1.0-py3-none-any.whl"))
     body = bytearray(world.index.routes[url]); body[60] ^= 1; world.index.routes[url] = bytes(body)
     verdict, package = judged(world)
     assert (package["status"], package["rule"]) == ("REJECTED", "HASH_MISMATCH")
     block = repair(world, verdict, package)
-    assert block["result"] != "NOT_ATTEMPTED"
+    assert block["result"] == "PROPOSED" and block["pin"]["version"] == "1.1"
     assert block["removal"] is None and "hash" in block["removal_reason"]
 
 
@@ -350,8 +352,8 @@ def test_budget_limits_the_time(tmp_path):
     verdict, package = judged(world)
     ticks = iter(range(0, 1000, 40))   # every reading of the clock is 40 s later than the one before
     block = repair(world, verdict, package, budget_seconds=60, clock=lambda: next(ticks))
-    assert block["budget"]["stopped_by"] == "time" and len(block["candidates_tried"]) < 3
-    assert block["result"] == "NO_REPAIR_FOUND"
+    assert block["budget"]["stopped_by"] == "time" and [c["version"] for c in block["candidates_tried"]] == ["1.1"]
+    assert block["not_tried"] == ["1.2", "1.3"] and (block["result"], block["rule"]) == ("NO_REPAIR_FOUND", "BUDGET_EXHAUSTED")
 
 
 def test_package_wide_osv_answer_is_stale_after_24_hours(tmp_path):
