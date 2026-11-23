@@ -254,8 +254,9 @@ def test_a_sink_in_a_function_called_from_the_branch_is_found(tmp_path):
 def test_another_guard_on_the_path_lowers_the_confidence_and_is_listed(tmp_path):
     source = "import os, socket\nDATA = []\nif os.getenv('CI'):\n    if DATA:\n" + "    " + CONNECT
     entry = only(scan(tmp_path, source))
-    assert entry["opaque_guards"] == [{"line": 4, "predicate": "DATA"}]
+    assert entry["opaque_guards"] == [{"line": 4, "predicate": "DATA", "how": "body"}]
     assert entry["priority"]["reachability_confidence"] == 0.5
+    assert entry["baseline_takes_it"] is False  # the other guard decides too, and CAVR cannot evaluate it
 
 
 def test_a_variable_assigned_once_is_followed(tmp_path):
@@ -377,7 +378,8 @@ def entry_of(entry_id, risk, simulable, baseline=False):
 
 def frontier_of(*entries, ok=True, dropped=0):
     return {"version": trigger_frontier.VERSION, "ok": ok, "rule": "FRONTIER_COMPLETE" if ok else "FRONTIER_INCOMPLETE",
-            "reason": "r", "entries": list(entries), "dropped": {"count": dropped, "by_risk": {}}}
+            "reason": "r", "entries": list(entries), "dropped": {"count": dropped, "by_risk": {}},
+            "total": len(entries) + dropped, "other_guards": [], "other_guards_count": 0}
 
 
 @pytest.mark.parametrize("risk", ["high", "medium", "low"])
@@ -395,11 +397,13 @@ def test_an_unsimulable_high_risk_entry_wins_over_everything_else():
         assert trigger_frontier.frontier_residual(found, explored=explored)["status"] == "UNRESOLVED"
 
 
-def test_an_unexplored_simulable_entry_is_unresolved_and_a_baseline_one_is_not():
+def test_every_simulable_entry_needs_run_evidence_also_one_the_baseline_takes():
+    # Review of PRs 10-11 (BLOCKER 3): `baseline_takes_it` is a prediction; only a run that showed the sink counts.
     found = frontier_of(entry_of("s1", "high", True), entry_of("b1", "high", True, baseline=True))
     out = trigger_frontier.frontier_residual(found, explored=[])
-    assert out["rule"] == "TRIGGER_UNEXPLORED" and out["unexplored"] == ["s1"]
-    done = trigger_frontier.frontier_residual(found, explored=["s1"])
+    assert out["rule"] == "TRIGGER_UNEXPLORED" and out["unexplored"] == ["s1", "b1"]
+    assert trigger_frontier.frontier_residual(found, explored=["s1"])["unexplored"] == ["b1"]
+    done = trigger_frontier.frontier_residual(found, explored=["s1", "b1"])
     assert done["verified_possible"] is True and done["status"] is None and done["rule"] == "FRONTIER_EXPLORED"
 
 
@@ -415,3 +419,147 @@ def test_a_real_frontier_with_a_win32_check_cannot_give_verified(tmp_path):
     found = scan(tmp_path, "import sys, socket\nif sys.platform == 'win32':\n" + CONNECT)
     out = trigger_frontier.frontier_residual(found, explored=[e["id"] for e in found["entries"]])
     assert out["status"] == "UNRESOLVED" and out["rule"] == "TRIGGER_UNSIMULABLE"
+
+
+# --- review of PRs 10-11 ----------------------------------------------------------------------------------------------
+
+@pytest.mark.parametrize("test", ["'PYPI_TOKEN' in os.environ", "os.getenv('GITHUB_TOKEN')", "os.environ.get('PATH')",
+                                  "os.getenv('HOME') == '/tmp/home'"])
+def test_the_baseline_environment_is_the_real_runs_so_an_early_exit_on_it_is_never_passed(tmp_path, test):
+    # BLOCKER 1: the run has the harness variables and the canary variables; `if X in os.environ: return` always returns.
+    source = f"import os, socket\n\ndef run():\n    if {test}:\n        return\n    socket.create_connection(('198.51.100.24', 443))\n"
+    entry = only(scan(tmp_path, source))
+    assert entry["baseline_takes_it"] is False and entry["simulable"] is False, entry
+
+
+def test_a_condition_that_needs_a_canary_variable_unset_is_unsimulable(tmp_path):
+    entry = only(scan(tmp_path, "import os, socket\nif os.getenv('GITHUB_TOKEN') is None and os.getenv('CI') == 'true':\n"
+                      + CONNECT))
+    assert entry["simulable"] is False and entry["activation"] is None
+
+
+def test_a_canary_variable_may_still_be_set_to_a_constant(tmp_path):
+    entry = only(scan(tmp_path, "import os, socket\nif os.getenv('GITHUB_TOKEN') == 'ghp_fixed':\n" + CONNECT))
+    assert entry["simulable"] and entry["activation"]["env"] == {"GITHUB_TOKEN": "ghp_fixed"}
+
+
+def test_a_sandbox_variable_cannot_be_changed(tmp_path):
+    entry = only(scan(tmp_path, "import os, socket\nif os.getenv('HOME') == '/root':\n" + CONNECT))
+    assert entry["simulable"] is False
+
+
+@pytest.mark.parametrize("test", ["(helper() or os.getenv('MODE', 'prod')) == 'prod'",
+                                  "(helper() and os.getenv('X')) is None"])
+def test_a_bool_op_used_as_a_value_with_an_unknown_operand_is_unknown(tmp_path, test):
+    # BLOCKER 2a: in Python `a or b` is a value, not True / False.
+    source = (f"import os, socket\n\ndef helper():\n    return None\n\ndef run():\n    if {test}:\n        return\n"
+              "    socket.create_connection(('198.51.100.24', 443))\n")
+    entry = only(scan(tmp_path, source))
+    assert entry["baseline_takes_it"] is False and entry["simulable"] is False, entry
+
+
+def test_a_bool_op_in_a_condition_keeps_kleene_logic(tmp_path):
+    entry = only(scan(tmp_path, "import os, socket\n\ndef helper():\n    return 1\n\nif helper() or os.getenv('CI'):\n"
+                      + CONNECT))
+    assert entry["simulable"] and entry["activation"]["env"] == {"CI": "1"}
+
+
+def test_a_keyword_default_of_environ_get_is_used(tmp_path):
+    # BLOCKER 2b
+    source = ("import os, socket\n\ndef run():\n    if os.environ.get('SAFE', default='1'):\n        return\n"
+              "    socket.create_connection(('198.51.100.24', 443))\n")
+    entry = only(scan(tmp_path, source))
+    assert entry["baseline_takes_it"] is False and entry["simulable"] is False
+
+
+def test_an_opaque_guard_alone_never_lets_the_baseline_take_the_entry(tmp_path):
+    # BLOCKER 3: `not os.getenv('CI')` holds in the baseline, but `uptime() > 3600` decides too.
+    source = ("import os, socket\n\ndef uptime():\n    return 0\n\nif not os.getenv('CI'):\n    if uptime() > 3600:\n"
+              "        socket.create_connection(('198.51.100.24', 443))\n")
+    entry = only(scan(tmp_path, source))
+    assert entry["baseline_takes_it"] is False and entry["opaque_guards"]
+    out = trigger_frontier.frontier_residual(scan(tmp_path / "x", source), explored=[])
+    assert out["status"] == "UNRESOLVED" and out["unexplored"] == [entry["id"]]
+
+
+def test_an_elif_chain_of_early_exits_puts_every_condition_in_front_of_the_sink(tmp_path):
+    # MAJOR 1
+    source = ("import os, socket\n\ndef run():\n    if os.getenv('A'):\n        return\n    elif os.getenv('B') != 'go':\n"
+              "        return\n    socket.create_connection(('198.51.100.24', 443))\n")
+    entry = only(scan(tmp_path, source))
+    assert [(g["line"], g["polarity"], g["how"]) for g in entry["guards"]] == [(4, False, "after"), (6, False, "after")]
+    assert entry["activation"]["env"] == {"B": "go"} and entry["baseline_takes_it"] is False
+
+
+def test_a_nested_exit_that_is_not_an_early_exit_guard_makes_what_follows_opaque(tmp_path):
+    source = ("import os, socket\n\ndef run():\n    if os.getenv('A'):\n        if os.getenv('B'):\n            return\n"
+              "    socket.create_connection(('198.51.100.24', 443))\n")
+    result = scan(tmp_path, source)
+    assert result["entries"] == [] and result["other_guards_count"] == 1
+    assert result["other_guards"][0]["guards"][0]["how"] == "may-exit"
+
+
+def test_a_loop_whose_body_breaks_does_not_hide_what_follows(tmp_path):
+    source = "import os, socket\nfor x in [1]:\n    break\nif os.getenv('CI'):\n" + CONNECT
+    assert only(scan(tmp_path, source))["opaque_guards"] == []
+
+
+@pytest.mark.parametrize("write", ["os.environ['ARMED'] = '1'", "os.environ.setdefault('ARMED', '1')",
+                                   "os.putenv('ARMED', '1')", "os.environ.update(ARMED='1')"])
+def test_a_package_that_writes_its_own_environment_makes_env_reads_unknown(tmp_path, write):
+    # MAJOR 2
+    source = f"import os, socket\n{write}\nif not os.getenv('ARMED'):\n" + CONNECT
+    entry = only(scan(tmp_path, source))
+    assert entry["baseline_takes_it"] is False and entry["simulable"] is False
+
+
+def test_an_environment_write_in_another_module_of_the_wheel_counts_too(tmp_path):
+    source = "import os, socket\nif not os.getenv('ARMED'):\n" + CONNECT
+    found = trigger_frontier.frontier([node(tmp_path, source, extra={"demo/arm.py": "import os\nos.environ['ARMED'] = '1'\n"})],
+                                      DENY_ALL, now=NOW)
+    assert found["entries"][0]["simulable"] is False
+
+
+def test_a_constant_env_write_only_hides_that_variable(tmp_path):
+    source = "import os, socket\nos.environ['OTHER'] = '1'\nif os.getenv('CI'):\n" + CONNECT
+    assert only(scan(tmp_path, source))["simulable"] is True
+
+
+def test_a_global_rebinding_in_a_function_makes_the_module_name_computed(tmp_path):
+    source = ("import os, socket\nFLAG = None\n\ndef arm():\n    global FLAG\n    FLAG = os.getenv('X')\n\n"
+              "if FLAG is None and os.getenv('CI'):\n" + CONNECT)
+    entry = only(scan(tmp_path, source))
+    assert entry["simulable"] is False and "assigned more than once" in entry["unsimulable_reason"]
+
+
+def test_is_between_strings_is_unknown(tmp_path):
+    # MINOR 2
+    entry = only(scan(tmp_path, "import os, socket\nif os.getenv('CI') is 'true':\n" + CONNECT))
+    assert entry["simulable"] is False
+
+
+def test_a_hostname_with_a_trailing_newline_is_not_a_hostname(tmp_path):
+    # MINOR 1
+    entry = only(scan(tmp_path, "import socket\nif socket.gethostname() == 'build\\n':\n" + CONNECT))
+    assert entry["simulable"] is False
+
+
+def test_a_method_does_not_see_its_class_scope(tmp_path):
+    # MINOR 6: inside a method, `MODE` is the module's name, not the class attribute.
+    source = ("import os, socket\nMODE = os.getenv('MODE')\n\nclass C:\n    MODE = 'x'\n\n    def go(self):\n"
+              "        if MODE == 'prod':\n            socket.create_connection(('198.51.100.24', 443))\n")
+    assert only(scan(tmp_path, source))["activation"]["env"] == {"MODE": "prod"}
+
+
+@pytest.mark.parametrize("change", [{"total": 5}, {"other_guards_count": 9}, {"entries": [{"risk": "high"}]}])
+def test_a_frontier_whose_counts_do_not_add_up_is_unresolved(change):
+    # MINOR 4
+    found = {**frontier_of(entry_of("s1", "high", True)), "total": 1, "other_guards": [], "other_guards_count": 0, **change}
+    out = trigger_frontier.frontier_residual(found, explored=["s1"])
+    assert out["status"] == "UNRESOLVED" and out["rule"] == "FRONTIER_MALFORMED"
+
+
+def test_every_other_guard_is_listed(tmp_path):
+    source = "import socket\nDATA = [1]\n" + "".join(f"if DATA:\n" + CONNECT for _ in range(40))
+    result = scan(tmp_path, source)
+    assert result["other_guards_count"] == 40 == len(result["other_guards"])

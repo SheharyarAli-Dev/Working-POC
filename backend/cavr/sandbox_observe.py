@@ -90,19 +90,24 @@ def job_file(steps, nonce: str) -> dict:
 
 
 def run_harness(steps, *, mounts=(), tmpfs=(), deadline: float = sandbox_exec.DEADLINE_SECONDS,
-                stderr_cap: int = sandbox_exec.STDERR_CAP, run_id: str | None = None, n: int = 1) -> dict:
-    """{status, stage, rule, reason, evidence, trace, output}. Never raises; never VERIFIED."""
+                stderr_cap: int = sandbox_exec.STDERR_CAP, run_id: str | None = None, n: int = 1, strace=None,
+                hostname: str | None = None) -> dict:
+    """{status, stage, rule, reason, evidence, trace, output}. Never raises; never VERIFIED.
+
+    `strace` (default STRACE) and `hostname` (default cavr-sandbox) are for PR 11's spec runs (`sandbox_spec`).
+    """
     try:
-        return _run(list(steps), mounts, tmpfs, deadline, stderr_cap, run_id or sandbox_exec.new_run_id(), n)
+        return _run(list(steps), mounts, tmpfs, deadline, stderr_cap, run_id or sandbox_exec.new_run_id(), n,
+                    list(strace or STRACE), hostname or sandbox_exec.DEFAULT_HOSTNAME)
     except Exception as exc:
         return _result("INTERNAL_ERROR", f"the sandbox run failed: {type(exc).__name__}: {exc}", {})
 
 
-def _run(steps, mounts, tmpfs, deadline, stderr_cap, run_id, n) -> dict:
+def _run(steps, mounts, tmpfs, deadline, stderr_cap, run_id, n, strace, hostname) -> dict:
     identity = (IDENTITY or sandbox_image.image_identity)()
     evidence = {"image": identity.get("image"), "image_id": identity.get("image_id"), "image_check": identity.get("rule"),
                 "seccomp_sha256": identity.get("seccomp_sha256"), "harness_sha256": _sha256(HARNESS),
-                "strace": STRACE, "deadline_seconds": deadline}
+                "strace": strace, "deadline_seconds": deadline, "hostname": hostname}
     if not identity.get("ok"):
         return _result(identity.get("rule") or "ENGINE_ERROR", f"no isolation: {identity.get('reason')}; "
                        "the package was not run", evidence)
@@ -120,12 +125,12 @@ def _run(steps, mounts, tmpfs, deadline, stderr_cap, run_id, n) -> dict:
         (job_dir / "job.json").write_text(json.dumps(job, indent=2), encoding="utf-8")
         os.chmod(job_dir, 0o755)  # the harness runs as UID 10001 and must read it; nothing in it is secret
         os.chmod(job_dir / "job.json", 0o644)
-        cmd = sandbox_exec.docker_command(name, identity["image_id"], STRACE,
+        cmd = sandbox_exec.docker_command(name, identity["image_id"], strace,
                                           mounts=[(HARNESS, HARNESS_INSIDE), (job_dir, JOB_INSIDE), *mounts],
-                                          env={NONCE_VARIABLE: nonce}, tmpfs=tmpfs)
+                                          env={NONCE_VARIABLE: nonce}, tmpfs=tmpfs, hostname=hostname)
         run = (RUN or sandbox_exec.run_container)(cmd, name, deadline=deadline, stderr_cap=stderr_cap)
     evidence.update({"container": name, "run_status": run["status"], "exit_code": run["exit_code"],
-                     "elapsed_seconds": run["elapsed_seconds"], "lockdown_flags": sandbox_exec.lockdown_flags(),
+                     "elapsed_seconds": run["elapsed_seconds"], "lockdown_flags": sandbox_exec.lockdown_flags(hostname=hostname),
                      "extra_tmpfs": list(tmpfs), "steps": [s["name"] for s in job["steps"]],
                      "trace_sha256": hashlib.sha256(run["stderr"]).hexdigest(), "trace_bytes": len(run["stderr"])})
     output = {"text": run["stdout_text"][:OUTPUT_SHOWN], "bytes": len(run["stdout"]), "trusted": False}

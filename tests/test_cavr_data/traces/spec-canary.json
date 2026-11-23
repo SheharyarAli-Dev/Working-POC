@@ -1,0 +1,195 @@
+{
+  "file": "spec-canary.txt",
+  "recorded": "2026-11-23",
+  "produced_by": "sandbox_spec.run_spec: wheel leak 1.0 under canary_spec(), whose import leaks canaries",
+  "rule": "DEEP_NOT_JUDGED",
+  "nonce": "0123456789abcdef0123456789abcdef",
+  "steps": [
+    {
+      "name": "install",
+      "argv": [
+        "/usr/local/bin/python",
+        "-I",
+        "-B",
+        "-c",
+        "import sys\nimport pip._internal.network.session as session\nsession.user_agent = lambda: 'cavr-sandbox'\nfrom pip._internal.cli.main import main\nsys.exit(main(sys.argv[1:]))\n",
+        "install",
+        "--isolated",
+        "--disable-pip-version-check",
+        "--no-cache-dir",
+        "--no-input",
+        "--no-index",
+        "--no-deps",
+        "--only-binary",
+        ":all:",
+        "--require-hashes",
+        "--no-compile",
+        "--find-links",
+        "/pkg",
+        "--target",
+        "/site/lib",
+        "-r",
+        "/pkg/hashes.txt"
+      ],
+      "env": {
+        "HOME": "/tmp/install-home"
+      }
+    },
+    {
+      "name": "imports",
+      "argv": [
+        "/usr/local/bin/python",
+        "-I",
+        "-S",
+        "-B",
+        "-c",
+        "import importlib, json, site, sys\njob = json.loads(sys.argv[1])\nsite.addsitedir('/site/lib')\nsys.argv = job['argv']\nfor name in job['modules']:\n    importlib.import_module(name)\n",
+        "{\"modules\": [\"leak\"], \"argv\": [\"-c\"]}"
+      ],
+      "env": {
+        "AWS_ACCESS_KEY_ID": "AKIA047782AB610FF34B",
+        "AWS_SECRET_ACCESS_KEY": "1e5ce02b5d03ce63161784c87e7b06de5e77c0e5",
+        "GITHUB_TOKEN": "ghp_f937ad56249c2736872d92a1638e7a66a334",
+        "PYPI_TOKEN": "pypi-96c401ac5dfc9beabf26c0f7d08c29a8"
+      }
+    }
+  ],
+  "image_id": "sha256:0e88dd461ca40066496c9d3966fc0bf226c47556a044ff16ce6112b22e31350f",
+  "seccomp_sha256": "bd992341659ce9603bc78ddfcc8a577a2110447a2bf724fa6c65d422099499b6",
+  "harness_sha256": "8159ad05f1aa4fb9915ec4c4e9b3bcea211d51e6284c540d2e86866a8e2dd132",
+  "strace": [
+    "strace",
+    "-f",
+    "-q",
+    "--always-show-pid",
+    "-y",
+    "-s",
+    "65536",
+    "-e",
+    "trace=%file,%network,%process,%creds,ptrace,process_vm_readv,process_vm_writev,io_uring_setup,io_uring_enter,io_uring_register,userfaultfd,bpf,perf_event_open,fchdir,write,pwrite64,writev,pwritev,pwritev2",
+    "-u",
+    "cavr",
+    "--",
+    "/usr/local/bin/python",
+    "-I",
+    "-S",
+    "/opt/cavr/harness.py",
+    "/job/job.json"
+  ],
+  "trace_sha256": "2c50c3ca981fd5a6307e487f5b29acc5a542a4ce98f36218ed839131bf574337",
+  "wheels": [
+    {
+      "name": "leak",
+      "version": "1.0",
+      "filename": "leak-1.0-py3-none-any.whl",
+      "path": "/tmp/cavr-record-60g83yq9/leak-1.0-py3-none-any.whl",
+      "sha256": "0b66c613e8326a2a6d043f69315bb24be757c2014c49ae4066bfb6515acf585c"
+    }
+  ],
+  "docker": "29.9.3",
+  "note": "the marker nonce was fixed for the recording; the canaries are the run's own (fake, random) values",
+  "spec": {
+    "version": "cavr-env-synthesis/1",
+    "id": "spec-canaries",
+    "entry_id": null,
+    "activation": null,
+    "env": {
+      "AWS_ACCESS_KEY_ID": "AKIA047782AB610FF34B",
+      "AWS_SECRET_ACCESS_KEY": "1e5ce02b5d03ce63161784c87e7b06de5e77c0e5",
+      "GITHUB_TOKEN": "ghp_f937ad56249c2736872d92a1638e7a66a334",
+      "PYPI_TOKEN": "pypi-96c401ac5dfc9beabf26c0f7d08c29a8"
+    },
+    "faketime": null,
+    "files": {
+      "/tmp/home/.aws/credentials": {
+        "kind": "file",
+        "canaries": [
+          "file:aws-access-key",
+          "file:aws-secret-key"
+        ],
+        "content": "[default]\naws_access_key_id = AKIA81B83ACD32688615\naws_secret_access_key = 5af6aafb69cceba09189f1374d7d03c2ce5a2ab6\n"
+      },
+      "/tmp/home/.env": {
+        "kind": "file",
+        "canaries": [
+          "file:env-api-key"
+        ],
+        "content": "API_KEY=7ab228f2f589baf3bf0ef52af7658f51\n"
+      },
+      "/tmp/home/.netrc": {
+        "kind": "file",
+        "canaries": [
+          "file:netrc-password"
+        ],
+        "content": "machine pypi.cavr.invalid login cavr password cf3c1e1a3e7b043638015e73c096fbba\n"
+      },
+      "/tmp/home/.ssh/id_ed25519": {
+        "kind": "file",
+        "canaries": [
+          "file:ssh-key"
+        ],
+        "content": "-----BEGIN OPENSSH PRIVATE KEY-----\n1ac2805d6ac8e6299050db59cef12e8ed35504a054c9119893ec62ab073a6f73\n-----END OPENSSH PRIVATE KEY-----\n"
+      }
+    },
+    "hostname": "cavr-sandbox",
+    "argv": [
+      "-c"
+    ],
+    "canaries": [
+      {
+        "id": "file:aws-access-key",
+        "kind": "file",
+        "where": "/tmp/home/.aws/credentials",
+        "value": "AKIA81B83ACD32688615"
+      },
+      {
+        "id": "file:aws-secret-key",
+        "kind": "file",
+        "where": "/tmp/home/.aws/credentials",
+        "value": "5af6aafb69cceba09189f1374d7d03c2ce5a2ab6"
+      },
+      {
+        "id": "file:env-api-key",
+        "kind": "file",
+        "where": "/tmp/home/.env",
+        "value": "7ab228f2f589baf3bf0ef52af7658f51"
+      },
+      {
+        "id": "file:netrc-password",
+        "kind": "file",
+        "where": "/tmp/home/.netrc",
+        "value": "cf3c1e1a3e7b043638015e73c096fbba"
+      },
+      {
+        "id": "file:ssh-key",
+        "kind": "file",
+        "where": "/tmp/home/.ssh/id_ed25519",
+        "value": "1ac2805d6ac8e6299050db59cef12e8ed35504a054c9119893ec62ab073a6f73"
+      },
+      {
+        "id": "env:AWS_ACCESS_KEY_ID",
+        "kind": "env",
+        "where": "AWS_ACCESS_KEY_ID",
+        "value": "AKIA047782AB610FF34B"
+      },
+      {
+        "id": "env:AWS_SECRET_ACCESS_KEY",
+        "kind": "env",
+        "where": "AWS_SECRET_ACCESS_KEY",
+        "value": "1e5ce02b5d03ce63161784c87e7b06de5e77c0e5"
+      },
+      {
+        "id": "env:GITHUB_TOKEN",
+        "kind": "env",
+        "where": "GITHUB_TOKEN",
+        "value": "ghp_f937ad56249c2736872d92a1638e7a66a334"
+      },
+      {
+        "id": "env:PYPI_TOKEN",
+        "kind": "env",
+        "where": "PYPI_TOKEN",
+        "value": "pypi-96c401ac5dfc9beabf26c0f7d08c29a8"
+      }
+    ]
+  }
+}

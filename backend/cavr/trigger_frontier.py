@@ -56,6 +56,8 @@ from pathlib import Path
 
 from backend.cavr.ast_scan import MAX_SOURCE_BYTES, MAX_TOTAL_SOURCE_BYTES, SOURCE_SUFFIXES
 from backend.cavr.contract_check import read_contract
+from backend.cavr.sandbox_harness import CHILD_ENV
+from backend.cavr.sandbox_exec import HOSTNAME
 from backend.cavr.wheel_meta import NATIVE, ZIP_ERRORS, WheelProblem, check_entries
 from backend.threat_repo.behavior_rules import normalize_name, python_sinks
 from backend.threat_repo.repository import seeds
@@ -70,11 +72,17 @@ HOME = "/tmp/home"  # the sandbox HOME (sandbox_harness.CHILD_ENV); PR 11 mounts
 WORKDIR = "/tmp"  # the image's WORKDIR: where a relative path points
 # Files every PR 11 run has (the canaries): the baseline run already finds them.
 CANARY_FILES = ("/tmp/home/.aws/credentials", "/tmp/home/.env", "/tmp/home/.netrc", "/tmp/home/.ssh/id_ed25519")
+# The variables every PR 11 run's imports step has: the harness's own (CHILD_ENV) and the four canary variables, in
+# their shapes (the values are random per run; a condition can see that they are set, and their prefix, not more).
+CANARY_ENV_SHAPES = {"AWS_ACCESS_KEY_ID": "AKIA" + "0" * 16, "AWS_SECRET_ACCESS_KEY": "0" * 40,
+                     "GITHUB_TOKEN": "ghp_" + "0" * 36, "PYPI_TOKEN": "pypi-" + "0" * 32}
+BASELINE_ENV = {**CHILD_ENV, **CANARY_ENV_SHAPES}
+# Variables the sandbox fixes: a spec cannot change them (env_synthesis refuses), so no candidate does either.
+RESERVED_ENV = re.compile(r"^(?:PATH|HOME|LANG|TMPDIR|PWD|PYTHON.*|LD_.*|FAKETIME.*|PIP_.*|CAVR_.*)$")
 SANDBOX = {"platform": "linux", "os_name": "posix", "system": "Linux", "uid": 10001, "hostname": "cavr-sandbox",
            "user": "cavr", "argv": ("-c",)}
 OTHER_PLATFORMS = ({"platform": "win32", "os_name": "nt", "system": "Windows"},
                    {"platform": "darwin", "os_name": "posix", "system": "Darwin"})
-HOSTNAME = re.compile(r"^(?=.{1,253}$)[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$")
 SECRET_MARKERS = (".aws", ".ssh", ".netrc", ".kube", ".env", ".git-credentials", ".pypirc", ".docker/config.json",
                   ".gnupg", ".azure", "gcloud", "id_rsa", "id_ed25519")
 READ_CALLS = ("open", "io.open", "builtins.open", "codecs.open")
@@ -141,7 +149,7 @@ class Bound:
 class World:
     """One candidate environment of the sandbox run."""
     def __init__(self, env=None, now=None, files=None, hostname=None, user=None, argv=None, fixed=None):
-        self.env = dict(env or {})
+        self.env = dict(BASELINE_ENV if env is None else env)
         self.now = now
         self.files = dict(files or {})
         self.hostname = hostname or SANDBOX["hostname"]
@@ -291,6 +299,13 @@ class Evaluator:
             raise _NotConstant()
         self.world.reads.add((family, key))
 
+    def env_written(self, key):
+        """Unknown when the package itself sets `key` (or any variable) somewhere in the tree (review of PRs 10-11)."""
+        written = self.world.fixed.get("env_written") or ()
+        if "*" in written or key in written:
+            return Unknown(f"the package sets the variable {key} itself, so its value at the condition is not known")
+        return None
+
     def ev(self, node):
         method = getattr(self, "e_" + type(node).__name__, None)
         if method is None:
@@ -389,7 +404,7 @@ class Evaluator:
             if not isinstance(key, str):
                 return Unknown("the variable name is computed")
             self.read("env", key)
-            return self.world.env[key] if key in self.world.env else Raised(f"KeyError {key}")
+            return self.env_written(key) or (self.world.env[key] if key in self.world.env else Raised(f"KeyError {key}"))
         if isinstance(base, (list, tuple, str)) and (isinstance(key, (int, slice)) and not isinstance(key, bool)):
             try:
                 return base[key]
@@ -406,11 +421,31 @@ class Evaluator:
             return Unknown("a slice bound is computed")
         return slice(*parts)
 
-    def e_UnaryOp(self, node):
-        value = self.ev(node.operand)
-        if isinstance(node.op, ast.Not):
-            value = truth(value)
+    def test(self, node):
+        """The truth of `node` used as a condition: Kleene logic through and / or / not (an unknown operand does not
+        stop a decisive one). Used for an if / while test and for the operands of and / or / not."""
+        if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Not):
+            value = self.test(node.operand)
             return value if _special(value) else not value
+        if not isinstance(node, ast.BoolOp):
+            return truth(self.ev(node))
+        is_and = isinstance(node.op, ast.And)
+        unknown = None
+        for operand in node.values:
+            flag = self.test(operand)
+            if isinstance(flag, Raised):
+                return unknown or flag
+            if isinstance(flag, Unknown):
+                unknown = unknown or flag
+                continue
+            if flag is (not is_and):  # True for or, False for and: decisive whatever the unknown operands were
+                return flag
+        return unknown if unknown is not None else is_and
+
+    def e_UnaryOp(self, node):
+        if isinstance(node.op, ast.Not):
+            return self.test(node)
+        value = self.ev(node.operand)
         if _special(value):
             return value
         if isinstance(node.op, ast.USub) and isinstance(value, (int, float)) and not isinstance(value, bool):
@@ -418,24 +453,18 @@ class Evaluator:
         return Unknown(f"`{_text(node)}` is computed")
 
     def e_BoolOp(self, node):
-        """Kleene logic on truth values: an unknown operand does not stop a decisive one."""
+        """`a or b` / `a and b` as a value (Python: the deciding operand itself). An unknown operand before the
+        decision makes the value unknown (review of PRs 10-11); a condition's truth goes through `test`."""
         is_and = isinstance(node.op, ast.And)
-        unknown = None
-        last = None
+        value = None
         for operand in node.values:
             value = self.ev(operand)
-            if isinstance(value, Raised):
-                return unknown or value
             flag = truth(value)
-            if isinstance(flag, Raised):
-                return unknown or flag
-            if isinstance(flag, Unknown):
-                unknown = unknown or flag
-                continue
-            if flag is (not is_and):  # True for or, False for and: decisive
-                return value if unknown is None else (not is_and)
-            last = value
-        return unknown if unknown is not None else last
+            if _special(flag):
+                return flag
+            if flag is (not is_and):
+                return value
+        return value
 
     def e_Compare(self, node):
         left = self.ev(node.left)
@@ -456,6 +485,8 @@ class Evaluator:
                 if not isinstance(left, str):
                     return Unknown("the variable name is computed")
                 self.read("env", left)
+                if self.env_written(left):
+                    return self.env_written(left)
                 found = left in self.world.env
             elif isinstance(right, (list, tuple, str)):
                 if isinstance(right, str) and not isinstance(left, str):
@@ -470,8 +501,10 @@ class Evaluator:
             return Unknown("a comparison with a reference")
         operations = {ast.Eq: lambda a, b: a == b, ast.NotEq: lambda a, b: a != b, ast.Lt: lambda a, b: a < b,
                       ast.LtE: lambda a, b: a <= b, ast.Gt: lambda a, b: a > b, ast.GtE: lambda a, b: a >= b,
-                      ast.Is: lambda a, b: a is b if (a is None or b is None) else a == b,
-                      ast.IsNot: lambda a, b: a is not b if (a is None or b is None) else a != b}
+                      ast.Is: lambda a, b: a is b, ast.IsNot: lambda a, b: a is not b}
+        if isinstance(op, (ast.Is, ast.IsNot)) and not (left is None or right is None
+                                                         or (isinstance(left, bool) and isinstance(right, bool))):
+            return Unknown("`is` between values that are not None or booleans depends on object identity")
         try:
             return operations[type(op)](left, right)
         except TypeError:
@@ -519,6 +552,8 @@ class Evaluator:
                 return bad or Unknown("the variable name is computed")
             self.read("env", args[0])
             default = args[1] if len(args) > 1 else kwargs.get("default")
+            if self.env_written(args[0]):
+                return self.env_written(args[0])
             return world.env[args[0]] if args[0] in world.env else default  # an unknown default stays unknown
         if bad is not None:
             return bad
@@ -608,9 +643,11 @@ class Evaluator:
             if not args or not isinstance(args[0], str):
                 return bad or Unknown("the variable name is computed")
             self.read("env", args[0])
+            if self.env_written(args[0]):
+                return self.env_written(args[0])
             if args[0] in self.world.env:
                 return self.world.env[args[0]]
-            return args[1] if len(args) > 1 else None
+            return args[1] if len(args) > 1 else kwargs.get("default")
         if bad is not None:
             return bad
         if isinstance(value, str) and name in STR_METHODS:
@@ -768,7 +805,7 @@ def evaluate(tests, world):
     """The truth of all `tests` ((node, polarity, scope)) in `world`: True, False, or an Unknown."""
     unknown = None
     for node, polarity, scope in tests:
-        value = truth(Evaluator(scope, world).ev(node))
+        value = Evaluator(scope, world).test(node)
         if isinstance(value, Raised):
             return False
         if isinstance(value, Unknown):
@@ -813,15 +850,20 @@ def search(tests, now, fixed=None):
                 keys[family] = True
         options = []
         for key in keys["env"]:
-            values = [None] + [v for v in ["1", "true", *found["str"]] if isinstance(v, str)]
+            if RESERVED_ENV.match(key):  # fixed by the sandbox: only its value
+                values = [BASELINE_ENV.get(key)]
+            elif key in BASELINE_ENV:  # a canary variable: always set; a trigger may set it to a constant, never unset
+                values = [BASELINE_ENV[key]] + [v for v in ["1", "true", *found["str"]] if isinstance(v, str)]
+            else:
+                values = [None] + [v for v in ["1", "true", *found["str"]] if isinstance(v, str)]
             options.append([("env", key, v) for v in dict.fromkeys(values)])
         for key in keys["file"]:
             options.append([("file", key, kind) for kind in (None, "file", "dir")])
         if keys["time"]:
             options.append([("time", None, t) for t in time_candidates(found, now)])
         if keys["host"]:
-            hosts = [SANDBOX["hostname"]] + [s for s in found["str"] if isinstance(s, str) and HOSTNAME.match(s)]
-            invalid_hosts = [s for s in found["str"] if isinstance(s, str) and not HOSTNAME.match(s)]
+            hosts = [SANDBOX["hostname"]] + [s for s in found["str"] if isinstance(s, str) and HOSTNAME.fullmatch(s)]
+            invalid_hosts = [s for s in found["str"] if isinstance(s, str) and not HOSTNAME.fullmatch(s)]
             options.append([("host", None, h) for h in dict.fromkeys(hosts)])
         if keys["user"]:
             users = [None] + [s for s in found["str"] if isinstance(s, str) and re.fullmatch(r"[a-z_][a-z0-9_-]{0,31}", s)]
@@ -866,7 +908,9 @@ def search(tests, now, fixed=None):
 def _world(combo, now, baseline_files, fixed):
     world = World(now=now, files=baseline_files, fixed=fixed)
     for family, key, value in combo:
-        if family == "env" and value is not None:
+        if family == "env" and value is None:
+            world.env.pop(key, None)
+        elif family == "env":
             world.env[key] = value
         elif family == "file" and value is not None:
             world.files[key] = value
@@ -884,7 +928,7 @@ def _world(combo, now, baseline_files, fixed):
 def _activation(combo, now) -> dict:
     out = {"env": {}, "time": None, "files": {}, "hostname": None, "argv": None}
     for family, key, value in combo:
-        if family == "env" and value is not None:
+        if family == "env" and value is not None and value != BASELINE_ENV.get(key):
             out["env"][key] = value
         elif family == "file" and value is not None:
             out["files"][key] = value
@@ -906,18 +950,19 @@ def _changes(activation) -> int:
             + (activation["hostname"] is not None) + (activation["argv"] is not None))
 
 
-def activate(tests, now):
+def activate(tests, now, env_written=frozenset()):
     """The activation search, and for a condition the sandbox cannot satisfy, why (another platform, UID 0)."""
-    activation, baseline, reason, reads = search(tests, now)
+    written = {"env_written": frozenset(env_written)}
+    activation, baseline, reason, reads = search(tests, now, fixed=written)
     if activation is None and not reason.startswith(("obfuscated", "os.getlogin")) and "outside the sandbox HOME" not in reason:
         families = {family for family, _ in reads}
         if "platform" in families:
             for other in OTHER_PLATFORMS:
-                if search(tests, now, fixed=other)[0] is not None:
+                if search(tests, now, fixed={**other, **written})[0] is not None:
                     reason = (f"the condition is true only when sys.platform is {other['platform']!r} (os.name "
                               f"{other['os_name']!r}, platform.system() {other['system']!r}); the sandbox runs Linux")
                     break
-        if "user" in families and search(tests, now, fixed={"uid": 0})[0] is not None:
+        if "user" in families and search(tests, now, fixed={"uid": 0, **written})[0] is not None:
             reason = "the condition is true only for UID 0; package code never runs as root (NFR-1)"
     return activation, baseline, reason
 
@@ -957,6 +1002,13 @@ class FileScan:
     def __init__(self, package, version, file, tree, rules):
         self.package, self.version, self.file, self.tree, self.rules = package, version, file, tree, rules
         self.module = build_scope(tree.body)
+        # A `global X` in a function rebinds the module's X: it is then assigned more than once (review of PRs 10-11).
+        for function in ast.walk(tree):
+            if isinstance(function, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                for node in ast.walk(function):
+                    if isinstance(node, ast.Global):
+                        for name in node.names:
+                            self.module.assigned.setdefault(name, []).append(None)
         self.functions = {n.name: n for n in tree.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))}
         self.function_scopes = {}
         self.found = []  # (path, sink)
@@ -966,6 +1018,8 @@ class FileScan:
         return self.found
 
     def scope_for(self, function, parent):
+        while parent is not None and parent.name.startswith("class "):
+            parent = parent.parent  # a method does not see its class's names (Python's scoping)
         key = id(function)
         if key not in self.function_scopes:
             args = [a.arg for a in function.args.posonlyargs + function.args.args + function.args.kwonlyargs]
@@ -990,38 +1044,37 @@ class FileScan:
                 guard = (statement.test, scope, statement.lineno)
                 self.block(statement.body, path + [(guard, True, "body")], scope, where)
                 self.block(statement.orelse, path + [(guard, False, "else")], scope, where)
-                if _exits(statement.body) and not _exits(statement.orelse):
-                    path = path + [(guard, False, "after")]
-                elif statement.orelse and _exits(statement.orelse) and not _exits(statement.body):
-                    path = path + [(guard, True, "after")]
+                # What follows runs only if the if / elif chain falls through: each early exit puts its negated
+                # condition in front of it; a nested exit CAVR cannot state as conditions makes it opaque.
+                through = _fall_through(statement, scope)
+                path = path + (through if through is not None else [(guard, None, "may-exit")])
                 continue
             if isinstance(statement, ast.While):
                 self.expressions([statement.test], path, scope, where)
                 self.block(statement.body, path + [((statement.test, scope, statement.lineno), True, "body")], scope, where)
                 self.block(statement.orelse, path, scope, where)
-                continue
-            if isinstance(statement, (ast.For, ast.AsyncFor)):
+            elif isinstance(statement, (ast.For, ast.AsyncFor)):
                 self.expressions([statement.iter], path, scope, where)
                 self.block(statement.body, path, scope, where)
                 self.block(statement.orelse, path, scope, where)
-                continue
-            if isinstance(statement, (ast.With, ast.AsyncWith)):
+            elif isinstance(statement, (ast.With, ast.AsyncWith)):
                 self.expressions([item.context_expr for item in statement.items], path, scope, where)
                 self.block(statement.body, path, scope, where)
-                continue
-            if isinstance(statement, ast.Try) or type(statement).__name__ == "TryStar":
+            elif isinstance(statement, ast.Try) or type(statement).__name__ == "TryStar":
                 self.block(statement.body, path, scope, where)
                 for handler in statement.handlers:
                     self.block(handler.body, path, scope, where)
                 self.block(statement.orelse, path, scope, where)
                 self.block(statement.finalbody, path, scope, where)
-                continue
-            if isinstance(statement, ast.Match):
+            elif isinstance(statement, ast.Match):
                 self.expressions([statement.subject], path, scope, where)
                 for case in statement.cases:
                     self.block(case.body, path, scope, where)
+            else:
+                self.expressions([statement], path, scope, where)
                 continue
-            self.expressions([statement], path, scope, where)
+            if _may_exit([statement]):  # a return / raise / exit inside it may skip what follows
+                path = path + [((statement, scope, statement.lineno), None, "may-exit")]
 
     def expressions(self, nodes, path, scope, where):
         for node in nodes:
@@ -1084,6 +1137,90 @@ def _names_secret(call) -> bool:
     return False
 
 
+def _fall_through(statement, scope):
+    """The (guard, polarity, "after") conditions under which control falls through an if / elif chain whose branches
+    end in an exit; [] when no branch can exit; None when it cannot be stated as conditions (opaque)."""
+    guard = (statement.test, scope, statement.lineno)
+    body_exits, else_exits = _exits(statement.body), _exits(statement.orelse)
+    if body_exits and else_exits:
+        return None  # nothing after it runs through this statement
+    if body_exits:
+        rest = _fall_through_block(statement.orelse, scope)
+        return None if rest is None else [(guard, False, "after")] + rest
+    if else_exits:
+        rest = _fall_through_block(statement.body, scope)
+        return None if rest is None else [(guard, True, "after")] + rest
+    if _may_exit(statement.body) or _may_exit(statement.orelse):
+        return None
+    return []
+
+
+def _fall_through_block(statements, scope):
+    if not statements:
+        return []
+    if len(statements) == 1 and isinstance(statements[0], ast.If):  # an elif
+        return _fall_through(statements[0], scope)
+    return None if _may_exit(statements) else []
+
+
+def _may_exit(statements, in_loop=False) -> bool:
+    """A return, raise or exit call anywhere in `statements` (not in nested functions or classes); break / continue
+    only when they leave the block, not a loop inside it."""
+    for statement in statements:
+        if isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            continue
+        if isinstance(statement, (ast.Return, ast.Raise)):
+            return True
+        if isinstance(statement, (ast.Break, ast.Continue)) and not in_loop:
+            return True
+        if isinstance(statement, ast.Expr) and _exits([statement]):
+            return True
+        loop = isinstance(statement, (ast.For, ast.AsyncFor, ast.While))
+        for field in ("body", "orelse", "finalbody"):
+            inner = getattr(statement, field, None)
+            if isinstance(inner, list) and _may_exit(inner, in_loop or (loop and field == "body")):
+                return True
+        for handler in getattr(statement, "handlers", []) or []:
+            if _may_exit(handler.body, in_loop):
+                return True
+        for case in getattr(statement, "cases", []) or []:
+            if _may_exit(case.body, in_loop):
+                return True
+    return False
+
+
+def env_writes(tree, scope) -> set:
+    """Variables the module sets (os.environ[...] =, setdefault, pop, update, putenv, unsetenv, del); "*" when the
+    name is computed or the whole mapping changes (review of PRs 10-11)."""
+    found = set()
+
+    def key_of(node):
+        return node.value if isinstance(node, ast.Constant) and isinstance(node.value, str) else "*"
+
+    for node in ast.walk(tree):
+        targets = []
+        if isinstance(node, (ast.Assign, ast.Delete)):
+            targets = node.targets
+        elif isinstance(node, (ast.AugAssign, ast.AnnAssign)):
+            targets = [node.target]
+        for target in targets:
+            if isinstance(target, ast.Subscript) and dotted(target.value, scope) == "os.environ":
+                found.add(key_of(target.slice))
+        if isinstance(node, ast.Call):
+            name = dotted(node.func, scope)
+            if name in ("os.putenv", "os.unsetenv"):
+                found.add(key_of(node.args[0]) if node.args else "*")
+            elif name and name.startswith("os.environ."):
+                method = name[len("os.environ."):]
+                if method in ("setdefault", "pop", "__setitem__", "__delitem__"):
+                    found.add(key_of(node.args[0]) if node.args else "*")
+                elif method == "update" and not node.args and all(k.arg for k in node.keywords):
+                    found.update(k.arg for k in node.keywords)
+                elif method in ("update", "clear", "popitem", "__ior__"):
+                    found.add("*")
+    return found
+
+
 def _exits(statements) -> bool:
     if not statements:
         return False
@@ -1113,7 +1250,7 @@ def _frontier(nodes, contract, now, limit, knowledge):
         return _out(False, "FRONTIER_NO_WHEEL", "the tree has no wheel to scan", now)
     rules = python_sinks(knowledge)
     grants, problem = read_contract(contract)
-    findings, raw, packages = [], [], []
+    findings, raw, packages, writes = [], [], [], set()
     for node in sorted(nodes, key=lambda n: (str(n.get("name")), str(n.get("version")))):
         name, version = node.get("name"), node.get("version")
         try:
@@ -1127,12 +1264,12 @@ def _frontier(nodes, contract, now, limit, knowledge):
         packages.append({"name": name, "version": version, "sha256": actual})
         try:
             with zipfile.ZipFile(io.BytesIO(data)) as archive:
-                raw += _scan_wheel(archive, name, version, rules, findings)
+                raw += _scan_wheel(archive, name, version, rules, findings, writes)
         except WheelProblem as exc:
             findings.append({"package": name, "file": None, "kind": exc.rule, "detail": exc.reason})
         except ZIP_ERRORS as exc:
             findings.append({"package": name, "file": None, "kind": "NOT_A_WHEEL", "detail": str(exc)})
-    entries, other = _entries(raw, grants, problem, now)
+    entries, other = _entries(raw, grants, problem, now, writes)
     entries.sort(key=lambda e: (RISK_RANK[e["risk"]], -e["priority"]["score"], e["package"], e["file"], e["line"], e["id"]))
     _novelty(entries)
     entries.sort(key=lambda e: (RISK_RANK[e["risk"]], -e["priority"]["score"], e["package"], e["file"], e["line"], e["id"]))
@@ -1149,12 +1286,12 @@ def _frontier(nodes, contract, now, limit, knowledge):
         reason += f"; not all code was scanned: {findings[0]['file'] or findings[0]['package']}: {findings[0]['detail']}"
     result = _out(complete, rule, reason, now)
     result.update({"entries": kept, "total": len(entries), "dropped": {"count": len(cut), "by_risk": by_risk},
-                   "other_guards": other[:limit], "other_guards_count": len(other), "findings": findings,
+                   "other_guards": other, "other_guards_count": len(other), "findings": findings,
                    "packages": packages, "contract_readable": problem is None})
     return result
 
 
-def _scan_wheel(archive, package, version, rules, findings):
+def _scan_wheel(archive, package, version, rules, findings, writes):
     out, total = [], 0
     infos = sorted((info for info in check_entries(archive) if not info.is_dir()), key=lambda info: info.filename)
     for info in infos:
@@ -1175,12 +1312,14 @@ def _scan_wheel(archive, package, version, rules, findings):
         except (SyntaxError, UnicodeDecodeError, LookupError, ValueError, RecursionError, MemoryError) as exc:
             findings.append({"package": package, "file": name, "kind": "PARSE_ERROR", "detail": f"{type(exc).__name__}: {exc}"})
             continue
-        for path, where, sink in FileScan(package, version, name, tree, rules).run():
+        scan = FileScan(package, version, name, tree, rules)
+        writes.update(env_writes(tree, scan.module))
+        for path, where, sink in scan.run():
             out.append({"package": package, "version": version, "file": name, "path": path, "scope": where, "sink": sink})
     return out
 
 
-def _entries(raw, grants, problem, now):
+def _entries(raw, grants, problem, now, writes=frozenset()):
     groups = {}
     for item in raw:
         if not item["path"]:
@@ -1194,7 +1333,7 @@ def _entries(raw, grants, problem, now):
         triggers, opaque = [], []
         for guard, polarity, how in item["path"]:
             node, scope, line = guard
-            families = families_of(node, scope)
+            families = families_of(node, scope) if how != "may-exit" else set()
             (triggers if families else opaque).append((node, scope, line, polarity, how, families))
         sinks = sorted({json.dumps(s, sort_keys=True) for s in group["sinks"]})
         sinks = [json.loads(s) for s in sinks]
@@ -1208,7 +1347,7 @@ def _entries(raw, grants, problem, now):
                                      for g in item["path"]],
                           "sinks": sinks, "risk": _risk(sinks, grants, problem)[0]})
             continue
-        activation, baseline, reason = activate([(t[0], t[3], t[1]) for t in triggers], now)
+        activation, baseline, reason = activate([(t[0], t[3], t[1]) for t in triggers], now, writes)
         risk, why = _risk(sinks, grants, problem)
         confidence = min(CONFIDENCE[t[4]] for t in triggers)
         if any(s["via"] for s in sinks) and all(s["via"] for s in sinks):
@@ -1222,12 +1361,13 @@ def _entries(raw, grants, problem, now):
             "guards": [{"line": t[2], "predicate": _text(t[0]), "polarity": t[3], "how": t[4]} for t in triggers],
             "predicate": " and ".join(f"({_text(t[0])})" if t[3] else f"not ({_text(t[0])})" for t in triggers),
             "families": sorted({f for t in triggers for f in t[5]}),
-            "opaque_guards": [{"line": o[2], "predicate": _text(o[0])} for o in opaque],
+            "opaque_guards": [{"line": o[2], "predicate": _text(o[0]), "how": o[4]} for o in opaque],
             "sinks": sinks, "risk": risk, "risk_why": why,
             "priority": {"sink_risk": sink_risk, "reachability_confidence": round(confidence, 3), "novelty": 1.0,
                          "run_cost": 1.0, "score": 0.0, "formula": FORMULA},
             "simulable": activation is not None, "unsimulable_reason": reason if activation is None else None,
-            "activation": activation, "baseline_takes_it": bool(baseline)})
+            # A guard CAVR cannot evaluate decides too: the baseline run is not known to reach the sink.
+            "activation": activation, "baseline_takes_it": bool(baseline) and not opaque})
     for entry in entries:
         _score(entry)
     return entries, other
@@ -1279,23 +1419,28 @@ def _out(ok, rule, reason, now) -> dict:
 def frontier_residual(found, explored=()) -> dict:
     """Can the frontier still allow a deep VERIFIED? Pure; `explored` are the ids of entries a completed run explored.
 
-    UNRESOLVED (verified_possible False) when the frontier is missing, incomplete or truncated, when any entry is
-    unsimulable (an explored id does not change that: CAVR could not build its environment), or when a simulable
-    entry that the baseline does not take was not explored. Otherwise status None: the frontier is no reason left.
+    UNRESOLVED (verified_possible False) when the frontier is missing, malformed (counts that do not add up, an
+    entry without an id), incomplete or truncated, when any entry is unsimulable (an explored id does not change that:
+    CAVR could not build its environment), or when a simulable entry is not in `explored`. `baseline_takes_it` is a
+    prediction, never evidence: PR 12 puts an id in `explored` only when a completed run (the baseline run for such an
+    entry) showed the entry's sink. Otherwise status None: the frontier is no reason left.
     """
     explored = set(explored or ())
     if not isinstance(found, dict) or found.get("version") != VERSION or not isinstance(found.get("entries"), list):
         return _residual("FRONTIER_MISSING", "no trigger frontier was computed", [], [])
+    entries = found["entries"]
+    dropped = (found.get("dropped") or {}).get("count", 0)
+    if (not all(isinstance(e, dict) and isinstance(e.get("id"), str) for e in entries)
+            or found.get("total") != len(entries) + dropped
+            or found.get("other_guards_count") != len(found.get("other_guards") or [])):
+        return _residual("FRONTIER_MALFORMED", "the frontier's entries or counts do not add up", [], [])
     if not found.get("ok"):
         return _residual("FRONTIER_INCOMPLETE", f"the trigger frontier is incomplete: {found.get('reason')}", [], [])
-    dropped = (found.get("dropped") or {}).get("count", 0)
     if dropped:
         return _residual("FRONTIER_TRUNCATED", f"{dropped} trigger(s) were cut from the bounded frontier and never "
                          "considered", [], [])
-    entries = found["entries"]
     unsimulable = [e["id"] for e in entries if e.get("simulable") is not True]
-    unexplored = [e["id"] for e in entries if e.get("simulable") is True and not e.get("baseline_takes_it")
-                  and e["id"] not in explored]
+    unexplored = [e["id"] for e in entries if e.get("simulable") is True and e["id"] not in explored]
     if unsimulable:
         first = next(e for e in entries if e["id"] == unsimulable[0])
         return _residual("TRIGGER_UNSIMULABLE", f"{len(unsimulable)} trigger(s) CAVR cannot simulate; first: "
@@ -1305,7 +1450,7 @@ def frontier_residual(found, explored=()) -> dict:
         return _residual("TRIGGER_UNEXPLORED", f"{len(unexplored)} simulable trigger(s) were not explored by any run",
                          unsimulable, unexplored)
     return {"verified_possible": True, "status": None, "rule": "FRONTIER_EXPLORED",
-            "reason": f"every one of the {len(entries)} trigger(s) was explored or taken by the baseline run",
+            "reason": f"a run showed the sink of every one of the {len(entries)} trigger(s)",
             "unsimulable": [], "unexplored": []}
 
 

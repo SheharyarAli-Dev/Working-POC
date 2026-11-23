@@ -40,9 +40,13 @@ CAPABILITIES = ("SYS_PTRACE", "SETUID", "SETGID", "DAC_READ_SEARCH")
 NAME = re.compile(r"^cavr-[0-9a-f]{12}-[0-9]{1,3}$")
 TMPFS = re.compile(r"^/[a-z][a-z0-9_-]*:rw,(?:noexec|exec),nosuid,nodev,size=[0-9]{1,4}m,mode=1777$")
 _UNSAFE_MOUNT = re.compile(r"[,\n\r\0]")
+DEFAULT_HOSTNAME = "cavr-sandbox"
+# RFC 1123 host name: dot-separated labels of letters, digits and inner hyphens, at most 63 characters each, 253 in all.
+HOSTNAME = re.compile(r"^(?=.{1,253}$)[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?"
+                      r"(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$")
 
 
-def lockdown_flags(seccomp=SECCOMP_PROFILE) -> list[str]:
+def lockdown_flags(seccomp=SECCOMP_PROFILE, hostname: str = DEFAULT_HOSTNAME) -> list[str]:
     flags = ["--network", "none", "--read-only", "--tmpfs", TMP_TMPFS, "--cap-drop", "ALL"]
     for cap in CAPABILITIES:
         flags += ["--cap-add", cap]
@@ -50,21 +54,24 @@ def lockdown_flags(seccomp=SECCOMP_PROFILE) -> list[str]:
               "--pids-limit", str(PIDS_LIMIT), "--memory", MEMORY, "--memory-swap", MEMORY, "--cpus", CPUS]
     for limit in ULIMITS:
         flags += ["--ulimit", limit]
-    return flags + ["--log-driver", "none", "--hostname", "cavr-sandbox"]
+    if not HOSTNAME.fullmatch(hostname or ""):
+        raise ValueError(f"hostname {hostname!r} is not a valid host name")
+    return flags + ["--log-driver", "none", "--hostname", hostname]
 
 
 def docker_command(name: str, image_id: str, command, *, mounts=(), env=None, tmpfs=(), seccomp=SECCOMP_PROFILE,
-                   engine: str = ENGINE) -> list[str]:
+                   engine: str = ENGINE, hostname: str = DEFAULT_HOSTNAME) -> list[str]:
     """The `docker run` argv for one run. Raises ValueError on a bad name, image ID, mount or variable.
 
     `mounts` are (host path, container path) pairs, all mounted read-only. `tmpfs` adds mounts to /tmp's; each
-    must be nosuid,nodev with a size cap (`TMPFS`).
+    must be nosuid,nodev with a size cap (`TMPFS`). `hostname` is the container's host name (PR 11: a trigger's
+    spec may set it; checked against HOSTNAME).
     """
     if not NAME.match(name or ""):
         raise ValueError(f"container name {name!r} is not cavr-<12 hex>-<n>")
     if not re.fullmatch(r"sha256:[0-9a-f]{64}", image_id or ""):
         raise ValueError(f"image {image_id!r} is not an image ID")
-    cmd = [engine, "run", "--rm", "--name", name, *lockdown_flags(seccomp)]
+    cmd = [engine, "run", "--rm", "--name", name, *lockdown_flags(seccomp, hostname)]
     for extra in tmpfs:
         if not TMPFS.match(extra) or extra.split(":", 1)[0] in ("/tmp", "/", "/pkg", "/job", "/opt/cavr", "/proc"):
             raise ValueError(f"tmpfs {extra!r} is not <path>:rw,[no]exec,nosuid,nodev,size=<n>m,mode=1777")
