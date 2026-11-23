@@ -468,7 +468,7 @@ Stated as limitations in the report and on the dashboard, not implemented in M2:
 ### Phase 2 — Behaviour sandbox
 - [x] PR 3 CAVR sandbox image `asent-cavr-sandbox:local` + identity check (branch `cavr-m2-sandbox`, 2026-11-23; report notes Step M2-7): own seccomp copy, the shared profile cannot start a container
 - [x] PR 4 runner deadline / kill / limits (branch `cavr-m2-sandbox`, 2026-11-23; report notes Step M2-8): `sandbox_exec.run_container`
-- [ ] PR 5 trusted trace channel (package code never runs as root)
+- [x] PR 5 trusted trace channel (package code never runs as root) (branch `cavr-m2-sandbox`, 2026-11-23; report notes Step M2-9): strace's stderr is the trace, `sandbox_trace.check_trace`
 - [ ] PR 6 wheel install + import harness
 - [ ] PR 7 normalisation v2
 - [ ] PR 8 runtime contract check

@@ -4518,3 +4518,137 @@ Runs before the commit: `CAVR_DOCKER=1 pytest tests/test_cavr_sandbox_exec.py`: 
    removed, whatever it prints or does not print; the result is TIMEOUT, which is UNRESOLVED.
 2. **How do you know no container is left?** After every run the runner lists containers of that name with
    `docker ps -a`; each Docker test also asserts that no `cavr-*` container exists.
+
+## Step M2-9 — PR 5: behaviour evidence from a trace the package cannot write (2026-11-23)
+
+Plan: `docs/cavr-m2-plan.md` PR 5, decision Q5. Closes the M1 "report forgery" item for the new path: the result is
+read only from strace's trace; the package's output is shown as untrusted and never parsed.
+
+### Ch 6 Implementation
+
+- `backend/cavr/sandbox_harness.py` (new, trusted, stdlib only, mounted read-only at `/opt/cavr/harness.py`). Its first
+  statement (`if __name__ == "__main__": posix.dup2(open("/dev/null"), 2)`) points fd 2, strace's stderr, at
+  /dev/null before any import. `main`: closes stdin, pops `CAVR_RUN_NONCE`, makes itself non-dumpable (`prctl
+  PR_SET_DUMPABLE 0`), runs each job step as a child (env from `CHILD_ENV` + the job's own, stdin /dev/null, stdout and
+  stderr to the container's stdout), refuses a step whose argv or env would carry the nonce, after each step sends
+  `kill(-1, SIGKILL)` until ESRCH (only as UID 10001 from `/opt/cavr/harness.py`), and marks each phase with a failed
+  `stat("/.cavr/<nonce>/<phase>")`. Exit 0 / 3 bad job / 4 step failed / 5 internal.
+- `backend/cavr/sandbox_trace.py` (new): `check_trace(data, nonce, steps)`. Every line must be a strace line with a
+  PID; the first is the harness's execve; every PID is the harness's or returned by clone/clone3/fork/vfork of a known
+  PID (resolved over the whole trace, since a child's first line can come before its parent's clone returns); every
+  process has one exit line and nothing after it; the last line is the harness's `+++ exited with 0 +++`; the harness's
+  markers are exactly `start, step:<s>:begin, step:<s>:end:0 ..., end:ok` with this nonce; no other process uses the
+  nonce. Returns each process's parent and step (by PID).
+- `backend/cavr/sandbox_observe.py` (new): `run_harness(steps, mounts, tmpfs, deadline, stderr_cap, run_id, n)`.
+  Checks the image, makes a 32-hex nonce, writes `job.json` into a temporary directory mounted read-only at `/job`,
+  runs `strace -f -q --always-show-pid -s 1024 -e trace=%file,%network,%process,%creds -u cavr -- /usr/local/bin/python
+  -I -S /opt/cavr/harness.py /job/job.json` with `--env CAVR_RUN_NONCE=<nonce>`, then `check_trace`. Always UNRESOLVED
+  in Phase 2a: a complete run is `DEEP_NOT_JUDGED` (judging is PR 7 / PR 8); the evidence has image ID, seccomp and
+  harness SHA-256, container name, exit code, elapsed time, trace SHA-256, lines and the process map.
+- `tests/test_cavr_data/traces/harness-two-steps.{txt,json}`: a real trace (706 lines) recorded 2026-11-23 from
+  `run_harness` with a fixed nonce, with the docker command, image ID and SHA-256.
+
+### Design decisions
+
+- **The trace is strace's stderr stream, not a file in a root-only tmpfs** (plan text; changed in the plan review,
+  approved 2026-11-23): a file in a tmpfs needs a second root process to carry it out after strace ends, which would
+  break "only strace runs as root". Only strace holds the stream: the harness drops its copy first, children get
+  /dev/null and the stdout pipe, and `/proc/1/fd` (strace, root) is EACCES for UID 10001 (Docker test).
+- **`--always-show-pid`** (strace 6.13): without it, lines of a single live process have no PID, so they cannot be
+  attributed; with it every line is `<pid> ...`.
+- **The harness never runs package code itself and is non-dumpable**: a child of the same UID cannot read its
+  environment (the nonce) or write its memory through `/proc/<pid>/mem` (EACCES, Docker test). Only lines with the
+  harness's PID count as markers.
+- **Nonce only in strace's environment** (owner's request): not in the job file, not in any child's argv or env
+  (unit tests on both the host's `job_file` and the harness's `read_job`); new per run.
+- **Fill the trace**: there is no file to fill; a flood of syscalls passes the 16 MiB stderr cap and the run is
+  OUTPUT_CAP (Docker test with a 512 KiB cap). **Delete the trace**: there is no file; unlinking `/proc/1/fd/2` is EACCES.
+- **Leftover processes are killed by the harness after each step** (kill(-1) as UID 10001 reaches no root process):
+  otherwise strace waits for them and the run times out.
+- **`chdir` is not in the seccomp profile**, so the harness passes no `cwd` (the image's WORKDIR is /tmp) instead of
+  widening the profile. Likewise `setsid` is not allowed: `start_new_session=True` fails with EPERM.
+
+### Requirements covered
+
+| ID | Acceptance check |
+|---|---|
+| NFR-1 (package code never runs as root) | `test_package_code_never_runs_as_root`: `docker top` during the run lists only `strace` as root, every other process UID 10001; `setuid(0) = -1 EPERM`; every getuid/geteuid in the trace is 10001 |
+| FR-13 (trusted observation) | a package cannot open, list or unlink strace's fds, read the harness's environ or mem, or write the job or harness (9 attempts refused); the trace stays complete with one harness exit line |
+| FR-6 fail closed | truncated, tampered, forged, filled or cut traces and a killed harness are UNRESOLVED (unit + Docker) |
+| M1 report-forgery item | `test_report_markers_in_the_package_output_change_nothing`, `test_package_printing_a_fake_report_is_ignored` |
+
+### Ch 7 Test cases
+
+`tests/test_cavr_sandbox_trace.py`: 64 tests, 56 unit and 8 Docker.
+
+| Test ID | Purpose | Input | Expected | Result |
+|---|---|---|---|---|
+| `test_recorded_trace_is_what_its_metadata_says`, `test_recorded_trace_is_complete_and_maps_each_process_to_its_step` | baseline | recorded trace | complete; root 9; steps probe [10], second [12]; 11 child of 10 | pass |
+| `test_empty_trace_is_incomplete` | empty | "" | TRACE_EMPTY | pass |
+| `test_trace_cut_in_the_middle_of_a_line_is_incomplete`, `..._without_its_last_lines_...`, `..._without_the_harness_exit_line_...`, `test_trace_cut_at_half_is_incomplete` | truncation | cut traces | TRACE_TRUNCATED / incomplete | pass |
+| `test_harness_exit_code_other_than_zero_is_incomplete`, `test_line_after_the_harness_exited_is_incomplete`, `test_child_without_an_exit_line_is_incomplete` | tamper | edited exits | TRACE_TRUNCATED | pass |
+| `test_line_from_a_pid_nobody_created_is_incomplete` | injection | PID 77 line | TRACE_UNKNOWN_PID | pass |
+| `test_a_line_that_is_not_a_strace_line_is_incomplete` (5) | stray text | traceback, bare exit line, strace message, ... | TRACE_MALFORMED | pass |
+| `test_first_line_that_is_not_the_harness_execve_is_incomplete` | other program | execve of /tmp/evil.py | TRACE_NOT_HARNESS | pass |
+| `test_missing_end_marker_is_incomplete`, `test_a_failed_step_marker_is_incomplete`, `test_wrong_nonce_is_incomplete`, `test_steps_other_than_the_job_are_incomplete` | markers | edited markers | TRACE_MARKERS | pass |
+| `test_marker_with_this_runs_nonce_from_a_package_process_is_incomplete` / `test_marker_guess_from_a_package_process_changes_nothing` | forgery | marker from PID 12 | nonce used -> TRACE_MARKERS; a guess -> still complete | pass |
+| `test_unreadable_input_is_incomplete_not_an_exception` | robustness | None, bad bytes | incomplete | pass |
+| `test_the_harness_sends_fd_2_to_dev_null_before_any_import` | first statement | AST of the harness | statement 0 is the dup2; imports after; `os.close(0)` in main | pass |
+| `test_strace_starts_the_harness_with_isolated_python_and_no_site` | `-I -S`, `-u cavr` | STRACE | as planned | pass |
+| `test_the_nonce_is_in_no_child_argv_or_environment` | nonce | job + host env with a fake secret | no nonce, no host variable in any child | pass |
+| `test_a_step_that_would_carry_the_nonce_is_refused` (3), `test_a_malformed_job_is_refused` (5) | job | nonce in argv / env value / env key; bad jobs | ValueError (harness and host) | pass |
+| `test_leftover_processes_are_killed_until_none_is_left`, `test_kill_minus_one_is_never_sent_outside_the_sandbox` | cleanup | fake kill; this host | 3 rounds; never on the host | pass |
+| `test_harness_writes_nothing_to_its_stderr_even_when_a_step_does`, `test_harness_exit_codes` (4) | harness run on the host | steps writing stderr; failing / missing / bad nonce / empty | stderr empty; exit 0, 4, 4, 3, 3 | pass |
+| `test_complete_run_is_unresolved_not_judged`, `test_report_markers_in_the_package_output_change_nothing`, `test_the_nonce_is_passed_only_to_the_container_environment` | run_harness | fake run with the recorded trace | DEEP_NOT_JUDGED; forged stdout changes nothing; nonce once, in `--env`, new per run | pass |
+| `test_a_run_that_did_not_complete_is_unresolved` (5), `test_harness_exit_other_than_zero_is_unresolved`, `test_incomplete_trace_is_unresolved`, `test_image_problem_runs_nothing`, `test_a_fault_is_unresolved_internal_error`, `test_a_bad_step_is_unresolved` | fail closed | each failure | its rule, UNRESOLVED; nothing run on an image problem | pass |
+| `test_benign_step_gives_a_complete_trace` (Docker) | happy path | print | DEEP_NOT_JUDGED, trace complete | pass |
+| `test_package_code_never_runs_as_root` (Docker) | NFR-1 | 2 forks + sh + setuid(0) | only strace root; all others 10001 | pass |
+| `test_package_cannot_open_strace_fds_and_the_trace_stays_complete_and_unforged` (Docker) | owner's test | 9 attempts on /proc/1/fd, harness /proc, mounts; forged lines on stdout and stderr | 9 refused (EACCES 13 x8, EROFS 30 x1); complete; one harness exit line, last | pass |
+| `test_package_that_fills_the_trace_is_unresolved` (Docker) | fill | stat loop, cap 512 KiB | SANDBOX_OUTPUT_CAP | pass |
+| `test_package_that_kills_the_harness_is_unresolved` (Docker) | cut | kill(ppid, SIGKILL) | SANDBOX_KILLED (exit 137) | pass |
+| `test_package_that_exits_with_an_error_is_unresolved` (Docker) | failure | exit 7 | SANDBOX_EXIT_NONZERO, `step:probe:end:7` | pass |
+| `test_package_printing_a_fake_report_is_ignored` (Docker) | forgery | old report markers | DEEP_NOT_JUDGED; markers only in output | pass |
+| `test_background_process_left_by_a_step_is_killed_and_the_run_ends` (Docker) | leftovers | forked child sleeps 600 s | complete < 15 s; `killed by SIGKILL` in trace | pass |
+
+Runs before the commit: `CAVR_DOCKER=1 pytest tests/test_cavr_sandbox_trace.py`: 64 passed;
+`CAVR_DOCKER=1 pytest tests/test_cavr_*.py`: 1 failed, 1571 passed, 11 skipped (the failure is the strace defect below); after the fix, `CAVR_DOCKER=1 pytest tests/test_cavr_sandbox_{image,exec,trace}.py`: 135 passed; 80 of 80 benign runs and 80 of 80 runs with fork, threads and subprocess complete. No existing result changed.
+
+### Defects found and fixed
+
+- **strace start-up race (found by the CAVR suite):** `test_benign_step_gives_a_complete_trace` failed once with exit 1;
+  40 repeated runs reproduced it once: `strace: test_ptrace_seize: unexpected wait status 0`. strace's self-test forks a
+  child that calls `pause()` and expects to kill it; `pause` was not in the CAVR profile, so the child got EPERM and
+  sometimes exited first. Fix: `pause` added to the profile (comment says why). The same race explains the one failed
+  run in 40 of the PR 3 measurement, so `process_vm_writev` and `rt_sigsuspend`, kept then for that run, are removed
+  (80 of 80 runs without them). The profile now has **46** additions, not 47 as written in Step M2-7;
+  `test_cavr_profile_is_the_shared_profile_plus_listed_additions` checks 46. The failure was UNRESOLVED, never VERIFIED.
+- First smoke run: the step failed with `chdir("/tmp") = -1 EPERM` (not in the profile); `cwd` removed.
+- Without `--always-show-pid` the single-process lines had no PID (found before the checker was written).
+- `test_background_process_left_by_a_step_is_killed_and_the_run_ends` first used `start_new_session=True`, which
+  fails under the profile (setsid EPERM); changed to a plain fork.
+
+### Known limitations / deferred
+
+- A package can end its own import early (`os._exit(0)`); what it did before is in the trace, but the early exit is
+  not detected as such.
+- `chdir`, `setsid` and other syscalls outside the profile fail with EPERM: such a package's run is incomplete
+  (UNRESOLVED), never VERIFIED.
+- Events are not normalised (PR 7) or judged (PR 8); the result is never VERIFIED until PR 9.
+- strace's `+++ superseded by execve +++` (execve from a non-leader thread) is accepted as an exit line but no test
+  produces it.
+
+### Tool disclosure (Ch 8.7)
+
+- **Generated by Claude Code:** harness, trace check, run_harness, recorded trace, tests and these notes.
+  **Reviewed by Maryam:** the trace-channel design and the first-statement / nonce rules (2026-11-23).
+  **Verified by:** the runs above on Docker 29.9.3.
+
+### Supervisor Q&A prep
+
+1. **Can the package write a fake clean trace?** No process of UID 10001 holds the trace stream or can reach strace's
+   fds; a forged line printed to stdout or stderr goes to the untrusted output. A missing, cut or reordered line makes
+   the trace incomplete, which is UNRESOLVED.
+2. **How do you know package code never ran as root?** strace starts the harness as 10001; `docker top`, the host's
+   view, listed only strace as root while the package's processes ran; `setuid(0)` failed with EPERM.
+3. **Why not trust the harness's own report?** It shares a UID with the package's processes; the verdict reads only
+   what strace (root) wrote, and the harness's lines count only by its PID.

@@ -184,7 +184,7 @@ def test_cavr_profile_is_the_shared_profile_plus_listed_additions():
     added = cavr["syscalls"][1:]
     assert all(entry["action"] == "SCMP_ACT_ALLOW" and entry["comment"].startswith("CAVR addition: ") for entry in added)
     names = _names({"syscalls": added})
-    assert len(names) == len(set(names)) == 47 and not set(names) & set(shared["syscalls"][0]["names"])
+    assert len(names) == len(set(names)) == 46 and not set(names) & set(shared["syscalls"][0]["names"])
     # Never added: kernel modules, mounts, namespaces, keyrings, BPF, reboot, the clock.
     assert not set(names) & {"mount", "umount2", "unshare", "setns", "init_module", "finit_module", "bpf", "keyctl",
                              "add_key", "reboot", "settimeofday", "clock_settime", "pivot_root", "chroot", "ptrace_attach"}

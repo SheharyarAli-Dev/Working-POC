@@ -94,11 +94,10 @@
     },
     {
       "names": [
-        "process_vm_writev",
-        "rt_sigsuspend"
+        "pause"
       ],
       "action": "SCMP_ACT_ALLOW",
-      "comment": "CAVR addition: strace's own startup (measured: a run without them failed once in 40)"
+      "comment": "CAVR addition: strace's own start-up: its self-test test_ptrace_seize forks a child that calls pause() and expects it to be killed; without pause the child exits first about 1 run in 40 and strace aborts"
     },
     {
       "names": [
