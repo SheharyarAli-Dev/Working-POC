@@ -474,7 +474,7 @@ Stated as limitations in the report and on the dashboard, not implemented in M2:
 - [x] PR 5 trusted trace channel (package code never runs as root) (branch `cavr-m2-sandbox`, 2026-11-23; report notes Step M2-9): strace's stderr is the trace, `sandbox_trace.check_trace`
 - [x] PR 6 wheel install + import harness (branch `cavr-m2-sandbox`, 2026-11-23; report notes Step M2-10): `sandbox_observe.observe`; exec tmpfs only for the install target; `harness.py` kept until PR 12 (`docker/asent-sandbox/Dockerfile` still copies it; review 2026-11-23); refused syscalls and ptrace checked (Step M2-11)
 - [x] PR 7 normalisation v2 (branch `cavr-m2-deep`, 2026-11-23; report notes Step M2-12): `sandbox_events.py`; strace `-y -s 4096` with `DAC_READ_SEARCH`; pip's User-Agent replaced; `normalizer.py` deleted, `runtime_monitor.py` kept (LOCAL lab, PR 12)
-- [ ] PR 8 runtime contract check
+- [x] PR 8 runtime contract check (branch `cavr-m2-deep`, 2026-11-23; report notes Step M2-13): `contract_check.py`; label scopes -> UNRESOLVED (D5); `policy.verify_runtime` kept for the LOCAL lab (PR 12)
 - [ ] PR 9 one observed run for escalated packages
 
 ### Phase 3 — Counterfactual activation and causal graph

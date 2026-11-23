@@ -5096,3 +5096,117 @@ tests/test_cli_gate.py`: 1828 passed, 1 failed (`test_two_empty_harness_runs_giv
 3. **What is in the baseline, and why must it be clean?** Only what the interpreter and harness do with nothing to
    import: 317 code loads and structure lines (recorded). If it contained a secret read or a connect, subtracting it
    would hide the same event in a package run, so such a baseline is refused.
+
+## Step M2-13 — Observed events judged against the capability contract (PR 8) (2026-11-23)
+
+Plan: `docs/cavr-m2-plan.md` PR 8, decisions D3, D4, D5 (Maryam, 2026-11-23).
+
+### Ch 6 Implementation
+
+- `backend/cavr/contract_check.py` (new): `judge(events, contract)` -> {result OK / VIOLATION / UNRESOLVED, rule,
+  reason, violations, unresolved, not_exercised, judged, used, install_events}; `read_contract`, `capability_of`,
+  `in_scope`. Algorithm: read the contract (allowed with scopes, denied); for each event of the import step and the
+  harness, map its type to a capability (FILE_READ or its sensitive level, FILE_WRITE or PERSISTENCE_WRITE,
+  PROCESS_EXEC, NETWORK_CONNECT; none for CODE_LOAD / structure / a loopback port-0 bind; never-allowed for
+  CREDENTIAL_CHANGE and REFUSED_SYSCALL); denied -> violation, "*" -> fine, a scope -> `in_scope`; install-step
+  events go through pip's envelope instead. Any violation wins; else anything unjudgeable -> UNRESOLVED.
+- `policy.verify_runtime` is kept (Q12): `analyzer.py` and `backend/orchestrator/service.py` still call it for the
+  LOCAL lab; PR 12.
+- Tests: `tests/test_cavr_contract_check.py` (new).
+
+### Design decisions
+
+- **An attempt counts like a success** (plan): the judgement never looks at `ok` / `errno`.
+- **Sensitive reads need their own capability** (D4): `FILE_READ:*` does not allow `~/.aws/credentials`; it needs
+  SECRET_READ. A stat of a secret is an attempt.
+- **Scopes (D5)**: `*` unrestricted; `ip:port` lists for NETWORK_CONNECT (IPv6 as `[addr]:port`); absolute program
+  paths for PROCESS_EXEC; absolute directories for file capabilities (lexically normalised, `/database` is not inside
+  `/data`, the real path must be inside too). Any other scope is a label -> UNRESOLVED SCOPE_NOT_CHECKABLE. The demo
+  policy's `FILE_READ:invoice_documents` and `FILE_WRITE:scratch_tmp` are labels: a file read or write by an escalated
+  package of the demo project is UNRESOLVED, not VERIFIED and not REJECTED.
+- **Incomplete events**: a network, credential or refused event is still a violation of a denied capability (its
+  capability does not depend on the unreadable part); an incomplete file or exec event is UNRESOLVED (the path that
+  could not be read might have been a code load or the step's own start). Alternative (every incomplete event
+  UNRESOLVED) would let a package hide a connect behind an unreadable address.
+- **Loopback port-0 bind needs no capability**: pip's vendored urllib3 does it to test IPv6 support (measured,
+  Step M2-12); with `listen` refused by the profile nothing can connect to it. Any other bind, listen or accept
+  needs NETWORK_CONNECT.
+- **Install envelope (D3)**: code loads, non-sensitive reads, writes under `/tmp/` and `/site/lib/` (a `.pth` pip
+  installs there runs, and is judged, in the import step), a loopback port-0 bind. Anything else ->
+  INSTALL_OUTSIDE_ENVELOPE. Tested with the exact events an unpatched pip 25.0.1 makes (`uname -rs`,
+  `lsb_release -a`, stat of `/etc/shadow`): UNRESOLVED.
+- **Harness events are judged like any other** after the baseline subtraction; nothing is excluded by name.
+
+### Requirements covered
+
+| ID | Acceptance check |
+|---|---|
+| FR-6 / FR-13 | each capability denied -> violation with the event; allowed `*`; scoped inside / outside; label -> UNRESOLVED |
+| FR-6 | unknown event type, unreadable contract (9 cases), a fault -> UNRESOLVED |
+| FR-3 | required capability not used in the run -> `not_exercised` |
+| NFR-6 | `not_exercised` and the install envelope are in the evidence |
+
+### Ch 7 Test cases
+
+`tests/test_cavr_contract_check.py`: 52 tests, unit (hand-made events, the demo policy's real contract fields, and the
+recorded traces of Step M2-12).
+
+| Test ID | Purpose | Input | Expected | Result |
+|---|---|---|---|---|
+| `test_denied_capability_is_a_violation` (7) | each capability denied | connect, `.aws`, read, write, exec, `.bashrc`, `/etc/passwd` | VIOLATION, the capability, the event's line | pass |
+| `test_failed_attempt_counts_like_a_success` | attempts | connect ENETUNREACH vs = 0 | both VIOLATION | pass |
+| `test_unrestricted_grant_allows` (5) | `*` | each capability granted `*` | OK | pass |
+| `test_scoped_network_grant_matching_and_non_matching_endpoint` | D5 network | IPv4 / IPv6 inside, port 80, Unix socket, sendto without address | OK, OK, VIOLATION, VIOLATION, EVENT_INCOMPLETE | pass |
+| `test_scoped_file_grant_by_path_prefix` | D5 files | inside, outside, `/data/../etc`, `/database`, link to `/etc` | OK, then 4 x VIOLATION | pass |
+| `test_scoped_exec_grant_by_program` | D5 exec | `/usr/bin/gs` granted; `/bin/sh` | OK / VIOLATION | pass |
+| `test_label_scope_is_unresolved` (3) | D5 labels | `invoice_documents`, `scratch_tmp`, `approved endpoints` | SCOPE_NOT_CHECKABLE | pass |
+| `test_the_demo_policy_labels_make_file_events_unresolved_and_the_rest_a_violation` | real policy | InvoiceHub `.asent/cavr/policy.json` | read / write UNRESOLVED; connect, secret VIOLATION | pass |
+| `test_sensitive_read_needs_secret_read_even_with_file_read_star` | D4 | `.aws` open, `.ssh` stat with `FILE_READ:*` | VIOLATION (SECRET_READ) | pass |
+| `test_credential_change_and_refused_syscall_always_violate` | never allowed | setuid, ptrace, unshare; every capability `*` | VIOLATION | pass |
+| `test_code_load_and_structure_need_no_capability` | none needed | stdlib load, clone, getuid, kill, `::1` port-0 bind | OK, 0 judged | pass |
+| `test_a_bind_that_is_not_a_loopback_probe_needs_network` | bind | 0.0.0.0:8080, listen | VIOLATION | pass |
+| `test_unknown_event_type_is_unresolved` | fail closed | inotify, invented type | EVENT_TYPE_UNKNOWN | pass |
+| `test_unreadable_contract_is_unresolved` (9) | fail closed | None, str, not OK, bad lists, unknown / repeated / missing capability, empty scope, no vocabulary | CONTRACT_UNREADABLE | pass |
+| `test_violation_wins_over_unknown` | Q8 | unknown + connect | VIOLATION, 1 unresolved listed | pass |
+| `test_incomplete_file_event_is_unresolved_but_an_incomplete_connect_still_violates` | incomplete | cut path, blank dirfd, connect without address | EVENT_INCOMPLETE / VIOLATION | pass |
+| `test_required_not_observed_is_not_exercised` | FR-3 | REQUIRED FILE_READ unused / used | listed / not listed | pass |
+| `test_install_step_envelope_inside` | D3 | pip writes in `/tmp`, `/site/lib` (+ `.pth`), pip.conf probe, `::1` bind | OK | pass |
+| `test_install_step_outside_the_envelope_is_unresolved_never_a_pass` (9) | D3 + pip pin | write `/var`, connect, `.aws`, `uname -rs`, `lsb_release -a`, setuid, unknown, blank dirfd, stat `/etc/shadow` | INSTALL_OUTSIDE_ENVELOPE (every capability `*`) | pass |
+| `test_recorded_install_step_is_inside_the_envelope` | real pip | benign recording | OK | pass |
+| `test_recorded_benign_run_is_within_a_deny_all_contract` | real run | benign minus baseline | OK, 0 judged | fail, then pass (see defects) |
+| `test_recorded_probe_run_is_a_violation_with_every_kind_listed` | real run | probe minus baseline | VIOLATION covering 8 capabilities | pass |
+| `test_harness_events_are_not_excluded_by_name` | by PID, not name | harness reads `/etc/hostname` | VIOLATION | pass |
+| `test_a_fault_is_unresolved_never_a_pass` | fail closed | not an event | INTERNAL_ERROR | pass |
+
+No existing result changed. Run before the commit: `CAVR_DOCKER=1 pytest tests/test_cavr_*.py tests/test_orchestrator_config.py
+tests/test_gate_*.py tests/test_cli_gate.py`: 1882 passed, 12 skipped (live), 606 s.
+
+### Defects found and fixed
+
+- The first draft counted install-step events as judged (`test_recorded_benign_run_is_within_a_deny_all_contract`
+  expected 0, got 171); install events are counted separately (`install_events`).
+- Two bugs found while reading the draft before the tests ran: denied entries were told from allowed ones by dict
+  equality (`entry in allowed`), and the envelope message indexed an empty list; both rewritten.
+
+- Review: one cavr-reviewer pass over PRs 7-9 at the end of Phase 2b (recorded in Step M2-14).
+
+### Known limitations / deferred
+
+- Label scopes (`invoice_documents`, `scratch_tmp`) make file events UNRESOLVED (D5); mapping labels to paths is
+  future work.
+- A scope cannot name a host by DNS name (there is no DNS in the sandbox); only IP literals are checked.
+- `policy.verify_runtime` (LOCAL lab) is replaced only on the pipeline path; deleted with the lab in PR 12.
+
+### Tool disclosure (Ch 8.7)
+
+- **Generated by Claude Code:** `contract_check.py`, its tests and these notes. **Reviewed by Maryam:** D3, D4, D5.
+  **Verified by:** the runs above.
+
+### Supervisor Q&A prep
+
+1. **Why is a failed connect a violation?** The contract is about what the package tries to do; the sandbox making
+   it fail (`--network none`) says nothing about the package. `test_failed_attempt_counts_like_a_success`.
+2. **Why is the demo project's file read UNRESOLVED and not VERIFIED?** Its policy grants FILE_READ only for the label
+   `invoice_documents`; CAVR cannot tell which paths that means, so it cannot say the read is inside (D5).
+3. **Why is pip judged differently?** No package code runs in the install step; pip is trusted code on hash-checked
+   bytes, so it is held to a fixed envelope instead of the package's contract, and anything outside is UNRESOLVED.
