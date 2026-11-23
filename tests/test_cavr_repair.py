@@ -19,6 +19,7 @@ from pathlib import Path
 import pytest
 
 from backend.cavr import gate_adapter, repair_proposal
+from backend.cavr.pypi_client import project_url
 from backend.cavr.repair_proposal import propose_repair
 from test_cavr_gate_adapter import Gate
 from test_cavr_support import (CLEAN_DEMO, PIN_SHA256, PIN_VERSION, PYPDF_SHA256, RECORDED_5_1_0, RECORDED_6_19_0_NOW,
@@ -459,3 +460,67 @@ def test_exception_in_the_gate_wiring_keeps_the_verdict(tmp_path, monkeypatch):
     status, details, _ = gate.analyze()
     assert status == "REJECTED"
     assert (details["nodes"][0]["repair"]["result"], details["nodes"][0]["repair"]["rule"]) == ("NO_REPAIR_FOUND", "INTERNAL_ERROR")
+
+
+# --- the repair budget of one gate run (120 s over all REJECTED packages) ----------------------------------------
+
+def three_rejected_gate(tmp_path, monkeypatch):
+    """A gate run whose head pins three REJECTED packages: the real pypdf 6.19.0 and two synthetic ones."""
+    gate = rejected_gate(tmp_path, monkeypatch, True)
+    for name in ("demo", "top"):
+        wheel = build_wheel(tmp_path / f"build-{name}", name, "1.0")
+        gate.index.add(name, "1.0", wheel)
+        write_osv_cache(gate.osv, name, "1.0", [synthetic_advisory(f"SYNTH-RUN-{name}", name, fixed="2.0")])
+    requirements = "pypdf==6.19.0\ndemo==1.0\ntop==1.0\n"
+    (Path(gate.run.candidate_workspace) / "requirements.txt").write_text(requirements)
+    return gate
+
+
+def test_run_budget_is_shared_by_all_rejected_packages(tmp_path, monkeypatch):
+    gate = three_rejected_gate(tmp_path, monkeypatch)
+    clock = {"now": 0.0}
+    calls = []
+
+    def slow_repair(verdict, package, **kwargs):     # every repair takes 70 s on the fake clock
+        calls.append((package["package"], kwargs["budget_seconds"]))
+        clock["now"] += 70
+        return repair_proposal.no_repair(package["package"], package["version"], package, "NO_SAFE_CANDIDATE", "fake")
+
+    monkeypatch.setattr(gate_adapter, "CLOCK", lambda: clock["now"])
+    monkeypatch.setattr(gate_adapter, "propose_repair", slow_repair)
+    status, details, _ = gate.analyze()
+    rows = {row["name"]: row for row in details["nodes"]}
+    assert status == "REJECTED" and [rows[n]["status"] for n in ("pypdf", "demo", "top")] == ["REJECTED"] * 3
+    # 1st: 0 s spent, its own 60 s. 2nd: 70 s spent, 50 s left of the run. 3rd: 140 s spent: not attempted.
+    assert calls == [("pypdf", 60.0), ("demo", 50.0)]
+    third = rows["top"]["repair"]
+    assert (third["result"], third["rule"], third["reason"]) == ("NOT_ATTEMPTED", "RUN_BUDGET_USED_UP",
+                                                                 "repair budget for this run used up")
+    assert third["package"] == "top" and third["pin"] is None and third["applied"] is False
+
+
+def test_run_budget_counts_repair_time_only(tmp_path, monkeypatch):
+    """Time spent verifying the packages does not use up the repair budget."""
+    gate = three_rejected_gate(tmp_path, monkeypatch)
+    clock = {"now": 0.0}
+    real_verify = gate_adapter.verify_request
+
+    def slow_verify(*args, **kwargs):                   # the pipeline itself takes 500 s on the fake clock
+        clock["now"] += 500
+        return real_verify(*args, **kwargs)
+
+    monkeypatch.setattr(gate_adapter, "CLOCK", lambda: clock["now"])
+    monkeypatch.setattr(gate_adapter, "verify_request", slow_verify)
+    monkeypatch.setattr(gate_adapter, "propose_repair", lambda verdict, package, **kwargs: repair_proposal.no_repair(
+        package["package"], package["version"], package, "NO_SAFE_CANDIDATE", "fake"))
+    _, details, _ = gate.analyze()
+    assert {row["repair"]["rule"] for row in details["nodes"]} == {"NO_SAFE_CANDIDATE"}
+
+
+def test_run_budget_used_up_never_asks_the_registry(tmp_path, monkeypatch):
+    gate = three_rejected_gate(tmp_path, monkeypatch)
+    monkeypatch.setattr(gate_adapter, "REPAIR_RUN_SECONDS", 0)
+    status, details, _ = gate.analyze()
+    assert status == "REJECTED"
+    assert {(row["repair"]["result"], row["repair"]["rule"]) for row in details["nodes"]} == {("NOT_ATTEMPTED", "RUN_BUDGET_USED_UP")}
+    assert not {project_url(name) for name in ("pypdf", "demo", "top")} & set(gate.index.calls)   # no release list asked

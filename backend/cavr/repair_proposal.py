@@ -100,6 +100,11 @@ def no_repair(name, version, package, rule, reason) -> dict:
     return _block("NO_REPAIR_FOUND", rule, reason, name, version, package)
 
 
+def not_attempted(name, version, package, rule, reason) -> dict:
+    """NOT_ATTEMPTED with every key of a block (for example when the caller's run budget is used up)."""
+    return _block("NOT_ATTEMPTED", rule, reason, canonicalize_name(str(name or "")) or None, version, package)
+
+
 # --- the steps ---------------------------------------------------------------------------------------------------
 
 def _propose(verdict, package, name, version, run) -> dict:
