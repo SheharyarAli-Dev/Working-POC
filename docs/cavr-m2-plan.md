@@ -466,7 +466,7 @@ Stated as limitations in the report and on the dashboard, not implemented in M2:
 - [x] PR 2 deep-analysis stage interface (branch `cavr-m2-phase1-wiring`, 2026-11-22; report notes Step M2-2)
 
 ### Phase 2 — Behaviour sandbox
-- [ ] PR 3 CAVR sandbox image `asent-cavr-sandbox:local` + identity check
+- [x] PR 3 CAVR sandbox image `asent-cavr-sandbox:local` + identity check (branch `cavr-m2-sandbox`, 2026-11-23; report notes Step M2-7): own seccomp copy, the shared profile cannot start a container
 - [ ] PR 4 runner deadline / kill / limits
 - [ ] PR 5 trusted trace channel (package code never runs as root)
 - [ ] PR 6 wheel install + import harness

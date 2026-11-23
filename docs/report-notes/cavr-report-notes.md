@@ -4301,3 +4301,132 @@ Run before the commit, as asked (repair and gate tests only: `tests/test_cavr_re
 
 1. **Can a gate run with many vulnerable packages take forever in repair?** No: at most 120 s of repair per run
    (plus one candidate check in progress); later packages say NOT_ATTEMPTED with the reason.
+
+## Step M2-7 — PR 3: CAVR's own sandbox image and its identity check (2026-11-23)
+
+Plan: `docs/cavr-m2-plan.md` PR 3, decisions Q5 to Q7. Not wired into `verify_request` or the gate yet (Phase 2b).
+
+### Ch 6 Implementation
+
+- `docker/cavr-sandbox/Dockerfile` (new): `FROM python:3.12-slim@sha256:5e2bdb1b0d542d5039cffb8181c65930093949194a65c365dfb1b0fe13a4fa5b`
+  (Debian 13), installs `strace` (6.13) and `libfaketime`, adds user `cavr` UID/GID 10001. No ENTRYPOINT.
+- `docker/cavr-sandbox/build.sh` (new): runs `python -m backend.cavr.sandbox_image build`.
+- `docker/cavr-sandbox/cavr-seccomp.json` (new): CAVR-only copy of the shared profile plus 47 measured syscalls,
+  in commented groups (see design decisions).
+- `backend/cavr/sandbox_image.py` (new): `IMAGE = "asent-cavr-sandbox:local"`; `build()` runs `docker build --label
+  org.asent.cavr.recipe-sha256=<SHA-256 of the Dockerfile>`, reads the ID with `docker image inspect`, writes
+  `{image, image_id, recipe_sha256, base, built_at}` to `DATA/cavr/sandbox-image.json`; `image_identity()` is ok only
+  when the image exists, its ID equals the recorded one and its label equals the current Dockerfile's SHA-256.
+  Rules: ENGINE_UNAVAILABLE, IMAGE_MISSING, IMAGE_NOT_RECORDED, IMAGE_ID_MISMATCH, IMAGE_STALE, SECCOMP_MISSING,
+  ENGINE_ERROR. Never raises.
+- `backend/cavr/sandbox_exec.py` (new): `lockdown_flags()` and `docker_command(name, image_id, command, mounts, env)`,
+  the only builder of a CAVR `docker run`: the image is passed by its checked ID, every mount is a `readonly` bind,
+  only listed variables are passed, a bad name / tag / mount / variable raises ValueError.
+- `backend/cavr/sandbox_runner.py`: the hardcoded `image_digest` constant is removed; the legacy result field is
+  `image_id: None` (that runner never checked its image; it goes with PR 12).
+- `tests/test_cavr_support.py`: `docker_skip_reason`, `requires_docker`, `sandbox_identity()` (builds once per
+  session if missing), `cavr_containers()`.
+- `.github/workflows/ci.yml`: new job `cavr-docker` (builds the image, runs `tests/test_cavr_sandbox_*.py` with
+  `CAVR_DOCKER=1`, fails if a `cavr-*` container is left).
+
+### Design decisions
+
+- **Expected image ID recorded at build time, not a constant** (alternative: commit the ID): `docker build` is not
+  reproducible (apt packages change), so a committed ID would be wrong on every other machine. The recipe label ties
+  the image to the Dockerfile in this checkout, so an image built from an older Dockerfile is IMAGE_STALE.
+- **Run by image ID, not tag** (alternative: `asent-cavr-sandbox:local`): the tag could be moved between the check and
+  the run.
+- **CAVR-only seccomp profile.** The shared `docker/asent-seccomp.json` (57 syscalls, default ERRNO) cannot start a
+  container on this engine: runc fails at init with `fstatfs fsmount:fscontext:proc: operation not permitted`
+  (exit 125, Docker 29.9.3, 2026-11-23). It also lacks `execve`, `clone`, `wait4`, `ptrace`, `socket`, `connect`.
+  The shared file is not changed; the CAVR copy keeps its first entry byte-identical and adds 47 names. Method: the
+  full flow (strace -u, pip install of a wheel, import, connect/sendto/IPv6/Unix attempts, os.system, threads, fork,
+  setuid(0), prctl, kill) was measured with `strace -c` under Docker's default profile (72 syscalls), and the runc and
+  strace needs were found by removing each candidate in turn and comparing the output with the default-profile run.
+  Groups, each with its reason in the JSON `comment`: runc init (`close_range`, `execve`, `fstatfs`, `statx`);
+  strace (`kill`, `ptrace`, `setgroups`, `setregid`, `setreuid`, `wait4`); strace start-up (`process_vm_writev`,
+  `rt_sigsuspend`: removing them gave one failed run in 40); process starts (`clone`, `clone3`, `prctl`,
+  `set_tid_address`, `setuid`, `vfork`); sockets (`bind`, `connect`, `getpeername`, `getsockname`, `sendto`,
+  `setsockopt`, `socket`), allowed so that attempts reach the kernel and are recorded, while `--network none` makes
+  them fail; Python, pip and import (22 file and process syscalls). Never added: mount, namespaces, modules, BPF,
+  keyrings, clock setting, reboot (test). With the profile, 20 of 20 runs of the flow gave the same output as
+  Docker's default profile.
+- **The profile works only with CAVR's flags.** Without `--cap-drop ALL`, runc also needs `capget`; CAVR always drops
+  all capabilities, so it is not added.
+- **Container user is root** (`Config.User` empty): strace is the container's process (Q5); package code runs as
+  10001 through `strace -u cavr` (PR 5 proves it per process).
+
+### Requirements covered
+
+| ID | Acceptance check |
+|---|---|
+| NFR-1 (rule 5, pinned image) | `test_dockerfile_base_is_pinned_by_digest`; missing / mismatched / stale / unrecorded image -> not ok (6 tests) |
+| NFR-1 (rules 1-4) | `test_running_container_has_every_lockdown_flag` reads `docker inspect` of a running container |
+| NFR-1 (rule 1) | `test_container_has_only_loopback`: `/sys/class/net` is `lo` only |
+| FR-6 fail closed | no engine, inspect error, unreadable record, missing seccomp profile -> not ok, never raises |
+| Q6, Q7 | image `asent-cavr-sandbox:local` != SATRA's; strace and libfaketime present (Docker test) |
+
+### Ch 7 Test cases
+
+`tests/test_cavr_sandbox_image.py`: 41 tests, 35 unit (fake `sandbox_image.RUN`) and 6 Docker.
+
+| Test ID | Purpose | Input | Expected | Result |
+|---|---|---|---|---|
+| `test_recorded_image_built_from_the_current_dockerfile_is_ok` | happy path | inspect ID = record, label = Dockerfile SHA | ok, IMAGE_OK | pass |
+| `test_missing_image_is_unresolved` | no image | inspect "No such image" | IMAGE_MISSING | pass |
+| `test_image_id_mismatch_is_unresolved` | rebuilt / re-tagged | inspect ID != record | IMAGE_ID_MISMATCH | pass |
+| `test_no_build_record_is_unresolved`, `test_unreadable_build_record_is_unresolved` (4) | built another way | no / bad record | IMAGE_NOT_RECORDED | pass |
+| `test_stale_recipe_label_is_unresolved`, `test_image_without_labels_is_stale` | old Dockerfile | wrong / no label | IMAGE_STALE | pass |
+| `test_no_engine_is_unresolved` (4) | no engine | no binary, timeout, permission, daemon down | ENGINE_UNAVAILABLE | pass |
+| `test_inspect_error_is_unresolved` (4) | odd engine | exit 2, garbage, non-sha256 ID, exception | ENGINE_ERROR | pass |
+| `test_missing_seccomp_profile_is_unresolved` | profile gone | absent file | SECCOMP_MISSING, engine not asked | pass |
+| `test_build_records_the_built_image_id`, `test_failed_build_writes_no_record`, `test_build_without_engine_is_not_ok` | build | fake build | record written only on success | pass |
+| `test_dockerfile_base_is_pinned_by_digest`, `test_image_is_cavr_own_not_satra` | recipe | Dockerfile | digest pin, strace, libfaketime, UID 10001 | pass |
+| `test_sandbox_runner_has_no_hardcoded_digest` | Q12 | `sandbox_runner.py` | no constant | pass |
+| `test_shared_profile_lacks_what_strace_and_runc_need` | finding | shared profile | 9 needed names missing | pass |
+| `test_cavr_profile_is_the_shared_profile_plus_listed_additions` | smallest addition | CAVR profile | shared entry identical, 47 commented additions, no dangerous names | pass |
+| `test_lockdown_flags_are_the_planned_set`, `test_docker_command_runs_the_image_by_id_with_read_only_mounts` | flags | — | exact list; ID last; readonly; no --user/-v/-i/--privileged | pass |
+| `test_docker_command_refuses_what_it_cannot_pass_safely` (6) | bad input | bad name, tag, comma mount, relative path, bad variable | ValueError | pass |
+| `test_real_image_identity_is_its_inspected_id` (Docker) | real check | built image | ok, ID = `docker image inspect` | pass |
+| `test_image_has_strace_and_libfaketime` (Docker) | Q7 | image | strace, `libfaketime.so.1`, `id -u cavr` = 10001 | pass |
+| `test_python_and_strace_start_under_the_cavr_profile` (Docker) | profile | `strace -f -u cavr python -c` | `10001 10001`, `+++ exited with 0 +++` | pass |
+| `test_the_shared_profile_is_not_used_and_would_not_start_python` (Docker) | finding | shared profile | non-zero exit; not in CAVR flags | pass |
+| `test_running_container_has_every_lockdown_flag` (Docker) | rules 1-4, 9 | running container | every HostConfig field as planned | pass |
+| `test_container_has_only_loopback` (Docker) | rule 1 | `/sys/class/net` | `lo` | pass |
+
+Runs before the commit: `CAVR_DOCKER=1 pytest tests/test_cavr_sandbox_image.py`: 41 passed;
+`CAVR_DOCKER=1 pytest tests/test_cavr_*.py`: 1478 passed, 11 skipped (live, `CAVR_LIVE` unset) in 424 s; CI, packaging and resource tests
+(`test_satra_runner_image`, `test_gate_packaging`, `test_cli_workflow`, `test_cli_packaging`, `test_cli_resources`,
+`test_cli_doctor`): 61 passed. No existing result changed.
+
+### Defects found and fixed
+
+- First profile candidate failed at runc init (`statx … could not get mount id`) and then in strace
+  (`setregid: Operation not permitted`); both added with their reasons.
+- Tests: none failed after the code was written.
+
+### Known limitations / deferred
+
+- The CI job is not verified: nothing is pushed (GitHub's Ubuntu runner may need other syscalls for its runc).
+- `process_vm_writev` and `rt_sigsuspend` are kept on one failed run in 40 without them; the cause was not found.
+- The profile is denied-by-default: a package whose import needs a syscall outside it fails, which is UNRESOLVED
+  (fail closed), never VERIFIED.
+- The legacy `SandboxRunner`, `docker/asent-sandbox/Dockerfile` and `counterfactual.py` stay until PR 12 (Q12).
+
+### Note for Sheharyar (owner of the shared `docker/asent-seccomp.json`)
+
+The shared profile cannot start a container on current runc (Docker 29.9.3): runc's init needs `fstatfs` and `statx`
+after the filter is loaded, and fails with `error closing exec fds: get handle to /proc/thread-self/fd: fstatfs
+fsmount:fscontext:proc: operation not permitted`. CAVR does not use it and did not change it.
+
+### Tool disclosure (Ch 8.7)
+
+- **Generated by Claude Code:** the image, profile, build script, both modules, the CI job, the tests and these notes.
+  **Reviewed by Maryam:** the plan and decisions (2026-11-23). **Verified by:** the runs above on Docker 29.9.3.
+
+### Supervisor Q&A prep
+
+1. **Why not use the repository's seccomp profile?** It cannot start a container on current runc; CAVR uses a copy
+   with 47 measured additions, each group explained, and the shared one is unchanged.
+2. **How do you know the image a run uses is the one you built?** The run names the image by the ID recorded at
+   build time, after checking that the local image still has that ID and carries the current Dockerfile's SHA-256.

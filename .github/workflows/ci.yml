@@ -100,6 +100,39 @@ jobs:
           name: junit-full-suite
           path: reports/pytest.xml
 
+  cavr-docker:
+    # CAVR's behaviour sandbox on a real engine (docs/cavr-m2-plan.md PR 3-6). Docker stays enabled here: the
+    # tests build asent-cavr-sandbox:local once and run every Docker test (CAVR_DOCKER=1). No container may be
+    # left behind afterwards.
+    name: CAVR sandbox tests (Docker)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements.lock.txt
+      - run: pip install -r requirements.lock.txt
+      - name: Build the CAVR sandbox image and record its ID
+        run: bash docker/cavr-sandbox/build.sh
+      - name: Run the CAVR sandbox tests with Docker
+        env:
+          CAVR_DOCKER: "1"
+        run: |
+          mkdir -p reports
+          python -m pytest -q -rs tests/test_cavr_sandbox_*.py --junitxml=reports/cavr-docker.xml
+      - name: No cavr-* container is left
+        if: always()
+        run: |
+          left=$(docker ps -a --filter name=^cavr- --format '{{.Names}}')
+          if [ -n "$left" ]; then echo "left behind: $left"; exit 1; fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: junit-cavr-docker
+          path: reports/cavr-docker.xml
+
   frontend:
     name: Frontend build and render tests
     runs-on: ubuntu-latest
