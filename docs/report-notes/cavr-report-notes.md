@@ -5210,3 +5210,144 @@ tests/test_gate_*.py tests/test_cli_gate.py`: 1882 passed, 12 skipped (live), 60
    `invoice_documents`; CAVR cannot tell which paths that means, so it cannot say the read is inside (D5).
 3. **Why is pip judged differently?** No package code runs in the install step; pip is trusted code on hash-checked
    bytes, so it is held to a fixed envelope instead of the package's contract, and anything outside is UNRESOLVED.
+
+## Step M2-14 — Escalated packages get one observed sandbox run (PR 9) (2026-11-23)
+
+Plan: `docs/cavr-m2-plan.md` PR 9, Q8 and its frontier rule, decisions D2, D6, D7 (Maryam, 2026-11-23).
+
+### Ch 6 Implementation
+
+- `backend/cavr/sandbox_deep.py` (new): `SandboxDeepAnalyzer` (the Phase 1 `deep_stage` interface), `for_gate_run`,
+  `deep_version`, `high_risk_triggers`. `version` = `cavr-sandbox-deep/1` + SHA-256 of the harness, the profile, the
+  strace command, the two step commands, and the normaliser's and checker's versions; `image_id` the checked ID;
+  `budget` {runs 1, run_seconds 20, package_seconds 120, gate_run_seconds 300}; `deep_stage.identity` puts all into
+  `analyzer_version`. Algorithm of `analyse`: run-wide time left? -> baseline (read, or recorded once by an
+  empty-harness run and refused unless clean) -> one `observe` run with deadline min(20, 120, left) -> normalise ->
+  subtract the baseline -> `contract_check.judge` -> Q8 verdict (violation REJECTED; anything incomplete UNRESOLVED;
+  high-risk trigger unexplored UNRESOLVED; else VERIFIED with the bounded claim).
+- `backend/cavr/gate_adapter.py`: `SETTINGS["deep"] = "sandbox"` (D7): one analyzer per gate run when the image
+  passes its check, else none (today's verdicts); `details["deep_stage"]`; each row's `deep` block (status, rule,
+  reason, elapsed, image ID, trace and baseline SHA-256, trace lines and check, run rule, key events, unexplored
+  triggers, claim, not exercised); `BOUNDED_DEEP` when the deep stage is on.
+- `backend/commands/report.py` (shared file): `cavr_deep(report)`, one line per package with a deep result under
+  the module rows of `asent report`; `_cavr_packages` helper.
+- Tests: `tests/test_cavr_sandbox_deep.py` (new).
+
+### Design decisions
+
+- **Recorded runs instead of a fake analyzer in the unit tests**: `OBSERVE` / `RUN_HARNESS` return the real traces of
+  Step M2-12, so the normaliser, the baseline and the contract check are the real ones; only the container is not
+  started. Alternative (a fake `analyse`) would test none of PRs 7-8.
+- **Order of the Q8 rule**: a violation is checked first, also in a run that did not end well (D6), then the image,
+  then the run's own problems, then events that cannot be judged, then unexplored triggers; VERIFIED only if all pass.
+- **High-risk trigger** = a gated branch (`ast_scan` trigger) that reaches a sink whose capability the contract does
+  not grant with `*`; any such trigger in any wheel of the tree is UNRESOLVED until Phase 3 (frontier rule).
+  Conservative: it can only add UNRESOLVED, never a pass.
+- **Baseline stored per identity** in `<data>/cavr/deep/baseline-<hash>.json`, written atomically, re-checked when
+  read (identity, clean); a baseline that is not clean is never stored. Its run counts against the 300 s cap.
+- **`DEEP_IMAGE_CHANGED`**: a run whose evidence names another image than the identity in the cache key is UNRESOLVED.
+- **One analyzer per gate run** so the 300 s cap is per run; the per-package 120 s is also checked by `deep_stage`.
+- **The deep stage turns itself off** without Docker or the image (`for_gate_run` -> None): the escalated package keeps
+  `escalation: "deep analysis required (M2)"`, and `analyzer_version` is unchanged (D7).
+
+### Requirements covered
+
+| ID | Acceptance check |
+|---|---|
+| FR-4 / FR-13 | escalated packages get one install + import run in `asent-cavr-sandbox:local` through `verify_request` and `asent gate` |
+| FR-6 (Q8) | violation REJECTED; timeout, incomplete trace, unknown event, baseline problem, image change UNRESOLVED; unexplored trigger UNRESOLVED |
+| FR-15 | the deep result and its key event in `asent-report.json` and one line of `asent report` |
+| NFR-4 | budget 20 s / 120 s / 300 s; deep time per package in the evidence (`elapsed_seconds`) |
+| NFR-6 | VERIFIED states what was observed and what was not (`claim`, `not_exercised`) |
+
+### Ch 7 Test cases
+
+`tests/test_cavr_sandbox_deep.py`: 32 tests, 25 unit (real pipeline and recorded traces) and 7 Docker.
+
+| Test ID | Purpose | Input | Expected | Result |
+|---|---|---|---|---|
+| `test_clean_complete_run_without_triggers_is_verified` | Q8 all clauses | escalated demo, benign recording | VERIFIED DEEP_RUN_CLEAN, bounded claim, baseline recorded once | pass |
+| `test_violation_is_rejected_with_the_event_as_evidence` | Q8 violation | probe recording | REJECTED, key events with line and syscall | pass |
+| `test_timeout_is_unresolved` | Q8 budget | benign cut at 50 %, SANDBOX_TIMEOUT | UNRESOLVED SANDBOX_TIMEOUT | pass |
+| `test_violation_before_a_timeout_is_rejected` | D6 | probe cut at 99.5 %, SANDBOX_TIMEOUT | REJECTED | pass |
+| `test_incomplete_trace_is_unresolved` | Q8 trace | not attributable | UNRESOLVED TRACE_INCOMPLETE | pass |
+| `test_unknown_event_is_unresolved` | Q8 unknown | inotify line inserted in the import step | UNRESOLVED EVENT_TYPE_UNKNOWN | pass |
+| `test_a_run_on_another_image_is_unresolved` | cache key | evidence names another image | UNRESOLVED DEEP_IMAGE_CHANGED | pass |
+| `test_escalated_package_with_an_unexplored_trigger_is_unresolved_until_the_frontier_exists` | frontier rule | `if os.getenv(...)` gates a connect | UNRESOLVED DEEP_TRIGGERS_UNEXPLORED, trigger listed | pass |
+| `test_a_violation_wins_over_an_unexplored_trigger` | Q8 order | trigger + probe recording | REJECTED | pass |
+| `test_trigger_gating_only_unrestricted_sinks_is_not_high_risk` | trigger rule | `*`, scoped, none | [], listed, listed | pass |
+| `test_baseline_is_recorded_once_and_reused` | D2 | two analyzers | one baseline run, file with the identity | pass |
+| `test_baseline_unavailable_is_unresolved`, `test_a_baseline_that_is_not_clean_is_refused_…`, `test_a_stored_baseline_of_another_identity_or_not_clean_is_refused` | D2 + Maryam's rule | failed run; probe as baseline; edited file | BASELINE_UNAVAILABLE / BASELINE_NOT_CLEAN / BASELINE_IDENTITY_MISMATCH; nothing stored | pass |
+| `test_run_wide_cap_leaves_the_remaining_packages_unresolved` | 300 s cap | 4 packages, 100 s each | 4th DEEP_RUN_BUDGET_USED_UP, not run | pass |
+| `test_package_deadline_is_cut_to_what_is_left` | budget | 140 s runs | deadlines 20, 20, then 18 | pass |
+| `test_package_over_its_budget_is_unresolved_by_the_deep_stage` | 120 s | 121 s run | UNRESOLVED DEEP_BUDGET_EXCEEDED | pass |
+| `test_identity_changes_with_image_harness_profile_and_budget` | cache key | each part changed | identity differs | pass |
+| `test_a_new_image_is_a_cache_miss` | cache key | same package, new image | hit, then miss | fail, then pass (see defects) |
+| `test_non_escalated_packages_never_reach_the_deep_stage` | escalated only | clean demo | no observe, no baseline, verdict as `deep=None` | pass |
+| `test_no_docker_or_no_image_keeps_todays_behaviour` | D7 | ENGINE_UNAVAILABLE, IMAGE_MISSING, IMAGE_ID_MISMATCH | no analyzer; escalation string; same `analyzer_version` | pass |
+| `test_the_gate_default_is_the_sandbox_and_it_turns_itself_off_without_an_image` | D7 | SETTINGS | `deep == "sandbox"` | pass |
+| `test_gate_row_report_json_and_text_carry_the_deep_result` | FR-15 | `asent gate`, probe recording | exit 1, row `deep`, `deep_stage` on, one report line in `render` | pass |
+| `test_gate_without_an_image_has_no_deep_row_and_no_report_line` | D7 | `asent gate`, IMAGE_MISSING | UNRESOLVED escalation, `deep: None`, no line | pass |
+| `test_report_text_line_for_each_deep_result` | report | VERIFIED, REJECTED, none | two exact lines | pass |
+| `test_demo_wheel_on_the_real_sandbox[benign]` (Docker) | demo | escalated, nothing at import | VERIFIED DEEP_RUN_CLEAN, 0 judged events | pass |
+| `test_demo_wheel_on_the_real_sandbox[aws]` (Docker) | demo | reads `~/.aws/credentials` | REJECTED; SECRET_READ openat `/tmp/home/.aws/credentials` ENOENT | pass |
+| `test_demo_wheel_on_the_real_sandbox[connect]` (Docker) | demo | connect 198.51.100.24:443 | REJECTED; NETWORK_CONNECT ENETUNREACH | pass |
+| `test_demo_wheel_on_the_real_sandbox[shell]` (Docker) | demo | `subprocess.run(['/bin/sh', …])` | REJECTED; PROCESS_EXEC `/bin/sh` | pass |
+| `test_demo_wheel_on_the_real_sandbox[env_trigger]` (Docker) | demo | connect behind `os.getenv` | UNRESOLVED DEEP_TRIGGERS_UNEXPLORED | pass |
+| `test_asent_gate_end_to_end_on_the_real_sandbox[aws / benign]` (Docker) | end to end | `asent gate` | BLOCK exit 1 / ACCEPT exit 0, one report line each | pass |
+
+Measured on the real sandbox (one run each, fresh data directory): every demo verdict took 4.0–4.5 s
+including the baseline run; the container run itself 2.8–3.2 s.
+
+No existing result changed (gate tests replace `SETTINGS` without a `deep` key; demo runs keep `deep=None`).
+Run before the commit: `CAVR_DOCKER=1 pytest tests/test_cavr_*.py tests/test_orchestrator_config.py tests/test_gate_*.py
+tests/test_cli_gate.py tests/test_cli_report.py`: 1923 passed, 12 skipped (live), 577 s.
+
+### Real projects (D7)
+
+`asent gate --head main` on each target with the image `sha256:0e88dd461ca4…` built, a fresh data directory each run;
+before = commit `d4dec7e` (no deep stage), after = PR 9.
+
+| Project | Before: decision, CAVR / SATRA / SABLE, time | After: decision, modules, time | Deep stage after |
+|---|---|---|---|
+| asent-target-flask (main) | ACCEPT exit 0; pass / pass / pass; 133.3 s | ACCEPT exit 0; pass / pass / pass; 147.8 s | on (IMAGE_OK), no package reached it |
+| asent-target-invoicehub (main) | ACCEPT exit 0; pass / pass / pass; 36.5 s | ACCEPT exit 0; pass / pass / pass; 37.2 s | on (IMAGE_OK), no package reached it |
+
+No verdict changed. CAVR's own result is the same text in both: Flask "requirements.txt: no requirement was added or
+changed" (verify `changed`, base = head = main, so nothing was verified); InvoiceHub "1 requested packages
+verified: pypdf==6.21.4" (VERIFIED by the fast gate, not escalated). So neither project exercised the deep stage;
+the five demo wheels did. The Flask time difference (+14.5 s) is within the spread of identical runs on this machine
+(the same pre-PR 9 code took 168.3 s in an earlier run today; the post-PR 9 code 143.3 s in another).
+
+### Defects found and fixed
+
+- `test_a_new_image_is_a_cache_miss` first failed: the fake baseline run named the first image, and the analyzer
+  refused it for the second image (correct behaviour); the test now records the baseline on the second image.
+- Review: one cavr-reviewer pass over PRs 7-9 at the end of Phase 2b (outcome under "Review of steps M2-12 to M2-14").
+
+### Known limitations / deferred
+
+- One run, baseline environment only; the project's call sites are not executed; counterfactual runs (env, file,
+  time, hostname) are Phase 3, so a package with a high-risk trigger is UNRESOLVED until PR 12.
+- The demo project's label scopes make any file read or write by an escalated package UNRESOLVED (D5); mapping labels
+  to paths is future work.
+- Dashboard display of the deep result is Phase 5 (PR 19).
+- p50/p95 of deep time across packages (NFR-4 metrics) are not yet in `pipeline.metrics`; each package's time is in
+  its evidence.
+- Neither real target project has an escalated package, so the real-project check shows only that nothing else changed.
+
+### Tool disclosure (Ch 8.7)
+
+- **Generated by Claude Code:** `sandbox_deep.py`, the gate adapter and report changes, the tests and these notes.
+  **Reviewed by Maryam:** Q8, D2, D6, D7, the budget, the demo wheel list, the real-project check.
+  **Verified by:** the runs above on Docker 29.9.3.
+
+### Supervisor Q&A prep
+
+1. **When is a deep VERIFIED given?** Only when the one run completed, its trace is complete, every event minus the
+   empty-harness baseline is within the contract, and no gated branch reaches an ungranted sink
+   (`test_clean_complete_run_without_triggers_is_verified`); it says it observed install + import only.
+2. **What if Docker is missing in CI?** `for_gate_run` returns no analyzer and the gate gives exactly the verdicts it
+   gave before (`test_no_docker_or_no_image_keeps_todays_behaviour`, `test_gate_without_an_image_…`).
+3. **Why is the env-trigger wheel UNRESOLVED and not VERIFIED, though its run was clean?** Its import never took the
+   `os.getenv` branch, so the sink behind it was never observed; until Phase 3 explores it, Q8 says incomplete.

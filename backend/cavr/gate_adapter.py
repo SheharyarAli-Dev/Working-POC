@@ -23,8 +23,12 @@ else VERIFIED. A dependency manifest the pipeline cannot read (pyproject depende
 Pipenv, setup.py, npm) is UNRESOLVED: those dependencies would otherwise pass unseen.
 
 `SETTINGS` replaces the outside world in tests (PyPI transport, OSV); None means the pipeline's
-own default (live PyPI, live OSV). `repair` (default True) turns the repair proposal on or off. `deep` is the deep analyzer for escalated packages (PR 2 of
-docs/cavr-m2-plan.md); None, the default until the sandbox exists, means no deep stage.
+own default (live PyPI, live OSV). `repair` (default True) turns the repair proposal on or off. `deep` is the deep
+analyzer for escalated packages (PR 2 of docs/cavr-m2-plan.md): "sandbox" (the default, PR 9) makes one
+`sandbox_deep.SandboxDeepAnalyzer` for this gate run when the CAVR sandbox image passes its identity check, and
+none otherwise (no Docker, no image, a mismatch: the escalated package stays UNRESOLVED, as before); None means no
+deep stage; any other value is used as the analyzer. `details["deep_stage"]` says which, and each row's `deep` is the
+package's deep result (status, rule, reason, image ID, trace and baseline SHA-256, key events), or None.
 A `settings` argument is used instead of `SETTINGS` when given.
 
 Each package row carries what the orchestrator's assurance report reads: `sha256`, `artifact` (the
@@ -58,7 +62,8 @@ from backend.cavr.repair_proposal import BUDGET_SECONDS, no_repair, not_attempte
 from backend.cavr.storage import CavrStorage
 from backend.cavr.verdict_cache import KEY_FIELDS
 
-SETTINGS = {"transport": None, "osv": None, "advisory_cache_dir": None, "live_advisories": True, "deep": None, "repair": True}
+SETTINGS = {"transport": None, "osv": None, "advisory_cache_dir": None, "live_advisories": True, "deep": "sandbox",
+            "repair": True}
 STATUS_MAP = {"VERIFIED": "VERIFIED", "REJECTED": "REJECTED", "BLOCK": "REJECTED"}
 UNSUPPORTED_MANIFESTS = ("poetry.lock", "uv.lock", "Pipfile", "Pipfile.lock", "setup.py", "setup.cfg", "package.json",
                          "package-lock.json", "yarn.lock", "pnpm-lock.yaml")
@@ -67,6 +72,12 @@ REPAIR_RUN_SECONDS = 120.0
 RUN_BUDGET_USED_UP = "repair budget for this run used up"
 CLOCK = time.monotonic
 BOUNDED = "M1 fast gate: artifact hash, dependency tree, advisories, capability contract and AST sink scan; no deep runtime analysis (M2)"
+BOUNDED_DEEP = ("fast gate (artifact hash, dependency tree, advisories, capability contract, AST sink scan) and, for "
+                "escalated packages, one observed install + import run in the CAVR sandbox; the project's call sites are "
+                "not executed and gated branches are not explored (Phase 3)")
+DEEP_ROW = ("status", "rule", "reason", "elapsed_seconds")
+DEEP_EVIDENCE = ("image_id", "trace_sha256", "trace_lines", "trace_check", "run_rule", "key_events", "unexplored_triggers",
+                 "claim", "not_exercised")
 
 
 def map_status(status) -> str:
@@ -102,6 +113,27 @@ def _row_contract(contract: dict) -> dict:
     required = [f"{entry['capability']}({entry['scope']})" for entry in contract.get("allowed") or []
                 if entry.get("status") == "REQUIRED"]
     return {**contract, "required": required, "confidence": contract.get("rule")}
+
+
+def _deep_row(evidence: dict):
+    """The package's deep result for the report, or None when the deep stage did not run for it."""
+    deep = evidence.get("deep")
+    if not isinstance(deep, dict):
+        return None
+    inner = deep.get("evidence") or {}
+    row = {key: deep.get(key) for key in DEEP_ROW}
+    row.update({key: inner.get(key) for key in DEEP_EVIDENCE})
+    row["baseline_sha256"] = (inner.get("baseline") or {}).get("sha256")
+    return row
+
+
+def _deep_analyzer(settings, data_root):
+    """(analyzer or None, details["deep_stage"] or None)."""
+    deep = settings.get("deep")
+    if deep != "sandbox":
+        return deep, None
+    from backend.cavr.sandbox_deep import for_gate_run
+    return for_gate_run(data_root)
 
 
 def _repair(verdict, package, project, policy, requirements_file, data_root, context, settings, spent):
@@ -154,6 +186,7 @@ def analyze_pipeline(context, store, outdir, emit, settings=None):
     project = Path(context.path)
     pipeline, nodes = [], []
     repair_spent = [0.0]   # seconds spent in repair in this run, against REPAIR_RUN_SECONDS
+    deep, deep_stage = _deep_analyzer(settings, data_root)  # one per gate run: its 300 s cap is this run's
     for name in present:
         if cavr.verify == "changed":
             before, after = snapshot_requirements(Path(context.baseline) / name), snapshot_requirements(project / name)
@@ -169,7 +202,7 @@ def analyze_pipeline(context, store, outdir, emit, settings=None):
                                  quarantine_dir=data_root / "quarantine",
                                  advisory_cache_dir=settings.get("advisory_cache_dir") or data_root / "advisories",
                                  live_advisories=settings.get("live_advisories", True), knowledge=context.knowledge,
-                                 deep=settings.get("deep"))
+                                 deep=deep)
         entry = {"file": name, "request": shown, "status": verdict.get("status"), "mapped": map_status(verdict.get("status")),
                  "stage": verdict.get("stage"), "rule": verdict.get("rule"), "reason": verdict.get("reason"),
                  "policy_version": verdict.get("policy_version"), "analyzer_version": verdict.get("analyzer_version"),
@@ -189,6 +222,7 @@ def analyze_pipeline(context, store, outdir, emit, settings=None):
                                   for n in tree.get("nodes") or []],
                    "advisories": [{key: advisory.get(key) for key in ADVISORY_FIELDS} for advisory in evidence.get("advisories") or []],
                    "contract": _row_contract(evidence.get("contract") or {}),
+                   "deep": _deep_row(evidence),
                    "repair": None}
             if package.get("status") == "REJECTED" and settings.get("repair", True):
                 row["repair"] = _repair(verdict, package, project, policy, name, data_root, context, settings, repair_spent)
@@ -203,5 +237,5 @@ def analyze_pipeline(context, store, outdir, emit, settings=None):
         status = "UNRESOLVED"
     reasons = [f"{e['file']}: {e['status']} {e['rule']}: {e['reason']}" for e in pipeline if e["mapped"] != "VERIFIED"] + problems
     reason = "; ".join(reasons) if reasons else "; ".join(f"{e['file']}: {e['reason']}" for e in pipeline)
-    status, details = _result(status, reason, pipeline, nodes)
-    return status, details, reasons + [BOUNDED]
+    status, details = _result(status, reason, pipeline, nodes, {"deep_stage": deep_stage} if deep_stage else None)
+    return status, details, reasons + [BOUNDED_DEEP if deep is not None else BOUNDED]

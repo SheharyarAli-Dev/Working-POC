@@ -48,6 +48,7 @@ def render(report: dict, path: Path) -> str:
     for module, row in (report.get("modules") or {}).items():
         reason = " ".join(str(row.get("reason") or "").split())
         lines.append(f"  {module:<6} {row.get('result')!s:<40} {reason[:160]}")
+    lines += cavr_deep(report)
     repairs = cavr_repairs(report)
     if repairs:
         lines += ["", "CAVR repair proposals (not applied; for a person to approve):"] + repairs
@@ -55,6 +56,40 @@ def render(report: dict, path: Path) -> str:
     lines += [f"  config problem: {problem}" for problem in config.get("problems") or []]
     lines += ["", f"Report: {path}"]
     return "\n".join(lines) + "\n"
+
+
+def _cavr_packages(report: dict):
+    """(requirements entry, package row) of every package in the CAVR evidence record the CAVR module row names."""
+    row = (report.get("modules") or {}).get("CAVR") or {}
+    records = ((report.get("assurance") or {}).get("evidence")) or []
+    record = next((r for r in records if isinstance(r, dict) and r.get("evidence_id") == row.get("evidence_id")), None)
+    for entry in ((record or {}).get("details") or {}).get("pipeline") or []:
+        for package in entry.get("packages") or []:
+            yield entry, package
+
+
+def cavr_deep(report: dict) -> list[str]:
+    """One line per package that had a CAVR deep result (docs/cavr-m2-plan.md PR 9): verdict, rule, first key event.
+
+    Display only, read from the CAVR evidence record; a report without deep results gives no lines.
+    """
+    lines = []
+    for _, package in _cavr_packages(report):
+        deep = package.get("deep")
+        if not isinstance(deep, dict):
+            continue
+        line = f"  CAVR deep: {package.get('name')}=={package.get('version')} {deep.get('status')} {deep.get('rule')}"
+        key = (deep.get("key_events") or [None])[0]
+        if isinstance(key, dict):
+            address = key.get("address") or {}
+            target = key.get("path") or (f"{address.get('host')}:{address.get('port')}" if address.get("host")
+                                         else address.get("path")) or " ".join((key.get("argv") or [])[:3])
+            line += f" - {key.get('capability') or key.get('rule')} {key.get('syscall')} {target} = " \
+                    f"{'ok' if key.get('ok') else key.get('errno')}"
+        elif deep.get("status") == "VERIFIED":
+            line += " (install + import observed; nothing outside the contract)"
+        lines.append(line)
+    return lines
 
 
 def cavr_repairs(report: dict) -> list[str]:
