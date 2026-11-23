@@ -21,6 +21,10 @@ OK is returned from one place, after the bytes on disk have been hashed. The fil
 opened as a zip, imported or executed here. A REJECTED file is kept for evidence with
 ".rejected" added to its name, so that nothing later can pick it up as a wheel.
 
+For the repair search (`repair_proposal`) two reads that download nothing: `fetch_releases(name)`
+lists every release of a package (yanked, has a wheel) from `pypi.org/pypi/<name>/json`, and
+`release_wheel(name, version)` names the wheel `fetch_artifact` would take and its registry SHA-256.
+
 The HTTP transport is injectable: any object with `stream(url)` that yields the body as
 chunks of bytes and raises `TransportError` on failure. Tests pass one that reads local files.
 """
@@ -207,6 +211,115 @@ def select_wheel(entries: list[dict], name: str, version: str, supported_tags=No
         return None, ("NO_COMPATIBLE_WHEEL",
                       f"no wheel of {name} {version} fits this interpreter: {sorted(w[1] for w in wheels)}")
     return compatible[0][2], None
+
+
+def project_url(name: str) -> str:
+    """The registry's JSON for every release of `name` (`releases`: version -> files)."""
+    return f"https://{REGISTRY_HOST}/pypi/{quote(name, safe='')}/json"
+
+
+def fetch_releases(name, transport=None, deadline_seconds: float = DEADLINE_SECONDS) -> dict:
+    """Every release the registry lists for `name`, for the repair search (`repair_proposal`). Nothing is downloaded.
+
+    OK `RELEASES_READ` with `releases`: one entry per listed version, sorted, each with `version` (as listed),
+    `parsed` (a Version, None when it is not one), `yanked` (True unless every file is marked `yanked: false`),
+    `yanked_reason`, `has_wheel` (a wheel file not marked yanked) and `files` (the file names). Otherwise
+    UNRESOLVED: INVALID_REQUEST, PROJECT_NOT_FOUND (404), REGISTRY_UNAVAILABLE or REGISTRY_INVALID.
+    `response_sha256` is the SHA-256 of the bytes received.
+    """
+    fields = {"name": name if isinstance(name, str) else None, "url": None, "response_sha256": None, "releases": []}
+
+    def result(outcome, rule, reason):
+        return {"result": outcome, "rule": rule, "reason": reason, **fields}
+
+    if not isinstance(name, str) or not NAME.fullmatch(name):
+        return result("UNRESOLVED", "INVALID_REQUEST", f"not a package name: {name!r}")
+    name = canonicalize_name(name)
+    fields.update(name=name, url=project_url(name))
+    try:
+        body = _read_capped(transport or HttpxTransport(), fields["url"], MAX_REGISTRY_BYTES, deadline_seconds)
+    except _TooLarge:
+        return result("UNRESOLVED", "REGISTRY_INVALID", f"registry response is larger than {MAX_REGISTRY_BYTES} bytes")
+    except TransportError as exc:
+        if exc.status == 404:
+            return result("UNRESOLVED", "PROJECT_NOT_FOUND", f"PyPI has no project {name}")
+        return result("UNRESOLVED", "REGISTRY_UNAVAILABLE", f"cannot read the registry: {exc}")
+    except OSError as exc:
+        return result("UNRESOLVED", "REGISTRY_UNAVAILABLE", f"cannot read the registry: {exc}")
+    fields["response_sha256"] = hashlib.sha256(body).hexdigest()
+    try:
+        project = json.loads(body.decode("utf-8"))
+    except (ValueError, RecursionError) as exc:
+        return result("UNRESOLVED", "REGISTRY_INVALID", f"registry response is not JSON: {exc}")
+    info = project.get("info") if isinstance(project, dict) else None
+    releases = project.get("releases") if isinstance(project, dict) else None
+    if not isinstance(info, dict) or not isinstance(releases, dict):
+        return result("UNRESOLVED", "REGISTRY_INVALID", "registry response has no info object and releases mapping")
+    if not isinstance(info.get("name"), str) or canonicalize_name(info["name"]) != name:
+        return result("UNRESOLVED", "REGISTRY_INVALID", f"registry response is for another package: {info.get('name')!r}")
+    listed = []
+    for version, files in releases.items():
+        if not isinstance(files, list) or not all(isinstance(entry, dict) for entry in files):
+            return result("UNRESOLVED", "REGISTRY_INVALID", f"release {version!r} does not list its files as objects")
+        try:
+            parsed = Version(version)
+        except InvalidVersion:
+            parsed = None
+        yanked = not files or any(entry.get("yanked") is not False for entry in files)
+        reasons = sorted({str(entry.get("yanked_reason")) for entry in files if entry.get("yanked") is not False})
+        wheel = any((entry.get("packagetype") == "bdist_wheel" or str(entry.get("filename", "")).endswith(".whl"))
+                    and entry.get("yanked") is False for entry in files)
+        listed.append({"version": version, "parsed": parsed, "yanked": yanked,
+                       "yanked_reason": ", ".join(reasons) if reasons else ("no files" if not files else None),
+                       "has_wheel": wheel, "files": [entry.get("filename") for entry in files]})
+    fields["releases"] = sorted(listed, key=lambda item: (item["parsed"] is None, item["parsed"] or Version("0"), item["version"]))
+    return result("OK", "RELEASES_READ", f"{len(listed)} releases of {name} listed by the registry")
+
+
+def release_wheel(name, version, transport=None, supported_tags=None, deadline_seconds: float = DEADLINE_SECONDS) -> dict:
+    """The wheel `fetch_artifact` would download for `name==version` and its registry SHA-256, without downloading it.
+
+    Same rules as the first two steps of `fetch_artifact` (registry JSON, yanked, wheel choice, digest). OK
+    `WHEEL_LISTED` with `filename` and `sha256`; otherwise UNRESOLVED with that function's rule.
+    """
+    fields = {"name": name, "version": version, "filename": None, "sha256": None}
+
+    def result(outcome, rule, reason):
+        return {"result": outcome, "rule": rule, "reason": reason, **fields}
+
+    problem = request_problem(name, version)
+    if problem:
+        return result("UNRESOLVED", "INVALID_REQUEST", problem)
+    name, version = canonicalize_name(name), version.strip()
+    fields.update(name=name, version=version)
+    try:
+        body = _read_capped(transport or HttpxTransport(), registry_url(name, version), MAX_REGISTRY_BYTES, deadline_seconds)
+    except _TooLarge:
+        return result("UNRESOLVED", "REGISTRY_INVALID", f"registry response is larger than {MAX_REGISTRY_BYTES} bytes")
+    except TransportError as exc:
+        if exc.status == 404:
+            return result("UNRESOLVED", "RELEASE_NOT_FOUND", f"PyPI has no release {name} {version}")
+        return result("UNRESOLVED", "REGISTRY_UNAVAILABLE", f"cannot read the registry: {exc}")
+    except OSError as exc:
+        return result("UNRESOLVED", "REGISTRY_UNAVAILABLE", f"cannot read the registry: {exc}")
+    release, problem = _parse_release(body, name, version)
+    if problem:
+        return result("UNRESOLVED", "REGISTRY_INVALID", problem)
+    if release["info"].get("yanked") is not False:
+        return result("UNRESOLVED", "YANKED", f"release {name} {version} is yanked: {release['info'].get('yanked_reason')}")
+    entry, problem = select_wheel(release["urls"], name, version, supported_tags)
+    if problem:
+        return result("UNRESOLVED", problem[0], problem[1])
+    fields["filename"] = entry["filename"]
+    if entry.get("yanked") is not False:
+        return result("UNRESOLVED", "YANKED", f"file {entry['filename']} is yanked: {entry.get('yanked_reason')}")
+    digests = entry.get("digests")
+    expected = digests.get("sha256") if isinstance(digests, dict) else None
+    expected = expected.lower() if isinstance(expected, str) else ""
+    if not SHA256.match(expected):
+        return result("UNRESOLVED", "REGISTRY_DIGEST_MISSING", f"no well-formed sha256 for {entry['filename']}")
+    fields["sha256"] = expected
+    return result("OK", "WHEEL_LISTED", f"{entry['filename']} is listed with sha256 {expected}")
 
 
 # --- internals ---------------------------------------------------------------

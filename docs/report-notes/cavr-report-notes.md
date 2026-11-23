@@ -3854,3 +3854,139 @@ without Docker.
    (`test_an_unpinned_source_is_still_refused_without_docker`).
 3. **How do you know the new file is still inert?** Same imports and calls, 0 sinks in the CAVR scan, and an
    the same audit-event types and counts as the approved file on the same host fallback.
+
+## Step M2-3 — Repair proposal from real releases, re-verified with `verify_request` (2026-11-23)
+
+PR 15 and the fast-gate part of PR 16 of `docs/cavr-m2-plan.md` (fast-first item 2). Decisions Q9, Q10, Q12 applied;
+no sandbox. Owner additions of 2026-11-23: symlinks in the copy, lockfile dependents, the major-version limitation,
+the 24-hour limit on the package-wide OSV answer.
+
+### Ch 6 Implementation
+
+- New `backend/cavr/repair_proposal.py`. `propose_repair(verdict, package, project_dir=, policy=, requirements_file=,
+  …)` returns one block (`schema: cavr.repair.v1`): `result` PROPOSED / NO_REPAIR_FOUND / NOT_ATTEMPTED, `pin`,
+  `removal`, `removal_reason`, `candidates_tried`, `excluded`, `not_tried`, `budget`, `registry`, `advisory_screen`,
+  `project_copy`, `limitations`, and always `applied: false`, `gate_decision_changed: false`. Any exception gives
+  NO_REPAIR_FOUND / `INTERNAL_ERROR`. `copy_project` copies without following links; `_ProjectFiles` makes the
+  requirements / lockfile patches in the copy and restores them after each re-check; `_policy_for_pin` makes the
+  patched policy.
+- `backend/cavr/pypi_client.py`: `project_url`, `fetch_releases` (every release from `pypi.org/pypi/<name>/json`:
+  yanked, has a wheel; SHA-256 of the bytes received) and `release_wheel` (the wheel `fetch_artifact` would take and
+  its registry SHA-256, without downloading). Both reuse `_read_capped`, `_parse_release`, `select_wheel`.
+- `backend/cavr/advisories.py`: `package_query`, `package_cache_path`, `package_advisories` (OSV's package-wide
+  answer, dated and digest-checked cache in the adapter's format, stale after 24 hours, `now` injectable).
+- `backend/cavr/gate_adapter.py`: every package row has `repair` (None unless REJECTED); `SETTINGS["repair"]`
+  (default True); `_repair` wraps the call once more, so a failure is NO_REPAIR_FOUND. Status, reasons and events
+  are computed as before. The block reaches `asent-report.json` through the CAVR evidence.
+
+Key algorithm: REJECTED by an advisory or `HASH_MISMATCH` -> copy the project (links not followed; the copy must
+read like the project: same result, rule and sources digest) -> releases newer than the rejected one, minus
+pre-releases, yanked and wheel-less -> minus releases affected by any advisory of the package-wide OSV answer ->
+same major first, smallest upgrade first -> for at most 5 candidates within 60 s: patch requirements line, lockfile
+entry (registry SHA-256) and `approved_requirements` in the copy, `verify_request` with the patched policy, a fresh
+quarantine and no store -> the first VERIFIED, not escalated re-check whose wheel has the registry digest is the
+pin. Removal separately: only when the project never imports it and nothing depends on it.
+
+### Design decisions
+
+- **Package-wide OSV screen before the budget** (alternative: only the rejected version's advisories, or one OSV
+  query per release). 5.1.0's own 97 advisories leave 6.19.0–6.21.3 looking clean, which uses up 5 candidates and
+  gives no repair; one query per release is ~60 queries. The screen only filters; each candidate's own
+  `verify_request` is the judgement. It is implemented in CAVR because `backend/integrations/osv_adapter.py` only
+  asks per version (not edited).
+- **Re-check through `verify_request` on a copy** (alternative: re-run selected checks): the proposed policy and
+  lockfile go through the requirement gate like any request, and the re-check is the same code as a real verdict.
+  The request is the requirements edit (original file -> patched file), so the patch text itself is checked.
+- **`store=None` for re-checks**: they are not in the verdict log (metrics stay about real requests) and cannot
+  read or write the verdict cache.
+- **Copy must read like the project** (owner: skip links that point outside). Skipping an outside `.py` link would
+  make the copy read better than the project (`context_extractor` reports such a link as not read), so the
+  re-check would be about another project: `COPY_DIFFERS`, no repair. Links inside the project are recreated as
+  relative links, never followed.
+- **Policy patch is minimal**: no change when an entry already approves the candidate (e.g. `pypdf>=5,<7`);
+  otherwise the exact `name==old` pin is replaced by `name==new`, or `name==new` is added.
+- **Removal needs proof of no dependents** (owner): another package of the verdict with it in its tree, or a
+  lockfile edge pointing to it, blocks removal; a lockfile that locks other packages but has no `edges`, or no
+  lockfile, cannot rule a dependent out, so no removal. Never for a hash mismatch (import names untrusted).
+- **Upgrades only** (alternative: also downgrades): an older release is a step back in fixes; listed as a limitation.
+- **Budget between candidates**: a running `verify_request` is not interrupted (its downloads have their own
+  deadlines); stated in every block.
+
+### Requirements covered
+
+| ID | Acceptance check |
+|---|---|
+| FR-7 | Nearest safe release proposed from real data: `test_6_19_0_proposes_6_21_4`, `test_5_1_0_proposes_6_21_4_with_the_major_version_limitation` |
+| FR-8 (fast part) | Each candidate re-verified by `verify_request` under the proposed policy: `recheck` VERIFIED, `test_tampered_candidate_is_skipped`, `test_candidate_without_an_osv_answer_is_skipped`, `test_escalated_candidate_is_skipped` |
+| FR-6 | Fail closed: `test_exception_inside_repair_gives_no_repair_found`, `test_exception_in_the_gate_wiring_keeps_the_verdict`, `test_copy_that_reads_differently_from_the_project_gives_no_repair_found`, `test_package_wide_osv_answer_is_stale_after_24_hours` |
+| Q9 | Proposal only: `test_repair_never_writes_the_project`, `test_gate_decision_is_unchanged_with_or_without_a_proposal` |
+
+### Ch 7 Test cases
+
+`tests/test_cavr_repair.py` (recorded pypdf data of 2026-11-23 for the real cases; synthetic `demo` wheels and
+SYNTH- advisories otherwise).
+
+| Test ID | Purpose | Input | Expected | Result |
+|---|---|---|---|---|
+| `test_6_19_0_proposes_6_21_4` | real case | pypdf 6.19.0, recorded releases + OSV | pin 6.21.4, re-check VERIFIED, 6.20.0–6.21.3 excluded, 7.x not tried | pass |
+| `test_5_1_0_proposes_6_21_4_with_the_major_version_limitation` | real case, major change | pypdf 5.1.0 (real wheel) | pin 6.21.4, policy pin moved, limitation "major version change (5 -> 6)…" | pass |
+| `test_tampered_candidate_is_skipped` | tampered | demo 1.1 bytes flipped | 1.1 SKIPPED `HASH_MISMATCH`, 1.2 proposed | pass |
+| `test_yanked_version_is_skipped` | yanked | demo 1.1 yanked | excluded `YANKED`, 1.2 proposed | pass |
+| `test_release_without_a_wheel_is_excluded` | sdist only | demo 1.1 sdist | excluded `NO_WHEEL` | pass |
+| `test_candidate_without_an_osv_answer_is_skipped` | no OSV | no answer for 1.1 | 1.1 SKIPPED `ADVISORIES_UNAVAILABLE` | pass |
+| `test_escalated_candidate_is_skipped` | escalated | 1.1 re-check escalated | 1.1 SKIPPED, 1.2 proposed | pass |
+| `test_no_safe_version_gives_no_repair_found` | none safe | advisory without fix | NO_REPAIR_FOUND `NO_SAFE_CANDIDATE`, package still REJECTED | pass |
+| `test_unused_package_gets_a_removal` | removal | project never imports demo | removal diff, lockfile entry removed, re-check `NOTHING_TO_VERIFY` | pass |
+| `test_used_package_never_gets_a_removal` | no removal | demo imported | removal None, reason names `app/uses_demo.py` | pass |
+| `test_removal_is_not_proposed_when_a_locked_package_depends_on_it` | owner addition | edge other-tool -> Demo | removal None | pass |
+| `test_removal_is_not_proposed_when_the_lockfile_records_no_dependencies` | cannot tell | lockfile without edges | removal None | pass |
+| `test_hash_mismatch_is_repaired_but_never_removed` | hash case | demo 1.0 tampered | attempted, removal None | pass |
+| `test_repair_never_writes_the_project` | Q9 | every file, link and mtime | unchanged; policy and verdict unchanged | pass |
+| `test_recheck_is_neither_logged_nor_cached` | isolation | verdict log, cache rows | unchanged | pass |
+| `test_exception_inside_repair_gives_no_repair_found` | fail closed | `fetch_releases` raises | NO_REPAIR_FOUND `INTERNAL_ERROR` | pass |
+| `test_budget_limits_the_number_of_candidates` | budget | 7 candidates, all UNRESOLVED | 5 tried, `stopped_by: candidates` | pass |
+| `test_budget_limits_the_time` | budget | fake clock +40 s per read, 60 s | `stopped_by: time`, < 3 tried | pass |
+| `test_package_wide_osv_answer_is_stale_after_24_hours` | owner addition | fake clock +25 h / +23 h | `ADVISORIES_STALE` / PROPOSED | pass |
+| `test_policy_range_that_already_covers_the_candidate_needs_no_policy_change` | policy | `demo>=1,<3` | `changed: false` | pass |
+| `test_package_that_is_not_rejected_is_not_repaired` | eligibility | VERIFIED pypdf 6.21.4 | NOT_ATTEMPTED, registry not asked | pass |
+| `test_symlink_to_a_file_outside_the_project_is_not_copied` | owner addition | `notes.txt` -> outside file; in-project link | outside link skipped, inside kept, outside file and project unchanged | pass |
+| `test_copy_that_reads_differently_from_the_project_gives_no_repair_found` | fail closed | `.py` link out of the project | NO_REPAIR_FOUND `COPY_DIFFERS` | pass |
+| `test_gate_decision_is_unchanged_with_or_without_a_proposal` | gate | REJECTED 6.19.0, repair on / off | same status, reasons, row status, events; proposal 6.21.4 only when on | pass |
+| `test_gate_row_of_a_verified_package_has_no_repair` | gate | VERIFIED | `repair: null` | pass |
+| `test_exception_in_the_gate_wiring_keeps_the_verdict` | gate fail closed | `propose_repair` raises | REJECTED, NO_REPAIR_FOUND | pass |
+| `test_cavr_live.py::test_live_repair_for_pypdf_6_19_0` | live (`CAVR_LIVE=1`) | real PyPI + OSV | newer pin, re-check VERIFIED, digest = registry, project unchanged | pass (10 s) |
+
+`tests/test_cavr_repair.py`: 26 passed. Before the commit (CAVR, orchestrator, integration, `test_modules.py`; no
+pytest-xdist, run serially): 1483 passed, 11 skipped (live). Baseline of the same set before the step: 1457 passed,
+10 skipped; no earlier result changed.
+
+### Defects found and fixed
+
+- First run of the new tests: 1 failure, the removal reason said "(imports)"; reworded to "imported at file:line".
+- While writing the symlink test: a directory link inside the project makes `context_extractor` report the
+  project as not fully read, so the in-project link in the test is a non-`.py` file link.
+- Review: the one cavr-reviewer pass runs after step M2-5 (owner's order); its outcome is recorded there.
+
+### Known limitations / deferred
+
+- Project tests are not run on the proposal (Q10, waiting for Sheharyar / SATRA's image builder API): in every block.
+- No sandbox or deep analysis on the re-check: an escalated candidate is skipped (Phase 2).
+- No resolver: a candidate whose new dependencies are not in the lockfile is UNRESOLVED and skipped.
+- No downgrades, no pre-releases, no replacement package (level 4 is future work, Q3); no transitive (level 2) repair.
+- `_repair` (orchestrator) and `repair.rank_repairs` stay until PR 12 (owner decision 2026-11-23): the
+  `cross_module` LOCAL-lab demo still uses them.
+
+### Tool disclosure (Ch 8.7)
+
+- **Generated by Claude Code:** `repair_proposal.py`, the `pypi_client` / `advisories` additions, the gate wiring,
+  the tests, the recorded data (fetched from pypi.org and api.osv.dev on 2026-11-23, stored unchanged) and these
+  notes. **Reviewed by Maryam:** the plan, the test list and the four additions; the diff not yet. **Verified by:**
+  the runs above and the live test.
+
+### Supervisor Q&A prep
+
+1. **Can repair turn a REJECTED into a pass?** No. The block is extra data on the row; status, reasons and the gate
+   decision are computed before and without it (`test_gate_decision_is_unchanged_with_or_without_a_proposal`).
+2. **Why trust the proposed version?** It went through the same `verify_request` as any request, under the proposed
+   policy and lockfile: real wheel hashed against the registry, tree, OSV for that version, contract, AST scan.
+3. **Why is 7.x not proposed for 6.19.0?** Same major first: 6.21.4 is a smaller change; 7.x is listed under `not_tried`.

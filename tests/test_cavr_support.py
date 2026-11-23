@@ -13,9 +13,11 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from packaging.utils import canonicalize_name
+from packaging.version import Version
 
+from backend.cavr.advisories import package_cache_path, package_query
 from backend.cavr.pipeline import verify_request
-from backend.cavr.pypi_client import FILES_HOST, TransportError, registry_url
+from backend.cavr.pypi_client import FILES_HOST, TransportError, project_url, registry_url
 from backend.cavr.storage import CavrStorage
 from backend.orchestrator.hashing import digest
 
@@ -140,6 +142,11 @@ class FakeIndex:
         """The real pypdf 6.21.4 wheel, the VERIFIED demo pin."""
         return self.add("pypdf", PIN_VERSION, PIN_WHEEL, response=pin_registry_response())
 
+    def add_project(self, name, response):
+        """Serve `response` as the registry's whole-project JSON (`pypi.org/pypi/<name>/json`, every release)."""
+        self.routes[project_url(canonicalize_name(name))] = json.dumps(response).encode()
+        return response
+
     def downloads(self) -> list[str]:
         return [url for url in self.calls if FILES_HOST in url]
 
@@ -171,6 +178,24 @@ def write_osv_cache(cache_dir, name, version, vulns, age_days=0.0) -> Path:
     return path
 
 
+def write_package_osv_cache(cache_dir, name, vulns, age_hours=0.0) -> Path:
+    """Write a package-wide OSV answer (no version in the query) in the format `advisories.package_advisories` stores."""
+    query = package_query(name)
+    body = {"vulns": list(vulns), "pages": [{"vulns": list(vulns)}]}
+    value = {"query": query, "retrieved_at": (datetime.now(timezone.utc) - timedelta(hours=age_hours)).isoformat(),
+             "source": "https://api.osv.dev/v1/query", "response": body, "response_sha256": digest(body)}
+    path = package_cache_path(cache_dir, name)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(value))
+    return path
+
+
+def project_response(name, releases: dict) -> dict:
+    """A whole-project registry body: `releases` maps version -> list of `urls` entries (see `file_entry`)."""
+    latest = max(releases, key=Version) if releases else None
+    return {"info": {"name": name, "version": latest}, "releases": {version: list(files) for version, files in releases.items()}}
+
+
 def synthetic_advisory(advisory_id, name, introduced="0", fixed=None) -> dict:
     """A hand-written OSV advisory for `name`, affected from `introduced` up to (not including) `fixed`."""
     assert advisory_id.startswith("SYNTH-")
@@ -189,6 +214,21 @@ RECORDED_5_1_0 = recorded_vulns("osv-pypdf-5.1.0.json")
 # HISTORICAL SNAPSHOT (2026-10-10): OSV then knew no advisory for 6.19.0; it now lists 18. Only for tests of the
 # advisory logic itself; tests/conftest.py fails any test in which pypdf 6.19.0 comes out VERIFIED.
 HISTORICAL_6_19_0_2026_10_10 = recorded_vulns("osv-pypdf-6.19.0.json")
+# Repair (PR 15): every pypdf release (pypi.org/pypi/pypdf/json) and every pypdf advisory (OSV, no version), 2026-11-23.
+# The real pypdf 5.1.0 wheel and its registry JSON, recorded 2026-11-23 (sha256 equal to the registry digest).
+RECORDED_PYPDF_ALL = recorded_vulns("osv-pypdf-all-2026-11-23.json")
+V5_WHEEL = DATA / "pypdf-5.1.0-py3-none-any.whl"
+V5_SHA256 = "3bd4f503f4ebc58bae40d81e81a9176c400cbbac2ba2d877367595fb524dfdfc"
+
+
+def pypdf_project_response() -> dict:
+    """The recorded `pypi.org/pypi/pypdf/json` body (every release; retrieved 2026-11-23)."""
+    return json.loads((DATA / "pypi-pypdf-project-2026-11-23.json").read_text(encoding="utf-8"))["response"]
+
+
+def v5_registry_response() -> dict:
+    """The recorded `pypi.org/pypi/pypdf/5.1.0/json` body (retrieved 2026-11-23)."""
+    return json.loads((DATA / "pypi-pypdf-5.1.0.json").read_text(encoding="utf-8"))["response"]
 POLICY = {
     "project_task_description": "Invoice PDF text extraction",
     "allowed_scopes": ["FILE_READ:invoice_documents", "FILE_WRITE:scratch_tmp", "PROCESS_EXEC:none", "NETWORK_CONNECT:none"],
