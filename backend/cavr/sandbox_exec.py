@@ -22,6 +22,10 @@ above; it starts the package's processes as UID 10001 (`strace -u cavr`). The im
 from __future__ import annotations
 
 import re
+import secrets
+import subprocess
+import threading
+import time
 
 from backend.cavr.sandbox_image import ENGINE, SECCOMP_PROFILE
 
@@ -69,3 +73,154 @@ def docker_command(name: str, image_id: str, command, *, mounts=(), env=None, tm
             raise ValueError(f"environment variable {key!r} cannot be passed safely")
         cmd += ["--env", f"{key}={value}"]
     return cmd + [image_id, *command]
+
+
+# --- one run: deadline, kill, output caps, removal (PR 4) ------------------------------------------------------------------
+#
+# `run_container(cmd, name)` starts `docker run` and returns when the container is gone. The deadline is kept by the
+# host's clock, independent of output: two reader threads drain stdout and stderr into byte buffers while the main
+# thread waits. At the deadline, or when a stream passes its cap, the container is killed by name (`docker kill`),
+# the docker CLI process is killed and waited for, and the container is removed (`docker rm -f`). Whatever happened,
+# the `finally` removes the container by name and checks with `docker ps -a` that it is gone.
+#
+#     COMPLETED      the container exited by itself; `exit_code` is its exit code (strace's, i.e. the harness's)
+#     TIMEOUT        still running at the deadline; killed and removed
+#     OUTPUT_CAP     a stream passed its cap; killed and removed
+#     KILLED         exited with 137 (SIGKILL) that CAVR did not send: the memory limit or another kill
+#     ENGINE_ERROR   docker could not be started, or `docker run` itself failed (exit 125, 126, 127)
+#     LEFT_BEHIND    the container was still listed after removal
+#
+# Only COMPLETED with exit code 0 can lead anywhere; every other status is UNRESOLVED for the caller.
+
+DEADLINE_SECONDS = 20.0  # per run (Q8)
+KILL_GRACE_SECONDS = 5.0
+STDOUT_CAP = 1024 * 1024  # untrusted package output, shown only
+STDERR_CAP = 16 * 1024 * 1024  # the strace trace (PR 5)
+DOCKER_SECONDS = 20
+CLOCK = time.monotonic
+POPEN = None  # tests replace it; None means subprocess.Popen
+DOCKER = None  # tests replace it; None means subprocess.run (docker kill / rm / ps)
+STATUSES = ("COMPLETED", "TIMEOUT", "OUTPUT_CAP", "KILLED", "ENGINE_ERROR", "LEFT_BEHIND")
+
+
+def new_run_id() -> str:
+    return secrets.token_hex(6)
+
+
+def container_name(run_id: str, n: int) -> str:
+    name = f"cavr-{run_id}-{n}"
+    if not NAME.match(name):
+        raise ValueError(f"container name {name!r} is not cavr-<12 hex>-<n>")
+    return name
+
+
+def run_container(cmd, name: str, *, deadline: float = DEADLINE_SECONDS, grace: float = KILL_GRACE_SECONDS,
+                  stdout_cap: int = STDOUT_CAP, stderr_cap: int = STDERR_CAP) -> dict:
+    """Run `cmd` (from `docker_command`, container `name`) to its end, its deadline or its output cap. Never raises."""
+    started = CLOCK()
+    status, reason, exit_code, proc = None, None, None, None
+    readers, buffers, over = [], {"stdout": bytearray(), "stderr": bytearray()}, {}
+    wake = threading.Event()
+    try:
+        proc = (POPEN or subprocess.Popen)(list(cmd), stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                           stderr=subprocess.PIPE)
+        for stream, cap in (("stdout", stdout_cap), ("stderr", stderr_cap)):
+            reader = threading.Thread(target=_drain, args=(getattr(proc, stream), buffers[stream], cap, stream, over, wake),
+                                      daemon=True)
+            reader.start()
+            readers.append(reader)
+        while proc.poll() is None:
+            if over:
+                status, reason = "OUTPUT_CAP", f"{' and '.join(sorted(over))} passed its cap; the container was killed"
+                break
+            if CLOCK() - started > deadline:
+                status, reason = "TIMEOUT", f"still running after the {deadline:g} s deadline; the container was killed"
+                break
+            wake.wait(0.05)
+        if status is None and over:
+            status, reason = "OUTPUT_CAP", f"{' and '.join(sorted(over))} passed its cap"
+        if status is not None:
+            _stop(proc, name, grace)
+        else:
+            exit_code = proc.returncode
+            if exit_code in (125, 126, 127):
+                status, reason = "ENGINE_ERROR", f"docker run failed (exit {exit_code})"
+            elif exit_code in (137, -9):
+                status, reason = "KILLED", "the container was killed (SIGKILL) by something other than CAVR: memory limit or kill"
+            else:
+                status, reason = "COMPLETED", f"the container exited with {exit_code}"
+    except Exception as exc:  # no docker binary, a reader that failed, ...: nothing was observed
+        status, reason = "ENGINE_ERROR", f"the container could not be run: {type(exc).__name__}: {exc}"
+        if proc is not None:
+            _stop(proc, name, grace)
+    finally:
+        for reader in readers:
+            reader.join(grace)
+        gone, why = _remove(name, grace)
+        if not gone:
+            status, reason = "LEFT_BEHIND", why
+    stdout, stderr = bytes(buffers["stdout"]), bytes(buffers["stderr"])
+    return {"status": status, "reason": reason, "name": name, "exit_code": exit_code,
+            "elapsed_seconds": round(CLOCK() - started, 3), "deadline_seconds": deadline,
+            "stdout": stdout, "stderr": stderr,
+            "stdout_text": stdout.decode("utf-8", errors="replace"), "stderr_text": stderr.decode("utf-8", errors="replace"),
+            "over_cap": sorted(over)}
+
+
+def completed(result: dict) -> bool:
+    """True only for a container that exited by itself with exit code 0 and was removed."""
+    return result.get("status") == "COMPLETED" and result.get("exit_code") == 0
+
+
+def _drain(pipe, buffer: bytearray, cap: int, stream: str, over: dict, wake: threading.Event):
+    """Read `pipe` to its end. Bytes past `cap` are counted, not kept; passing the cap wakes the main thread."""
+    try:
+        while True:
+            chunk = pipe.read1(65536) if hasattr(pipe, "read1") else pipe.read(65536)
+            if not chunk:
+                break
+            room = cap - len(buffer)
+            if room > 0:
+                buffer.extend(chunk[:room])
+            if len(chunk) > room:
+                over[stream] = True
+                wake.set()
+    except (OSError, ValueError):
+        pass  # the pipe was closed by the kill
+    finally:
+        wake.set()
+
+
+def _docker(args, timeout=DOCKER_SECONDS):
+    return (DOCKER or subprocess.run)([ENGINE, *args], capture_output=True, text=True, timeout=timeout)
+
+
+def _stop(proc, name, grace):
+    """Kill the container by name, then the docker CLI process; wait for it."""
+    for step in (lambda: _docker(["kill", name], timeout=grace + DOCKER_SECONDS),
+                 lambda: proc.kill(),
+                 lambda: proc.wait(timeout=grace)):
+        try:
+            step()
+        except Exception:
+            pass  # removal below checks the outcome
+
+
+def _remove(name, grace) -> tuple[bool, str | None]:
+    """`docker rm -f` by name until `docker ps -a` no longer lists it. (gone, reason when not)."""
+    deadline = CLOCK() + grace + DOCKER_SECONDS
+    last = None
+    while True:
+        try:
+            listed = _docker(["ps", "-a", "-q", "--filter", f"name=^/{name}$"])
+            if listed.returncode == 0 and not listed.stdout.strip():
+                return True, None
+            last = f"docker ps -a still lists {name}" if listed.returncode == 0 else f"docker ps failed: {listed.stderr.strip()[:200]}"
+            _docker(["rm", "-f", name])
+        except FileNotFoundError:
+            return True, None  # no docker binary: nothing could have been started
+        except Exception as exc:
+            last = f"cannot check that {name} is gone: {type(exc).__name__}: {exc}"
+        if CLOCK() > deadline:
+            return False, last
+        time.sleep(0.1)

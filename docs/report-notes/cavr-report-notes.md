@@ -4430,3 +4430,91 @@ fsmount:fscontext:proc: operation not permitted`. CAVR does not use it and did n
    with 47 measured additions, each group explained, and the shared one is unchanged.
 2. **How do you know the image a run uses is the one you built?** The run names the image by the ID recorded at
    build time, after checking that the local image still has that ID and carries the current Dockerfile's SHA-256.
+
+## Step M2-8 — PR 4: deadline, kill, output caps and removal of the real container (2026-11-23)
+
+Plan: `docs/cavr-m2-plan.md` PR 4 (Q8: 20 s per run). Closes the three M1 deferred runner items (silent container
+not timed out, kill stops the docker CLI and not the container, invalid UTF-8 leaves the process un-waited) for
+CAVR's new runner; the legacy `SandboxRunner` keeps them until PR 12.
+
+### Ch 6 Implementation
+
+- `backend/cavr/sandbox_exec.py`: `run_container(cmd, name, deadline=20, grace=5, stdout_cap=1 MiB,
+  stderr_cap=16 MiB)`, `completed(result)`, `new_run_id()` (12 hex), `container_name(run_id, n)` = `cavr-<run>-<n>`.
+  Algorithm: `Popen` with stdin `/dev/null`; two reader threads drain stdout and stderr as bytes into capped buffers
+  (bytes past the cap are counted, not kept, and wake the main thread); the main thread waits on the host's
+  monotonic clock. At the deadline or a cap: `docker kill <name>`, then kill and wait for the docker CLI. In a
+  `finally`: `docker rm -f <name>` until `docker ps -a --filter name=^/<name>$` is empty, or LEFT_BEHIND.
+  Statuses: COMPLETED (own exit; code kept), TIMEOUT, OUTPUT_CAP, KILLED (137 not sent by CAVR: memory limit),
+  ENGINE_ERROR (no docker, or `docker run` exit 125/126/127), LEFT_BEHIND. Only COMPLETED with exit 0 is usable.
+
+### Design decisions
+
+- **Deadline independent of output** (alternative, M1: check the clock after each `readline`): a silent container
+  never returns from `readline`; the reader threads make the deadline a plain clock check.
+- **Kill by container name, then the CLI** (M1 killed only the CLI, which leaves the container running).
+- **Any stream over its cap is UNRESOLVED and killed at once** (alternative: keep reading and truncate): an untrusted
+  flood of stdout or a trace past 16 MiB cannot be judged; killing early also bounds the run.
+- **Removal is checked, not assumed** (`--rm` removes asynchronously): a container still listed after removal is
+  LEFT_BEHIND, which is UNRESOLVED.
+- **Docker tests use a 2-3 s deadline** to keep the suite fast; the 20 s default is checked by a unit test.
+
+### Requirements covered
+
+| ID | Acceptance check |
+|---|---|
+| NFR-1 rule 4 (limits, deadline) | infinite loop TIMEOUT after 3.37 s with a 3 s deadline (<= deadline + 5 s); fork bomb stops at the pids limit (EAGAIN, < 64 forks); memory hog KILLED |
+| NFR-1 rule 9 (disposable) | `docker ps -a` lists no `cavr-*` container after every Docker test, including failed runs |
+| FR-6 fail closed | timeout, cap, foreign kill, engine error, leftover container: never usable |
+| Q8 | `DEADLINE_SECONDS == 20.0` |
+
+### Ch 7 Test cases
+
+`tests/test_cavr_sandbox_exec.py`: 30 tests, 22 unit (fake `docker run` with real OS pipes, fake `docker kill/rm/ps`)
+and 8 Docker.
+
+| Test ID | Purpose | Input | Expected | Result |
+|---|---|---|---|---|
+| `test_the_default_deadline_is_twenty_seconds_per_run` | Q8 | constants | 20 s, grace 5 s | pass |
+| `test_silent_container_is_killed_at_the_deadline` | silent run | no output, 0.3 s deadline | TIMEOUT within deadline + grace; CLI killed and waited | pass |
+| `test_kill_and_removal_target_the_container_name`, `test_kill_happens_before_the_cli_process_is_killed` | kill target | timeout | `docker kill <name>` before the CLI kill; `ps -a` by name | pass |
+| `test_output_does_not_keep_a_container_alive_past_its_deadline` | chatter | output every 10 ms | TIMEOUT < 1.5 s | pass |
+| `test_finished_container_is_completed_with_its_exit_code`, `test_non_zero_exit_is_completed_but_not_usable` | own exit | exit 0 / 3 | COMPLETED, usable only for 0 | pass |
+| `test_docker_failure_and_foreign_kill_are_not_completed` (5) | engine / OOM | 125, 126, 127, 137, -9 | ENGINE_ERROR / KILLED | pass |
+| `test_invalid_utf8_is_replaced_not_fatal` | M1 item | `\xff\xfe`, `\xc3(` | U+FFFD in text, bytes kept | pass |
+| `test_output_over_the_cap_is_killed_and_unresolved` (2), `test_output_over_the_cap_at_exit_is_still_unresolved` | cap | 5000 bytes, cap 1000 | OUTPUT_CAP, 1000 bytes kept | pass |
+| `test_docker_that_cannot_start_is_an_engine_error_and_is_still_cleaned_up` (3), `test_no_docker_binary_at_all_returns_without_waiting` | no engine | Popen raises | ENGINE_ERROR, removal still checked, < 1 s | pass |
+| `test_container_still_listed_after_removal_is_left_behind` | leak | `ps -a` keeps listing | LEFT_BEHIND, `rm -f` tried | pass |
+| `test_names_are_unique_and_well_formed` | names | 1000 names | 1000 distinct `cavr-<12 hex>-<n>` | pass |
+| `test_infinite_loop_is_killed_within_deadline_plus_grace` (Docker) | deadline | `while True: pass`, 3 s | TIMEOUT, 3.0 <= elapsed <= 8.0, no container | pass |
+| `test_sleeping_container_is_killed_and_removed` (Docker) | deadline | `sleep 600`, 2 s | TIMEOUT, removed | pass |
+| `test_failed_run_leaves_no_container` (2, Docker) | failed run | `/nonexistent`; exit 3 | ENGINE_ERROR / COMPLETED not usable; none left | pass |
+| `test_fork_bomb_stops_at_the_pids_limit` (Docker) | pids | fork until error | < 64 forks, errno 11 | pass |
+| `test_memory_hog_is_killed_and_unresolved` (Docker) | memory | 16 MiB blocks | KILLED | pass |
+| `test_flood_of_output_is_capped_and_killed` (Docker) | cap | `yes` | OUTPUT_CAP, 1 MiB kept | pass |
+| `test_invalid_utf8_from_a_real_container_is_replaced` (Docker) | UTF-8 | `a\xffb` | `a�b` | pass |
+
+Runs before the commit: `CAVR_DOCKER=1 pytest tests/test_cavr_sandbox_exec.py`: 30 passed;
+`CAVR_DOCKER=1 pytest tests/test_cavr_*.py`: 1508 passed, 11 skipped (live) in 403 s. No existing result changed.
+
+### Defects found and fixed
+
+- None found by the tests after the code was written; the order test was rewritten once to be readable.
+
+### Known limitations / deferred
+
+- `docker kill` needs the engine: if the daemon dies mid-run, removal cannot be checked and the run is LEFT_BEHIND
+  (UNRESOLVED) after grace + 20 s.
+- The legacy `SandboxRunner` (used only by `counterfactual.py` and its tests) still has the M1 runner items; PR 12.
+
+### Tool disclosure (Ch 8.7)
+
+- **Generated by Claude Code:** the runner, the tests and these notes. **Reviewed by Maryam:** the plan (20 s,
+  unique names, TIMEOUT -> UNRESOLVED, no container left). **Verified by:** the runs above on Docker 29.9.3.
+
+### Supervisor Q&A prep
+
+1. **What stops a package from hanging the gate?** The host's clock: at 20 s the container is killed by name and
+   removed, whatever it prints or does not print; the result is TIMEOUT, which is UNRESOLVED.
+2. **How do you know no container is left?** After every run the runner lists containers of that name with
+   `docker ps -a`; each Docker test also asserts that no `cavr-*` container exists.
