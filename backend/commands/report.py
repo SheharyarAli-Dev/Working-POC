@@ -48,7 +48,73 @@ def render(report: dict, path: Path) -> str:
     for module, row in (report.get("modules") or {}).items():
         reason = " ".join(str(row.get("reason") or "").split())
         lines.append(f"  {module:<6} {row.get('result')!s:<40} {reason[:160]}")
+    repairs = cavr_repairs(report)
+    if repairs:
+        lines += ["", "CAVR repair proposals (not applied; for a person to approve):"] + repairs
     lines += ["", "Reasons:"] + [f"  - {reason}" for reason in report.get("reasons") or ["(none)"]]
     lines += [f"  config problem: {problem}" for problem in config.get("problems") or []]
     lines += ["", f"Report: {path}"]
     return "\n".join(lines) + "\n"
+
+
+def cavr_repairs(report: dict) -> list[str]:
+    """Text lines for the `repair` block of every REJECTED CAVR package (backend/cavr/repair_proposal.py).
+
+    Display only: read from the CAVR evidence record that the CAVR module row names. A report without such
+    a record, or without a block, gives no lines.
+    """
+    row = (report.get("modules") or {}).get("CAVR") or {}
+    records = ((report.get("assurance") or {}).get("evidence")) or []
+    record = next((r for r in records if isinstance(r, dict) and r.get("evidence_id") == row.get("evidence_id")), None)
+    details = (record or {}).get("details") or {}
+    lines = []
+    for entry in details.get("pipeline") or []:
+        for package in entry.get("packages") or []:
+            block = package.get("repair")
+            if not isinstance(block, dict):
+                continue
+            rejected = block.get("rejected") or {}
+            lines.append(f"  {package.get('name')}=={package.get('version')} ({rejected.get('status')} {rejected.get('stage')} "
+                         f"{rejected.get('rule')}) in {entry.get('file')}: {block.get('result')} {block.get('rule')}")
+            if block.get("result") != "PROPOSED":
+                lines.append(f"      {block.get('reason')}")
+            pin = block.get("pin")
+            if isinstance(pin, dict):
+                recheck = pin.get("recheck") or {}
+                checked = recheck.get("package") or {}
+                lines.append(f"      pin {pin.get('requirement')}: re-check {recheck.get('status')} {recheck.get('rule')}, "
+                             f"wheel sha256 {str(checked.get('sha256'))[:12]} (registry {str(checked.get('registry_sha256'))[:12]})")
+                lines += _patch_lines(pin)
+            removal = block.get("removal")
+            if isinstance(removal, dict):
+                lines.append(f"      remove {removal.get('name')}: re-check {(removal.get('recheck') or {}).get('status')} "
+                             f"{(removal.get('recheck') or {}).get('rule')}")
+                lines += _patch_lines(removal)
+            elif block.get("removal_reason"):
+                lines.append(f"      removal not proposed: {block.get('removal_reason')}")
+            skipped = [c for c in block.get("candidates_tried") or [] if c.get("outcome") != "PROPOSED"]
+            for candidate in skipped:
+                lines.append(f"      skipped {candidate.get('version')}: {candidate.get('status')} {candidate.get('rule')}")
+            lines += [f"      limitation: {item}" for item in block.get("limitations") or []]
+    return lines
+
+
+def _patch_lines(part: dict) -> list[str]:
+    lines = []
+    diff = part.get("requirements_diff")
+    if diff:
+        lines.append(f"        {part.get('requirements_file')}:")
+        lines += [f"          {line}" for line in diff.splitlines() if line[:1] in "+-" and line[:3] not in ("---", "+++")]
+    elif part.get("pip_command"):
+        lines.append(f"        command: {part.get('pip_command')}")
+    lock = part.get("lockfile_entry")
+    if not lock:
+        lines.append("        lockfile: none in the project")
+    else:
+        after = lock.get("after")
+        lines.append(f"        {lock.get('file')}: " + (f"{after.get('name')} {after.get('version')} sha256 {after.get('sha256')}"
+                                                       if after else f"remove {(lock.get('before') or {}).get('name')}"))
+    policy = part.get("policy") or {}
+    changes = [f"+ {item}" for item in policy.get("added") or []] + [f"- {item}" for item in policy.get("removed") or []]
+    lines.append("        policy approved_requirements: " + (", ".join(changes) if changes else "no change needed"))
+    return lines

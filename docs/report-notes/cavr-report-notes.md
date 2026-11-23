@@ -3990,3 +3990,98 @@ pytest-xdist, run serially): 1483 passed, 11 skipped (live). Baseline of the sam
 2. **Why trust the proposed version?** It went through the same `verify_request` as any request, under the proposed
    policy and lockfile: real wheel hashed against the registry, tree, OSV for that version, contract, AST scan.
 3. **Why is 7.x not proposed for 6.19.0?** Same major first: 6.21.4 is a smaller change; 7.x is listed under `not_tried`.
+
+## Step M2-4 — The repair proposal in the report, the dashboard and the VS Code panel (2026-11-23)
+
+Display of the step M2-3 block. Shared files (Q4, `[owner review: …]`): `backend/commands/report.py`,
+`frontend/src/components/CavrModule.tsx`, `vscode-asent/src/report.ts` and its unit test.
+
+### Ch 6 Implementation
+
+- `asent-report.json`: no change needed; the `repair` block is in the CAVR evidence rows since step M2-3
+  (`assurance.evidence[].details.pipeline[].packages[].repair`).
+- `backend/commands/report.py`: `cavr_repairs(report)` and `_patch_lines` add a section "CAVR repair proposals (not
+  applied; for a person to approve)" after the module rows: per REJECTED package its result, the pin with its
+  re-check and digests, the requirements +/- lines (or the pip command), the lockfile entry, the policy change, the
+  removal or why not, skipped candidates, limitations. Read from the evidence record the CAVR module row names.
+- `backend/cavr/api.py`: `dashboard_repair(verdict, condition)` runs after the verdict in the worker thread for a
+  REJECTED first package (no requirements file on this path: the pin is a `pip install` command), under the same
+  demo condition (`_conditions`). The block goes to the verdict event's `repair` and to the proof's `repair`; the
+  pipeline verdict object is not changed.
+- `frontend/src/components/cavr/RepairTab.tsx`: rewritten to print the block (result, pin / removal card with the
+  re-check, digests, diff, lockfile and policy lines, skipped and excluded candidates, limitations). The approve /
+  reject buttons stay and only record the decision (`/api/cavr/approve-alternative`, writes nothing to the project).
+  `types.ts`: `RepairBlock`, `RepairPart`, `RepairCandidate`. `CavrModule.tsx`: the recorded alternative is the
+  pin requirement (or "remove <name>"). `RequirementsTab.tsx`: FR-7 / FR-8 rows name `repair_proposal.py` and
+  print the block's result and re-check.
+- `vscode-asent/src/report.ts`: `repairLine` adds one key-evidence line after each package with a block, e.g.
+  `repair: proposes pin pypdf==6.21.4 (re-check VERIFIED); not applied`.
+- `tests/test_cavr_data/render_cavr.mjs`: a `repair` view.
+
+### Design decisions
+
+- **Read from the evidence, not a new report field**: `asent-report.json` keeps schema `asent.gate.v1`; every
+  surface reads the same block, so they cannot disagree.
+- **Dashboard repair outside `verify_dashboard_request`**: the proof's `cavr_verdict` stays exactly the pipeline's
+  answer (an existing test checks equality); the block sits next to it.
+- **Same demo condition for candidates**: a demo condition only makes things worse, also for repair.
+- **Buttons kept, relabelled "Record approval / rejection"**: Q9 — a person approves; the dashboard only records it.
+
+### Requirements covered
+
+| ID | Acceptance check |
+|---|---|
+| FR-7 / FR-10 | The proposal and its evidence are in the report and text output: `test_asent_gate_report_carries_the_repair_block_and_the_same_decision`, `test_asent_report_text_lists_the_proposal` |
+| Q9 | Same exit code (1), decision and reasons with and without repair; tab says "Applied: false" |
+| FR-7 (dashboard) | `test_dashboard_rejected_run_has_the_proposal_and_keeps_its_verdict`, `test_the_repair_tab_prints_the_proposal_of_the_run` |
+
+### Ch 7 Test cases
+
+`tests/test_cavr_repair_surfaces.py` (recorded data as in step M2-3) and `vscode-asent/test/unit/report.test.ts`.
+
+| Test ID | Purpose | Input | Expected | Result |
+|---|---|---|---|---|
+| `test_asent_gate_report_carries_the_repair_block_and_the_same_decision` | report JSON | `asent gate`, head pins pypdf 6.19.0, repair on / off | exit 1 BLOCK both; same reasons and CAVR result; block PROPOSED pypdf==6.21.4 only when on | pass |
+| `test_asent_report_text_lists_the_proposal` | text output | that report | section, pin line with digests, -/+ lines, lockfile, policy, removal reason, limitation; before "Reasons:" | pass |
+| `test_asent_report_text_without_a_block_has_no_repair_section` | text output | repair off; empty report | no section | pass |
+| `test_dashboard_rejected_run_has_the_proposal_and_keeps_its_verdict` | dashboard | chip known_vulnerable | verdict BLOCK/REJECTED; repair pin via pip command; proof `cavr_verdict` unchanged | pass |
+| `test_dashboard_verified_run_has_no_repair` | dashboard | chip verified | repair None | pass |
+| `test_dashboard_network_off_is_unresolved_and_gets_no_repair` | dashboard | network_off | UNRESOLVED, repair None | pass |
+| `test_dashboard_tampered_wheel_run_gets_no_proposal` | dashboard | tampered (pypdf 6.21.4) | 7.x candidates SKIPPED `RELEASE_NOT_FOUND`, NO_REPAIR_FOUND | pass |
+| `test_the_repair_tab_prints_the_proposal_of_the_run` | page render | known_vulnerable run | pin, re-check, digests, command, "Applied: false" | pass |
+| `test_the_repair_tab_without_a_block` | page render | verified run | "Not run: …" | pass |
+| `test_no_old_repair_fixture_field_is_left_in_the_page` | source | page and parts | no `chosen_candidate`, `ranked_candidates`, `cost_breakdown`, `dependency_diff`, `repair_engine.py`, `reverifier.py` | pass |
+| VS Code: 3 tests in "CAVR repair proposal … in the key evidence" | panel | derived block on the ACCEPT fixture | pin line after its package; removal; no repair found; none without a block | pass |
+
+`tests/test_cavr_repair_surfaces.py`: 10 passed. Before the commit (same set as step M2-3): 1493 passed, 11 skipped;
+no earlier result changed. Also run because `backend/commands/report.py` changed: `test_cli_report.py`,
+`test_gate_cli.py`, `test_vscode_make_fixtures.py`: 55 passed. `npx tsc --noEmit` (frontend): no errors.
+`npm test` (vscode-asent): 93 passing, 5 pending.
+
+### Defects found and fixed
+
+- First version of the tampered-wheel dashboard test assumed tampered candidates; the chip is pypdf 6.21.4, whose
+  upgrades (7.x) are not served offline, so they are `RELEASE_NOT_FOUND`. Test corrected to what happens.
+- `RequirementsTab.tsx` read `repair.chosen_candidate`, which no longer type-checks; its FR-7 / FR-8 rows changed in
+  this step instead of step M2-5.
+- Review: recorded after step M2-5.
+
+### Known limitations / deferred
+
+- `asent-summary.md` (`backend/gate/summary.py`) does not list the proposal (not asked; the JSON and `asent report` do).
+- The VS Code panel shows one line per block, not the diff; the diff is in `asent report`.
+- The dashboard's sample project has no lockfile and the request is a pip command, so its proposal has no diff and
+  no lockfile entry, and removal is never proposed there.
+
+### Tool disclosure (Ch 8.7)
+
+- **Generated by Claude Code:** the code and tests listed above and these notes. **Reviewed by Maryam:** the plan
+  (which surfaces); the diff not yet. **Verified by:** the runs above, `npx tsc --noEmit` (frontend), `npm test`
+  (VS Code).
+
+### Supervisor Q&A prep
+
+1. **Could the dashboard show a proposal for a package that passed?** No: `dashboard_repair` returns None unless the
+   first package is REJECTED (`test_dashboard_verified_run_has_no_repair`).
+2. **Does the "Record approval" button install anything?** No. It writes an audit row through the existing endpoint;
+   the proposal is applied by a person in a pull request.

@@ -138,6 +138,7 @@ const EVIDENCE: Record<ModuleCard["key"], (d: Obj) => string[]> = {
       for (const pkg of objs(entry.packages)) {
         const sha = str(pkg.sha256);
         out.push(`${str(pkg.name) ?? "?"}==${str(pkg.version) ?? "?"}: ${str(pkg.status) ?? "?"}` + (sha ? `, sha256 ${sha.slice(0, 12)}` : ""));
+        if (isObj(pkg.repair)) out.push(repairLine(pkg.repair));
       }
     }
     return out;
@@ -179,6 +180,21 @@ const EVIDENCE: Record<ModuleCard["key"], (d: Obj) => string[]> = {
     return out;
   },
 };
+
+// backend/cavr/repair_proposal.py: a proposal for a person to approve; CAVR never applies it.
+function repairLine(repair: Obj): string {
+  const result = str(repair.result) ?? "?";
+  if (result !== "PROPOSED") return `repair: ${result === "NOT_ATTEMPTED" ? "not attempted" : "no repair found"} (${str(repair.rule) ?? "?"}: ${str(repair.reason) ?? ""})`;
+  const parts: string[] = [];
+  const pin = isObj(repair.pin) ? repair.pin : null;
+  if (pin) {
+    const recheck = isObj(pin.recheck) ? pin.recheck : {};
+    parts.push(`pin ${str(pin.requirement) ?? "?"} (re-check ${str(recheck.status) ?? "?"})`);
+  }
+  const removal = isObj(repair.removal) ? repair.removal : null;
+  if (removal) parts.push(`remove ${str(removal.name) ?? "?"}`);
+  return `repair: proposes ${parts.join(" or ")}; not applied`;
+}
 
 // --- Problems tab: only where the report names a file ------------------------------------------
 
