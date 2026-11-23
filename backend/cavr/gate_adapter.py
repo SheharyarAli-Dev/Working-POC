@@ -77,7 +77,7 @@ BOUNDED_DEEP = ("fast gate (artifact hash, dependency tree, advisories, capabili
                 "not executed and gated branches are not explored (Phase 3)")
 DEEP_ROW = ("status", "rule", "reason", "elapsed_seconds")
 DEEP_EVIDENCE = ("image_id", "trace_sha256", "trace_lines", "trace_check", "run_rule", "key_events", "unexplored_triggers",
-                 "claim", "not_exercised")
+                 "escalation_reasons", "claim", "not_exercised")
 
 
 def map_status(status) -> str:

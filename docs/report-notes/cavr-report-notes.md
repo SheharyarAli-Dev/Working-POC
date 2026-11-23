@@ -5269,7 +5269,7 @@ Plan: `docs/cavr-m2-plan.md` PR 9, Q8 and its frontier rule, decisions D2, D6, D
 
 | Test ID | Purpose | Input | Expected | Result |
 |---|---|---|---|---|
-| `test_clean_complete_run_without_triggers_is_verified` | Q8 all clauses | escalated demo, benign recording | VERIFIED DEEP_RUN_CLEAN, bounded claim, baseline recorded once | pass |
+| `test_clean_complete_run_without_triggers_is_verified` | Q8 all clauses | escalated demo, benign recording | VERIFIED DEEP_RUN_CLEAN, bounded claim, baseline recorded once | pass; superseded: renamed and now UNRESOLVED DEEP_SINK_NOT_EXERCISED (decision below) |
 | `test_violation_is_rejected_with_the_event_as_evidence` | Q8 violation | probe recording | REJECTED, key events with line and syscall | pass |
 | `test_timeout_is_unresolved` | Q8 budget | benign cut at 50 %, SANDBOX_TIMEOUT | UNRESOLVED SANDBOX_TIMEOUT | pass |
 | `test_violation_before_a_timeout_is_rejected` | D6 | probe cut at 99.5 %, SANDBOX_TIMEOUT | REJECTED | pass |
@@ -5292,12 +5292,12 @@ Plan: `docs/cavr-m2-plan.md` PR 9, Q8 and its frontier rule, decisions D2, D6, D
 | `test_gate_row_report_json_and_text_carry_the_deep_result` | FR-15 | `asent gate`, probe recording | exit 1, row `deep`, `deep_stage` on, one report line in `render` | pass |
 | `test_gate_without_an_image_has_no_deep_row_and_no_report_line` | D7 | `asent gate`, IMAGE_MISSING | UNRESOLVED escalation, `deep: None`, no line | pass |
 | `test_report_text_line_for_each_deep_result` | report | VERIFIED, REJECTED, none | two exact lines | pass |
-| `test_demo_wheel_on_the_real_sandbox[benign]` (Docker) | demo | escalated, nothing at import | VERIFIED DEEP_RUN_CLEAN, 0 judged events | pass |
+| `test_demo_wheel_on_the_real_sandbox[benign]` (Docker) | demo | escalated, nothing at import | VERIFIED DEEP_RUN_CLEAN, 0 judged events | pass; superseded: now UNRESOLVED DEEP_SINK_NOT_EXERCISED (decision below) |
 | `test_demo_wheel_on_the_real_sandbox[aws]` (Docker) | demo | reads `~/.aws/credentials` | REJECTED; SECRET_READ openat `/tmp/home/.aws/credentials` ENOENT | pass |
 | `test_demo_wheel_on_the_real_sandbox[connect]` (Docker) | demo | connect 198.51.100.24:443 | REJECTED; NETWORK_CONNECT ENETUNREACH | pass |
 | `test_demo_wheel_on_the_real_sandbox[shell]` (Docker) | demo | `subprocess.run(['/bin/sh', …])` | REJECTED; PROCESS_EXEC `/bin/sh` | pass |
 | `test_demo_wheel_on_the_real_sandbox[env_trigger]` (Docker) | demo | connect behind `os.getenv` | UNRESOLVED DEEP_TRIGGERS_UNEXPLORED | pass |
-| `test_asent_gate_end_to_end_on_the_real_sandbox[aws / benign]` (Docker) | end to end | `asent gate` | BLOCK exit 1 / ACCEPT exit 0, one report line each | pass |
+| `test_asent_gate_end_to_end_on_the_real_sandbox[aws / benign]` (Docker) | end to end | `asent gate` | BLOCK exit 1 / ACCEPT exit 0, one report line each | pass; superseded: benign is now REVIEW exit 2 (decision below) |
 
 Measured on the real sandbox (one run each, fresh data directory): every demo verdict took 4.0–4.5 s
 including the baseline run; the container run itself 2.8–3.2 s.
@@ -5348,12 +5348,57 @@ the five demo wheels did. The Flask time difference (+14.5 s) is within the spre
 ### Supervisor Q&A prep
 
 1. **When is a deep VERIFIED given?** Only when the one run completed, its trace is complete, every event minus the
-   empty-harness baseline is within the contract, and no gated branch reaches an ungranted sink
-   (`test_clean_complete_run_without_triggers_is_verified`); it says it observed install + import only.
+   empty-harness baseline is within the contract, no gated branch reaches an ungranted sink, and every escalation
+   reason ran in the import (decision below; `test_an_import_time_sink_inside_a_scoped_contract_is_verified`); it says
+   it observed install + import only.
 2. **What if Docker is missing in CI?** `for_gate_run` returns no analyzer and the gate gives exactly the verdicts it
    gave before (`test_no_docker_or_no_image_keeps_todays_behaviour`, `test_gate_without_an_image_…`).
 3. **Why is the env-trigger wheel UNRESOLVED and not VERIFIED, though its run was clean?** Its import never took the
    `os.getenv` branch, so the sink behind it was never observed; until Phase 3 explores it, Q8 says incomplete.
+
+### Decision after the review: an escalation reason the run did not exercise (Maryam, 2026-11-23)
+
+Decision: when the escalation reason is a denied sink reachable from the project's call sites, an import-only run
+cannot clear it -> UNRESOLVED `DEEP_SINK_NOT_EXERCISED`, naming the sink and the call sites, until Phase 3 drives
+them. A deep VERIFIED is possible only when every escalation reason was exercised by the run; the deep block records
+which reasons the run covered (review MINOR 1).
+
+- **Ch 6 Implementation.** `backend/cavr/sandbox_deep.py`: `escalation_reasons(package, events)` takes every
+  REACHABLE sink of the fast gate's reachability judgement; `sink_placement(wheel, file, line, sink)` parses the
+  wheel's source and says whether the call is module-level code or inside a function / method / lambda. A reason is
+  exercised when the call is module-level AND the import step has an event of the sink's capability (and, as for
+  every VERIFIED, all events are within the contract). Order: violation -> run problems -> unjudged events ->
+  unexplored triggers (DEEP_TRIGGERS_UNEXPLORED stays first, so the env-trigger wheel is unchanged) -> no reachable
+  sink at all (DEEP_ESCALATION_UNKNOWN) -> any reason not exercised (DEEP_SINK_NOT_EXERCISED) -> VERIFIED.
+  `evidence["escalation_reasons"]`: package, file, line, sink, capability, placement, events_of_capability,
+  exercised, why, call_sites; `gate_adapter` copies it into the row's `deep` block; `asent report` names the first
+  sink not exercised. `tests/test_cavr_data/traces/events-scoped` (new recording, same image; `record_events.py`
+  can now re-record one stem).
+- **Design decisions.** Both a static and a dynamic condition: module level alone is not enough (the module might not
+  be imported by the top-level import, a plain `if` might not be taken, an exception might stop it before the call);
+  an event alone is not enough (the event might come from other code). The only way an import-time sink stays inside
+  a contract that denies it by default is a checkable scope, so the VERIFIED demo uses
+  `NETWORK_CONNECT:198.51.100.24:443` (task "Billing dashboard") and connects there at import.
+- **Requirements covered.** FR-6 / NFR-6: no VERIFIED for a reason the run did not cover; the deep block lists each
+  reason and whether it was covered.
+
+| Test ID | Purpose | Input | Expected | Result |
+|---|---|---|---|---|
+| `test_a_reachable_sink_the_import_never_ran_is_unresolved_not_exercised` (was `…_without_triggers_is_verified`) | decision | sink in `def send()`, benign recording | UNRESOLVED DEEP_SINK_NOT_EXERCISED naming `demo/net.py:5 socket.create_connection` and `app/uses_demo.py:5 demo.run`; not cached | pass |
+| `test_an_import_time_sink_inside_a_scoped_contract_is_verified` | decision | module-level connect, scoped grant, `events-scoped` | VERIFIED; reason exercised, 1 NETWORK_CONNECT event | pass |
+| `test_a_module_level_sink_that_shows_no_event_is_not_exercised` | dynamic condition | module-level sink, run without a connect | UNRESOLVED DEEP_SINK_NOT_EXERCISED, "did not run" | pass |
+| `test_an_escalation_without_a_reachable_sink_is_unresolved` | fail closed | no REACHABLE sink | UNRESOLVED DEEP_ESCALATION_UNKNOWN | pass |
+| `test_sink_placement_reads_the_wheel` | placement | module, function, lambda, method, no call, no wheel | as named | pass |
+| `test_a_new_image_is_a_cache_miss` (changed) | cache key | now the import-time wheel (an UNRESOLVED is not cached) | hit, then miss | pass |
+| `test_report_text_line_for_each_deep_result` (extended) | report | DEEP_SINK_NOT_EXERCISED row | `- not exercised: d/net.py:5 socket.create_connection (function send)` | pass |
+| `test_demo_wheel_on_the_real_sandbox[benign]` (Docker, changed) | demo | sink in a function | UNRESOLVED DEEP_SINK_NOT_EXERCISED | pass |
+| `test_demo_wheel_on_the_real_sandbox[import_time]` (Docker, new) | demo | module-level connect to the granted endpoint | VERIFIED DEEP_RUN_CLEAN | pass |
+| `test_asent_gate_end_to_end_on_the_real_sandbox[aws / benign / import_time]` (Docker) | end to end | `asent gate` | BLOCK exit 1 / REVIEW exit 2 / ACCEPT exit 0 | pass |
+
+Run before the commit (as Maryam asked, deep and gate tests only): `CAVR_DOCKER=1 pytest tests/test_cavr_sandbox_deep.py
+tests/test_cavr_deep_stage.py tests/test_cavr_sandbox_events.py tests/test_cavr_contract_check.py tests/test_cavr_gate_adapter.py
+tests/test_gate_*.py tests/test_cli_gate.py tests/test_cli_report.py tests/test_cavr_repair_surfaces.py`: 367 passed, 1 skipped
+(live), 207 s; the 9 Docker deep tests alone: 9 passed in 51.7 s. No other existing result changed; no full-suite run.
 
 ## Review of steps M2-12 to M2-14 — fixes (2026-11-23)
 
@@ -5361,7 +5406,7 @@ Review outcomes (one cavr-reviewer pass over PRs 7-9, `git diff 7308c2c..HEAD`, 
 without Docker at review time):
 - Step M2-12 (PR 7): 1 pass, fix first (BLOCKER 1 and 2, events part); fixed below; 0 open MINOR.
 - Step M2-13 (PR 8): 1 pass, fix first (BLOCKER 1, contract part); fixed below; 0 open MINOR.
-- Step M2-14 (PR 9): 1 pass, fix first (BLOCKER 3, notes); fixed below; 1 open MINOR (MINOR 1, design question for Maryam).
+- Step M2-14 (PR 9): 1 pass, fix first (BLOCKER 3, notes); fixed below; 0 open MINOR (MINOR 1 decided by Maryam: DEEP_SINK_NOT_EXERCISED, Step M2-14).
 
 ### Ch 6 Implementation
 
@@ -5441,7 +5486,8 @@ tests/test_gate_*.py tests/test_cli_gate.py tests/test_cli_report.py`: 1952 pass
 
 ### Known limitations / deferred
 
-- MINOR 1 (open, for Maryam): the fast gate escalates because a denied sink is reachable from the project's call
+- MINOR 1 (decided by Maryam, 2026-11-23: UNRESOLVED DEEP_SINK_NOT_EXERCISED, see Step M2-14, "Decision after the
+  review"): the fast gate escalates because a denied sink is reachable from the project's call
   sites; the deep run imports the package but never calls them, so a clean import gives VERIFIED although the
   escalating sink was never exercised. PR 9 of the plan asks for exactly this ("a benign wheel with a reachable sink
   and a clean complete run -> VERIFIED"), and the verdict's claim says the call sites were not executed. Alternative:
@@ -5472,3 +5518,14 @@ tests/test_gate_*.py tests/test_cli_gate.py tests/test_cli_report.py`: 1952 pass
   (SATRA, not changed in `7308c2c..HEAD`); it passed alone (9 s) and its file passed twice in a row (8 passed in
   260 s and in 650 s), so it is recorded as load-dependent, not caused by this phase.
 - `reports/scenario-validation.json` was not modified by the run (no diff); nothing to restore.
+
+
+## For Sheharyar (SATRA owner): a load-dependent Docker test (2026-11-23)
+
+Seen in the full-suite run at the end of CAVR Phase 2b (no SATRA file changed in `7308c2c..HEAD`):
+`tests/test_satra_project_image_docker.py::test_pip_refuses_a_wheel_that_does_not_fit_even_past_the_tag_check`
+failed once in `.venv/bin/python -m pytest -q` (1716 s run, alongside CAVR's Docker image tests), then passed alone
+(9 s) and its file passed twice in a row (8 passed in 260 s, then in 650 s). The traceback of the failure was not kept
+(the run's output was cut to its last lines), so the cause is not known; the long, varying file times suggest a
+timeout or Docker-load dependency. Suggested check: run the file under load (e.g. with CAVR_DOCKER=1 tests in
+parallel) with `-x --tb=long`.

@@ -28,10 +28,15 @@ Verdict (Q8):
     a gated branch in the scanned code reaches a sink the contract does not grant
       without a scope limit (a high-risk trigger the frontier of Phase 3 has not
       explored)                                                                    -> UNRESOLVED DEEP_TRIGGERS_UNEXPLORED
-    otherwise                                                                      -> VERIFIED DEEP_RUN_CLEAN
+    an escalation reason (a reachable denied sink) the run did not exercise: its
+      call is inside a function the project calls, or it showed no event          -> UNRESOLVED DEEP_SINK_NOT_EXERCISED
+    otherwise (every escalation reason ran in the import, within the contract)     -> VERIFIED DEEP_RUN_CLEAN
 
 What VERIFIED claims (NFR-6): installing the verified wheels and importing them, in the baseline environment, did
-nothing outside the contract. The project's own call sites are not executed, and no counterfactual run is made.
+nothing outside the contract, and every sink that escalated the package ran during that import (Maryam,
+2026-11-23: an import-only run cannot clear a sink only the project's call sites reach). The project's own call
+sites are not executed, and no counterfactual run is made. `evidence["escalation_reasons"]` lists each reason and
+whether the run covered it.
 """
 from __future__ import annotations
 
@@ -175,7 +180,22 @@ class SandboxDeepAnalyzer:
                            f"gated branch(es) reach a sink the contract does not grant, and no run explored them (Phase 3); "
                            f"first: {first['package']} {first['file']}:{first['line']} `{first['predicate']}` gates "
                            f"{', '.join(first['capabilities'])}", evidence)
-        return _answer("VERIFIED", "DEEP_RUN_CLEAN", f"{name}: {CLAIM}; {judged['reason']}", evidence)
+        reasons = escalation_reasons(package, left)
+        evidence["escalation_reasons"] = reasons
+        if not reasons:
+            return _answer("UNRESOLVED", "DEEP_ESCALATION_UNKNOWN", f"{name}: the fast gate's escalation names no "
+                           "reachable sink, so the run cannot show that it covered the reason", evidence)
+        missed = [reason for reason in reasons if not reason["exercised"]]
+        if missed:
+            first = missed[0]
+            sites = ", ".join(first["call_sites"][:3]) or "no recorded call site"
+            return _answer("UNRESOLVED", "DEEP_SINK_NOT_EXERCISED", f"{name}: the run was clean, but {len(missed)} of "
+                           f"{len(reasons)} escalation reason(s) were not exercised by it: {first['package']} "
+                           f"{first['file']}:{first['line']} calls {first['sink']} ({first['capability']}), reachable "
+                           f"from the project's call sites {sites}; {first['why']}. An install + import run cannot clear "
+                           "it; the call sites have to be driven (Phase 3)", evidence)
+        return _answer("VERIFIED", "DEEP_RUN_CLEAN", f"{name}: {CLAIM}; every escalation reason ({len(reasons)}) ran in "
+                       f"it; {judged['reason']}", evidence)
 
     def baseline(self):
         """(baseline, None) or (None, (rule, reason)). Recorded once per identity; refused unless clean (D2)."""
@@ -225,6 +245,70 @@ class SandboxDeepAnalyzer:
         except OSError:
             pass  # not stored: still used for this gate run
         return record
+
+
+def escalation_reasons(package: dict, events: list) -> list[dict]:
+    """Each reachable denied sink that escalated the package, and whether this run exercised it.
+
+    Exercised = the sink's call is module-level code (no enclosing function, method or lambda: an import runs it)
+    AND the import step has at least one event of the sink's capability (the code really ran and did it; a module
+    that the run did not import, or a branch that was not taken, shows no event). Only then can a deep VERIFIED
+    stand for that reason (Maryam, 2026-11-23).
+    """
+    sinks = [s for s in ((package.get("reachability") or {}).get("sinks") or []) if s.get("verdict") == "REACHABLE"]
+    wheels = {node.get("name"): node.get("path") for node in (package.get("tree") or {}).get("nodes") or []}
+    seen = {}
+    for event in events or []:
+        if event.get("step") == "imports":
+            for capability in contract_check.capability_of(event)[1]:
+                seen[capability] = seen.get(capability, 0) + 1
+    contract = package.get("contract") or {}
+    call_sites = [f"{site.get('file')}:{site.get('line')} {site.get('expression') or site.get('symbol') or ''}".rstrip()
+                  for site in contract.get("call_sites") or []]
+    reasons = []
+    for sink in sinks:
+        capability = normalize_name(sink.get("capability"))
+        placement = sink_placement(wheels.get(sink.get("package")), sink.get("file"), sink.get("line"), sink.get("sink"))
+        observed = seen.get(capability, 0)
+        if placement != "module level":
+            why = f"the call is in {placement}, which an import does not run"
+        elif not observed:
+            why = f"the call is module-level code, but the run's import step has no {capability} event (it did not run)"
+        else:
+            why = f"module-level code; the import step has {observed} {capability} event(s), all within the contract"
+        reasons.append({"package": sink.get("package"), "file": sink.get("file"), "line": sink.get("line"),
+                        "sink": sink.get("sink"), "capability": capability, "placement": placement,
+                        "events_of_capability": observed, "exercised": placement == "module level" and observed > 0,
+                        "why": why, "call_sites": call_sites})
+    return reasons
+
+
+def sink_placement(wheel_path, file, line, sink) -> str:
+    """"module level", "function <name>" / "lambda", or "an unknown place" for the sink call at file:line of the wheel."""
+    import ast
+    import zipfile
+    try:
+        with zipfile.ZipFile(wheel_path) as archive:
+            tree = ast.parse(archive.read(file))
+    except Exception:
+        return "an unknown place (the wheel's source could not be read)"
+    found = []
+
+    def visit(node, scope):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            scope = f"function {node.name}"
+        elif isinstance(node, ast.Lambda):
+            scope = "a lambda"
+        if isinstance(node, ast.Call) and node.lineno == line:
+            found.append((ast.unparse(node.func) == sink, scope))
+        for child in ast.iter_child_nodes(node):
+            visit(child, scope)
+    visit(tree, None)
+    exact = [scope for match, scope in found if match] or [scope for _, scope in found]
+    if not exact:
+        return "an unknown place (no call at that line)"
+    inner = next((scope for scope in exact if scope), None)
+    return inner or "module level"
 
 
 def high_risk_triggers(scans, contract) -> list[dict]:

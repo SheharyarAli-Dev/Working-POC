@@ -43,6 +43,12 @@ incomplete -> UNRESOLVED, with those triggers listed. Accepted consequence: unti
 returns UNRESOLVED for an escalated package that has such a trigger. Packages that are not escalated never reach the
 deep stage, so their fast-gate verdicts do not change.
 
+Q8 escalation rule (Maryam, 2026-11-23, after the review of PRs 7-9): a deep VERIFIED is possible only when every
+escalation reason (each reachable denied sink) was exercised by the run: its call is module-level code and the run
+shows an event of its capability. A sink that only the project's call sites reach -> UNRESOLVED
+`DEEP_SINK_NOT_EXERCISED` until Phase 3 drives the call sites. This replaces PR 9's "a benign wheel with a reachable
+sink and a clean complete run -> VERIFIED".
+
 ## Requirement IDs
 
 The dashboard matrix (`frontend/src/components/cavr/RequirementsTab.tsx`) already uses **FR-1 … FR-10, NFR-1, NFR-2**,

@@ -1,6 +1,8 @@
 """Record the real sandbox traces that tests/test_cavr_sandbox_events.py reads (PR 7 of docs/cavr-m2-plan.md).
 
-    CAVR_DOCKER=1 .venv/bin/python tests/test_cavr_data/traces/record_events.py
+    CAVR_DOCKER=1 .venv/bin/python tests/test_cavr_data/traces/record_events.py [stem ...]
+
+With stems (e.g. `events-scoped`) only those recordings are made again; without, all of them.
 
 Each recording is one real run of `sandbox_observe.observe` (or `run_harness` for the empty baseline) in
 asent-cavr-sandbox:local, written as <name>.txt (the trace, strace's stderr) and <name>.json (what produced it). The
@@ -67,6 +69,10 @@ if pid == 0:
 os.waitpid(pid, 0)
 '''
 BENIGN = "def run():\n    return 1\n"
+# A connect at import time, to the one endpoint a scoped grant names (NETWORK_CONNECT:198.51.100.24:443): the sink
+# that escalates the package runs in the import and stays inside the contract (step M2-14, Maryam's decision).
+SCOPED = ("import socket\n\ntry:\n    socket.create_connection(('198.51.100.24', 443), timeout=1)\nexcept OSError:\n"
+          "    pass\n\n\ndef run():\n    return 1\n")
 
 
 class FixedNonce:
@@ -97,19 +103,32 @@ def save(stem, result, steps, produced_by, wheels=None):
     print(stem, result["rule"], result["evidence"].get("trace_lines"))
 
 
-def main():
-    assert sandbox_image.image_identity()["ok"], "build the image first: bash docker/cavr-sandbox/build.sh"
-    sandbox_observe.secrets = FixedNonce
-    steps = sandbox_observe.install_steps(["probe"])
-    result, nodes = observe("probe", {"probe/__init__.py": PROBE})
-    save("events-probe", result, steps, "sandbox_observe.observe: wheel probe 1.0 whose import does PROBE", nodes)
-    steps = sandbox_observe.install_steps(["benign"])
-    result, nodes = observe("benign", {"benign/__init__.py": BENIGN})
-    save("events-benign", result, steps, "sandbox_observe.observe: wheel benign 1.0 (def run(): return 1)", nodes)
+def record_wheel(stem, name, code, what):
+    steps = sandbox_observe.install_steps([name])
+    result, nodes = observe(name, {f"{name}/__init__.py": code})
+    save(stem, result, steps, f"sandbox_observe.observe: wheel {name} 1.0 {what}", nodes)
+
+
+def record_baseline():
     steps = [sandbox_observe.step("imports", sandbox_observe.IMPORT_ARGV)]
     result = sandbox_observe.run_harness(steps, tmpfs=[sandbox_observe.SITE_TMPFS])
     save("events-baseline", result, steps, "sandbox_observe.run_harness: the empty-harness baseline (imports, no module)")
 
 
+RECORDINGS = {
+    "events-probe": lambda: record_wheel("events-probe", "probe", PROBE, "whose import does PROBE"),
+    "events-benign": lambda: record_wheel("events-benign", "benign", BENIGN, "(def run(): return 1)"),
+    "events-baseline": record_baseline,
+    "events-scoped": lambda: record_wheel("events-scoped", "demo", SCOPED, "whose import connects to 198.51.100.24:443"),
+}
+
+
+def main(stems=None):
+    assert sandbox_image.image_identity()["ok"], "build the image first: bash docker/cavr-sandbox/build.sh"
+    sandbox_observe.secrets = FixedNonce
+    for stem in stems or RECORDINGS:
+        RECORDINGS[stem]()
+
+
 if __name__ == "__main__":
-    main()
+    main(sys.argv[1:])

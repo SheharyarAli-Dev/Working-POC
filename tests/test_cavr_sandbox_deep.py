@@ -29,6 +29,11 @@ NETWORK_SINK = "import socket\n\n\ndef send(data):\n    socket.create_connection
 BENIGN = {"demo/__init__.py": "from .net import send\n\n\ndef run():\n    return 1\n", "demo/net.py": NETWORK_SINK}
 TRIGGERED = {"demo/__init__.py": "import os\nimport socket\n\nif os.getenv('CAVR_DEMO_TRIGGER'):\n"
                                  "    socket.create_connection(('198.51.100.24', 443))\n\n\ndef run():\n    return 1\n"}
+# Escalated only by import-time code: the module-level connect runs when the package is imported, to the one endpoint
+# the policy grants (the same code as the recording events-scoped).
+IMPORT_TIME = {"demo/__init__.py": "import socket\n\ntry:\n    socket.create_connection(('198.51.100.24', 443), timeout=1)\n"
+                                   "except OSError:\n    pass\n\n\ndef run():\n    return 1\n"}
+SCOPED_POLICY = {"project_task_description": "Billing dashboard", "allowed_scopes": ["NETWORK_CONNECT:198.51.100.24:443"]}
 
 
 def recorded_run(stem, rule="DEEP_NOT_JUDGED", cut=None):
@@ -97,16 +102,64 @@ def verify(world, deep):
 
 # --- one test per clause of the Q8 rule ----------------------------------------------------------------------------------
 
-def test_clean_complete_run_without_triggers_is_verified(world, tmp_path, monkeypatch):
+def test_a_reachable_sink_the_import_never_ran_is_unresolved_not_exercised(world, tmp_path, monkeypatch):
+    """Maryam, 2026-11-23: the escalation is a sink only the project's call sites reach; an import cannot clear it."""
     escalated(world)
     sandbox = Sandbox(monkeypatch, [recorded_run("events-benign")])
     verdict, package = verify(world, analyzer(tmp_path))
+    assert (package["status"], package["stage"], package["rule"]) == ("UNRESOLVED", "deep", "DEEP_SINK_NOT_EXERCISED")
+    assert verdict["status"] == "UNRESOLVED"
+    assert "demo/net.py:5 calls socket.create_connection (NETWORK_CONNECT)" in package["reason"]
+    assert "app/uses_demo.py:5 demo.run" in package["reason"] and "Phase 3" in package["reason"]
+    deep = package["evidence"]["deep"]["evidence"]
+    (reason,) = deep["escalation_reasons"]
+    assert (reason["placement"], reason["exercised"], reason["events_of_capability"]) == ("function send", False, 0)
+    assert deep["check"]["rule"] == "EVENTS_WITHIN_CONTRACT" and deep["baseline"]["rule"] == "BASELINE_OK"
+    assert sandbox.calls[0]["modules"] == ["demo"] and sandbox.baseline_runs == 1 and world.cache_rows() == []
+
+
+def test_an_import_time_sink_inside_a_scoped_contract_is_verified(world, tmp_path, monkeypatch):
+    world.policy.update(SCOPED_POLICY)
+    escalated(world, IMPORT_TIME)
+    Sandbox(monkeypatch, [recorded_run("events-scoped")])
+    verdict, package = verify(world, analyzer(tmp_path))
+    assert package["evidence"]["reachability"]["sinks"][0]["verdict"] == "REACHABLE"  # escalated: a scoped grant
     assert (package["status"], package["stage"], package["rule"]) == ("VERIFIED", "deep", "DEEP_RUN_CLEAN"), package["reason"]
     assert verdict["status"] == "VERIFIED" and package["escalation"] != ESCALATION
     deep = package["evidence"]["deep"]["evidence"]
-    assert deep["check"]["rule"] == "EVENTS_WITHIN_CONTRACT" and deep["trace_sha256"] and deep["baseline"]["rule"] == "BASELINE_OK"
+    (reason,) = deep["escalation_reasons"]
+    assert (reason["placement"], reason["exercised"], reason["events_of_capability"]) == ("module level", True, 1)
+    assert deep["check"]["used"] == ["NETWORK_CONNECT"] and "every escalation reason (1) ran" in package["reason"]
     assert "call sites were not executed" in package["reason"] and deep["not_exercised"]  # NFR-6: the bounded claim
-    assert sandbox.calls[0]["modules"] == ["demo"] and sandbox.baseline_runs == 1
+
+
+def test_a_module_level_sink_that_shows_no_event_is_not_exercised(world, tmp_path, monkeypatch):
+    world.policy.update(SCOPED_POLICY)
+    escalated(world, IMPORT_TIME)
+    Sandbox(monkeypatch, [recorded_run("events-benign")])  # a run in which nothing connected
+    _, package = verify(world, analyzer(tmp_path))
+    assert (package["status"], package["rule"]) == ("UNRESOLVED", "DEEP_SINK_NOT_EXERCISED")
+    (reason,) = package["evidence"]["deep"]["evidence"]["escalation_reasons"]
+    assert (reason["placement"], reason["exercised"]) == ("module level", False) and "did not run" in reason["why"]
+
+
+def test_an_escalation_without_a_reachable_sink_is_unresolved(tmp_path, monkeypatch):
+    from backend.cavr.capability_contract import vocabulary
+    Sandbox(monkeypatch, [recorded_run("events-benign")])
+    contract = {"result": "OK", "import_names": ["demo"], "allowed": [], "vocabulary": vocabulary(),
+                "denied": [{"capability": name} for name in vocabulary()]}
+    answer = analyzer(tmp_path).analyse({"name": "demo", "version": "1.0", "contract": contract, "scan": [],
+                                         "tree": {"nodes": []}, "reachability": {"sinks": []}})
+    assert (answer["status"], answer["rule"]) == ("UNRESOLVED", "DEEP_ESCALATION_UNKNOWN")
+
+
+def test_sink_placement_reads_the_wheel(tmp_path):
+    source = "\n".join(["import os", "os.system('x')", "", "", "def f():", "    os.system('y')", "", "",
+                        "g = lambda: os.system('z')", "class C:", "    def m(self):", "        os.system('w')", ""])
+    wheel = build_wheel(tmp_path, "demo", "1.0", files={"demo/__init__.py": source})
+    place = lambda line: sandbox_deep.sink_placement(wheel, "demo/__init__.py", line, "os.system")  # noqa: E731
+    assert [place(2), place(6), place(9), place(12)] == ["module level", "function f", "a lambda", "function m"]
+    assert place(3).startswith("an unknown place") and sandbox_deep.sink_placement(tmp_path / "none.whl", "x", 1, "s").startswith("an unknown")
 
 
 def test_violation_is_rejected_with_the_event_as_evidence(world, tmp_path, monkeypatch):
@@ -307,8 +360,9 @@ def test_identity_changes_with_image_harness_profile_and_budget(tmp_path, monkey
 
 
 def test_a_new_image_is_a_cache_miss(world, tmp_path, monkeypatch):
-    escalated(world)
-    Sandbox(monkeypatch, [recorded_run("events-benign")])
+    world.policy.update(SCOPED_POLICY)
+    escalated(world, IMPORT_TIME)
+    Sandbox(monkeypatch, [recorded_run("events-scoped")])
     _, first = verify(world, analyzer(tmp_path))
     _, again = verify(world, analyzer(tmp_path))
     assert first["status"] == "VERIFIED" and again["cache_hit"] is True
@@ -318,7 +372,7 @@ def test_a_new_image_is_a_cache_miss(world, tmp_path, monkeypatch):
         run = recorded_run(stem)
         run["evidence"]["image_id"] = other["image_id"]
         return run
-    Sandbox(monkeypatch, [on_other("events-benign")], baseline=on_other("events-baseline"))
+    Sandbox(monkeypatch, [on_other("events-scoped")], baseline=on_other("events-baseline"))
     _, changed = verify(world, analyzer(tmp_path, other))
     assert changed["cache_hit"] is False and changed["status"] == "VERIFIED"
 
@@ -353,14 +407,14 @@ def test_the_gate_default_is_the_sandbox_and_it_builds_an_analyzer_when_the_imag
     assert status["enabled"] is True and status["version"] == deep.version and deep.quarantine_dir == tmp_path / "quarantine"
 
 
-def gate_repo(tmp_path, files, requirement="demo==1.0"):
+def gate_repo(tmp_path, files, requirement="demo==1.0", policy_update=None):
     index = FakeIndex()
     wheel = build_wheel(tmp_path / "wheels", "demo", "1.0", files=files)
     index.add("demo", "1.0", wheel)
     osv = tmp_path / "osv"
     write_osv_cache(osv, "demo", "1.0", [])
     write_osv_cache(osv, "pypdf", PIN_VERSION, RECORDED_6_21_4)
-    policy = {**POLICY, "approved_requirements": ["demo==1.0"]}
+    policy = {**POLICY, "approved_requirements": ["demo==1.0"], **(policy_update or {})}
     repo = GateRepo(tmp_path / "repo")
     base = {**invoice_app_files(), "requirements.txt": "", ".asent/cavr/policy.json": json.dumps(policy, indent=2),
             ".asent/config.json": config(CAVR={"enabled": True}, SATRA=DISABLED, SABLE=DISABLED)}
@@ -405,16 +459,21 @@ def test_report_text_line_for_each_deep_result():
             {"name": "b", "version": "2", "deep": {"status": "REJECTED", "rule": "DEEP_CONTRACT_VIOLATION", "key_events": [
                 {"capability": "SECRET_READ", "syscall": "openat", "path": "/tmp/home/.aws/credentials", "ok": False,
                  "errno": "ENOENT", "address": None, "argv": None}]}},
+            {"name": "d", "version": "4", "deep": {"status": "UNRESOLVED", "rule": "DEEP_SINK_NOT_EXERCISED", "key_events": [],
+                                                    "escalation_reasons": [{"file": "d/net.py", "line": 5, "sink": "socket.create_connection",
+                                                                            "placement": "function send", "exercised": False}]}},
             {"name": "c", "version": "3", "deep": None}]}]}}]}}
     assert cavr_deep(report) == [
         "  CAVR deep: a==1 VERIFIED DEEP_RUN_CLEAN (install + import observed; nothing outside the contract)",
-        "  CAVR deep: b==2 REJECTED DEEP_CONTRACT_VIOLATION - SECRET_READ openat /tmp/home/.aws/credentials = ENOENT"]
+        "  CAVR deep: b==2 REJECTED DEEP_CONTRACT_VIOLATION - SECRET_READ openat /tmp/home/.aws/credentials = ENOENT",
+        "  CAVR deep: d==4 UNRESOLVED DEEP_SINK_NOT_EXERCISED - not exercised: d/net.py:5 socket.create_connection (function send)"]
 
 
 # --- the demo wheels on Docker -------------------------------------------------------------------------------------------
 
 DEMOS = {
-    "benign": (BENIGN, "VERIFIED", "DEEP_RUN_CLEAN"),
+    "benign": (BENIGN, "UNRESOLVED", "DEEP_SINK_NOT_EXERCISED"),  # the sink is in a function only call sites reach
+    "import_time": (IMPORT_TIME, "VERIFIED", "DEEP_RUN_CLEAN"),   # with SCOPED_POLICY: the sink runs at import, in scope
     "aws": ({**BENIGN, "demo/__init__.py": "import os\nfrom .net import send\n\ntry:\n"
                                           "    open(os.path.expanduser('~/.aws/credentials')).read()\nexcept OSError:\n"
                                           "    pass\n\n\ndef run():\n    return 1\n"}, "REJECTED", "DEEP_CONTRACT_VIOLATION"),
@@ -433,6 +492,8 @@ DEMOS = {
 @pytest.mark.parametrize("demo", list(DEMOS))
 def test_demo_wheel_on_the_real_sandbox(demo, world, tmp_path):
     files, status, rule = DEMOS[demo]
+    if demo == "import_time":
+        world.policy.update(SCOPED_POLICY)
     escalated(world, files)
     deep = sandbox_deep.SandboxDeepAnalyzer(sandbox_identity(), tmp_path / "quarantine", tmp_path / "deep")
     verdict, found = verify(world, deep)
@@ -452,10 +513,10 @@ def test_demo_wheel_on_the_real_sandbox(demo, world, tmp_path):
 
 
 @requires_docker
-@pytest.mark.parametrize("demo, decision, code", [("aws", "BLOCK", 1), ("benign", "ACCEPT", 0)])
+@pytest.mark.parametrize("demo, decision, code", [("aws", "BLOCK", 1), ("benign", "REVIEW", 2), ("import_time", "ACCEPT", 0)])
 def test_asent_gate_end_to_end_on_the_real_sandbox(demo, decision, code, tmp_path, monkeypatch):
     sandbox_identity()
-    repo, settings = gate_repo(tmp_path, DEMOS[demo][0])
+    repo, settings = gate_repo(tmp_path, DEMOS[demo][0], policy_update=SCOPED_POLICY if demo == "import_time" else None)
     monkeypatch.setattr(gate_adapter, "SETTINGS", {**settings, "deep": "sandbox"})
     got, report, _ = run_cli(repo, "base", "head", tmp_path / "out")
     assert (got, report["decision"]) == (code, decision), report["reasons"]

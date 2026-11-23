@@ -1,0 +1,84 @@
+{
+  "file": "events-scoped.txt",
+  "recorded": "2026-11-23",
+  "produced_by": "sandbox_observe.observe: wheel demo 1.0 whose import connects to 198.51.100.24:443",
+  "rule": "DEEP_NOT_JUDGED",
+  "nonce": "0123456789abcdef0123456789abcdef",
+  "steps": [
+    {
+      "name": "install",
+      "argv": [
+        "/usr/local/bin/python",
+        "-I",
+        "-B",
+        "-c",
+        "import sys\nimport pip._internal.network.session as session\nsession.user_agent = lambda: 'cavr-sandbox'\nfrom pip._internal.cli.main import main\nsys.exit(main(sys.argv[1:]))\n",
+        "install",
+        "--isolated",
+        "--disable-pip-version-check",
+        "--no-cache-dir",
+        "--no-input",
+        "--no-index",
+        "--no-deps",
+        "--only-binary",
+        ":all:",
+        "--require-hashes",
+        "--no-compile",
+        "--find-links",
+        "/pkg",
+        "--target",
+        "/site/lib",
+        "-r",
+        "/pkg/hashes.txt"
+      ],
+      "env": {}
+    },
+    {
+      "name": "imports",
+      "argv": [
+        "/usr/local/bin/python",
+        "-I",
+        "-S",
+        "-B",
+        "-c",
+        "import importlib, site, sys\nsite.addsitedir('/site/lib')\nfor name in sys.argv[1:]:\n    importlib.import_module(name)\n",
+        "demo"
+      ],
+      "env": {}
+    }
+  ],
+  "image_id": "sha256:0e88dd461ca40066496c9d3966fc0bf226c47556a044ff16ce6112b22e31350f",
+  "seccomp_sha256": "bd992341659ce9603bc78ddfcc8a577a2110447a2bf724fa6c65d422099499b6",
+  "harness_sha256": "8159ad05f1aa4fb9915ec4c4e9b3bcea211d51e6284c540d2e86866a8e2dd132",
+  "strace": [
+    "strace",
+    "-f",
+    "-q",
+    "--always-show-pid",
+    "-y",
+    "-s",
+    "4096",
+    "-e",
+    "trace=%file,%network,%process,%creds,ptrace,process_vm_readv,process_vm_writev,io_uring_setup,io_uring_enter,io_uring_register,userfaultfd,bpf,perf_event_open,fchdir",
+    "-u",
+    "cavr",
+    "--",
+    "/usr/local/bin/python",
+    "-I",
+    "-S",
+    "/opt/cavr/harness.py",
+    "/job/job.json"
+  ],
+  "trace_sha256": "9f1e451c4cf171e1ec9b8e0d3d19479e550c6e19fd985478da267b424580c521",
+  "wheels": [
+    {
+      "name": "demo",
+      "version": "1.0",
+      "filename": "demo-1.0-py3-none-any.whl",
+      "path": "/tmp/cavr-record-it3bb4ot/demo-1.0-py3-none-any.whl",
+      "sha256": "268d82742b74beea70c49704278eada43d2ae67efdad80fa835428b0a7158773"
+    }
+  ],
+  "docker": "29.9.3",
+  "note": "the marker nonce was fixed for the recording"
+}

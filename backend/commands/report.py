@@ -88,6 +88,10 @@ def cavr_deep(report: dict) -> list[str]:
                     f"{'ok' if key.get('ok') else key.get('errno')}"
         elif deep.get("status") == "VERIFIED":
             line += " (install + import observed; nothing outside the contract)"
+        else:
+            missed = next((r for r in deep.get("escalation_reasons") or [] if isinstance(r, dict) and not r.get("exercised")), None)
+            if missed:
+                line += f" - not exercised: {missed.get('file')}:{missed.get('line')} {missed.get('sink')} ({missed.get('placement')})"
         lines.append(line)
     return lines
 
