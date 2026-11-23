@@ -528,3 +528,76 @@ def test_a_markers_nonce_is_not_part_of_its_key():
     assert events.event_key(one_run) == events.event_key(other)
     read = {**one_run, "type": "FILE_READ"}
     assert events.event_key(read) != events.event_key({**other, "type": "FILE_READ"})  # only markers lose the nonce
+
+
+# --- review of PRs 7-9: sensitive paths behind writes, aliases and the run's own symlinks --------------------------------
+
+@pytest.mark.parametrize("line", [
+    '10 openat(AT_FDCWD</tmp>, "/tmp/home/.aws/credentials", O_RDWR|O_CLOEXEC) = -1 ENOENT (No such file or directory)',
+    '10 rename("/tmp/home/.aws/credentials", "/tmp/x") = -1 ENOENT (No such file or directory)',
+    '10 link("/tmp/home/.ssh/id_rsa", "/tmp/k") = -1 ENOENT (No such file or directory)',
+    '10 linkat(AT_FDCWD</tmp>, "/etc/shadow", AT_FDCWD</tmp>, "/tmp/s", 0) = -1 EPERM (Operation not permitted)',
+    '10 truncate("/tmp/home/.netrc", 0) = -1 ENOENT (No such file or directory)',
+    '10 symlink("/tmp/home/.aws/credentials", "/tmp/c") = 0',
+])
+def test_a_write_that_names_a_sensitive_path_is_also_sensitive(line):
+    found = one(line)
+    assert found["type"] == "FILE_WRITE" and found["sensitive"] in ("SECRET_READ", "SENSITIVE_FILE_READ"), found
+
+
+@pytest.mark.parametrize("path", ["/proc/self/root/tmp/home/.aws/credentials", "/proc/1/cwd/x", "/proc/self/fd/3",
+                                  "/proc/12/task/12/root/etc/passwd", "/proc/thread-self/root/tmp/home/.ssh/id_rsa",
+                                  "/dev/fd/3/x", "/proc/self/map_files/1-2"])
+def test_a_path_through_a_proc_or_fd_alias_is_incomplete(path):
+    found = one(f'10 openat(AT_FDCWD</tmp>, "{path}", O_RDONLY) = -1 ENOENT (No such file or directory)')
+    assert found["complete"] is False and "alias" in found["problem"]
+
+
+def test_proc_self_exe_and_environ_are_not_aliases():
+    assert one('10 readlinkat(AT_FDCWD</tmp>, "/proc/self/exe", "/usr/local/bin/python3.12", 4096) = 25')["type"] == "CODE_LOAD"
+    assert one('10 openat(AT_FDCWD</tmp>, "/proc/self/environ", O_RDONLY) = 3</proc/10/environ>')["sensitive"] == "SECRET_READ"
+
+
+def test_a_symlink_the_run_made_is_followed_by_later_paths():
+    found = made('10 symlink("/tmp/home", "/tmp/h") = 0',
+                 '10 openat(AT_FDCWD</tmp>, "/tmp/h/.aws/credentials", O_RDONLY) = -1 ENOENT (No such file or directory)',
+                 '10 symlink("home", "/tmp/rel") = 0', '10 newfstatat(AT_FDCWD</tmp>, "/tmp/rel/.ssh/id_rsa", 0x1, 0) = -1 ENOENT (No such file or directory)')
+    assert found[0]["link_target"] == "/tmp/home"
+    assert (found[1]["path"], found[1]["sensitive"]) == ("/tmp/home/.aws/credentials", "SECRET_READ")
+    assert found[2]["link_target"] == "/tmp/home"  # relative to the link's directory
+    assert (found[3]["path"], found[3]["sensitive"]) == ("/tmp/home/.ssh/id_rsa", "SECRET_READ")
+
+
+def test_a_symlink_in_the_install_target_is_not_a_code_load():
+    found = made('10 symlink("/tmp/home/.aws/credentials", "/site/lib/demo/data") = 0',
+                 '10 newfstatat(AT_FDCWD</tmp>, "/site/lib/demo/data", 0x1, 0) = -1 ENOENT (No such file or directory)')
+    assert found[0]["sensitive"] == "SECRET_READ"
+    assert found[1]["type"] == "FILE_READ" and found[1]["sensitive"] == "SECRET_READ"
+
+
+def test_a_failed_symlink_creates_no_link():
+    found = made('10 symlink("/tmp/home", "/tmp/h") = -1 EEXIST (File exists)',
+                 '10 openat(AT_FDCWD</tmp>, "/tmp/h/x", O_RDONLY) = -1 ENOENT (No such file or directory)')
+    assert found[1]["path"] == "/tmp/h/x"
+
+
+@pytest.mark.parametrize("path, level", [("/nonexistent/.ssh/id_rsa", "SECRET_READ"), ("/proc/1/task/7/environ", "SECRET_READ")])
+def test_more_sensitive_paths(path, level):
+    assert events.sensitivity(path)[0] == level
+
+
+def test_an_unknown_address_family_is_incomplete_not_an_exception():
+    found = one('10 connect(3<socket:[1]>, {sa_family=0x2a /* AF_??? */, sa_data="x"}, 16) = -1 EAFNOSUPPORT (Address family not supported by protocol)')
+    assert found["type"] == "NETWORK_CONNECT" and found["complete"] is False
+
+
+def test_a_line_the_code_cannot_handle_is_unknown_and_the_rest_is_kept(monkeypatch):
+    original = events._line_event
+
+    def flaky(state, number, pid, body):
+        if "boom" in body:
+            raise ValueError("unexpected")
+        return original(state, number, pid, body)
+    monkeypatch.setattr(events, "_line_event", flaky)
+    found = made('10 openat(AT_FDCWD</tmp>, "/tmp/boom", O_RDONLY) = 3</tmp/boom>', '10 setuid(0) = -1 EPERM (Operation not permitted)')
+    assert [e["type"] for e in found] == ["UNKNOWN", "CREDENTIAL_CHANGE"] and "ValueError" in found[0]["problem"]

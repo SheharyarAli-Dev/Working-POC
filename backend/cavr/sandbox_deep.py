@@ -3,7 +3,8 @@
 `SandboxDeepAnalyzer` is the Phase 1 deep-analyzer interface (`deep_stage`) on top of PRs 3-8:
 
     version    cavr-sandbox-deep/1 plus the SHA-256 of the harness, the seccomp profile, the strace command, the two
-               step commands (pip, import), the event normaliser's and the contract check's versions
+               step commands (pip, import), the docker lockdown flags, the event normaliser's and the contract
+               check's versions, and the source of every module that decides the verdict (VERDICT_CODE)
     image_id   the checked image ID (`sandbox_image.image_identity`)
     budget     {"runs": 1, "run_seconds": 20, "package_seconds": 120, "gate_run_seconds": 300}
 
@@ -40,7 +41,7 @@ import os
 import time
 from pathlib import Path
 
-from backend.cavr import contract_check, sandbox_events, sandbox_image, sandbox_observe
+from backend.cavr import contract_check, sandbox_events, sandbox_exec, sandbox_image, sandbox_observe
 from backend.orchestrator.hashing import digest
 from backend.threat_repo.behavior_rules import normalize_name
 
@@ -56,10 +57,20 @@ OBSERVE = None  # tests replace it; None means sandbox_observe.observe
 RUN_HARNESS = None  # tests replace it; None means sandbox_observe.run_harness
 
 
+# The source files whose code decides a deep verdict: a change to any of them is a new identity, so no verdict cached
+# by older code is reused (review of PRs 7-9; the version strings alone would need a manual bump).
+VERDICT_CODE = ("sandbox_deep.py", "sandbox_events.py", "contract_check.py", "sandbox_trace.py", "sandbox_observe.py",
+                "sandbox_exec.py")
+
+
 def deep_version(identity: dict) -> str:
+    here = Path(__file__).resolve().parent
+    code = hashlib.sha256(b"".join(f"{name}\0".encode() + (_sha256(here / name) or "missing").encode()
+                                   for name in VERDICT_CODE)).hexdigest()
     parts = {"harness": _sha256(sandbox_observe.HARNESS), "profile": identity.get("seccomp_sha256"),
              "strace": digest(sandbox_observe.STRACE), "steps": digest([sandbox_observe.PIP_INSTALL, sandbox_observe.IMPORT_ARGV]),
-             "events": sandbox_events.EVENTS_VERSION, "check": contract_check.CHECK_VERSION}
+             "flags": digest([sandbox_exec.lockdown_flags(), sandbox_observe.SITE_TMPFS]),
+             "events": sandbox_events.EVENTS_VERSION, "check": contract_check.CHECK_VERSION, "code": code}
     return VERSION + "".join(f";{key}:{value}" for key, value in parts.items())
 
 
@@ -132,7 +143,8 @@ class SandboxDeepAnalyzer:
                          "wheels": [{k: w.get(k) for k in ("name", "version", "sha256")} for w in observed.get("wheels") or []],
                          "output": run.get("output")})
         judged = None
-        if observed.get("image_id") not in (None, self.image_id):
+        ran = observed.get("trace_attributable") or observed.get("container")
+        if (ran and observed.get("image_id") != self.image_id) or observed.get("image_id") not in (None, self.image_id):
             return _answer("UNRESOLVED", "DEEP_IMAGE_CHANGED", f"{name}: the run used image {observed.get('image_id')}, "
                            f"not {self.image_id} (the identity in the cache key)", evidence)
         if observed.get("trace_attributable") and observed.get("processes"):

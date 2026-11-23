@@ -249,3 +249,37 @@ def test_harness_events_are_not_excluded_by_name():
 
 def test_a_fault_is_unresolved_never_a_pass():
     assert contract_check.judge([object()], contract())["rule"] == "INTERNAL_ERROR"
+
+
+# --- review of PRs 7-9 ---------------------------------------------------------------------------------------------------
+
+RDWR_SECRET = 'openat(AT_FDCWD</tmp>, "/tmp/home/.aws/credentials", O_RDWR|O_CLOEXEC) = -1 ENOENT (No such file or directory)'
+
+
+@pytest.mark.parametrize("line", [RDWR_SECRET, 'rename("/tmp/home/.aws/credentials", "/tmp/x") = 0',
+                                  'link("/tmp/home/.ssh/id_rsa", "/tmp/k") = 0', 'symlink("/tmp/home/.aws/credentials", "/tmp/c") = 0'])
+def test_a_write_naming_a_secret_needs_the_secret_capability_too(line):
+    files = contract(FILE_WRITE="*", FILE_READ="*")
+    checked = contract_check.judge(ev(line), files)
+    assert checked["result"] == "VIOLATION" and checked["violations"][0]["capability"] == "SECRET_READ"
+    scoped = contract(FILE_WRITE="/tmp", FILE_READ="/tmp")  # HOME is /tmp/home: inside a /tmp grant
+    assert contract_check.judge(ev(line), scoped)["result"] == "VIOLATION"
+    both = contract(FILE_WRITE="*", SECRET_READ="*")
+    assert contract_check.judge(ev(line), both)["result"] == "OK"
+
+
+def test_reading_a_secret_through_a_symlink_the_run_made_is_a_violation():
+    found = ev('symlink("/tmp/home", "/tmp/h") = 0',
+               'openat(AT_FDCWD</tmp>, "/tmp/h/.aws/credentials", O_RDONLY) = -1 ENOENT (No such file or directory)')
+    checked = contract_check.judge(found, contract(FILE_WRITE="*", FILE_READ="*"))
+    assert checked["result"] == "VIOLATION" and checked["violations"][0]["capability"] == "SECRET_READ"
+
+
+def test_a_secret_read_through_proc_root_is_never_a_pass():
+    found = ev('openat(AT_FDCWD</tmp>, "/proc/self/root/tmp/home/.aws/credentials", O_RDONLY) = -1 ENOENT (No such file or directory)')
+    assert contract_check.judge(found, contract(FILE_READ="*"))["rule"] == "EVENT_INCOMPLETE"
+
+
+def test_pip_touching_a_secret_is_outside_its_envelope():
+    found = ev('rename("/tmp/home/.aws/credentials", "/tmp/pip-x") = 0', pid=10)
+    assert contract_check.judge(found, contract())["rule"] == "INSTALL_OUTSIDE_ENVELOPE"

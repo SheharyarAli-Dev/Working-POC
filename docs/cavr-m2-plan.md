@@ -275,7 +275,8 @@ sandbox security rule above has a passing Docker test; violation -> REJECTED, in
 
 ### PR 7 — `fix(cavr): every attempted sensitive syscall becomes an event`
 
-- Part (review of PRs 3-6, MAJOR 1): strace gets `-yy` and a larger `-s`, and an event whose path or address is
+- Part (review of PRs 3-6, MAJOR 1): strace gets `-y` (as built: `-yy` would need netlink `sendmsg` / `recvmsg` for
+  strace, which the profile does not give packages either; sockets print as `socket:[n]`) and `-s 4096`, and an event whose path or address is
   truncated (`"..."...`) or relative to a dirfd that cannot be resolved is unknown -> UNRESOLVED.
 - Part: `runtime_monitor.normalize` keeps failed attempts with their errno; real endpoints from `sockaddr`
   (IPv4, IPv6, Unix); SECRET_ACCESS from the run's canary path set; harness processes excluded by PID from the trace,
@@ -298,7 +299,8 @@ sandbox security rule above has a passing Docker test; violation -> REJECTED, in
   Verdict rule (Q8): VERIFIED only if the run completed within budget (20 s per run, 120 s per package), its trace is
   complete, and no event falls outside the contract; any violation -> REJECTED; anything incomplete -> UNRESOLVED with
   the reason. `gate_adapter` passes the deep analyzer when the engine and image check pass; otherwise UNRESOLVED
-  "no isolation", as today. Deep time in `deep_analysis_ms` (NFR-4). Until PR 12 there is no frontier, so under the
+  "no isolation", as today. Deep time per package in the deep evidence (`elapsed_seconds`; as built in PR 9; a
+  `deep_analysis_ms` metric in `pipeline.metrics` is still open, NFR-4). Until PR 12 there is no frontier, so under the
   confirmed Q8 frontier rule an escalated package with a high-risk trigger in front of a reachable sink is incomplete
   -> UNRESOLVED (accepted). Packages that are not escalated are unaffected: they never reach the deep stage and keep
   their fast-gate verdict.

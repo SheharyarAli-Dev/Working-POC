@@ -7,7 +7,8 @@
     no capability   CODE_LOAD and the structure types (sandbox_events.STRUCTURE); a bind to a loopback address
                     with port 0 (a local probe: nothing can connect to it, listen is refused by the profile)
     a capability    FILE_READ -> FILE_READ, or SECRET_READ / SENSITIVE_FILE_READ when the path is sensitive (even
-                    with FILE_READ granted); FILE_WRITE -> FILE_WRITE, or PERSISTENCE_WRITE; PROCESS_EXEC;
+                    with FILE_READ granted); FILE_WRITE -> FILE_WRITE, or PERSISTENCE_WRITE, and also the sensitive
+                    one when any path it names is sensitive (O_RDWR, rename / link of a secret); PROCESS_EXEC;
                     NETWORK_CONNECT, NETWORK_LISTEN and any other bind -> NETWORK_CONNECT
     never allowed   CREDENTIAL_CHANGE, REFUSED_SYSCALL: no capability of the contract can allow them
     unknown         UNKNOWN, or a type this module has no rule for
@@ -21,6 +22,7 @@ An attempt counts like a success: a refused or failed call is judged as if it ha
         PROCESS_EXEC      "/abs/path[, ...]": the exec'd path must be one of them
         file capabilities "/abs/dir[, ...]": the path (and the real path) must be inside one of them
         anything else (a label such as `invoice_documents`) -> UNRESOLVED SCOPE_NOT_CHECKABLE
+    a file event whose path cannot be read -> UNRESOLVED EVENT_INCOMPLETE whatever is granted (it may be a secret);
     an event the scope or capability cannot be decided for -> UNRESOLVED EVENT_INCOMPLETE; except that a network,
         credential or refused-syscall event is a violation of a denied capability even when an address is missing
         (its capability does not depend on it). An incomplete file or exec event is never a violation: the path
@@ -43,7 +45,7 @@ import posixpath
 
 from backend.cavr import sandbox_events
 
-CHECK_VERSION = "cavr-contract-check/1"
+CHECK_VERSION = "cavr-contract-check/2"
 UNRESTRICTED = "*"
 RUNTIME_CAPABILITIES = ("FILE_READ", "SECRET_READ", "SENSITIVE_FILE_READ", "FILE_WRITE", "PERSISTENCE_WRITE",
                         "PROCESS_EXEC", "NETWORK_CONNECT")
@@ -96,23 +98,28 @@ def read_contract(contract):
 
 
 def capability_of(event: dict):
-    """(kind, capability): kind is "none", "capability", "never" or "unknown"."""
+    """(kind, [capabilities]): kind is "none", "capability", "never" or "unknown"; every capability must be granted.
+
+    A write that names a sensitive path needs the write capability and the sensitive one: an O_RDWR open reads the
+    file, and a rename / link of a secret (or a symlink to it) makes it readable under another name.
+    """
     kind = event.get("type")
     if kind in NO_CAPABILITY:
-        return "none", None
+        return "none", []
     if kind in NEVER_ALLOWED:
-        return "never", kind
+        return "never", [kind]
     if kind == "FILE_READ":
-        return "capability", event.get("sensitive") or "FILE_READ"
+        return "capability", [event.get("sensitive") or "FILE_READ"]
     if kind == "FILE_WRITE":
-        return "capability", "PERSISTENCE_WRITE" if event.get("persistence") else "FILE_WRITE"
+        write = "PERSISTENCE_WRITE" if event.get("persistence") else "FILE_WRITE"
+        return "capability", [write] + ([event["sensitive"]] if event.get("sensitive") else [])
     if kind == "PROCESS_EXEC":
-        return "capability", "PROCESS_EXEC"
+        return "capability", ["PROCESS_EXEC"]
     if kind == "NETWORK_BIND" and _loopback_probe(event.get("address")):
-        return "none", None
+        return "none", []
     if kind in ("NETWORK_CONNECT", "NETWORK_BIND", "NETWORK_LISTEN"):
-        return "capability", "NETWORK_CONNECT"
-    return "unknown", None
+        return "capability", ["NETWORK_CONNECT"]
+    return "unknown", []
 
 
 def _judge(events, grants, contract) -> dict:
@@ -123,36 +130,26 @@ def _judge(events, grants, contract) -> dict:
             if why:
                 unresolved.append(_entry(event, "INSTALL_OUTSIDE_ENVELOPE", why))
             continue
-        kind, capability = capability_of(event)
+        kind, capabilities = capability_of(event)
         if kind == "none":
             continue
         if kind == "unknown":
             unresolved.append(_entry(event, "EVENT_TYPE_UNKNOWN", f"an event of type {event.get('type')!r} "
                                      f"({event.get('syscall')}) has no rule: {event.get('problem') or 'no rule'}"))
             continue
-        used.add(capability)
-        if kind == "never":
-            violations.append(_entry(event, "CONTRACT_VIOLATION", f"{capability}: no capability can allow it", capability))
+        if event.get("type") in ("FILE_READ", "FILE_WRITE") and not event.get("complete") and not event.get("sensitive"):
+            # The path is not known, so neither is whether it is a secret: no grant (not even "*") can cover it.
+            used.update(capabilities)
+            unresolved.append(_entry(event, "EVENT_INCOMPLETE", f"a file event whose path cannot be read (it may be "
+                                     f"sensitive): {event.get('problem')}", capabilities[0]))
             continue
-        scope = grants.get(capability)
-        if scope is None:
-            if event.get("complete") or event.get("type") in ("NETWORK_CONNECT", "NETWORK_BIND", "NETWORK_LISTEN"):
-                violations.append(_entry(event, "CONTRACT_VIOLATION", f"{capability} is not granted by the contract",
-                                         capability))
-            else:
-                unresolved.append(_entry(event, "EVENT_INCOMPLETE", f"{capability} is denied, but the event cannot be "
-                                         f"read: {event.get('problem')}", capability))
-            continue
-        if scope == UNRESTRICTED:
-            continue
-        verdict, why = in_scope(event, capability, scope)
-        if verdict is True:
-            continue
-        if verdict is False:
-            violations.append(_entry(event, "CONTRACT_VIOLATION", why, capability))
-        else:
-            unresolved.append(_entry(event, "SCOPE_NOT_CHECKABLE" if verdict == "label" else "EVENT_INCOMPLETE", why,
-                                     capability))
+        for capability in capabilities:
+            used.add(capability)
+            found = _one(event, kind, capability, grants)
+            if found is not None:
+                (violations if found["rule"] == "CONTRACT_VIOLATION" else unresolved).append(found)
+                if found["rule"] == "CONTRACT_VIOLATION":
+                    break  # one violation per event is evidence enough
     required = [entry["capability"] for entry in contract.get("allowed") or [] if entry.get("status") == "REQUIRED"]
     not_exercised = sorted(set(required) - used)
     judged = sum(1 for event in events if event.get("step") != INSTALL_STEP and capability_of(event)[0] != "none")
@@ -168,6 +165,26 @@ def _judge(events, grants, contract) -> dict:
                        f"{first['why']} ({_describe(first['event'])})", **fields)
     return _result("OK", "EVENTS_WITHIN_CONTRACT", f"{judged} event(s) judged, all within the contract"
                    + (f"; required but not exercised: {', '.join(not_exercised)}" if not_exercised else ""), **fields)
+
+
+def _one(event, kind, capability, grants):
+    """The violation or unresolved entry for one capability an event needs, or None when it is granted."""
+    if kind == "never":
+        return _entry(event, "CONTRACT_VIOLATION", f"{capability}: no capability can allow it", capability)
+    scope = grants.get(capability)
+    if scope is None:
+        if event.get("complete") or event.get("type") in ("NETWORK_CONNECT", "NETWORK_BIND", "NETWORK_LISTEN"):
+            return _entry(event, "CONTRACT_VIOLATION", f"{capability} is not granted by the contract", capability)
+        return _entry(event, "EVENT_INCOMPLETE", f"{capability} is denied, but the event cannot be read: "
+                      f"{event.get('problem')}", capability)
+    if scope == UNRESTRICTED:
+        return None
+    verdict, why = in_scope(event, capability, scope)
+    if verdict is True:
+        return None
+    if verdict is False:
+        return _entry(event, "CONTRACT_VIOLATION", why, capability)
+    return _entry(event, "SCOPE_NOT_CHECKABLE" if verdict == "label" else "EVENT_INCOMPLETE", why, capability)
 
 
 def in_scope(event: dict, capability: str, scope: str):
@@ -211,7 +228,7 @@ def _outside_envelope(event: dict):
         return f"pip's event cannot be read: {event.get('problem')}"
     if kind == "FILE_READ" and not event.get("sensitive"):
         return None
-    if kind == "FILE_WRITE":
+    if kind == "FILE_WRITE" and not event.get("sensitive"):
         paths = [p for p in (event.get("paths") or [event.get("path")]) + [event.get("real_path")] if p]
         if not paths:
             return "pip wrote to a path that cannot be read"

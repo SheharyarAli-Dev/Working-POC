@@ -4983,10 +4983,11 @@ Plan: `docs/cavr-m2-plan.md` PR 7, decisions D1–D7 (Maryam, 2026-11-23) plus t
   most relative paths are resolved from the kernel; calls without a dirfd use the last directory seen for the
   process; after any chdir every other process's directory is unknown (threads can share it) -> incomplete.
 - **CODE_LOAD locations (D1, refined with the measured baseline)**: `/usr/local/`, `/usr/lib/`, `/lib/`,
-  `/usr/share/locale/`, `/usr/share/zoneinfo/`, `/opt/cavr/`, `/job/`, `/pkg/`, `/site/lib/`, and five exact files
-  (`/etc/ld.so.cache`, `/etc/ld.so.preload`, `/etc/localtime`, `/dev/null`, `/proc/self/exe`); a stat of an ancestor
-  (`/`, `/usr`, ...) only. Both the asked path and the real path must be inside; sensitive paths are checked first.
-  Without the five files the empty baseline would never be clean (measured: its only non-code reads are these).
+  `/usr/share/locale/`, `/usr/share/zoneinfo/`, `/opt/cavr/`, `/job/`, `/pkg/`, `/site/lib/`, and seven exact paths
+  in `RUNTIME_FILES` (`/etc/ld.so.cache`, `/etc/ld.so.preload`, `/etc/localtime`, `/dev/null`, `/proc/self/exe`,
+  and the directories `/site/lib` and `/site` themselves); a stat of an ancestor (`/`, `/usr`, ...) only. Both the asked
+  path and the real path (when strace prints one) must be inside; sensitive paths are checked first. Without the first
+  five the empty baseline would never be clean (measured: its only non-code reads are these).
 - **Kept as attempts**: every failed syscall (ENETUNREACH, ENOENT, EACCES, EPERM) is an event; a `sendmsg` refused
   by the profile is a network attempt.
 - **bind is its own type** (NETWORK_BIND): pip's urllib3 binds `::1` port 0 to probe IPv6 support; PR 8 decides.
@@ -5238,8 +5239,10 @@ Plan: `docs/cavr-m2-plan.md` PR 9, Q8 and its frontier rule, decisions D2, D6, D
 - **Recorded runs instead of a fake analyzer in the unit tests**: `OBSERVE` / `RUN_HARNESS` return the real traces of
   Step M2-12, so the normaliser, the baseline and the contract check are the real ones; only the container is not
   started. Alternative (a fake `analyse`) would test none of PRs 7-8.
-- **Order of the Q8 rule**: a violation is checked first, also in a run that did not end well (D6), then the image,
-  then the run's own problems, then events that cannot be judged, then unexplored triggers; VERIFIED only if all pass.
+- **Order of the Q8 rule**: the image is checked first (a run whose evidence names another image, or none, is
+  UNRESOLVED DEEP_IMAGE_CHANGED even if it shows a violation: its events would be cached under the wrong identity);
+  then a violation, also in a run that did not end well (D6) -> REJECTED; then the run's own problems, then events
+  that cannot be judged, then unexplored triggers; VERIFIED only if all pass.
 - **High-risk trigger** = a gated branch (`ast_scan` trigger) that reaches a sink whose capability the contract does
   not grant with `*`; any such trigger in any wheel of the tree is UNRESOLVED until Phase 3 (frontier rule).
   Conservative: it can only add UNRESOLVED, never a pass.
@@ -5351,3 +5354,121 @@ the five demo wheels did. The Flask time difference (+14.5 s) is within the spre
    gave before (`test_no_docker_or_no_image_keeps_todays_behaviour`, `test_gate_without_an_image_…`).
 3. **Why is the env-trigger wheel UNRESOLVED and not VERIFIED, though its run was clean?** Its import never took the
    `os.getenv` branch, so the sink behind it was never observed; until Phase 3 explores it, Q8 says incomplete.
+
+## Review of steps M2-12 to M2-14 — fixes (2026-11-23)
+
+Review outcomes (one cavr-reviewer pass over PRs 7-9, `git diff 7308c2c..HEAD`, 2026-11-23; 1753 passed, 70 skipped
+without Docker at review time):
+- Step M2-12 (PR 7): 1 pass, fix first (BLOCKER 1 and 2, events part); fixed below; 0 open MINOR.
+- Step M2-13 (PR 8): 1 pass, fix first (BLOCKER 1, contract part); fixed below; 0 open MINOR.
+- Step M2-14 (PR 9): 1 pass, fix first (BLOCKER 3, notes); fixed below; 1 open MINOR (MINOR 1, design question for Maryam).
+
+### Ch 6 Implementation
+
+- `backend/cavr/sandbox_events.py` (EVENTS_VERSION `cavr-events/2`): every path a file call names (both paths of a
+  rename / link, the real path, a symlink's target) is checked for sensitivity, also for writes; symlinks the run
+  creates are recorded (`_State.links`, `_link_target`) and followed when later paths are resolved
+  (`_State.follow`); a path through `/proc/<pid>/{root,cwd,fd,task,map_files}`, `/proc/thread-self` or `/dev/fd` is
+  incomplete (`ALIASES`); `/nonexistent` (the cavr user's passwd home) is a home; `/proc/*/task/*/environ` is a secret;
+  an unreadable address family is incomplete; any exception on a line makes that line UNKNOWN.
+- `backend/cavr/contract_check.py` (CHECK_VERSION `cavr-contract-check/2`): `capability_of` returns every capability an
+  event needs (a write naming a secret needs the write capability and SECRET_READ / SENSITIVE_FILE_READ), judged by
+  `_one`; a file event whose path cannot be read is UNRESOLVED whatever is granted; pip touching a secret is outside
+  its envelope.
+- `backend/cavr/sandbox_deep.py`: the identity also covers the docker lockdown flags, the install tmpfs and the source
+  of every module that decides a verdict (`VERDICT_CODE`); a run with an attributable trace and no image ID is
+  DEEP_IMAGE_CHANGED.
+- `docs/report-notes/cavr-report-notes.md`: Step M2-12's CODE_LOAD list (seven RUNTIME_FILES entries, not five);
+  Step M2-14's Q8 order (the image is checked before a violation). `docs/cavr-m2-plan.md`: PR 7 says `-y` (as built),
+  PR 9 says where deep time is (as built).
+
+### Design decisions
+
+- **Follow the run's own symlinks** instead of the reviewer's suggestion "no CODE_LOAD for a failed stat in
+  /site/lib without a real path": Python's import probes in /site/lib are exactly such stats, so that rule would have
+  turned every benign import into FILE_READ events (REJECTED under a deny-all contract). A symlink can only reach a
+  secret if someone made it; /site/lib starts empty, pip writes regular files, and the package's own `symlink` is
+  traced, so recording it and resolving later paths through it closes the hole without that cost.
+- **A file event with an unreadable path cannot be granted**: found by the new
+  `test_a_secret_read_through_proc_root_is_never_a_pass` (with `FILE_READ:*` it passed before this change).
+- **Hash the verdict code into the identity**: a fix to the normaliser now invalidates cached deep verdicts by
+  itself; the version strings were bumped as well.
+
+### Requirements covered
+
+| ID | Acceptance check |
+|---|---|
+| FR-13 / D4 | O_RDWR, rename, link, linkat, truncate, symlink naming a secret -> sensitive; secret via the run's symlink -> SECRET_READ |
+| FR-6 | `/proc/self/root/...`, `/dev/fd/...` -> incomplete -> UNRESOLVED even with `FILE_READ:*`; a line that raises -> UNKNOWN |
+| FR-10 / cache | identity changes with STRACE, PIP_INSTALL, IMPORT_ARGV, SITE_TMPFS, CAPABILITIES, both versions, the verdict code |
+
+### Ch 7 Test cases
+
+| Test ID | Purpose | Input | Expected | Result |
+|---|---|---|---|---|
+| `test_a_write_that_names_a_sensitive_path_is_also_sensitive` (6) | BLOCKER 1 | O_RDWR `.aws`, rename, link, linkat `/etc/shadow`, truncate `.netrc`, symlink to `.aws` | FILE_WRITE with `sensitive` | pass |
+| `test_a_write_naming_a_secret_needs_the_secret_capability_too` (4) | BLOCKER 1 | same calls; `FILE_WRITE/READ:*`, `/tmp` scopes, + `SECRET_READ:*` | VIOLATION, VIOLATION, OK | pass |
+| `test_a_path_through_a_proc_or_fd_alias_is_incomplete` (7) | BLOCKER 2 | `/proc/self/root/…`, `/proc/1/cwd`, `/proc/self/fd/3`, task root, thread-self, `/dev/fd/3/x`, map_files | incomplete | pass |
+| `test_proc_self_exe_and_environ_are_not_aliases` | no false alarm | `/proc/self/exe`, `/proc/self/environ` | CODE_LOAD / SECRET_READ | pass |
+| `test_a_symlink_the_run_made_is_followed_by_later_paths` | BLOCKER 2 | `/tmp/h -> /tmp/home`, relative `home` | later opens resolve to `/tmp/home/...`, SECRET_READ | pass |
+| `test_a_symlink_in_the_install_target_is_not_a_code_load` | BLOCKER 2 | link in `/site/lib` to `.aws` | the link and the stat are SECRET_READ | pass |
+| `test_a_failed_symlink_creates_no_link` | edge | EEXIST | not followed | pass |
+| `test_more_sensitive_paths` (2) | BLOCKER 2 | `/nonexistent/.ssh/id_rsa`, `/proc/1/task/7/environ` | SECRET_READ | pass |
+| `test_reading_a_secret_through_a_symlink_the_run_made_is_a_violation` | BLOCKER 2 | symlink + open, `FILE_READ/WRITE:*` | VIOLATION SECRET_READ | pass |
+| `test_a_secret_read_through_proc_root_is_never_a_pass` | BLOCKER 2 | `/proc/self/root/...`, `FILE_READ:*` | EVENT_INCOMPLETE | fail, then pass (see design decisions) |
+| `test_pip_touching_a_secret_is_outside_its_envelope` | D3 | install step renames `.aws/credentials` | INSTALL_OUTSIDE_ENVELOPE | pass |
+| `test_an_unknown_address_family_is_incomplete_not_an_exception` | MINOR 2 | `sa_family=0x2a /* AF_??? */` | NETWORK_CONNECT, incomplete | pass |
+| `test_a_line_the_code_cannot_handle_is_unknown_and_the_rest_is_kept` | MINOR 2 | a line that raises ValueError | UNKNOWN, next line still typed | pass |
+| `test_a_run_without_an_image_id_is_unresolved` | MINOR 3 | probe recording, image ID None | DEEP_IMAGE_CHANGED | pass |
+| `test_identity_changes_with_image_harness_profile_and_budget` (extended) | MINOR 4, 7 | 7 more parts and a source hash | identity differs each time | pass |
+| `test_run_wide_cap_leaves_the_remaining_packages_unresolved` (stronger) | MINOR 5 | — | each of the first three ran | pass |
+| `test_the_gate_default_is_the_sandbox_and_it_builds_an_analyzer_when_the_image_passes` (replaces the docstring test) | MINOR 6 | image passes | analyzer built, status on | pass |
+
+No existing result changed. Run before the commit: `CAVR_DOCKER=1 pytest tests/test_cavr_*.py tests/test_orchestrator_config.py
+tests/test_gate_*.py tests/test_cli_gate.py tests/test_cli_report.py`: 1952 passed, 12 skipped (live), 649 s.
+
+### Defects found and fixed
+
+- BLOCKER 1 (reviewer): a write-class call never checked sensitivity, so O_RDWR / rename / link of a secret passed
+  under a write grant. Fixed above.
+- BLOCKER 2 (reviewer): lexical normalisation missed /proc and /dev/fd aliases, the run's own symlinks, the
+  `/nonexistent` home and `/proc/*/task/*/environ`. Fixed above; one more case found by the new tests
+  (an incomplete file event under `FILE_READ:*`), also fixed.
+- BLOCKER 3 (reviewer): two statements in the notes did not match the code. Corrected.
+- MINOR 2–8 fixed as listed; MINOR 9: `backend/commands/report.py` was in the approved plan of this phase (shared
+  files, `[owner review: backend/commands/report.py]`); the dangling "Review of steps M2-12 to M2-14" pointer is
+  this section.
+
+### Known limitations / deferred
+
+- MINOR 1 (open, for Maryam): the fast gate escalates because a denied sink is reachable from the project's call
+  sites; the deep run imports the package but never calls them, so a clean import gives VERIFIED although the
+  escalating sink was never exercised. PR 9 of the plan asks for exactly this ("a benign wheel with a reachable sink
+  and a clean complete run -> VERIFIED"), and the verdict's claim says the call sites were not executed. Alternative:
+  UNRESOLVED until Phase 3 when the escalating sink is not behind a trigger.
+- A truncated path whose real path shows a secret, under a denied capability, is EVENT_INCOMPLETE (UNRESOLVED), not a
+  violation.
+
+### Tool disclosure (Ch 8.7)
+
+- **Generated by Claude Code:** the fixes, tests and this section, from the cavr-reviewer report. **Reviewed by
+  Maryam:** not yet. **Verified by:** the runs above.
+
+### Supervisor Q&A prep
+
+1. **Can a package read a credential through `/proc/self/root/...`, a symlink, a rename or an O_RDWR open?** Each
+   is now an event the contract has to allow as a secret read (or, for /proc aliases, UNRESOLVED): 21 tests above.
+2. **If the normaliser changes tomorrow, are old deep VERIFIEDs reused?** No: the identity in `analyzer_version`
+   contains the SHA-256 of each module that decides the verdict, so the cache key changes.
+
+### End-of-phase checks (after the review fixes, in the same commit)
+
+- Docker hidden (`DOCKER_HOST=unix:///nonexistent`), `tests/test_cavr_*.py tests/test_orchestrator_config.py
+  tests/test_gate_*.py tests/test_cli_gate.py tests/test_cli_report.py`: 1893 passed, 71 skipped (59 Docker, 12 live),
+  0 failed, 385 s; `sandbox_deep.for_gate_run` -> no analyzer, ENGINE_UNAVAILABLE (today's verdicts).
+- Full suite `.venv/bin/python -m pytest -q` (no CAVR_DOCKER): 2764 passed, 71 skipped, 1 xfailed, 1 failed, 1716 s
+  (before Phase 2b: 2578 passed, 42 skipped, 1 xfailed, plus 7c7fc72's tests). The failure was
+  `tests/test_satra_project_image_docker.py::test_pip_refuses_a_wheel_that_does_not_fit_even_past_the_tag_check`
+  (SATRA, not changed in `7308c2c..HEAD`); it passed alone (9 s) and its file passed twice in a row (8 passed in
+  260 s and in 650 s), so it is recorded as load-dependent, not caused by this phase.
+- `reports/scenario-validation.json` was not modified by the run (no diff); nothing to restore.

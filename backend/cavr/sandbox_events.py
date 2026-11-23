@@ -8,7 +8,9 @@ ENOENT is still a secret read attempt.
     FILE_READ          open for reading, or a metadata call (stat, access, readlink, xattr, statfs) on a path;
                        `sensitive` is SECRET_READ or SENSITIVE_FILE_READ for the paths in SECRET_PATHS / SYSTEM_PATHS
     FILE_WRITE         open for writing / creating / truncating, mkdir, rmdir, unlink, rename, link, symlink, chmod,
-                       chown, utime, truncate, setxattr, mknod; `persistence` for the paths in PERSISTENCE_PATHS
+                       chown, utime, truncate, setxattr, mknod; `persistence` for the paths in PERSISTENCE_PATHS;
+                       `sensitive` too when any path it names is (an O_RDWR open reads; a rename or link of a
+                       secret, or a symlink to one, makes it readable under another name)
     CODE_LOAD          a read-only access whose path (and real path) is in CODE_LOCATIONS or RUNTIME_FILES and is not
                        sensitive: the interpreter, the image's libraries, the verified install target, CAVR's own
                        read-only mounts (decision D1). Recorded, needs no capability
@@ -39,8 +41,11 @@ Paths: absolute paths are normalised (`.` and `..`, lexically); a path relative 
 directory strace prints with -y (`AT_FDCWD</tmp>`); relative to a directory fd, to that fd's path (`3</site/lib>`);
 for calls without a dirfd (stat, mkdir, rename, ...), to the process's current directory, known from its last
 `AT_FDCWD</...>`, getcwd, chdir or fchdir line (inherited by a child). After any process changes directory every other
-process's directory is unknown until its own next such line (threads can share it). An event whose path, address or
-argv cannot be resolved, or whose string strace cut (`"..."...`), has `complete: False` and a `problem`.
+process's directory is unknown until its own next such line (threads can share it). Symlinks the run creates
+are followed (a package cannot hide `~/.aws` behind `/tmp/h -> /tmp/home`; /site/lib starts empty and pip writes
+regular files only). A path through /proc/<pid>/{root,cwd,fd,task}, /proc/thread-self or /dev/fd is incomplete. An
+event whose path, address or argv cannot be resolved, or whose string strace cut (`"..."...`), has `complete: False`
+and a `problem`.
 
 `subtract_baseline(events, baseline)` removes exactly the events a recorded empty-harness run produced (same step,
 type, call, path, access, address, argv and outcome), each as many times as the baseline has it. `check_baseline`
@@ -52,9 +57,12 @@ import posixpath
 import re
 from collections import Counter
 
-EVENTS_VERSION = "cavr-events/1"
+EVENTS_VERSION = "cavr-events/2"
 HOME = "/tmp/home"  # the sandbox HOME (sandbox_harness.CHILD_ENV)
-HOMES = (HOME, "/root")
+HOMES = (HOME, "/root", "/nonexistent")  # /nonexistent: the cavr user's home in /etc/passwd (Dockerfile useradd -d)
+# Paths that reach another file by a kernel alias, not by its name: the open of /proc/self/root/tmp/home/.aws/... or
+# /dev/fd/3/x names a secret that no lexical check would see. Such a path is incomplete (review of PRs 7-9).
+ALIASES = re.compile(r"^/(?:proc/(?:[^/]+/(?:root|cwd|fd|task|map_files)|thread-self)|dev/fd)(?:/|$)")
 
 STRUCTURE = ("HARNESS_START", "STEP_START", "MARKER", "PROCESS", "CWD_CHANGE", "SIGNAL", "PROCESS_CONTROL", "NO_EFFECT")
 JUDGED = ("FILE_READ", "FILE_WRITE", "PROCESS_EXEC", "NETWORK_CONNECT", "NETWORK_BIND", "NETWORK_LISTEN",
@@ -295,7 +303,7 @@ def sensitivity(path: str | None):
     name = posixpath.basename(path)
     if name == ".env" or name.startswith(".env."):
         return "SECRET_READ", "a .env file (application secrets)"
-    if re.fullmatch(r"/proc/[^/]+/environ", path):
+    if re.fullmatch(r"/proc/[^/]+(?:/task/[^/]+)?/environ", path):
         return "SECRET_READ", "a process environment"
     for pattern, why in SECRET_PATHS:
         if _matches(path, pattern):
@@ -348,6 +356,16 @@ class _State:
         self.first = {name: (pids[0] if pids else None) for name, pids in (step_pids or {}).items()}
         self.argv = {item["name"]: list(item["argv"]) for item in steps or []}
         self.started = set()
+        self.links = {}  # symlinks this run created: link path -> absolute target (followed when resolving)
+
+    def follow(self, path: str) -> str:
+        """`path` with every symlink this run created in front of it replaced by its target (up to 40, as the kernel)."""
+        for _ in range(40):
+            link = next((l for l in sorted(self.links, key=len, reverse=True) if path == l or path.startswith(l + "/")), None)
+            if link is None:
+                return path
+            path = _normal(self.links[link] + path[len(link):])
+        return path
 
     def cwd_of(self, pid):
         """The process's directory, or None when it is not known. A process never seen yet takes its parent's (a
@@ -375,6 +393,9 @@ def normalise(trace: str, processes: dict, step_pids: dict, steps) -> dict:
             events.append(_line_event(state, number, pid, body))
         except Unreadable as exc:
             events.append(_event(state, number, pid, body, "UNKNOWN", None, problem=f"cannot read the line: {exc}"))
+        except Exception as exc:  # a line this code cannot handle is unknown, never a reason to lose the run's events
+            events.append(_event(state, number, pid, body, "UNKNOWN", None,
+                                 problem=f"cannot read the line: {type(exc).__name__}: {exc}"))
     counts = Counter(event["type"] for event in events)
     return {"version": EVENTS_VERSION, "events": events, "counts": dict(sorted(counts.items())),
             "incomplete": [event for event in events if not event["complete"]],
@@ -441,15 +462,18 @@ def _resolve(state, pid, args, dirfd_index, path_index, empty_is_fd=False):
         if dirfd_index is not None and base and base.startswith("/"):
             return _normal(base), None
         return None, "the call names no path and its fd has none"
-    if path.startswith("/"):
-        return _normal(path), None
-    if dirfd_index is None:
-        base = state.cwd_of(pid)
-        if base is None:
-            return None, "a relative path and the process's current directory is not known"
-    elif not base or not base.startswith("/"):
-        return None, "a path relative to a directory fd whose path strace could not print"
-    return _normal(posixpath.join(base, path)), None
+    if not path.startswith("/"):
+        if dirfd_index is None:
+            base = state.cwd_of(pid)
+            if base is None:
+                return None, "a relative path and the process's current directory is not known"
+        elif not base or not base.startswith("/"):
+            return None, "a path relative to a directory fd whose path strace could not print"
+        path = posixpath.join(base, path)
+    resolved = state.follow(_normal(path))
+    if ALIASES.match(resolved):
+        return resolved, f"{resolved} reaches a file through a /proc or /dev/fd alias, not by its name"
+    return resolved, None
 
 
 def _file_event(state, number, pid, body, name, args, result) -> dict:
@@ -492,16 +516,20 @@ def _file_event(state, number, pid, body, name, args, result) -> dict:
     real = result["path"] if result["path"] and result["path"].startswith("/") else None
     path = paths[0]
     extra = {"paths": paths} if len(paths) > 1 else {}
+    target = _link_target(state, pid, name, args, paths, result) if name in ("symlink", "symlinkat") else None
+    if target:
+        extra["link_target"] = target
     if name in OPEN and path == "/dev/null" and real in (None, "/dev/null"):
         return _event(state, number, pid, body, "NO_EFFECT", name, path=path, access=access, **done)  # the null device
+    # Every path the call names (both of a rename or link, the real path, a symlink's target) is checked: an O_RDWR
+    # open reads, and renaming or linking a secret makes it readable under another name (review of PRs 7-9).
+    level, why = next(((lv, w) for lv, w in (sensitivity(p) for p in paths + [real, target]) if lv), (None, None))
     if access == "write":
         return _event(state, number, pid, body, "FILE_WRITE", name, path=path, real_path=real, access=access,
-                      persistence=any(persistence(p) for p in paths + [real]), problem=problem, **extra, **done)
+                      sensitive=level, sensitive_why=why, persistence=any(persistence(p) for p in paths + [real]),
+                      problem=problem, **extra, **done)
     if MARKER.match(args[1] if name in ("newfstatat", "statx") and len(args) > 1 else "") and pid == state.root:
         return _event(state, number, pid, body, "MARKER", name, path=path, access=access, problem=problem, **done)
-    level, why = sensitivity(path)
-    if not level:
-        level, why = sensitivity(real)
     if level:
         return _event(state, number, pid, body, "FILE_READ", name, path=path, real_path=real, access=access,
                       sensitive=level, sensitive_why=why, problem=problem, **done)
@@ -509,6 +537,21 @@ def _file_event(state, number, pid, body, name, args, result) -> dict:
         return _event(state, number, pid, body, "CODE_LOAD", name, path=path, real_path=real, access=access, **done)
     return _event(state, number, pid, body, "FILE_READ", name, path=path, real_path=real, access=access,
                   problem=problem, **done)
+
+
+def _link_target(state, pid, name, args, paths, result):
+    """The absolute target of a symlink the call creates (recorded when it succeeds), or None when it cannot be read."""
+    try:
+        target, cut = string_arg(args[0])
+    except (Unreadable, IndexError):
+        return None
+    if target is None or cut or not paths[0]:
+        return None
+    absolute = _normal(target if target.startswith("/") else posixpath.join(posixpath.dirname(paths[0]), target))
+    absolute = state.follow(absolute)
+    if result["ok"]:
+        state.links[paths[0]] = absolute
+    return absolute
 
 
 def _argv(token: str):
@@ -546,7 +589,10 @@ def address_of(token: str):
     """({family, host, port, path}, problem) of a sockaddr, or (None, None) when the call names none."""
     if token in ("NULL", "", None) or "sa_family=" not in token:
         return None, None
-    family = ADDRESS["family"].search(token).group(1)
+    named = ADDRESS["family"].search(token)
+    if not named:  # e.g. `sa_family=0x2a /* AF_??? */`
+        return {"family": None, "host": None, "port": None, "path": None}, "the address family cannot be read"
+    family = named.group(1)
     if family in ("AF_INET", "AF_INET6"):
         host = ADDRESS["ipv4" if family == "AF_INET" else "ipv6"].search(token)
         port = ADDRESS["port"].search(token)

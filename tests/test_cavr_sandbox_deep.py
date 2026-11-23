@@ -12,7 +12,8 @@ from pathlib import Path
 
 import pytest
 
-from backend.cavr import deep_stage, gate_adapter, sandbox_deep, sandbox_image, sandbox_observe
+from backend.cavr import (contract_check, deep_stage, gate_adapter, sandbox_deep, sandbox_events, sandbox_exec, sandbox_image,
+                          sandbox_observe)
 from backend.cavr.pipeline import ESCALATION, analyzer_version
 from backend.cavr.sandbox_trace import check_trace
 from backend.commands.report import cavr_deep, render
@@ -156,6 +157,15 @@ def test_unknown_event_is_unresolved(world, tmp_path, monkeypatch):
     assert (package["status"], package["rule"]) == ("UNRESOLVED", "EVENT_TYPE_UNKNOWN")
 
 
+def test_a_run_without_an_image_id_is_unresolved(world, tmp_path, monkeypatch):
+    escalated(world)
+    run = recorded_run("events-probe")
+    run["evidence"]["image_id"] = None
+    Sandbox(monkeypatch, [run])
+    _, package = verify(world, analyzer(tmp_path))
+    assert (package["status"], package["rule"]) == ("UNRESOLVED", "DEEP_IMAGE_CHANGED")
+
+
 def test_a_run_on_another_image_is_unresolved(world, tmp_path, monkeypatch):
     escalated(world)
     run = recorded_run("events-benign")
@@ -244,7 +254,7 @@ def test_run_wide_cap_leaves_the_remaining_packages_unresolved(tmp_path, monkeyp
     sandbox = Sandbox(monkeypatch, [recorded_run("events-benign")], seconds=100.0)
     deep = analyzer(tmp_path)
     answers = [deep.analyse(package(f"p{i}")) for i in range(4)]
-    assert [a["rule"] for a in answers[:3]] != ["DEEP_RUN_BUDGET_USED_UP"] * 3
+    assert all(a["rule"] != "DEEP_RUN_BUDGET_USED_UP" and a["evidence"].get("run_rule") for a in answers[:3])  # each ran
     assert answers[3]["rule"] == "DEEP_RUN_BUDGET_USED_UP" and "300 s" in answers[3]["reason"]
     assert len(sandbox.calls) == 3 and deep.spent >= 300  # 2 s baseline + 3 x 100 s
 
@@ -275,8 +285,25 @@ def test_identity_changes_with_image_harness_profile_and_budget(tmp_path, monkey
     assert deep_stage.identity(analyzer(tmp_path, budget={**sandbox_deep.BUDGET, "run_seconds": 10})) != base
     other = tmp_path / "harness.py"
     other.write_text("# another harness\n")
-    monkeypatch.setattr(sandbox_observe, "HARNESS", other)
-    assert deep_stage.identity(analyzer(tmp_path)) != base
+    with monkeypatch.context() as patch:
+        patch.setattr(sandbox_observe, "HARNESS", other)
+        assert deep_stage.identity(analyzer(tmp_path)) != base
+    changes = [(sandbox_observe, "STRACE", sandbox_observe.STRACE + ["-v"]),
+               (sandbox_observe, "PIP_INSTALL", sandbox_observe.PIP_INSTALL + ["--x"]),
+               (sandbox_observe, "IMPORT_ARGV", sandbox_observe.IMPORT_ARGV + ["x"]),
+               (sandbox_observe, "SITE_TMPFS", sandbox_observe.SITE_TMPFS.replace("128m", "64m")),
+               (sandbox_events, "EVENTS_VERSION", "cavr-events/x"), (contract_check, "CHECK_VERSION", "cavr-contract-check/x"),
+               (sandbox_exec, "CAPABILITIES", sandbox_exec.CAPABILITIES + ("NET_RAW",))]
+    for module, name, value in changes:
+        with monkeypatch.context() as patch:
+            patch.setattr(module, name, value)
+            assert deep_stage.identity(analyzer(tmp_path)) != base, name
+    assert set(sandbox_deep.VERDICT_CODE) >= {"sandbox_events.py", "contract_check.py", "sandbox_deep.py"}
+    real = sandbox_deep.deep_version(IDENTITY)
+    with monkeypatch.context() as patch:
+        original = sandbox_deep._sha256
+        patch.setattr(sandbox_deep, "_sha256", lambda path: "0" * 64 if Path(path).name == "contract_check.py" else original(path))
+        assert sandbox_deep.deep_version(IDENTITY) != real
 
 
 def test_a_new_image_is_a_cache_miss(world, tmp_path, monkeypatch):
@@ -318,9 +345,12 @@ def test_no_docker_or_no_image_keeps_todays_behaviour(world, tmp_path, monkeypat
     assert verdict["escalation"] == ESCALATION and verdict["analyzer_version"] == analyzer_version()
 
 
-def test_the_gate_default_is_the_sandbox_and_it_turns_itself_off_without_an_image():
+def test_the_gate_default_is_the_sandbox_and_it_builds_an_analyzer_when_the_image_passes(tmp_path, monkeypatch):
     assert gate_adapter.SETTINGS["deep"] == "sandbox"
-    assert sandbox_deep.for_gate_run.__doc__ and "keeps today's verdicts" in sandbox_deep.for_gate_run.__doc__
+    monkeypatch.setattr(sandbox_image, "image_identity", lambda: dict(IDENTITY))
+    deep, status = sandbox_deep.for_gate_run(tmp_path)
+    assert isinstance(deep, sandbox_deep.SandboxDeepAnalyzer) and deep.image_id == IMAGE and deep.spent == 0
+    assert status["enabled"] is True and status["version"] == deep.version and deep.quarantine_dir == tmp_path / "quarantine"
 
 
 def gate_repo(tmp_path, files, requirement="demo==1.0"):
