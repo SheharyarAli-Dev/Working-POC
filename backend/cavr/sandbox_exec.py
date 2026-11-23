@@ -36,6 +36,7 @@ TMP_TMPFS = "/tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777"
 ULIMITS = ("nofile=256:256", "fsize=67108864:67108864", "core=0:0")
 CAPABILITIES = ("SYS_PTRACE", "SETUID", "SETGID")
 NAME = re.compile(r"^cavr-[0-9a-f]{12}-[0-9]{1,3}$")
+TMPFS = re.compile(r"^/[a-z][a-z0-9_-]*:rw,(?:noexec|exec),nosuid,nodev,size=[0-9]{1,4}m,mode=1777$")
 _UNSAFE_MOUNT = re.compile(r"[,\n\r\0]")
 
 
@@ -54,7 +55,8 @@ def docker_command(name: str, image_id: str, command, *, mounts=(), env=None, tm
                    engine: str = ENGINE) -> list[str]:
     """The `docker run` argv for one run. Raises ValueError on a bad name, image ID, mount or variable.
 
-    `mounts` are (host path, container path) pairs, all mounted read-only. `tmpfs` adds mounts to /tmp's.
+    `mounts` are (host path, container path) pairs, all mounted read-only. `tmpfs` adds mounts to /tmp's; each
+    must be nosuid,nodev with a size cap (`TMPFS`).
     """
     if not NAME.match(name or ""):
         raise ValueError(f"container name {name!r} is not cavr-<12 hex>-<n>")
@@ -62,6 +64,8 @@ def docker_command(name: str, image_id: str, command, *, mounts=(), env=None, tm
         raise ValueError(f"image {image_id!r} is not an image ID")
     cmd = [engine, "run", "--rm", "--name", name, *lockdown_flags(seccomp)]
     for extra in tmpfs:
+        if not TMPFS.match(extra) or extra.split(":", 1)[0] in ("/tmp", "/", "/pkg", "/job", "/opt/cavr", "/proc"):
+            raise ValueError(f"tmpfs {extra!r} is not <path>:rw,[no]exec,nosuid,nodev,size=<n>m,mode=1777")
         cmd += ["--tmpfs", extra]
     for host, inside in mounts:
         host, inside = str(host), str(inside)
@@ -100,6 +104,7 @@ DOCKER_SECONDS = 20
 CLOCK = time.monotonic
 POPEN = None  # tests replace it; None means subprocess.Popen
 DOCKER = None  # tests replace it; None means subprocess.run (docker kill / rm / ps)
+RECHECK_SECONDS = 0.5
 STATUSES = ("COMPLETED", "TIMEOUT", "OUTPUT_CAP", "KILLED", "ENGINE_ERROR", "LEFT_BEHIND")
 
 
@@ -137,13 +142,21 @@ def run_container(cmd, name: str, *, deadline: float = DEADLINE_SECONDS, grace: 
                 status, reason = "TIMEOUT", f"still running after the {deadline:g} s deadline; the container was killed"
                 break
             wake.wait(0.05)
-        if status is None and over:
-            status, reason = "OUTPUT_CAP", f"{' and '.join(sorted(over))} passed its cap"
+            wake.clear()
         if status is not None:
             _stop(proc, name, grace)
         else:
             exit_code = proc.returncode
-            if exit_code in (125, 126, 127):
+            # Decide only after both streams were read to their end: the docker CLI can exit before a reader has
+            # seen the last bytes (and with them an output over its cap).
+            for reader in readers:
+                reader.join(grace)
+            if any(reader.is_alive() for reader in readers):
+                status, reason = "ENGINE_ERROR", f"the container's output was not read to its end within {grace:g} s"
+                _stop(proc, name, grace)
+            elif over:
+                status, reason = "OUTPUT_CAP", f"{' and '.join(sorted(over))} passed its cap"
+            elif exit_code in (125, 126, 127):
                 status, reason = "ENGINE_ERROR", f"docker run failed (exit {exit_code})"
             elif exit_code in (137, -9):
                 status, reason = "KILLED", "the container was killed (SIGKILL) by something other than CAVR: memory limit or kill"
@@ -156,7 +169,7 @@ def run_container(cmd, name: str, *, deadline: float = DEADLINE_SECONDS, grace: 
     finally:
         for reader in readers:
             reader.join(grace)
-        gone, why = _remove(name, grace)
+        gone, why = _remove(name, grace, recheck=status != "COMPLETED")
         if not gone:
             status, reason = "LEFT_BEHIND", why
     stdout, stderr = bytes(buffers["stdout"]), bytes(buffers["stderr"])
@@ -206,15 +219,23 @@ def _stop(proc, name, grace):
             pass  # removal below checks the outcome
 
 
-def _remove(name, grace) -> tuple[bool, str | None]:
-    """`docker rm -f` by name until `docker ps -a` no longer lists it. (gone, reason when not)."""
+def _remove(name, grace, recheck=False) -> tuple[bool, str | None]:
+    """`docker rm -f` by name until `docker ps -a` no longer lists it. (gone, reason when not).
+
+    `recheck`: a run that was stopped (or never got going) is listed twice, RECHECK_SECONDS apart, before it counts
+    as gone: a CLI killed while the daemon was still creating the container can leave one that appears a moment later.
+    """
     deadline = CLOCK() + grace + DOCKER_SECONDS
     last = None
     while True:
         try:
             listed = _docker(["ps", "-a", "-q", "--filter", f"name=^/{name}$"])
             if listed.returncode == 0 and not listed.stdout.strip():
-                return True, None
+                if not recheck:
+                    return True, None
+                recheck = False
+                time.sleep(RECHECK_SECONDS)
+                continue
             last = f"docker ps -a still lists {name}" if listed.returncode == 0 else f"docker ps failed: {listed.stderr.strip()[:200]}"
             _docker(["rm", "-f", name])
         except FileNotFoundError:

@@ -189,6 +189,59 @@ def test_output_over_the_cap_at_exit_is_still_unresolved(docker):
     assert got["status"] == "OUTPUT_CAP"
 
 
+def test_output_over_the_cap_at_exit_is_never_completed(docker, monkeypatch):
+    """The CLI exits before the readers have read the bytes over the cap: the decision waits for the readers."""
+    monkeypatch.setattr(sandbox_exec, "RECHECK_SECONDS", 0.001)
+    for _ in range(50):
+        docker.on_start = lambda proc: (proc.write("stdout", b"y" * 5000), proc.finish(0))
+        got = run(deadline=5, stdout_cap=1000)
+        assert got["status"] == "OUTPUT_CAP" and not sandbox_exec.completed(got)
+
+
+def test_output_not_read_to_its_end_is_not_completed(docker):
+    """A stream still open after the CLI exited (its reader still blocked) is ENGINE_ERROR, never COMPLETED."""
+    def start(proc):
+        proc.returncode = 0  # exited, but the write ends stay open: the readers never see EOF
+    docker.on_start = start
+    got = run(deadline=5, grace=0.3)
+    assert got["status"] == "ENGINE_ERROR" and "not read to its end" in got["reason"]
+    docker.procs[0]._close()
+
+
+def test_a_stopped_run_is_listed_twice_before_it_counts_as_gone(monkeypatch, docker):
+    """A container the daemon was still creating when the CLI was killed can appear after a first empty listing."""
+    monkeypatch.setattr(sandbox_exec, "RECHECK_SECONDS", 0.01)
+    listings = iter(["", "late123\n", ""])
+
+    def ps(cmd, **kwargs):
+        docker.calls.append(cmd[1:])
+        return _done(0, next(listings, "") if cmd[1] == "ps" else "")
+    monkeypatch.setattr(sandbox_exec, "DOCKER", ps)
+    got = run()
+    assert got["status"] == "TIMEOUT"
+    assert ["rm", "-f", NAME] in docker.calls and [c[0] for c in docker.calls].count("ps") == 3
+
+
+def test_a_completed_run_is_listed_once(docker):
+    docker.on_start = lambda proc: proc.finish(0)
+    run(deadline=5)
+    assert [c[0] for c in docker.calls].count("ps") == 1
+
+
+@pytest.mark.parametrize("tmpfs", ["/site:rw,exec,size=128m", "/site:rw,exec,nosuid,nodev,mode=1777",
+                                   "/tmp:rw,exec,nosuid,nodev,size=64m,mode=1777", "/pkg:rw,exec,nosuid,nodev,size=1m,mode=1777",
+                                   "/site:rw,exec,suid,nodev,size=128m,mode=1777", "site:rw,exec,nosuid,nodev,size=1m,mode=1777"])
+def test_a_tmpfs_without_nosuid_nodev_and_a_size_is_refused(tmpfs):
+    with pytest.raises(ValueError, match="tmpfs"):
+        sandbox_exec.docker_command(NAME, "sha256:" + "ab" * 32, ["true"], tmpfs=[tmpfs])
+
+
+def test_the_install_target_tmpfs_is_accepted():
+    cmd = sandbox_exec.docker_command(NAME, "sha256:" + "ab" * 32, ["true"],
+                                      tmpfs=["/site:rw,exec,nosuid,nodev,size=128m,mode=1777"])
+    assert cmd[cmd.index("/site:rw,exec,nosuid,nodev,size=128m,mode=1777") - 1] == "--tmpfs"
+
+
 @pytest.mark.parametrize("error", [FileNotFoundError("docker"), PermissionError("denied"), RuntimeError("boom")])
 def test_docker_that_cannot_start_is_an_engine_error_and_is_still_cleaned_up(docker, error):
     docker.popen_error = error

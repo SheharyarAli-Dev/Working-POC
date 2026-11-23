@@ -182,9 +182,17 @@ def test_cavr_profile_is_the_shared_profile_plus_listed_additions():
     assert cavr["architectures"] == shared["architectures"]
     assert cavr["syscalls"][0]["names"] == shared["syscalls"][0]["names"]
     added = cavr["syscalls"][1:]
-    assert all(entry["action"] == "SCMP_ACT_ALLOW" and entry["comment"].startswith("CAVR addition: ") for entry in added)
+    assert all(entry["comment"].startswith("CAVR addition: ") for entry in added)
     names = _names({"syscalls": added})
     assert len(names) == len(set(names)) == 46 and not set(names) & set(shared["syscalls"][0]["names"])
+    # clone only without CLONE_UNTRACED and namespace flags; clone3 answers ENOSYS (glibc falls back to clone).
+    by_name = {name: entry for entry in added for name in entry["names"]}
+    assert by_name["clone"]["names"] == ["clone"] and by_name["clone"]["action"] == "SCMP_ACT_ALLOW"
+    assert by_name["clone"]["args"] == [{"index": 0, "value": 0x7E820000, "valueTwo": 0, "op": "SCMP_CMP_MASKED_EQ"}]
+    assert 0x7E820000 & 0x00800000 and 0x7E820000 & 0x7E020000 == 0x7E020000  # CLONE_UNTRACED + Docker's namespace mask
+    assert by_name["clone3"] == {**by_name["clone3"], "names": ["clone3"], "action": "SCMP_ACT_ERRNO", "errnoRet": 38}
+    unconditional = [entry for entry in added if entry["action"] == "SCMP_ACT_ALLOW" and "args" not in entry]
+    assert not {"clone", "clone3"} & set(_names({"syscalls": unconditional}))
     # Never added: kernel modules, mounts, namespaces, keyrings, BPF, reboot, the clock.
     assert not set(names) & {"mount", "umount2", "unshare", "setns", "init_module", "finit_module", "bpf", "keyctl",
                              "add_key", "reboot", "settimeofday", "clock_settime", "pivot_root", "chroot", "ptrace_attach"}

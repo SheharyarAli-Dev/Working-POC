@@ -4764,3 +4764,98 @@ Runs before the commit: `CAVR_DOCKER=1 pytest tests/test_cavr_sandbox_observe.py
 2. **Why is one tmpfs executable when the rules say noexec?** Native extensions are mapped executable; on a noexec
    mount the import fails (shown by a test). Only the install target is exec, still nosuid and nodev, and every
    execve is traced.
+
+## Review of steps M2-7 to M2-10 — fixes (2026-11-23)
+
+Review outcomes (one cavr-reviewer pass over PRs 3-6, 2026-11-23):
+- Step M2-7 (PR 3): 1 pass, fix first (BLOCKER 1, seccomp part); fixed below; 0 open MINOR.
+- Step M2-8 (PR 4): 1 pass, fix first (BLOCKER 2); fixed below; 0 open MINOR.
+- Step M2-9 (PR 5): 1 pass, fix first (BLOCKER 1, trace-check part); fixed below; MAJOR 1 deferred to PR 7; 0 open MINOR.
+- Step M2-10 (PR 6): 1 pass, MINORs 5 and 7 fixed below; 0 open MINOR.
+
+### Ch 6 Implementation
+
+- `docker/cavr-sandbox/cavr-seccomp.json`: `clone` allowed only with `SCMP_CMP_MASKED_EQ` on argument 0, mask
+  0x7E820000 (Docker's namespace mask 0x7E020000 + `CLONE_UNTRACED` 0x00800000), result 0; `clone3` is
+  `SCMP_ACT_ERRNO` with `errnoRet` 38 (ENOSYS; glibc falls back to `clone`). Still 46 names in the additions.
+- `backend/cavr/sandbox_trace.py`: new rule TRACE_UNFOLLOWED: every PID a known process's clone / fork / vfork
+  returned must have lines in the trace; every created PID (not only those seen) must have an exit line.
+- `backend/cavr/sandbox_exec.py`: `run_container` joins both readers before deciding a run that exited by itself; a
+  reader still alive -> ENGINE_ERROR, bytes over a cap -> OUTPUT_CAP; `wake.clear()` after each wait; a run that was
+  not COMPLETED is listed twice (`RECHECK_SECONDS` = 0.5) before it counts as removed; `docker_command` refuses a tmpfs
+  that is not `<path>:rw,[no]exec,nosuid,nodev,size=<n>m,mode=1777` or that targets /tmp, /, /pkg, /job, /opt/cavr, /proc.
+- `backend/cavr/sandbox_observe.py`: SECCOMP_CHANGED when the profile's SHA-256 differs from the one the image check
+  read; `top_level_names(data, filename)` from the wheel archive; a module no staged wheel provides -> MODULES_UNKNOWN;
+  an unreadable wheel -> WHEEL_NOT_VERIFIED.
+- `backend/cavr/harness.py`: **restored** (deleted in `c3d384a`). `docker/asent-sandbox/Dockerfile` still does
+  `COPY harness.py` with `backend/cavr` as its documented build context (`docs/cavr-m1-plan.md`), so it is used;
+  Q12 ("delete only what nothing uses") keeps it until PR 12, with that Dockerfile and `SandboxRunner`.
+- `tests/test_cavr_support.py`: `sandbox_identity()` rebuilds only a missing, unrecorded or stale image; an ID mismatch
+  fails the test instead of overwriting the build record.
+
+### Design decisions
+
+- **Filter clone's flags, refuse clone3** (alternative: drop clone and keep only vfork/fork): Python threads and
+  `fork` need `clone`; seccomp can read clone's flags (a register) but not clone3's (a struct in memory), which is why
+  Docker's own default profile does the same.
+- **Both layers**: the profile refuses CLONE_UNTRACED, and the trace check would still notice a created PID with no
+  lines, so one layer failing is not enough to hide a process.
+- **Restore rather than keep the deletion**: the owner's rule is about use, and a Dockerfile that copies the file is a use.
+
+### Requirements covered
+
+| ID | Acceptance check |
+|---|---|
+| NFR-1 / FR-13 | `clone(CLONE_UNTRACED)`, `CLONE_NEWUSER`, `NEWNET`, `NEWNS`, `NEWPID` -> EPERM, recorded; no child ran (Docker) |
+| FR-6 fail closed | a created PID with no lines -> TRACE_UNFOLLOWED; over-cap output at exit never COMPLETED (50 of 50) |
+
+### Ch 7 Test cases
+
+| Test ID | Purpose | Input | Expected | Result |
+|---|---|---|---|---|
+| `test_a_child_strace_never_followed_is_incomplete` | BLOCKER 1 | recorded trace + `clone(...) = 99`, no line of 99 | TRACE_UNFOLLOWED | pass |
+| `test_a_failed_clone_creates_nothing` | no false alarm | `clone(...) = -1 EPERM` | complete | pass |
+| `test_untraced_and_namespace_clones_are_refused_and_recorded` (Docker) | BLOCKER 1 | ctypes clone with 5 flags; clone3; a thread | 5 x EPERM, clone3 ENOSYS, thread ok, no child line | pass |
+| `test_cavr_profile_is_the_shared_profile_plus_listed_additions` (changed) | filter | profile | clone masked 0x7E820000; clone3 ERRNO 38; neither allowed unconditionally | pass |
+| `test_output_over_the_cap_at_exit_is_never_completed` | BLOCKER 2 | 50 runs: 5000 bytes then exit, cap 1000 | OUTPUT_CAP every time | pass |
+| `test_output_not_read_to_its_end_is_not_completed` | BLOCKER 2 | exited, streams never closed | ENGINE_ERROR | pass |
+| `test_a_stopped_run_is_listed_twice_before_it_counts_as_gone`, `test_a_completed_run_is_listed_once` | MINOR 2 | late container | `rm -f` after the second listing; one listing when completed | pass |
+| `test_a_tmpfs_without_nosuid_nodev_and_a_size_is_refused` (6), `test_the_install_target_tmpfs_is_accepted` | MINOR 4 | bad / good tmpfs | ValueError / accepted | pass |
+| `test_a_seccomp_profile_changed_after_the_image_check_runs_nothing` | MINOR 3 | other SHA-256 | SECCOMP_CHANGED, nothing run | pass |
+| `test_a_module_no_staged_wheel_provides_is_refused`, `test_top_level_names_come_from_the_wheel_archive`, `test_an_unreadable_wheel_is_refused` | MINOR 5 | `os`; mixed wheel; not a zip | MODULES_UNKNOWN; `fast, pkg_a, single`; WHEEL_NOT_VERIFIED | pass |
+| `test_the_old_harness_is_gone` | removed | — | `harness.py` stays until PR 12 | removed |
+
+Runs before the commit: `CAVR_DOCKER=1 pytest tests/test_cavr_sandbox_{exec,image,trace,observe}.py`: 188 passed;
+`CAVR_DOCKER=1 pytest tests/test_cavr_*.py`: 1625 passed, 11 skipped (live) in 456 s.
+
+### Defects found and fixed
+
+- BLOCKER 1 (confirmed on Docker before the fix): a ctypes `clone(CLONE_UNTRACED|SIGCHLD)` child ran, its stat was
+  not in the trace, and the trace was TRACE_COMPLETE; `clone(CLONE_NEWUSER)` succeeded. Fixed in the profile and in
+  `check_trace` (above). Corrections: Step M2-7's "Never added: namespaces" and Step M2-10's "every such execve is in
+  the trace" were not true before this fix.
+- BLOCKER 2: `run_container` could return COMPLETED for output over a cap when the CLI exited before the readers
+  caught up (reviewer: `test_output_over_the_cap_at_exit_is_still_unresolved` failed 8 of 100 runs under load). Fixed.
+- MINOR 7: deleting `harness.py` broke the legacy `docker/asent-sandbox` recipe; restored. The dashboard's
+  `proof.image_digest` (`ProofDrawer.tsx`, `CavrModule.tsx`) is unchanged: it shows `api.py`'s NOT_RUN value, which
+  never came from `SandboxRunner`.
+
+### Known limitations / deferred
+
+- MAJOR 1 (truncated `-s 1024` strings, dirfd-relative paths) does not affect completeness in Phase 2a; it is now a
+  Part of PR 7 in the plan (`-yy`, larger `-s`, truncated or unresolvable path -> UNRESOLVED).
+- The profile's SHA-256 is re-checked right before `docker run`; Docker reads the file by path a moment later, so a
+  change in that window is not detected. PR 9 puts the SHA-256 into `analyzer_version`.
+- The clone filter uses argument 0, which is the flags on x86_64 and aarch64 (the profile's architectures).
+
+### Tool disclosure (Ch 8.7)
+
+- **Generated by Claude Code:** the fixes, tests and these notes, from the cavr-reviewer report. **Reviewed by
+  Maryam:** not yet. **Verified by:** the BLOCKER 1 probe on Docker before and after the fix, and the runs above.
+
+### Supervisor Q&A prep
+
+1. **Can a package start a process strace does not follow?** The usual way is `clone(CLONE_UNTRACED)`; the profile
+   refuses it (EPERM, recorded), and if a created PID ever had no lines the trace check says TRACE_UNFOLLOWED.
+2. **Why is clone3 refused?** seccomp cannot look inside clone3's argument struct, so it cannot refuse namespace or
+   untraced flags there; with ENOSYS glibc uses clone, whose flags it can check (as Docker's default profile does).

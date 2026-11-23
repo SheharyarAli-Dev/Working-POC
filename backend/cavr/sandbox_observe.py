@@ -24,6 +24,7 @@ UNRESOLVED `DEEP_NOT_JUDGED` with the trace attached; anything incomplete is UNR
     SANDBOX_EXIT_NONZERO          the harness (strace) exited non-zero: a step failed, bad job, internal error
     TRACE_INCOMPLETE              the trace failed `check_trace` (its own rule is in the evidence)
     JOB_INVALID                   a step cannot be passed (bad name, or it would carry the nonce)
+    SECCOMP_CHANGED               the profile's SHA-256 differs from the one the image check read; nothing is run
     INTERNAL_ERROR                anything that raised
 """
 from __future__ import annotations
@@ -92,6 +93,9 @@ def _run(steps, mounts, tmpfs, deadline, stderr_cap, run_id, n) -> dict:
     if not identity.get("ok"):
         return _result(identity.get("rule") or "ENGINE_ERROR", f"no isolation: {identity.get('reason')}; "
                        "the package was not run", evidence)
+    if _sha256(sandbox_image.SECCOMP_PROFILE) != identity.get("seccomp_sha256"):
+        return _result("SECCOMP_CHANGED", "the CAVR seccomp profile changed after the image check; the package was not run",
+                       evidence)
     nonce = secrets.token_hex(16)
     try:
         job = job_file(steps, nonce)
@@ -157,7 +161,7 @@ def _result(rule, reason, evidence, trace="", output=None) -> dict:
 #
 #     WHEEL_NOT_VERIFIED    a node is not a verified wheel in the quarantine (or a name repeats)
 #     WHEEL_HASH_MISMATCH   the quarantine file's bytes no longer have the tree's sha256
-#     MODULES_UNKNOWN       no top-level module to import, or a name that is not one
+#     MODULES_UNKNOWN       no top-level module to import, a name that is not one, or one no staged wheel provides
 #     otherwise             run_harness's result (never VERIFIED in Phase 2a)
 
 SITE_TMPFS = "/site:rw,exec,nosuid,nodev,size=128m,mode=1777"
@@ -223,7 +227,8 @@ def stage_wheels(nodes, quarantine_dir, stage_dir) -> list[dict]:
         target = Path(stage_dir) / filename
         target.write_bytes(data)
         os.chmod(target, 0o644)
-        staged.append({"name": name, "version": version, "filename": filename, "sha256": sha, "size": len(data)})
+        staged.append({"name": name, "version": version, "filename": filename, "sha256": sha, "size": len(data),
+                       "top_level": top_level_names(data, filename)})
     if not staged:
         raise NotStaged("WHEEL_NOT_VERIFIED", "the tree has no wheel to install")
     (Path(stage_dir) / HASH_FILE).write_text("".join(f"{w['name']}=={w['version']} --hash=sha256:{w['sha256']}\n"
@@ -231,6 +236,29 @@ def stage_wheels(nodes, quarantine_dir, stage_dir) -> list[dict]:
     os.chmod(Path(stage_dir) / HASH_FILE, 0o644)
     os.chmod(stage_dir, 0o755)
     return staged
+
+
+def top_level_names(data: bytes, filename: str) -> list[str]:
+    """Importable top-level names in a wheel's archive: `x/...` packages, `x.py` and `x.<tag>.so` modules."""
+    import io
+    import zipfile
+    try:
+        with zipfile.ZipFile(io.BytesIO(data)) as archive:
+            entries = archive.namelist()
+    except (zipfile.BadZipFile, ValueError) as exc:
+        raise NotStaged("WHEEL_NOT_VERIFIED", f"{filename} is not a readable wheel: {exc}")
+    names = set()
+    for entry in entries:
+        first, _, rest = entry.partition("/")
+        if first.endswith((".dist-info", ".data")):
+            continue
+        if rest and (rest.endswith((".py", ".so")) or "/" in rest):
+            names.add(first)
+        elif not rest and first.endswith(".py"):
+            names.add(first[:-3])
+        elif not rest and first.endswith(".so"):
+            names.add(first.split(".", 1)[0])
+    return sorted(name for name in names if name.isidentifier())
 
 
 def observe(nodes, modules, *, quarantine_dir=None, deadline: float = sandbox_exec.DEADLINE_SECONDS,
@@ -243,6 +271,10 @@ def observe(nodes, modules, *, quarantine_dir=None, deadline: float = sandbox_ex
         names = check_modules(modules)
         with tempfile.TemporaryDirectory(prefix="cavr-pkg-") as directory:
             staged = stage_wheels(nodes, quarantine_dir, directory)
+            offered = {name for wheel in staged for name in wheel["top_level"]}
+            if not set(names) <= offered:
+                raise NotStaged("MODULES_UNKNOWN", f"{sorted(set(names) - offered)} are not top-level modules of the "
+                                f"staged wheels ({sorted(offered)}); importing them would test nothing of the tree")
             hash_sha = hashlib.sha256((Path(directory) / HASH_FILE).read_bytes()).hexdigest()
             result = run_harness(install_steps(names), mounts=[(directory, PKG_INSIDE)], tmpfs=[SITE_TMPFS],
                                  deadline=deadline, run_id=run_id, n=n)

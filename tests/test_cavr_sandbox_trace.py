@@ -93,6 +93,22 @@ def test_child_without_an_exit_line_is_incomplete():
     assert check(text)["rule"] == "TRACE_TRUNCATED"
 
 
+def test_a_child_strace_never_followed_is_incomplete():
+    """clone(CLONE_UNTRACED) returns a PID that strace never attaches to: its activity would be invisible."""
+    body = lines()
+    at = next(i for i, line in enumerate(body) if "step:second:end:0" in line)
+    body.insert(at, "9     clone(child_stack=NULL, flags=CLONE_UNTRACED|SIGCHLD) = 99\n")
+    got = check("".join(body))
+    assert got["complete"] is False and got["rule"] == "TRACE_UNFOLLOWED" and "99" in got["reason"]
+
+
+def test_a_failed_clone_creates_nothing():
+    body = lines()
+    at = next(i for i, line in enumerate(body) if "step:second:end:0" in line)
+    body.insert(at, "9     clone(child_stack=NULL, flags=CLONE_UNTRACED|SIGCHLD) = -1 EPERM (Operation not permitted)\n")
+    assert check("".join(body))["complete"] is True
+
+
 def test_line_from_a_pid_nobody_created_is_incomplete():
     body = lines()
     body.insert(400, "77    openat(AT_FDCWD, \"/etc/passwd\", O_RDONLY) = 3\n")
@@ -247,7 +263,8 @@ def test_harness_exit_codes(tmp_path, steps, nonce, code):
 # --- run_harness without Docker (fake identity and run) --------------------------------------------------------------------
 
 IMAGE_OK = {"ok": True, "rule": "IMAGE_OK", "reason": "ok", "image": "asent-cavr-sandbox:local",
-            "image_id": "sha256:" + "ab" * 32, "seccomp_sha256": "s"}
+            "image_id": "sha256:" + "ab" * 32,
+            "seccomp_sha256": sandbox_observe._sha256(sandbox_observe.sandbox_image.SECCOMP_PROFILE)}
 
 
 @pytest.fixture
@@ -328,6 +345,12 @@ def test_image_problem_runs_nothing(fake_run, monkeypatch):
     monkeypatch.setattr(sandbox_observe, "IDENTITY", lambda: {"ok": False, "rule": "IMAGE_ID_MISMATCH", "reason": "x"})
     got = sandbox_observe.run_harness(two_steps())
     assert got["status"] == "UNRESOLVED" and got["rule"] == "IMAGE_ID_MISMATCH" and fake_run.calls == []
+
+
+def test_a_seccomp_profile_changed_after_the_image_check_runs_nothing(fake_run, monkeypatch):
+    monkeypatch.setattr(sandbox_observe, "IDENTITY", lambda: {**IMAGE_OK, "seccomp_sha256": "0" * 64})
+    got = sandbox_observe.run_harness(two_steps())
+    assert got["status"] == "UNRESOLVED" and got["rule"] == "SECCOMP_CHANGED" and fake_run.calls == []
 
 
 def test_a_fault_is_unresolved_internal_error(fake_run, monkeypatch):
@@ -507,3 +530,39 @@ def test_background_process_left_by_a_step_is_killed_and_the_run_ends(tmp_path):
     assert got["rule"] == "DEEP_NOT_JUDGED", got["reason"]
     assert time.monotonic() - started < 15
     assert "+++ killed by SIGKILL +++" in got["trace"]
+
+
+CLONE_PROBE = r"""import ctypes, os, threading
+libc = ctypes.CDLL(None, use_errno=True)
+for label, flags in (("untraced", 0x00800000), ("newuser", 0x10000000), ("newnet", 0x40000000), ("newns", 0x00020000),
+                     ("newpid", 0x20000000)):
+    pid = libc.syscall(56, flags | 17, 0, 0, 0, 0)
+    if pid == 0:
+        os.stat("/cavr-child-ran-" + label)
+        os._exit(0)
+    print(label, pid, ctypes.get_errno())
+    if pid > 0:
+        os.waitpid(pid, 0)
+print("clone3", libc.syscall(435, 0, 0), ctypes.get_errno())
+thread = threading.Thread(target=lambda: None)
+thread.start()
+thread.join()
+print("thread ok")
+"""
+
+
+@requires_docker
+def test_untraced_and_namespace_clones_are_refused_and_recorded(tmp_path):
+    """CLONE_UNTRACED would make a child strace never sees; namespace flags open kernel attack surface (x86_64 numbers)."""
+    import platform
+    if platform.machine() != "x86_64":
+        pytest.skip("the probe uses x86_64 syscall numbers")
+    got = observed(tmp_path, CLONE_PROBE)
+    out = got["output"]["text"].split("\n")
+    for label in ("untraced", "newuser", "newnet", "newns", "newpid"):
+        assert f"{label} -1 1" in out, out  # EPERM
+    assert "clone3 -1 38" in out and "thread ok" in out  # ENOSYS; glibc falls back to clone for threads
+    assert got["rule"] == "DEEP_NOT_JUDGED", got["reason"]
+    assert "cavr-child-ran" not in got["trace"]
+    refused = [line for line in got["trace"].splitlines() if "clone(" in line and "= -1 EPERM" in line]
+    assert any("CLONE_UNTRACED" in line for line in refused) and any("CLONE_NEWUSER" in line for line in refused)

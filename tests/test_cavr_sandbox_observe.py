@@ -172,8 +172,25 @@ def test_a_fault_is_unresolved_internal_error(quarantine, monkeypatch):
     assert got["status"] == "UNRESOLVED" and got["rule"] == "INTERNAL_ERROR"
 
 
-def test_the_old_harness_is_gone():
-    assert not (Path(sandbox_observe.__file__).with_name("harness.py")).exists()
+def test_a_module_no_staged_wheel_provides_is_refused(quarantine, captured):
+    got = sandbox_observe.observe(tree(quarantine), ["os"], quarantine_dir=quarantine)
+    assert got["rule"] == "MODULES_UNKNOWN" and "os" in got["reason"] and captured == {}
+
+
+def test_top_level_names_come_from_the_wheel_archive(tmp_path):
+    wheel = build_wheel(tmp_path, "multi", "1.0", files={"pkg_a/__init__.py": "", "pkg_a/sub/x.py": "", "single.py": "",
+                                                         "fast.cpython-312-x86_64-linux-gnu.so": b"\x7fELF",
+                                                         "startup.pth": "", "multi-1.0.data/scripts/tool": ""})
+    assert sandbox_observe.top_level_names(wheel.read_bytes(), wheel.name) == ["fast", "pkg_a", "single"]
+
+
+def test_an_unreadable_wheel_is_refused(quarantine, captured):
+    bad = quarantine / "demo-1.0-py3-none-any.whl"
+    bad.write_bytes(b"not a zip")
+    node = {"name": "demo", "version": "1.0", "filename": bad.name, "path": str(bad),
+            "sha256": hashlib.sha256(b"not a zip").hexdigest()}
+    got = sandbox_observe.observe([node], ["demo"], quarantine_dir=quarantine)
+    assert got["rule"] == "WHEEL_NOT_VERIFIED" and captured == {}
 
 
 # --- Docker ---------------------------------------------------------------------------------------------------------------

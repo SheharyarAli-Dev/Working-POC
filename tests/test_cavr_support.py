@@ -356,7 +356,9 @@ def sandbox_identity() -> dict:
     from backend.cavr import sandbox_image
     if not _SANDBOX_IDENTITY:
         found = sandbox_image.image_identity()
-        if not found["ok"]:
+        # Build only an image that is missing, unrecorded or built from an older Dockerfile; an ID mismatch means
+        # someone re-tagged it, which a test must not paper over by rebuilding and overwriting the record.
+        if not found["ok"] and found["rule"] in ("IMAGE_MISSING", "IMAGE_NOT_RECORDED", "IMAGE_STALE"):
             built = sandbox_image.build(emit=lambda line: None)
             assert built["ok"], built
             found = sandbox_image.image_identity()

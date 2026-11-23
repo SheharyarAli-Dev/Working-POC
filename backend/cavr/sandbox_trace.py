@@ -9,11 +9,14 @@ package process (UID 10001) cannot reach strace's fds through /proc either (stra
 
     TRACE_EMPTY        there is at least one line
     TRACE_TRUNCATED    it ends with a newline; the last line is the harness's `+++ exited with 0 +++`; every
-                       process in it has exactly one exit line and no line after it
+                       process created in it has exactly one exit line and no line after it
     TRACE_MALFORMED    every line is `<pid> <syscall>(...`, `<pid> <... x resumed>`, `<pid> +++ ... +++` or
                        `<pid> --- SIG... ---` (a Python traceback or any stray text is not)
     TRACE_NOT_HARNESS  the first line is the harness's execve: /usr/local/bin/python -I -S /opt/cavr/harness.py
     TRACE_UNKNOWN_PID  every PID is the harness's or was returned by clone / clone3 / fork / vfork of a known PID
+    TRACE_UNFOLLOWED   every PID a known process's clone / fork / vfork returned has lines in the trace (a child
+                       strace did not follow, e.g. CLONE_UNTRACED, would otherwise be invisible; the seccomp
+                       profile also refuses CLONE_UNTRACED)
     TRACE_MARKERS      the harness's markers (failed stats of /.cavr/<nonce>/<phase>, from the harness's PID) are
                        exactly start, step:<s>:begin, step:<s>:end:0 for each step in order, end:ok; no harness
                        marker carries another nonce, and no other process stats a path with this run's nonce
@@ -96,7 +99,11 @@ def _check(raw: bytes, nonce: str, steps: list) -> dict:
         if ended:
             exited[pid] = index
             exit_code[pid] = int(ended.group(1)) if ended.group(1) is not None else None
-    missing = sorted((set(parent) & {pid for pid, _ in parsed}) - set(exited))
+    seen = {pid for pid, _ in parsed}
+    unfollowed = sorted(set(parent) - seen)
+    if unfollowed:  # e.g. clone(CLONE_UNTRACED): the child ran, but strace never saw it
+        return bad("TRACE_UNFOLLOWED", f"PIDs {unfollowed[:5]} were created but have no line in the trace", lines=lines)
+    missing = sorted(set(parent) - set(exited))
     if missing:
         return bad("TRACE_TRUNCATED", f"PIDs {missing[:5]} have no exit line", lines=lines)
     if exited.get(root) != lines - 1 or exit_code.get(root) != 0:

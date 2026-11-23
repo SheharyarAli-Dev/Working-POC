@@ -275,6 +275,8 @@ sandbox security rule above has a passing Docker test; violation -> REJECTED, in
 
 ### PR 7 — `fix(cavr): every attempted sensitive syscall becomes an event`
 
+- Part (review of PRs 3-6, MAJOR 1): strace gets `-yy` and a larger `-s`, and an event whose path or address is
+  truncated (`"..."...`) or relative to a dirfd that cannot be resolved is unknown -> UNRESOLVED.
 - Part: `runtime_monitor.normalize` keeps failed attempts with their errno; real endpoints from `sockaddr`
   (IPv4, IPv6, Unix); SECRET_ACCESS from the run's canary path set; harness processes excluded by PID from the trace,
   not by the substring `python`; unknown sensitive lines are counted and make the run UNRESOLVED. `normalizer.py` deleted.
@@ -339,7 +341,8 @@ counterfactual run; the §6.6 three-package canary path is found; unexplored tri
   run, 120 s per package (Q8), overridable only by the base policy. The Q8 rule applies across all runs: VERIFIED only
   if every run completed within budget, every trace is complete and no event in any context is outside the contract;
   unexplored or unsynthesizable high-risk triggers are listed and make the verdict UNRESOLVED. Replaces
-  `counterfactual.py`, the `sandbox.py` lab path and the old `capability_contract.infer`; the demo LOCAL lab node moves onto this path
+  `counterfactual.py`, the `sandbox.py` lab path, the old `capability_contract.infer`, and (with the legacy
+  `SandboxRunner` and `docker/asent-sandbox/Dockerfile`, `[owner review: docker/]`) the old `harness.py`; the demo LOCAL lab node moves onto this path
   (`test_controlled_dormant_execution` re-pointed, `[owner review: tests/test_modules.py]`).
 - Tests first: unit (fake runner) order follows priority, budget stops the loop, early stop, residuals in the verdict,
   a baseline that is not observed stops the loop as UNRESOLVED; Docker: an env-gated sample is clean in the baseline run
@@ -469,7 +472,7 @@ Stated as limitations in the report and on the dashboard, not implemented in M2:
 - [x] PR 3 CAVR sandbox image `asent-cavr-sandbox:local` + identity check (branch `cavr-m2-sandbox`, 2026-11-23; report notes Step M2-7): own seccomp copy, the shared profile cannot start a container
 - [x] PR 4 runner deadline / kill / limits (branch `cavr-m2-sandbox`, 2026-11-23; report notes Step M2-8): `sandbox_exec.run_container`
 - [x] PR 5 trusted trace channel (package code never runs as root) (branch `cavr-m2-sandbox`, 2026-11-23; report notes Step M2-9): strace's stderr is the trace, `sandbox_trace.check_trace`
-- [x] PR 6 wheel install + import harness (branch `cavr-m2-sandbox`, 2026-11-23; report notes Step M2-10): `sandbox_observe.observe`; exec tmpfs only for the install target; `harness.py` deleted
+- [x] PR 6 wheel install + import harness (branch `cavr-m2-sandbox`, 2026-11-23; report notes Step M2-10): `sandbox_observe.observe`; exec tmpfs only for the install target; `harness.py` kept until PR 12 (`docker/asent-sandbox/Dockerfile` still copies it; review 2026-11-23)
 - [ ] PR 7 normalisation v2
 - [ ] PR 8 runtime contract check
 - [ ] PR 9 one observed run for escalated packages
