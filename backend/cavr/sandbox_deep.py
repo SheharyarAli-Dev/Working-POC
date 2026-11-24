@@ -74,6 +74,7 @@ VERSION = "cavr-sandbox-deep/2"
 BUDGET = {"runs": 8, "run_seconds": 20, "package_seconds": 120, "gate_run_seconds": 300}
 MIN_RUN_SECONDS = activation_loop.MIN_RUN_SECONDS  # below this a run cannot even start Python; nothing is started
 KEY_EVENTS = 5
+MAX_GUARDS_LISTED = 50  # other_guards listed in the evidence for the dashboard (PR 19); `other_guards_count` is the total
 CLAIM = ("the counterfactual activation loop: a canary-only run, then one run per distinct trigger activation of the "
          "frontier; in each run the verified wheels were installed offline, imported, and the project's call sites "
          "that pass only literals were called")
@@ -437,6 +438,7 @@ def _loop_evidence(found, drives, loop) -> dict:
             for record in loop["runs"]]
     frontier = {key: (found or {}).get(key) for key in ("version", "ok", "rule", "reason", "now", "total", "dropped",
                                                          "other_guards_count")}
+    frontier["other_guards"] = _listed_guards(found)
     not_exercised = [f"trigger {o['file']}:{o['line']} `{o['predicate']}`: {o['outcome']}" for o in loop["outcomes"]
                      if o["outcome"] != "explored"]
     not_exercised += [f"call site {d.get('file')}:{d.get('line')} {d.get('call') or d.get('expression')}: {d.get('why')}"
@@ -449,6 +451,13 @@ def _loop_evidence(found, drives, loop) -> dict:
             "loop": {key: loop[key] for key in ("version", "stop", "stop_reason", "planned_runs", "budget_used",
                                                 "activation_rate", "new_sensitive_events")},
             "not_exercised": not_exercised}
+
+
+def _listed_guards(found) -> list[dict]:
+    """The frontier's other_guards (guards CAVR cannot evaluate), in the frontier's order, at most MAX_GUARDS_LISTED."""
+    return [{key: guard.get(key) for key in ("id", "package", "version", "file", "line", "predicate", "risk")}
+            | {"capabilities": sorted(activation_loop.sink_capabilities(guard))}
+            for guard in ((found or {}).get("other_guards") or [])[:MAX_GUARDS_LISTED]]
 
 
 def _run_evidence(record) -> dict:
