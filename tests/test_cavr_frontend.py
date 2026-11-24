@@ -750,3 +750,10 @@ def test_a_recorded_view_says_its_fast_gate_inputs_were_not_pypi_or_osv(dashboar
     assert matrix_rows(table)["FR-11"][5] == "HASH_MATCH / TREE_BUILT / NO_KNOWN_VULNERABILITY (recorded: local test index, OSV not asked)"
     (live,) = render(tmp_path, {"view": "deep", **run_data(dashboard, "verified")})
     assert "local test index" not in " ".join(live)
+
+
+def test_the_verified_badge_names_the_deep_analysis_only_when_it_ran(dashboard, tmp_path):
+    deep, fast = render(tmp_path, {"view": "stage", **recorded_data(dashboard, "benign_triggered")},
+                        {"view": "stage", **run_data(dashboard, "verified")})
+    assert "Verified by the fast gate and the deep analysis" in " ".join(deep)
+    assert "Verified by the fast gate" in fast and "deep analysis" not in " ".join(p for p in fast if p.startswith("Verified"))
