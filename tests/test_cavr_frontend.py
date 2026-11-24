@@ -215,7 +215,7 @@ def test_the_proof_drawer_prints_the_hash_result_of_each_run(dashboard, tmp_path
     for scenario, pieces in drawers.items():
         verdict = runs[scenario]["cavr_verdict"]
         assert after(pieces, "Status:") == verdict["status"] and after(pieces, "Reason:") == verdict["reason"]
-        assert after(pieces, "fast_gate_ms:") == shown(verdict["fast_gate_ms"]) and "Counterfactual runs (0):" in pieces
+        assert after(pieces, "fast_gate_ms:") == shown(verdict["fast_gate_ms"]) and "Sandbox runs (0):" in pieces
         assert after(pieces, "Container command:") == api.NOT_RUN and "VERIFIED MATCH" not in " ".join(pieces)
     assert after(drawers["tampered_wheel"], "Demo condition:") == "tampered_wheel"
     assert after(drawers["verified"], "Demo condition:") == DASH
@@ -495,7 +495,8 @@ def test_the_recorded_banner_and_chips(dashboard, tmp_path):
 def test_the_proof_drawer_lists_the_deep_runs_of_a_recorded_run(dashboard, tmp_path):
     data = recorded_data(dashboard, "env_ci")
     (drawer,) = render(tmp_path, {"view": "proof", "proof": data["proof"]})
-    assert "Counterfactual runs (2):" in drawer and after(drawer, "Image digest:") == RECORDED_FILE["image_id"]
+    assert "Sandbox runs (2, including 1 canary-only run):" in drawer and after(drawer, "Image digest:") == RECORDED_FILE["image_id"]
+    assert not [piece for piece in drawer if piece.startswith("Counterfactual runs")]
     assert "RECORDED RUN" in drawer and after(drawer, "Container command:") == api.NOT_IN_EVIDENCE
 
 

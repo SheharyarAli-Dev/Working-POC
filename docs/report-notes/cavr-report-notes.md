@@ -6549,7 +6549,8 @@ component and one render test) got the per-commit checks only: 297 passed.
 - Found on the screenshots: tiny section headings, fixed 380 px graph height, edge labels on top of nodes: `bcc1ce5`;
   a replayed deep VERIFIED badged "Verified by the fast gate" although the fast gate had escalated it: `c165af7`.
 - Review (cavr-reviewer): 1 pass, fix first: 3 BLOCKER / 4 MAJOR / 10 MINOR; all BLOCKERs and MAJORs addressed
-  (MAJOR 2 by docstrings, the test left as it is), 9 MINORs fixed, 1 MINOR open (proof drawer label).
+  (MAJOR 2 by docstrings, then the test updated on Maryam's decision), all 10 MINORs fixed (the proof drawer label
+  after the step).
 
 ### Known limitations / deferred
 
@@ -6558,10 +6559,11 @@ component and one render test) got the per-commit checks only: 297 passed.
 - The digest check proves consistency, not that the recording file was not edited; `counts` is not covered by it.
 - The certificate's terminal hash is still taken before the final record; certificate fields of PR 18 (baseline
   digest, SARIF) not done.
-- Open MINOR: the proof drawer still says "Counterfactual runs (N)" while N includes the canary-only run (an existing
-  test asserts that label).
-- `test_api_imports_none_of_the_fixture_or_simulation_modules` still lists `backend.cavr.causal_graph` as forbidden
-  for `api.py` (written for the legacy graph); `api.py` reaches it through `dashboard_view`. For Maryam to decide.
+- Resolved after the step (Maryam, 2026-11-25): the proof drawer says "Sandbox runs (N, including K canary-only run)"
+  (K counted from the runs; "Sandbox runs (0)" without any), and
+  `test_api_imports_none_of_the_fixture_or_simulation_modules` no longer forbids `backend.cavr.causal_graph` (the real
+  PR 13 graph) but names every deleted fake or legacy module (sandbox, lab_harness, runtime_monitor, sandbox_runner,
+  harness, trigger_discovery, policy, repair added); `dashboard_view.py` unchanged.
 
 ### Tool disclosure (Ch 8.7)
 

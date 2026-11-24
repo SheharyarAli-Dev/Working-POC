@@ -799,9 +799,13 @@ def test_api_imports_none_of_the_fixture_or_simulation_modules():
     tree = ast.parse(Path(api.__file__).read_text(encoding="utf-8"))
     imported = {node.module for node in ast.walk(tree) if isinstance(node, ast.ImportFrom)}
     imported |= {alias.name for node in ast.walk(tree) if isinstance(node, ast.Import) for alias in node.names}
+    # Fake, stub and legacy modules, each by name. causal_graph is not here: since PR 13 it is the real graph of the
+    # deep runs (api.py reaches it through dashboard_view); the hardcoded legacy graph it replaced is gone.
     gone = {"backend.cavr.fixtures.scenarios", "backend.cavr.fixtures", "backend.cavr.resolver", "backend.cavr.reverifier",
             "backend.cavr.reconstructor", "backend.cavr.counterfactual", "backend.cavr.triggers", "backend.cavr.normalizer",
-            "backend.cavr.causal_graph", "backend.cavr.repair_engine", "hashlib"}
+            "backend.cavr.repair_engine", "backend.cavr.sandbox", "backend.cavr.lab_harness", "backend.cavr.runtime_monitor",
+            "backend.cavr.sandbox_runner", "backend.cavr.harness", "backend.cavr.trigger_discovery", "backend.cavr.policy",
+            "backend.cavr.repair", "hashlib"}
     assert not imported & gone and "backend.cavr.pipeline" in imported
     source = Path(api.__file__).read_text(encoding="utf-8")
     assert "source_code" not in source and "sha256(" not in source

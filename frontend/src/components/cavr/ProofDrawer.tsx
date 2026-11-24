@@ -3,6 +3,16 @@ import { shown } from './types';
 import { SafeText } from './SafeText';
 import { RecordedBanner } from './RecordedBanner';
 
+// "Sandbox runs (N, including K canary-only run)": the deep runs of the proof; K is counted from the runs themselves.
+// Without any run (a fast-gate request) it is "Sandbox runs (0)".
+export const sandboxRunsLabel = (runs: unknown): string => {
+  const list: any[] = Array.isArray(runs) ? runs : [];
+  const canaryOnly = list.filter((run) => run?.kind === 'canary-only').length;
+  return list.length && canaryOnly
+    ? `Sandbox runs (${list.length}, including ${canaryOnly} canary-only run${canaryOnly === 1 ? '' : 's'})`
+    : `Sandbox runs (${list.length})`;
+};
+
 interface ProofDrawerProps {
   // The answer of GET /api/cavr/proof/{run_id}.
   proof: any;
@@ -58,7 +68,7 @@ export const ProofDrawer: React.FC<ProofDrawerProps> = ({ proof, onClose }) => (
         </div>
 
         <div className="proof-group">
-          <label>Counterfactual runs ({shown(proof.counterfactual_runs?.length)}):</label>
+          <label>{sandboxRunsLabel(proof.counterfactual_runs)}:</label>
           <div className="cf-proof-list">
             {(proof.counterfactual_runs || []).map((r: any, index: number) => (
               <div key={index} className="cf-proof-item">
