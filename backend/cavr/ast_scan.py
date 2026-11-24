@@ -1,10 +1,10 @@
 """C3: light AST risk scan of the Python sources inside a wheel. Nothing is imported or run.
 
 `scan_wheel(path)` reads every `.py` entry of the wheel (after the archive checks of
-`wheel_meta.check_entries`), parses it with `ast`, and applies the rule-driven scan of
-`backend.cavr.trigger_discovery.scan` (imported, not edited): calls to sensitive sinks from the
-threat-repository rules, and `if` / `while` branches that gate such a call behind an environment
-variable or a file-existence check. On top of that this module adds:
+`wheel_meta.check_entries`), parses it with `ast`, and applies the rule-driven scan `rule_scan` (at the
+end of this file; moved here unchanged from the deleted `trigger_discovery.py`, Step M2-18): calls to
+sensitive sinks from the threat-repository rules, and `if` / `while` branches that gate such a call
+behind an environment variable or a file-existence check. On top of that this module adds:
 
 - sinks called through an import alias (`import socket as s`, `from subprocess import run`),
   which the rule scan misses because it compares the call text literally;
@@ -40,10 +40,10 @@ import tokenize
 import zipfile
 from pathlib import Path
 
-from backend.cavr.trigger_discovery import scan
 from backend.cavr.wheel_meta import NATIVE, ZIP_ERRORS, WheelProblem, check_entries
 from backend.orchestrator.hashing import digest
 from backend.threat_repo.behavior_rules import python_sinks
+from backend.threat_repo.trigger_rules import matching
 from backend.threat_repo.repository import seeds
 
 ANALYZER_VERSION = "cavr-ast-scan/1"
@@ -104,7 +104,7 @@ def _scan(archive: zipfile.ZipFile, fields: dict, knowledge: dict) -> None:
     fields["not_scanned_files"] = [info.filename for info in infos if _not_scanned(info.filename)]
     findings += [_finding("NOT_SCANNED", name, None, _not_scanned(name)) for name in fields["not_scanned_files"]]
     try:
-        fields["coverage"] = scan({}, knowledge)["coverage"] + OWN_COVERAGE
+        fields["coverage"] = rule_scan({}, knowledge)["coverage"] + OWN_COVERAGE
     except Exception:
         fields["coverage"] = "rule scan coverage statement unavailable" + OWN_COVERAGE
 
@@ -112,7 +112,7 @@ def _scan(archive: zipfile.ZipFile, fields: dict, knowledge: dict) -> None:
         """Parse and scan one source text. False (with a PARSE_ERROR finding) when that is not possible."""
         try:
             tree = ast.parse(source)
-            found = scan({name: source}, knowledge)
+            found = rule_scan({name: source}, knowledge)
             if found["parse_errors"]:
                 raise SyntaxError(found["parse_errors"][0]["error"])
             extra_sinks, dynamic_calls = _alias_pass(name, tree, rules)
@@ -258,3 +258,42 @@ def _result(outcome, rule, reason, path=None, rules_digest=None, python_files=0,
             "dynamic_code": dynamic_code or [], "parse_errors": parse_errors or [], "native_files": native_files or [],
             "bytecode_files": bytecode_files or [], "pth_files": pth_files or [],
             "not_scanned_files": not_scanned_files or [], "coverage": coverage}
+
+
+# --- the rule-driven scan (moved unchanged from trigger_discovery.py, Step M2-18) ---------------------
+
+def rule_scan(sources,knowledge=None):
+    rules=python_sinks(knowledge);triggers=[];sinks=[];parse_errors=[]
+    for name,source in sources.items():
+        try:tree=ast.parse(source)
+        except SyntaxError as e:parse_errors.append({'file':name,'error':str(e)});continue
+        for n in ast.walk(tree):
+            if isinstance(n,ast.Call):
+                func=ast.unparse(n.func)
+                if func in rules:sinks.append({'file':name,'line':n.lineno,'sink':func,'capability':rules[func]['event'],'rule_id':rules[func]['rule_id']})
+            if not isinstance(n,(ast.If,ast.While)):continue
+            pred=ast.unparse(n.test);matched={};inputs=[];trigger_types=[]
+            for call in ast.walk(n.test):
+                if isinstance(call,ast.Call):
+                    fn=ast.unparse(call.func)
+                    for rule in matching(knowledge,fn,pred):matched[rule['id']]=rule
+                    if fn in ('os.getenv','os.environ.get') and call.args and isinstance(call.args[0],ast.Constant):inputs.append(str(call.args[0].value));trigger_types.append('environment-variable')
+                    elif fn in ('os.path.exists','Path.exists','Path.is_file','Path.is_dir'):
+                        inputs.extend(ast.unparse(a) for a in call.args);trigger_types.append('file-existence')
+                elif isinstance(call,ast.Attribute) and call.attr in ('exists','is_file','is_dir'):
+                    inputs.append(ast.unparse(call.value));trigger_types.append('file-existence')
+            # Simple named feature flags and boolean comparisons are recorded as
+            # unsupported until a rule explicitly recognizes their activation.
+            names=[x.id for x in ast.walk(n.test) if isinstance(x,ast.Name)]
+            if not matched and names and any(x in pred.lower() for x in ('flag','feature','enabled')):
+                trigger_types.append('feature-flag')
+            branches=[('body',n.body)]
+            if isinstance(n,ast.If) and n.orelse:branches.append(('else',n.orelse))
+            recognized_env=bool(inputs and 'environment-variable' in trigger_types)
+            recognized_file=bool(inputs and 'file-existence' in trigger_types)
+            supported=recognized_env or recognized_file
+            for branch,statements in branches:
+                sensitive=[{'sink':ast.unparse(x.func),'capability':rules[ast.unparse(x.func)]['event'],'line':x.lineno} for x in ast.walk(ast.Module(body=statements,type_ignores=[])) if isinstance(x,ast.Call) and ast.unparse(x.func) in rules]
+                if not sensitive:continue
+                triggers.append({'id':name+':'+str(n.lineno)+':'+branch,'file':name,'line':n.lineno,'predicate':pred,'trigger_type':list(dict.fromkeys(trigger_types)) or [r['name'] for r in matched.values()],'types':list(dict.fromkeys(trigger_types)) or [r['name'] for r in matched.values()],'rule_ids':list(matched),'inputs':list(dict.fromkeys(inputs)),'relevant_key':inputs[0] if len(inputs)==1 else None,'environment_keys':inputs if 'environment-variable' in trigger_types else [],'reachable_sinks':sensitive,'priority':max([float(r['data'].get('risk_weight',1)) for r in matched.values()] or [1])*len(sensitive),'reachability':'syntactic '+branch+'-branch containment','supported':supported,'activation_known':recognized_env and inputs==['CAVR_CANARY_AWS_SECRET'],'supported_activation':supported,'trigger_status':'recognized' if supported else 'unsupported/unresolved','unsupported_reason':None if supported else 'Helper-call or indirect predicate cannot be resolved by bounded AST rules'})
+    return {'triggers':sorted(triggers,key=lambda t:-t['priority']),'sinks':sinks,'parse_errors':parse_errors,'coverage':'Python AST supports literal environment lookups and file-existence predicates with syntactic branch containment (including if/else); helper-call predicates unresolved; no path feasibility, symbolic execution, interprocedural analysis, or general dataflow'}

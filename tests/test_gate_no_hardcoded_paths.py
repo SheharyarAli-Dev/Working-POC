@@ -27,9 +27,6 @@ PATTERNS = ["demo_project", "sample_project", "SAMPLE_PROJECT_DIR", "scenarios/"
             ",DEMO", "DEMO,"]
 # (file, text that the line contains) -> why a gate run never reaches it
 ALLOWED = {
-    ("backend/cavr/analyzer.py", "context.path/'fixtures/invoice.pdf'"): "lockfile analyzer; analyze() returns the pipeline adapter first for every gate run",
-    ("backend/orchestrator/service.py", "scenarios/cavr_controlled/invoice_pdf_safe.py"): "demo repair (_repair); analyze() forces auto_repair=False for gate runs",
-    ("backend/orchestrator/service.py", "branch/'fixtures'/'invoice.pdf'"): "demo repair (_repair); unreachable for gate runs",
     ("backend/satra/pytest_runner.py", "ASSETS/'scenarios/laboratory_hashes.json'"): "ASENT's own index of bundled inert sources; only read when external=False",
     ("backend/satra/pytest_runner.py", "ASSETS/'demo_project/InvoiceHub'"): "host fallback for bundled sources; run_pytest(external=True) returns before it",
     ("backend/satra/pytest_runner.py", "for name in ('pytest.ini','fixtures/invoice.pdf'):"): "same host fallback (permitted_builtin); not consulted when external=True",
@@ -65,7 +62,7 @@ def small_repo(tmp_path):
 def test_gate_run_never_calls_a_demo_scenario_function(tmp_path, monkeypatch):
     def forbidden(*a, **k):
         raise AssertionError("a gate run called a demo-scenario function")
-    for name in ("catalog", "apply_scenario", "replace_lab", "scenario_project"):
+    for name in ("catalog", "apply_scenario", "scenario_project"):
         monkeypatch.setattr(service_module, name, forbidden)
     from backend.gate.runner import run_gate
     repo, base = small_repo(tmp_path)

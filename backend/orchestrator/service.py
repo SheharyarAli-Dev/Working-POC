@@ -6,7 +6,7 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor,as_completed
 from pathlib import Path
-from backend.config import ASSETS,DATA
+from backend.config import DATA
 from backend.db.storage import Store
 from backend.orchestrator.run_context import RunContext,Evidence
 from backend.orchestrator.hashing import digest,manifest,snapshot,changed,copy_tree,files
@@ -16,16 +16,13 @@ from backend.orchestrator.evidence_bus import EvidenceBus
 from backend.orchestrator.event_router import route
 from backend.orchestrator.invalidation import invalidate_changed
 from backend.orchestrator.final_gate import decide
-from backend.orchestrator.scenarios import catalog,apply_scenario,replace_lab,scenario_project
+from backend.orchestrator.scenarios import catalog,apply_scenario,scenario_project
 from backend.integrations.git_adapter import git,diff
 from backend.integrations.agent_adapter import WorkspaceWatchAdapter,parse_dependency_command
 from backend.cavr import analyzer as cavr
-from backend.cavr.sandbox import run_counterfactual
-from backend.cavr.policy import verify_runtime
 from backend.satra import analyzer as satra
 from backend.sable import analyzer as sable
 from backend.satra.repair import propose
-from backend.cavr.repair import rank_repairs
 from backend.threat_repo.repository import ThreatRepository
 from backend.threat_repo.provenance import explanation
 
@@ -159,29 +156,17 @@ class Service:
             run=self.store.run(rid);run.lifecycle='ERROR';run.final_decision='REVIEW';run.reasons=['Run could not complete'];run.error=type(e).__name__+': '+str(e);self.store.save_run(run);self.store.event(rid,'run.error',{'reason':run.error})
         finally:lock.release()
     def _repair(self,run,context,bus):
+        # Only SATRA repairs here. The CAVR half (replace the LOCAL lab adapter) was removed with the lab
+        # (CAVR report notes Step M2-18): CAVR repairs are proposals for a person to approve (Q9), never applied.
         current={e['analyzer']:e for e in self.store.evidence(run.run_id) if not e['stale']}
-        needs=[m for m in ('CAVR','SATRA') if current.get(m,{}).get('status') in ('REJECTED','REJECT')]
+        needs=[m for m in ('SATRA',) if current.get(m,{}).get('status') in ('REJECTED','REJECT')]
         if not needs:return False
         branch=Path(run.candidate_workspace).parent/('repair-'+str(run.revision))
         git(run.baseline_workspace,'worktree','add','-b','repair-'+run.run_id+'-'+str(run.revision),str(branch),run.baseline_commit)
         for p in files(branch):(branch/p).unlink()
         copy_tree(context.path,branch);changed_files=[]
         run.lifecycle='REPAIRING';self.store.save_run(run)
-        if 'CAVR' in needs:
-            old=next((n for n in current['CAVR']['details'].get('nodes',[]) if n['name']=='invoice-pdf-lab'),None)
-            if old:
-                # The repository represents exactly one supported migration.
-                # Prepare it only in the isolated proposal worktree.
-                proposal_changes=replace_lab(branch)
-                if proposal_changes:
-                    lock=json.loads((branch/'dependencies.lock.json').read_text())
-                    candidate=next((x for x in lock['packages'] if x['name']=='invoice-pdf-safe'),None)
-                    artifact=Path(candidate['artifact']) if candidate else None
-                    identity_ok=bool(candidate and artifact and (branch/artifact).is_file() and digest((branch/artifact).read_bytes())==candidate.get('sha256') and candidate.get('sha256')==digest((ASSETS/'scenarios/cavr_controlled/invoice_pdf_safe.py').read_bytes()))
-                    changed_files+=proposal_changes
-                    bus.emit('cavr.repair_candidate_checked',{'candidate_id':'local-safe-adapter-v1','artifact_identity_valid':identity_ok,'artifact':candidate,'proposal_snapshot':snapshot(branch)})
-        if 'SATRA' in needs:
-            changed_files+=propose(branch,current['SATRA']);bus.emit('satra.repair_attempt',{'branch':str(branch),'files':changed_files,'source':'bounded deterministic template'})
+        changed_files+=propose(branch,current['SATRA']);bus.emit('satra.repair_attempt',{'branch':str(branch),'files':changed_files,'source':'bounded deterministic template'})
         if not changed_files:return False
         # Verify all affected application/dependency obligations in isolated proposal before promotion.
         proposal=ContextService(branch,run.baseline_workspace,context.knowledge);results={}
@@ -189,27 +174,7 @@ class Service:
             if m in proposal.applicability():
                 proposal_run=run.model_copy(update={'candidate_snapshot':snapshot(branch)})
                 results[m]=self._module(m,proposal,proposal_run,bus,'repair-verification')
-        artifact_ok=any(x['kind']=='cavr.repair_candidate_checked' and x['data'].get('artifact_identity_valid') for x in self.store.events(run.run_id))
-        functional_ok=False;security_ok=False;fixture_check=None
-        if 'CAVR' in needs and artifact_ok:
-            candidate_src=branch/'vendor'/'invoice_pdf_safe.py'
-            fixture_check=run_counterfactual(candidate_src,branch/'fixtures'/'invoice.pdf',self.root/'evidence'/run.run_id/(str(run.revision)+'-repair-functional'),bus.emit)
-            runs=fixture_check.get('runs',[])
-            outputs=[r.get('facts',{}).get('functional_text') for r in runs]
-            functional_ok=bool(fixture_check.get('available') and len(outputs)==2 and outputs[0] is not None and outputs[0]==outputs[1])
-            cnode=next((n for n in results['CAVR'].details.get('nodes',[]) if n.get('name')=='invoice-pdf-safe'),None) if 'CAVR' in results else None
-            # Security acceptance uses actual observed events and the inferred
-            # capability contract; absence of runtime data is not a pass.
-            violations=[]
-            if cnode and runs:
-                for rr in runs:violations.extend(verify_runtime(cnode.get('contract',{}),rr.get('events',[]),rr.get('facts',{}).get('receiver_payloads')))
-            security_ok=bool(cnode and runs and not violations and all(not rr.get('facts',{}).get('canary_received') for rr in runs))
-            bus.emit('repair.functional_security_check',{'functional_verified':functional_ok,'security_verified':security_ok,'fixture_result':fixture_check,'violations':violations})
-        repair_candidates=[{'name':'invoice-pdf-safe','version':'1.0.0','level':3,'api_slice':'extract_invoice_text(bytes) -> str','files_changed':len(set(changed_files)),'candidate_id':'local-safe-adapter-v1'}]
-        verified_candidate_ids=['local-safe-adapter-v1'] if artifact_ok and functional_ok and security_ok else []
-        ranked=rank_repairs(next((n for n in current.get('CAVR',{}).get('details',{}).get('nodes',[]) if n['name']=='invoice-pdf-lab'),{'name':'invoice-pdf-lab','version':'1.0.0'}),repair_candidates,verified_candidate_ids=verified_candidate_ids) if 'CAVR' in needs else []
-        verified=(('CAVR' not in needs) or bool(ranked)) and all(e.status in ('VERIFIED','ACCEPT') for e in results.values())
-        bus.emit('repair.ranking',{'selected':ranked[0]['candidate_id'] if ranked else None,'verified_only':True,'verification':{'artifact':artifact_ok,'functional':functional_ok,'security':security_ok}})
+        verified=all(e.status in ('VERIFIED','ACCEPT') for e in results.values())
         bus.emit('repair.differential_verification',{'before':{m:current[m]['status'] for m in current},'after':{m:e.status for m,e in results.items()},'verified':verified,'changed_files':sorted(set(changed_files)),'evidence':{m:e.model_dump(mode='json') for m,e in results.items()}})
         if not verified:return False
         # Copy only the proposed source state; discard verifier temp workspaces.

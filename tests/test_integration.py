@@ -42,16 +42,6 @@ def test_ownership_regression(integration_runs):
     assert r.final_decision=='BLOCK' and e['status']=='REJECT'
     assert e['details']['executions']['trusted_candidate']['failed']>=2
 
-def test_cavr_repair_invalidates_satra_then_reverifies(integration_runs):
-    svc,runs=integration_runs;r=runs['cross_module'];events=svc.store.events(r.run_id)
-    assert r.final_decision=='ACCEPT',r.model_dump()
-    assert any(e['kind']=='repair.applied' for e in events)
-    assert any(e['kind']=='evidence.invalidated' and e['data']['module']=='SATRA' for e in events)
-    assert any(e['kind']=='module.rerun' and e['data']['module']=='SATRA' for e in events)
-    assert any(e['analyzer']=='CAVR' and e['status']=='REJECTED' and e['stale'] for e in svc.store.evidence(r.run_id))
-    assert current(svc,r,'CAVR')['status']=='VERIFIED'
-    assert current(svc,r,'SATRA')['candidate_snapshot']==r.candidate_snapshot
-
 def test_satra_repair_differential(integration_runs):
     svc,runs=integration_runs;r=runs['satra_weak'];svc.analyze(r.run_id,auto_repair=True);fresh=svc.store.run(r.run_id)
     assert fresh.final_decision=='ACCEPT',fresh.model_dump()

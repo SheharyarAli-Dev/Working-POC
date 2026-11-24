@@ -6001,3 +6001,126 @@ skipped (live network), 0 failed, 998 s; no container left; `reports/` unchanged
    UID 10001, canaries only), and a literal that looks like a credential is never passed (D2).
 3. **Why can a package with a high-risk trigger never be VERIFIED?** High risk means the sink's capability is not
    granted; a run that shows it is a violation (REJECTED), and one that does not leaves it unexplored (UNRESOLVED).
+
+
+## Step M2-18 — Legacy clean-up and the retired LOCAL-lab demos (Q12) (2026-11-24)
+
+Plan: the Phase 3b plan (legacy clean-up), demo option A chosen by Maryam on 2026-11-24, with two additions: every
+reference to `cross_module` / `cavr_canary` updated or removed plus a test that no non-historical file names them,
+and an "M2 demo: real wheels" section in `docs/cavr-demo.md` (written with PR 13, Step M2-19, because its recorded
+output shows each verdict's cause).
+
+### Ch 6 Implementation
+
+Deleted, with what used each one before:
+
+| Deleted | Used by (before) | Now |
+|---|---|---|
+| `backend/cavr/sandbox.py`, `lab_harness.py` | `analyzer._lab`, orchestrator `_repair` | deep stage (`sandbox_deep`, PRs 9-12) |
+| `backend/cavr/runtime_monitor.py` | `sandbox.py`; `test_modules` | `sandbox_events.normalise` (PR 7) |
+| `backend/cavr/sandbox_runner.py`, `harness.py`, `docker/asent-sandbox/` | `test_cavr_sandbox_runner`, `test_cli_resources` (its `SECCOMP_PROFILE`), `doctor.RESOURCES`, `scripts/ci/check_wheel.py`, `test_cli_packaging` | `sandbox_exec` / `sandbox_observe` / `sandbox_harness`, image `asent-cavr-sandbox:local`; the shared profile is `sandbox_image.SHARED_SECCOMP_PROFILE` |
+| `backend/cavr/trigger_discovery.py` | **fast gate** `ast_scan`; `analyzer._lab`; `test_modules`, `test_cavr_targeted` | moved unchanged into `ast_scan.rule_scan` |
+| `backend/cavr/policy.py` (`verify_runtime`) | `analyzer._lab`, orchestrator `_repair` | `contract_check.judge` (PR 8) |
+| `backend/cavr/repair.py` (`rank_repairs`) and the CAVR half of `Service._repair` | orchestrator | `repair_proposal` (proposals only, Q9) |
+| `capability_contract.infer`, `use_through_local_artifacts` and helpers | `analyzer._lab`; `test_cavr_vendored_use` | `infer_capability_contract` (M1) |
+| the LOCAL-lab path of `analyzer.py` (`_lab`) | demo runs with a LOCAL lock node | a LOCAL node is UNRESOLVED `LOCAL_NOT_SUPPORTED` |
+| scenarios `cavr_canary`, `cross_module`, `scenarios/cavr_controlled/`, `apply_scenario`'s lab branch, `replace_lab` | catalog, dashboard buttons, `conftest.integration_runs` | `tests/test_cavr_m2_wheels.py` (real wheels) |
+
+Changed: `backend/cavr/ast_scan.py` (`rule_scan` at its end; imports `trigger_rules.matching`), `analyzer.py`
+(docstring, LOCAL rule), `capability_contract.py` (docstring), `backend/orchestrator/service.py` (`_repair` SATRA
+only; imports), `backend/orchestrator/scenarios.py`, `backend/commands/doctor.py` (RESOURCES), `scenarios/catalog.json`,
+`scenarios/laboratory_hashes.json` (the `cavr_sources` key and exactly the four `python_sources` hashes of the lab
+files and their one-line adapters; no remaining file has those bytes), `scripts/build_scenarios.py`,
+`scripts/ci/check_wheel.py`, `scripts/generate_defense_replays.py` (frame 06 text), `reports/ASENT_FINAL1_DEMO_RUNBOOK.md`
+(a dated "retired" note above Scenario 5; the Final-1 text kept). New: `tests/test_cavr_retired_scenarios.py`.
+
+### Design decisions
+
+- Option A (retire) over porting the lab to wheels: the repair half of `cross_module` (swap the lab for a different
+  package) is level-3/4 replacement (future work, Q3) and was applied to the candidate (Q9 forbids); porting the
+  detection half needs a LOCAL-wheel trust path in `verify_request` and Docker in demo runs. The detection story is now
+  shown by real wheels through `asent gate`.
+- `trigger_discovery.scan` moved byte-for-byte instead of being rewritten: the fast gate's sink list must not change in
+  a clean-up. Proof: the canonical JSON of `scan_wheel` for the real pypdf 6.21.4 / 6.19.0 / 5.1.0 wheels and the 13
+  demo wheels (path field left out) has the same SHA-256 before and after (`eabb11dc10ac56a4…`; 16 wheels, 16
+  triggers, 24 sinks). `analyzer_version` holds version strings only, so no cache key changes.
+- `laboratory_hashes.json` edited by hand, not regenerated: it is also SATRA's host-fallback allowlist; regenerating
+  could change SATRA's other entries.
+- A LOCAL lock node fails closed (UNRESOLVED) like any ecosystem the pipeline cannot verify.
+- Historical files keep their text (the guard test lists them with the reason): report notes, the plan's decision
+  log, `docs/satra/harness-isolation.md` (another owner's dated record), `reports/` (committed evidence and reports).
+
+### Requirements covered
+
+- Q12 (legacy removed once replaced and unused): every module in the table has no importer left
+  (`git grep` for the module names in `*.py`: only comments recording the move).
+- FR-6 (fail closed): `test_a_local_lock_node_is_unresolved_local_not_supported`.
+- NFR-2 / scope: the `cross_module` / `cavr_canary` names are gone from every file in use
+  (`test_no_file_in_use_names_a_retired_scenario`).
+
+### Ch 7 Test cases
+
+| Test ID | Purpose | Input | Expected | Result |
+|---|---|---|---|---|
+| test_no_file_in_use_names_a_retired_scenario (new) | user's addition | every tracked text file outside the historical list | no `cross_module` / `cavr_canary` | pass |
+| test_the_scenario_catalog_has_no_retired_entry (new) | catalog | `scenarios/catalog.json` | neither id | pass |
+| test_the_historical_list_names_only_paths_that_exist (new) | guard of the guard | the allowlist | every prefix tracked | pass |
+| test_a_local_lock_node_is_unresolved_local_not_supported (was test_local_lab_node_keeps_the_lab_path_labelled_demo_lab) | fail closed | safe scenario + a LOCAL `.py` lock entry | UNRESOLVED LOCAL_NOT_SUPPORTED (was REJECTED demo-lab); pypdf VERIFIED | pass |
+| test_local_wheel_in_the_lock_is_unresolved_never_verified (changed) | fail closed | LOCAL wheel | still UNRESOLVED; rule LOCAL_NOT_SUPPORTED, engine demo (was LOCAL_ARTIFACT_NOT_SUPPORTED, demo-lab) | pass |
+| test_a_vendored_adapter_that_binds_the_reader_verifies_pypdf (was test_repaired_cross_module_state_verifies_pypdf) | guard proof | the reviewed adapter written directly | pypdf VERIFIED ALL_CHECKS_PASSED (the demo-lab assertion dropped) | pass |
+| test_seccomp_profiles_are_the_repository_files (was …_and_the_flags_are_unchanged) | assets | shared and CAVR profile paths | same `docker/asent-seccomp.json`; SandboxRunner flags gone with it | pass |
+| test_every_packaged_asset_…, test_a_copy_of_the_package_outside_the_checkout_… (re-pointed) | assets | `sandbox_image.SHARED_SECCOMP_PROFILE` | same path asserted | pass |
+| test_trigger_and_runtime_normalization (trimmed), test_trigger_predicates_bounded_and_unsupported_visible, test_trigger_scanner_records_supported_if_else_file_and_unknown_helper (re-pointed) | rule scan | `ast_scan.rule_scan` | unchanged results | pass |
+| test_scanner_crash_on_one_file_is_unresolved_not_an_exception (re-pointed) | fault | patched `rule_scan` | UNRESOLVED SOURCE_NOT_PARSED | pass |
+| test_gate_run_never_calls_a_demo_scenario_function, test_every_allowlist_entry_still_matches_a_line (changed) | gate path | `replace_lab` and 3 allowlist entries gone | pass | pass |
+
+Deleted with the code they tested (86): `test_cavr_lab_pins.py` (3), `test_cavr_runtime_monitor.py` (9),
+`test_cavr_sandbox_runner.py` (33), `test_cavr_vendored_use.py` (31), 4 of 6 in `test_cavr_targeted.py`,
+`test_hash_verification_line_endings.py::test_cavr_pinned_python_source_accepts_windows_crlf_checkout` (its SATRA test
+stays), `test_cavr_sandbox_image.py::test_sandbox_runner_has_no_hardcoded_digest`,
+`test_modules.py::test_controlled_dormant_execution`, `::test_causal_graph_requires_fixture_source_and_sink_evidence`,
+`::test_repair_constraints`, `test_integration.py::test_cavr_repair_invalidates_satra_then_reverifies`
+(`conftest.integration_runs` builds three scenario runs instead of four).
+Scan output before / after the move: SHA-256 `eabb11dc10ac56a41df657aaa66a29f6f037d0862f323a7d9a0b6bd4053860e1` both.
+Run before the commit: `CAVR_DOCKER=1 pytest tests/test_cavr_*.py tests/test_orchestrator_config.py tests/test_gate_*.py
+tests/test_cli_gate.py tests/test_cli_report.py tests/test_integration.py tests/test_modules.py tests/test_cli_resources.py
+tests/test_cli_packaging.py tests/test_hash_verification_line_endings.py tests/test_scenario_validation_guard.py`: 2202
+passed, 12 skipped (live network), 0 failed, 885 s; no container left; `reports/scenario-validation.json` unchanged.
+
+### Defects found and fixed
+
+- `test_cavr_ast_scan.py::test_scanner_crash_on_one_file_is_unresolved_not_an_exception` patched the old imported name
+  `ast_scan.scan`; it now patches `ast_scan.rule_scan` (same behaviour tested).
+- `test_gate_no_hardcoded_paths.py`: `test_every_allowlist_entry_still_matches_a_line` failed because the three
+  allowlisted demo paths were deleted with the lab code (the entries were removed); the monkeypatch list no longer
+  names `replace_lab`.
+- Review: one cavr-reviewer pass over the three Phase 3b commits at the end (Step M2-19).
+
+### Known limitations / deferred
+
+- `SHA256SUMS` (POC release manifest by `scripts/package.py`, last regenerated 2026-09-30, already stale for most files,
+  checked by no test) still lists the deleted files; regenerating it is a packaging step, not part of this clean-up.
+- `backend/threat_repo/seed/sources.json` record SRC-LAB (and copies in `vscode-asent/test/fixtures/reports/`) names
+  the deleted lab file as a source reference: threat-repository data outside CAVR's scope; left for its owner.
+- `frontend/src/components/cavr/RequirementsTab.tsx` still labels a row with `sandbox_runner.py`: PR 19 rewrites the
+  module column (Phase 5).
+- The orchestrator assurance report's CAVR fields that read the lab (`discovered_triggers`, `execution_modes`,
+  `observed_security_events`, `causal_evidence`) are now always empty, as they already were for gate runs; the deep
+  evidence is in each pipeline row (`deep`); PR 18 (certificate) / Phase 5.
+- `threat_repo.source_sink_rules.correlate` lost its only CAVR user; not deleted (outside CAVR's scope).
+
+### Tool disclosure (Ch 8.7)
+
+- **Generated by Claude Code:** the deletions, the edits listed above, the guard test, these notes and the plan edits,
+  from the plan and option A approved by Maryam on 2026-11-24. **Reviewed by Maryam:** the plan and the demo choice; the
+  diff not yet. **Verified by:** the scan-output digest before and after, and the runs above.
+
+### Supervisor Q&A prep
+
+1. **Did deleting `trigger_discovery.py` change the fast gate?** No: the function moved unchanged, and the scan output
+   of 16 real wheels has the same SHA-256 before and after (`eabb11dc…`).
+2. **Why retire a working demo?** It proved its point with a hand-written lab file in a host fallback, and its repair
+   step applied a package swap that the design now leaves to a person (Q9). The same behaviour is now shown on real
+   wheels in the real sandbox, through the command a developer runs.
+3. **What happens to a project that vendors a `.py` package in its lock?** It is UNRESOLVED `LOCAL_NOT_SUPPORTED`:
+   CAVR does not claim to have verified something it cannot verify.

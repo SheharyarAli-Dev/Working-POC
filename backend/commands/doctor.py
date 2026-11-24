@@ -25,7 +25,7 @@ IMAGES = {
     "asent-satra-runner:local": ("docker/satra-runner.Dockerfile", "docker"),
 }
 RESOURCES = ("docker/sandbox.Dockerfile", "docker/satra-runner.Dockerfile", "docker/satra-runner.requirements.txt",
-             "docker/asent-seccomp.json", "docker/asent-sandbox/Dockerfile", "requirements.lock.txt")
+             "docker/asent-seccomp.json", "requirements.lock.txt")
 POLICIES = ("cavr/project_policy.json", "cavr/osv_snapshot.json", "sable/sable_config.json", "satra/trusted/policy.json")
 NO_DOCKER_MEANS = ("Without it SATRA cannot run the project's tests in its sandbox, so an enabled SATRA is "
                    "INCONCLUSIVE and the gate decides REVIEW (CAVR and SABLE gate checks do not need Docker).")
