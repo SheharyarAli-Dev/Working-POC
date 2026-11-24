@@ -1033,6 +1033,21 @@ def test_bad_names_are_404_on_the_whole_app_too(tmp_path):
 
 # --- review of PR 19: certificates of replayed deep runs, provenance, malformed recordings ------------------------------
 
+def test_the_certificate_of_a_replayed_deep_verified_run_says_what_the_sandbox_did(dashboard):
+    run_id, run = replay("benign_triggered")
+    evidence = run["verdict"]["packages"][0]["evidence"]["deep"]["evidence"]
+    certificate = api.RUN_CERTIFICATES[run_id]
+    assert certificate["status"] == "VERIFIED" and "No package code was run" not in certificate["bounded_trust_claim"]
+    assert certificate["bounded_trust_claim"].startswith("Every fast-gate check passed, and the deep analysis ran the package")
+    assert certificate["security_checks"]["sandbox_execution"] == (
+        f"demo==1.0: VERIFIED DEEP_RUN_CLEAN ({len(evidence['runs'])} sandbox run(s), image {evidence['image_id']})")
+    predicates = [item["predicate"] for item in certificate["residual_uncertainty"]]
+    assert "package code was not executed" not in predicates and "outside the runs" in predicates
+    assert all(item in predicates for item in evidence["not_exercised"])
+    page = api.get_certificate_html(run_id)
+    assert "RECORDED RUN: replayed, not run now." in page and "Result of the recorded run" in page
+    assert RECORDED_FILE["recorded_at"] in page and "local test index" in page and "No package code was run" not in page
+
 
 def test_the_certificate_of_a_replayed_deep_rejection_names_its_sandbox_runs(dashboard):
     run_id, _ = replay("env_ci")
@@ -1048,6 +1063,12 @@ def test_the_certificate_of_a_live_fast_gate_run_is_unchanged(dashboard):
     page = api.get_certificate_html(run_id)
     assert "RECORDED RUN" not in page and "Result of this run" in page
 
+
+def test_the_recorded_label_carries_the_fast_gate_inputs(dashboard):
+    run_id, _ = replay("win32")
+    recorded = api.get_proof(run_id)["recorded"]
+    assert recorded["index"].startswith("local test index") and "OSV was not asked" in recorded["advisories"]
+    assert all(item["index"] == recorded["index"] for item in api.list_recorded_runs())
 
 
 def test_a_malformed_recording_ends_its_stream_with_no_result(dashboard, monkeypatch):

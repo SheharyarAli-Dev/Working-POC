@@ -577,8 +577,11 @@ def test_the_graph_of_a_rejected_run_shows_trigger_event_rule_verdict_with_the_c
     assert "RECORDED RUN" in view and "demo==1.0: causal capability graph" in view
     # Two events: the connect at import and again in the drive step (which imports the package too).
     chain = " caused by (os.environ.get('CI') == 'true') (demo/__init__.py:2) → violates NETWORK_CONNECT: denied (default deny) → REJECTED DEEP_CONTRACT_VIOLATION"
-    assert chains_of(view) == (f"NETWORK_CONNECT 198.51.100.24:443 (run 2, drive_1, trace line 4194){chain} "
-                               f"NETWORK_CONNECT 198.51.100.24:443 (run 2, imports, trace line 3948){chain}")
+    nodes = {node["id"]: node for node in graph["nodes"]}
+    caused = [nodes[edge["to"]] for edge in graph["edges"] if edge["kind"] == "caused"]
+    assert sorted(event["step"] for event in caused) == ["drive_1", "imports"]
+    assert chains_of(view) == " ".join(f"NETWORK_CONNECT 198.51.100.24:443 (run 2, {event['step']}, trace line {event['line']}){chain}"
+                                       for event in caused)
     for title in ("Trigger / call site", "Run spec", "Run", "Event", "Contract rule", "Verdict"):
         assert title in view
     assert "caused by" in view[view.index("Verdict"):]                       # the label on the drawn edge
@@ -719,7 +722,7 @@ def test_the_matrix_of_recorded_deep_runs_shows_their_values(dashboard, tmp_path
                                      "caused by CI=true")
     assert row(rejected, "FR-6") == "REJECTED (deep / DEEP_CONTRACT_VIOLATION)"
     assert row(rejected, "FR-7") == "NOT_ATTEMPTED"
-    assert row(rejected, "FR-11").startswith("HASH_MATCH / TREE_BUILT / NO_KNOWN_VULNERABILITY (recorded: ")
+    assert row(rejected, "FR-11") == "HASH_MATCH / TREE_BUILT / NO_KNOWN_VULNERABILITY (recorded: local test index, OSV not asked)"
     assert row(rejected, "FR-12") == "FRONTIER_COMPLETE: 1 trigger(s)"
     assert row(rejected, "FR-13") == "run 1 OK, run 2 VIOLATION"
     assert row(rejected, "FR-15") == "asent gate BLOCK (exit 1), recorded"
@@ -731,3 +734,19 @@ def test_the_matrix_of_recorded_deep_runs_shows_their_values(dashboard, tmp_path
     for table in (rejected, verified, unresolved):
         assert [row(table, requirement) for requirement in ("FR-9", "FR-14", "NFR-2", "NFR-3")] == [DASH] * 4
     assert "PASS" not in rejected and "FAIL" not in rejected
+
+
+
+def test_a_recorded_view_says_its_fast_gate_inputs_were_not_pypi_or_osv(dashboard, tmp_path):
+    data = recorded_data(dashboard, "env_ci")
+    banner, deep, table = render(tmp_path, {"view": "banner", **data}, {"view": "deep", **data},
+                                 {"view": "requirements", **data})
+    banner_text = " ".join(banner)
+    assert "Fast-gate inputs of the recorded run (not PyPI, not live OSV):" in banner_text
+    assert RECORDED_FILE["index"] in banner_text and RECORDED_FILE["advisories"] in banner_text
+    text = " ".join(deep)
+    assert "Recorded run: the artifact and tree came from a local test index" in text
+    assert "(seeded, OSV not asked)" in text and "(local test index)" in text
+    assert matrix_rows(table)["FR-11"][5] == "HASH_MATCH / TREE_BUILT / NO_KNOWN_VULNERABILITY (recorded: local test index, OSV not asked)"
+    (live,) = render(tmp_path, {"view": "deep", **run_data(dashboard, "verified")})
+    assert "local test index" not in " ".join(live)

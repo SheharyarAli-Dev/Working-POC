@@ -94,6 +94,10 @@ def test_each_recorded_graph_hashes_to_its_digest(name):
 
 
 
+def test_the_file_says_where_the_fast_gate_inputs_came_from_and_that_the_tree_was_clean():
+    assert DATA["index"] == RECORDED_INDEX and DATA["advisories"] == RECORDED_ADVISORIES
+    assert DATA["working_tree"] == "clean (tracked files)" and "local test index" in DATA["label"]
+
 
 def test_the_recorder_refuses_a_dirty_working_tree(monkeypatch, tmp_path):
     class Done:
