@@ -4,7 +4,6 @@ No Docker, or a container run without a usable behavior report, is UNRESOLVED (f
 The process launchers listed in `no_real_processes` are replaced in every test, so no test
 starts a real process through them.
 """
-import asyncio
 import json
 import os
 import subprocess
@@ -15,7 +14,6 @@ import pytest
 
 from backend.cavr import sandbox_runner
 from backend.cavr.causal_graph import build_causal_graph
-from backend.cavr.counterfactual import CounterfactualEngine, baseline_behaviors
 from backend.cavr.sandbox_runner import SandboxRunner
 
 START = "--- ASENT_BEHAVIOR_REPORT_START ---"
@@ -251,175 +249,6 @@ def test_docker_probe_is_false_when_binary_is_missing(monkeypatch):
 def test_docker_probe_follows_the_return_code(monkeypatch, returncode, expected):
     monkeypatch.setattr(subprocess, "run", lambda *a, **k: types.SimpleNamespace(returncode=returncode))
     assert SandboxRunner()._docker_available() is expected
-
-
-# --- report -> behaviors (counterfactual.baseline_behaviors) ----------------
-
-def actions(report):
-    return [(b["action"], b["verdict_impact"]) for b in baseline_behaviors(report)]
-
-
-def test_complete_clean_report_is_a_clean_import():
-    assert actions(clean_report()) == [("FILE_READ", "NEUTRAL")]
-
-
-@pytest.mark.parametrize("report", [None, [1], "x", {}, {"metrics": None}, {"metrics": {}},
-                                    clean_report(metrics=[0, 0]), clean_report(metrics="none")])
-def test_missing_or_non_dict_report_or_metrics_is_not_observed(report):
-    assert actions(report) == [("NOT_OBSERVED", "UNRESOLVED")]
-
-
-@pytest.mark.parametrize("missing", sorted(CLEAN_METRICS))
-def test_each_missing_metric_key_is_not_observed(missing):
-    metrics = {k: v for k, v in CLEAN_METRICS.items() if k != missing}
-    assert actions(clean_report(metrics=metrics)) == [("NOT_OBSERVED", "UNRESOLVED")]
-
-
-@pytest.mark.parametrize("key,value", [("network_attempts", None), ("processes_spawned", "0"),
-                                       ("secrets_touched", True), ("honeytoken_accessed", 0)])
-def test_metric_of_the_wrong_type_is_not_observed(key, value):
-    assert actions(clean_report(metrics={**CLEAN_METRICS, key: value})) == [("NOT_OBSERVED", "UNRESOLVED")]
-
-
-@pytest.mark.parametrize("key,value,action", [
-    ("network_attempts", 1, "NETWORK_CONNECT"),
-    ("honeytoken_accessed", True, "SECRET_ACCESS"),
-    ("secrets_touched", 1, "SECRET_ACCESS"),
-    ("processes_spawned", 1, "PROCESS_SPAWN"),
-    ("writes_outside_scratch", 1, "WRITE_OUTSIDE_SCRATCH"),
-])
-def test_each_nonzero_metric_is_a_violation_and_rejects(key, value, action):
-    behaviors = baseline_behaviors(clean_report(verdict="BLOCK", metrics={**CLEAN_METRICS, key: value}))
-    assert [(b["action"], b["verdict_impact"]) for b in behaviors] == [(action, "VIOLATION")]
-    assert build_causal_graph("some-pkg", "1.0", {"contract_rows": []}, [], _run(*behaviors))["policy_state"] == "REJECTED"
-
-
-@pytest.mark.parametrize("key,value,action", [
-    ("network_attempts", 1, "NETWORK_CONNECT"),
-    ("processes_spawned", 3, "PROCESS_SPAWN"),
-    ("honeytoken_accessed", True, "SECRET_ACCESS"),
-])
-def test_nonzero_metric_is_a_violation_even_when_the_report_says_allow(key, value, action):
-    # The metrics decide, not the verdict string printed next to them.
-    report = clean_report(verdict="ALLOW", test_passed=True, metrics={**CLEAN_METRICS, key: value})
-    assert actions(report) == [(action, "VIOLATION")]
-
-
-@pytest.mark.parametrize("key", ["network_attempts", "writes_outside_scratch", "processes_spawned", "secrets_touched"])
-def test_negative_counter_is_not_observed(key):
-    # -1 is not a count. Before the fix it passed `> 0` as "nothing happened".
-    assert actions(clean_report(metrics={**CLEAN_METRICS, key: -1})) == [("NOT_OBSERVED", "UNRESOLVED")]
-
-
-def test_verdict_block_with_zero_metrics_is_a_violation():
-    behaviors = baseline_behaviors(clean_report(verdict="BLOCK"))
-    assert [(b["action"], b["verdict_impact"]) for b in behaviors] == [("SANDBOX_BLOCK", "VIOLATION")]
-    assert build_causal_graph("some-pkg", "1.0", {"contract_rows": []}, [], _run(*behaviors))["policy_state"] == "REJECTED"
-
-
-@pytest.mark.parametrize("overrides", [
-    {"test_passed": False, "verdict": "NEEDS_REVIEW", "error": "No module named 'dep'"},  # import raised
-    {"test_passed": False},
-    {"test_passed": 1},                 # truthy is not True
-    {"verdict": "NEEDS_REVIEW"},
-    {"verdict": None},
-])
-def test_failed_or_unallowed_run_with_zero_metrics_is_not_observed(overrides):
-    assert actions(clean_report(**overrides)) == [("NOT_OBSERVED", "UNRESOLVED")]
-
-
-# --- CounterfactualEngine ---------------------------------------------------
-
-TRIGGERS = [
-    {"id": "T1", "predicate": "os.environ.get('AWS_SECRET_ACCESS_KEY')", "file_line": "evil.py:3", "priority": 1,
-     "condition_synth": {"type": "ENV_VAR", "key": "AWS_SECRET_ACCESS_KEY"}},
-    {"id": "T2", "predicate": "socket.gethostname() == 'ci'", "file_line": "evil.py:9", "priority": 2},
-]
-
-
-def explore(pkg_dir, triggers=(), max_runs=1):
-    engine = CounterfactualEngine(max_runs=max_runs)
-    return asyncio.run(engine.run_exploration_loop(pkg_dir, "some-pkg", "", {"ranked_triggers": list(triggers)}, "r"))
-
-
-def test_unobserved_baseline_is_not_reported_as_clean_import(pkg, monkeypatch):
-    monkeypatch.setattr(SandboxRunner, "_docker_available", lambda self: False)
-
-    behaviors = explore(pkg)["runs"][0]["behaviors_found"]
-
-    assert [(b["action"], b["verdict_impact"]) for b in behaviors] == [("NOT_OBSERVED", "UNRESOLVED")]
-
-
-def test_unobserved_baseline_reports_zero_coverage_and_zero_counts(pkg, monkeypatch):
-    monkeypatch.setattr(SandboxRunner, "_docker_available", lambda self: False)
-
-    out = explore(pkg)                      # no triggers: used to report 100.0 coverage
-    run0 = out["runs"][0]
-
-    assert run0["behaviors_found"][0]["action"] == "NOT_OBSERVED"   # still there for the verdict
-    assert run0["cumulative_coverage"] == 0.0
-    assert run0["new_behaviors"] == [] and run0["new_count"] == 0 and run0["cumulative_count"] == 0
-    assert out["comparison"] == {"baseline_behaviors_count": 0, "counterfactual_total_behaviors": 0,
-                                 "new_behaviors_revealed_by_counterfactual": 0}
-
-
-def test_unobserved_baseline_with_triggers_reports_zero_coverage(pkg, monkeypatch):
-    monkeypatch.setattr(SandboxRunner, "_docker_available", lambda self: False)
-    assert explore(pkg, TRIGGERS, max_runs=4)["runs"][0]["cumulative_coverage"] == 0.0
-
-
-def test_observed_clean_baseline_keeps_its_coverage_and_counts(pkg, monkeypatch):
-    monkeypatch.setattr(SandboxRunner, "_docker_available", lambda self: True)
-    monkeypatch.setattr(subprocess, "Popen", fake_popen([], text=framed(clean_report())))
-
-    out = explore(pkg)
-    run0 = out["runs"][0]
-
-    assert run0["cumulative_coverage"] == 100.0
-    assert run0["new_count"] == 1 and run0["cumulative_count"] == 1
-    assert out["comparison"]["baseline_behaviors_count"] == 1
-
-
-def test_container_report_with_empty_metrics_is_not_reported_as_clean_import(pkg, monkeypatch):
-    # A report that carries no measurements proves nothing: {} must not read as "0 attempts".
-    monkeypatch.setattr(SandboxRunner, "_docker_available", lambda self: True)
-    monkeypatch.setattr(subprocess, "Popen", fake_popen([], text=framed(clean_report(metrics={}))))
-
-    out = explore(pkg)
-
-    behaviors = out["runs"][0]["behaviors_found"]
-    assert [(b["action"], b["verdict_impact"]) for b in behaviors] == [("NOT_OBSERVED", "UNRESOLVED")]
-    graph = build_causal_graph("some-pkg", "1.0", {"contract_rows": []}, [], out["runs"])
-    assert graph["policy_state"] == "UNRESOLVED"
-
-
-def test_unobserved_baseline_stops_the_loop_and_leaves_all_triggers_residual(pkg, monkeypatch):
-    monkeypatch.setattr(SandboxRunner, "_docker_available", lambda self: False)
-
-    out = explore(pkg, TRIGGERS, max_runs=4)
-
-    assert out["total_runs"] == 1           # no run 1..n, so no "evaluated safely" or invented violations
-    assert out["stop_reason"] == "baseline not observed"
-    assert [r["trigger_id"] for r in out["residual_uncertainty"]] == ["T1", "T2"]
-    assert all("baseline" in r["reason"] for r in out["residual_uncertainty"])
-    graph = build_causal_graph("some-pkg", "1.0", {"contract_rows": []}, TRIGGERS, out["runs"])
-    assert graph["policy_state"] == "UNRESOLVED"
-
-
-def test_observed_clean_baseline_still_explores_triggers(pkg, monkeypatch):
-    monkeypatch.setattr(SandboxRunner, "_docker_available", lambda self: True)
-    calls = []
-    monkeypatch.setattr(subprocess, "Popen", fake_popen(calls, text=framed(clean_report())))
-
-    # TRIGGERS[1:] is T2 only. T1's synthesized condition contains "AWS", which makes the legacy
-    # loop in counterfactual.py append hardcoded SECRET_ACCESS/NETWORK_CONNECT violations.
-    out = explore(pkg, TRIGGERS[1:], max_runs=4)
-
-    assert out["total_runs"] == 2 and out["stop_reason"] != "baseline not observed"
-    assert out["residual_uncertainty"] == []
-    # Only run 0 reached the sandbox. Run 1 is legacy fabricated evidence ("evaluated safely"
-    # recorded without a container launch); it is removed in step 13.
-    assert len(calls) == 1 and calls[0][0] == "docker"
 
 
 # --- build_causal_graph -----------------------------------------------------

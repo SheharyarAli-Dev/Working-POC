@@ -5529,3 +5529,323 @@ failed once in `.venv/bin/python -m pytest -q` (1716 s run, alongside CAVR's Doc
 (the run's output was cut to its last lines), so the cause is not known; the long, varying file times suggest a
 timeout or Docker-load dependency. Suggested check: run the file under load (e.g. with CAVR_DOCKER=1 tests in
 parallel) with `-x --tb=long`.
+
+
+## Step M2-15 — Trigger frontier from the verified wheel (PR 10) (2026-11-23)
+
+Plan: `docs/cavr-m2-plan.md` PR 10, Q8 frontier rule; Phase 3a plan approved by Maryam, 2026-11-23 (decisions 1–4
+and the additions: `frontier_residual` for PR 12, the `other_guards` rule recorded for PR 12, sandbox-evasion checks
+UNRESOLVED by design).
+
+### Ch 6 Implementation
+
+- `backend/cavr/trigger_frontier.py` (new). `frontier(nodes, contract, now=, limit=32)` re-hashes each wheel of the
+  verified tree (mismatch -> `ARTIFACT_CHANGED`), parses every `.py` entry after `wheel_meta.check_entries` (nothing
+  imported or run) and returns the ordered, bounded list of conditions that guard a sink.
+  - `FileScan` walks each module's statements with a path of enclosing guards: `if` body / `else`, `while` body,
+    early exits (`if X: return` puts `not X` in front of the rest of the block), nested guards; calls to module-level
+    functions of the same file are followed (`CALL_DEPTH` 5). Sinks: threat-repo `python_sinks` with import aliases
+    resolved, plus reads of a secret path named by a string constant (`SECRET_READ`).
+  - `build_scope` / `Scope`: import aliases and names assigned exactly once per scope (module, function, class).
+  - `families_of`: the families a condition reads (env, time, file, host, user, argv, platform, obfuscated); a guard
+    with none is an `other_guard`, not a trigger.
+  - `Evaluator`: an AST walk (never `eval`) with Kleene logic for unknown values; `search` tries candidate
+    environments built from the condition's constants (at most 512, in rounds so that a key read only behind
+    another is found); `activate` gives the smallest change from the baseline run, or why there is none (another
+    platform, UID 0, os.getlogin, a file outside the sandbox HOME, an invalid hostname, computed / obfuscated values).
+  - Risk from the worst sink against the contract (`contract_check.read_contract`): high / medium / low; priority
+    = sink_risk × reachability_confidence × novelty / run_cost, all factors in the entry.
+  - `frontier_residual(frontier, explored)`: the pure check PR 12 calls; missing / incomplete / truncated frontier,
+    any unsimulable entry, or an unexplored simulable entry -> UNRESOLVED, `verified_possible: False`.
+- Key algorithm: for each sink with a non-empty guard path -> split the path into trigger guards and opaque guards ->
+  evaluate the conjunction of the trigger guards (with polarity) in the baseline world and in every candidate world
+  (also at t + 60 s for clocks) -> smallest true candidate = activation -> risk and score -> sort (risk, −score,
+  package, file, line, id) -> novelty 0.5 for a repeated activation -> sort again -> cut at `limit`.
+- `docs/cavr-m2-plan.md`: PR 10 "as built", the PR 12 records, progress.
+
+### Design decisions
+
+- **New module, `trigger_discovery.py` unchanged.** It feeds `ast_scan` (fast gate, cached) and the PR 9
+  `high_risk_triggers`; changing its output would change PR 9 verdicts. Alternative (extend it in place) rejected for
+  that reason; PR 12 swaps `high_risk_triggers` onto the frontier.
+- **Activation by evaluating the condition**, not by pattern rules per family: `and` / `or` / `not`, `.lower()`, day
+  counts and `in (…)` fall out of one evaluator, and "simulable" means "a candidate environment was found that makes
+  the condition true", checked, not assumed. Trade-off: only modelled calls are known; anything else is unknown ->
+  unsimulable (fail closed).
+- **Kleene logic** so that `sys.platform == 'win32' or os.getenv('CI') == 'true'` is simulable through its second side
+  while `… and …` is not.
+- **The baseline world has the PR 11 canary files** (`CANARY_FILES`), so a check for `~/.aws/credentials` is taken by
+  the canary run itself (`baseline_takes_it`).
+- **Files only under the sandbox HOME**; any other path is unsimulable (whether the image has it is not known
+  statically). Consequence: sandbox-evasion checks such as `/.dockerenv` are UNRESOLVED by design.
+- **Bound 32 entries, `dropped` counted per risk**: PR 12's `frontier_residual` treats a cut frontier as UNRESOLVED,
+  so the bound can never hide a trigger.
+- **Deterministic**: sorted nodes and files, stable ids (SHA-256 of package, version, file, guard lines), `now` is an
+  argument and recorded.
+
+### Requirements covered
+
+- FR-12 trigger frontier: env / time / file / host / user / argv / platform conditions in front of a sink, each with
+  risk, priority factors and an activation or an unsimulable reason. Check: `tests/test_cavr_trigger_frontier.py`.
+- Q8 frontier rule (prepared for PR 12): an unsimulable trigger can never give VERIFIED. Check:
+  `test_an_unsimulable_entry_is_always_unresolved` (all risks, explored or not).
+- FR-6 fail closed: hash mismatch, unparsed source, native code, unreadable contract all fail closed.
+
+### Ch 7 Test cases
+
+| Test ID | Purpose | Input | Expected | Result |
+|---|---|---|---|---|
+| test_ci_true_is_a_simulable_env_trigger | env wheel | `os.environ.get('CI') == 'true'` | env {CI: true}, high | pass |
+| test_after_a_date_is_a_simulable_time_trigger | time wheel | `date.today() >= date(2027,1,1)` | time ≥ 2027-01-01 | pass |
+| test_kube_config_exists_is_a_simulable_file_trigger | file wheel | `exists(expanduser('~/.kube/config'))` | file /tmp/home/.kube/config | pass |
+| test_a_hostname_is_a_simulable_host_trigger | host wheel | `gethostname() == 'build-prod-7'` | hostname build-prod-7 | pass |
+| test_win32_platform_check_is_unsimulable_and_says_so | platform wheel | `sys.platform == 'win32'` | unsimulable, reason names win32 / Linux | pass |
+| test_reading_the_aws_key_and_sending_it_is_a_secret_read_sink | canary wheel | read ~/.aws/credentials + connect | SECRET_READ and NETWORK_CONNECT sinks | pass |
+| test_env_predicates_get_the_value_that_makes_them_true (6) | env forms | truthiness, in, [], .lower(), and, in tuple | the right values | pass |
+| test_time_predicates_with_constants_are_simulable (5) | time forms | datetime, timestamp, day count, timedelta, fromisoformat | simulable, after now | pass |
+| test_a_date_already_passed_is_taken_by_the_baseline | edge | date in the past | baseline_takes_it | pass |
+| test_a_time_compared_with_a_computed_value_is_unsimulable | failure | `time.time() - getmtime(__file__)` | unsimulable | pass |
+| test_file_predicates_under_home_are_simulable (3) | file forms | os.path.join, joinpath().is_dir(), `/` | file / dir | pass |
+| test_a_canary_file_is_there_in_every_run_so_the_baseline_takes_it | edge | exists(~/.aws/credentials) | baseline_takes_it | pass |
+| test_a_file_outside_the_sandbox_home_is_unsimulable (3) | evasion | /.dockerenv, not /.dockerenv, /etc/... | unsimulable | pass |
+| test_other_hostname_reads_are_simulable (2), test_an_invalid_hostname_constant_is_unsimulable | host | platform.node, uname, `bad_host!` | simulable / unsimulable | pass |
+| test_getuser_is_set_through_the_login_variables, test_root_and_login_checks_are_unsimulable (3) | user | getuser, getuid==0, getlogin | LOGNAME/USER / unsimulable | pass |
+| test_argv_predicates_are_simulable (3) | argv | in, len, slice | argv lists | pass |
+| test_platform_checks (5) | platform | linux, != win32, nt, Darwin, startswith('win') | baseline or unsimulable | pass |
+| else / early exit / nested / or / and / call / opaque / alias / once / twice / while (11 tests) | guard shapes | — | polarity, how, confidence, families | pass |
+| test_obfuscated_or_computed_reads_are_unsimulable (4) | failure | getattr, __import__, join, chr | unsimulable | pass |
+| test_risk_follows_the_contract (3), test_an_unreadable_contract_makes_every_entry_high | risk | denied / scoped / * / unreadable | high / medium / low / high | pass |
+| test_the_design_high_and_low_examples_rank_as_in_section_6_3 | §6.3 | exec (denied) vs connect (*) | exec first | pass |
+| test_the_same_activation_twice_halves_the_novelty_of_the_second | novelty | two `getenv('CI')` | 1.0, 0.5 | pass |
+| test_the_frontier_is_bounded_and_counts_what_it_dropped | bound | 10 triggers, limit 4 | 4 kept, 6 dropped high | pass |
+| test_the_frontier_is_deterministic_and_does_not_depend_on_node_order | determinism | shuffled nodes ×4 | identical JSON | pass |
+| test_a_wheel_whose_bytes_changed_is_artifact_changed, …_cannot_be_parsed…, test_native_code…, test_no_nodes… | failure | wrong sha, bad .py, .so, [] | not ok, rule | pass |
+| test_an_unsimulable_entry_is_always_unresolved (6), …_wins_over_everything_else | Q8 for PR 12 | unsimulable × risk × explored | UNRESOLVED TRIGGER_UNSIMULABLE | pass |
+| test_an_unexplored_simulable_entry_is_unresolved_and_a_baseline_one_is_not | PR 12 check | explored [] / [s1] | UNEXPLORED / EXPLORED | pass |
+| test_a_missing_incomplete_or_truncated_frontier_is_unresolved (4), test_a_real_frontier_with_a_win32_check_cannot_give_verified | PR 12 check | — | UNRESOLVED | pass |
+
+84 tests, 84 passed. No existing result changed. `CAVR_DOCKER=1 pytest tests/test_cavr_trigger_frontier.py
+tests/test_cavr_sandbox_*.py tests/test_cavr_deep_stage.py`: 545 passed, 240 s. Full suite `.venv/bin/python -m pytest -q`: 2852 passed, 73 skipped, 1 xfailed, 1 failed, 1828 s; the failure was
+`tests/test_cli_packaging.py::test_wheel_holds_nothing_else` (the built wheel held the new modules, which git did not
+track yet); after `git add` that file passed (12 passed, 9 s).
+
+### Defects found and fixed
+
+- Between activations of equal size the first test run picked by JSON text (`dir` before `file`, a longer argv list);
+  4 tests failed. Fixed: ties go to the first candidate in candidate order.
+- The full suite's packaging check failed while the new modules were untracked (see Ch 7); no code change needed.
+
+### Known limitations / deferred
+
+- Sandbox-evasion checks (`/.dockerenv`, any file outside the sandbox HOME) are unsimulable, so UNRESOLVED by design.
+- Not scanned for guards: `try` / `import` guards, `match` cases, conditional expressions (`a if c else b`), `sleep`
+  delays, the cloud metadata address; calls are followed only within the same file; a sink reached through a method
+  of an object (`s.connect`) is found only if the threat-repo rules name it.
+- Values are known only for the modelled calls; everything else (a file's content, a computed name, `os.getlogin`) is
+  unknown. Corrected after the review (as first written, this line said "-> unsimulable", which was not true): a
+  guard with no family on the entry's path does not make it unsimulable; it makes `baseline_takes_it` False and is
+  listed in `opaque_guards`, and only a run that showed the sink counts (`frontier_residual`, Step M2-16).
+- A clock condition the baseline takes is checked at the analysis time (and 60 s later), not at the run's start.
+- Not modelled: `nonlocal` rebinding, attributes set from another module (`demo.FLAG = …`), environment writes
+  other than through `os.environ` / `os.putenv` / `os.unsetenv` in the wheels' own code (e.g. through ctypes).
+- The link from a trigger to the project's import closure (`reachability`) and the `other_guards` rule are PR 12.
+- Review (one cavr-reviewer pass over Steps M2-15 and M2-16): fix first; 3 BLOCKER and 2 MAJOR in this step's
+  evaluator, fixed in the PR 11 commit (Step M2-16, "Defects found and fixed"); 0 open MINOR.
+
+### Tool disclosure (Ch 8.7)
+
+- **Generated by Claude Code:** `trigger_frontier.py`, its tests, these notes and the plan edits, from the approved
+  plan. **Reviewed by Maryam:** the plan and decisions 1–4; the code not yet. **Verified by:** the runs above.
+
+### Supervisor Q&A prep
+
+1. **How do you know a trigger is simulable, rather than guessing from its shape?** The evaluator computes the
+   condition in the candidate environment and the entry is simulable only if it comes out true (also 60 s later for
+   clocks); PR 11's Docker tests then show the branch really runs under that spec.
+2. **Why is `sys.platform == 'win32'` not just skipped as irrelevant on Linux?** Code CAVR cannot run is code CAVR
+   has not observed; Q8 says incomplete -> UNRESOLVED, and `frontier_residual` enforces it.
+3. **Can the bound of 32 hide a malicious trigger?** No: anything cut is counted in `dropped`, and a non-zero
+   `dropped` makes `frontier_residual` UNRESOLVED.
+
+
+## Step M2-16 — Run specs with libfaketime and per-run canaries (PR 11) (2026-11-23)
+
+Plan: `docs/cavr-m2-plan.md` PR 11, Q7, Q8, Q12, sandbox rule 7; Phase 3a plan approved by Maryam, 2026-11-23
+(decisions 1–4; the fake HOME 0700 and removed after every run).
+
+### Ch 6 Implementation
+
+- `backend/cavr/env_synthesis.py` (new): `canaries` (four canary files and four canary variables, each a new
+  `secrets` value), `canary_spec`, `synthesize(entry)` (a frontier entry's activation -> a spec: env, libfaketime
+  clock, HOME files with a canary as content, hostname, argv; refused when unsimulable or unsafe), `step_env`
+  (`LD_PRELOAD`, `FAKETIME="@…"`, `FAKETIME_DONT_FAKE_MONOTONIC=1`, `FAKETIME_DISABLE_SHM=1`), `canary_forms`
+  ((kind, bytes): verbatim, hex, base64 at three alignments).
+- `backend/cavr/sandbox_spec.py` (new): `run_spec(nodes, modules, spec, contract=)` stages the verified wheels,
+  writes the spec's HOME into a new 0700 host directory (files 0644, directories 0755) mounted read-only at /tmp/home,
+  runs `install` (HOME=/tmp/install-home, no canary) and `imports` (`SPEC_IMPORT_CODE` sets `sys.argv`, then imports)
+  with `STRACE_SPEC` (PR 9's command, `-s 65536`, plus write, pwrite64, writev, pwritev, pwritev2), `--hostname`, a
+  64 MiB trace cap; removes the HOME in `finally` (`home_removed`, else `SPEC_HOME_LEFT_BEHIND`); normalises with the
+  canaries and judges. Always UNRESOLVED: not a verdict.
+- `backend/cavr/sandbox_events.py`: write-family syscalls (NO_EFFECT, or NETWORK_CONNECT into a socket);
+  `normalise(..., canaries=None)`; `canary_check` decodes every quoted string of a write / send / connect line
+  (`c_string`), looks for each canary form in each piece and in their concatenation -> `CANARY_EXFIL_ATTEMPT`; a cut
+  string, a shortened array or a buffer printed as an address -> `CANARY_UNCHECKED`. `EVENTS_VERSION` cavr-events/3.
+- `backend/cavr/contract_check.py`: `CANARY_EXFIL_ATTEMPT` is a violation (`CANARY_EXFIL`) in every step, before the
+  install envelope; `CANARY_UNCHECKED` -> UNRESOLVED `CANARY_CHECK_INCOMPLETE`, except pip's writes to files under
+  /tmp/ or /site/lib/ in the install step (`_pip_file_write`). `CHECK_VERSION` /3.
+- `backend/cavr/sandbox_exec.py`: `HOSTNAME`, `DEFAULT_HOSTNAME`; `lockdown_flags(seccomp, hostname)` and
+  `docker_command(..., hostname=)` (checked; default output unchanged). `backend/cavr/sandbox_observe.py`:
+  `run_harness(..., strace=None, hostname=None)` (defaults: PR 9's). `trigger_frontier.py` uses `sandbox_exec.HOSTNAME`.
+- Deleted (Q12, decision 1): `backend/cavr/triggers.py`, `backend/cavr/counterfactual.py`, and their 43 tests in
+  `tests/test_cavr_sandbox_runner.py` (36 `baseline_behaviors`, 7 `CounterfactualEngine`).
+- `tests/test_cavr_data/traces/record_events.py`: recordings `spec-canary`, `spec-clean` (real `run_spec` runs).
+- Key algorithm: spec -> host HOME (0700) -> two steps, canaries only in the imports step -> strace with whole payloads
+  up to 64 KiB -> every write / send / connect: decode its strings, search every canary form -> exfiltration event or
+  unchecked event -> contract check (a leak is always a violation) -> HOME removed.
+
+### Design decisions
+
+- **HOME as a read-only bind mount** (decision 2), not written by the harness: the harness and its SHA-256 stay the
+  same, and no setup write appears in the trace as if the package made it. Trade-off: the package cannot write into
+  HOME (an attempt is still an event). The host directory is 0700, so no other host user can read the canaries; the
+  mounted HOME inside it is 0755 / 0644 so that UID 10001 can.
+- **Separate strace for spec runs** (`STRACE_SPEC`): PR 9's command and every PR 9 verdict stay as they are.
+  `-s 65536` because pip writes at most 65536 bytes per call (measured 2026-11-23; no install write was cut in either
+  recording), so only a package's own larger writes can be cut, and those are UNRESOLVED.
+- **Cut pip writes exempt** (decision 3): a pip write into a file under /tmp/ or /site/lib/ carries the verified
+  wheel's bytes, and the canaries are drawn after that hash was checked. Every other cut payload is UNRESOLVED.
+- **Hex and base64 as well as verbatim** (decision 4): base64 at all three alignments, only the whole groups that
+  depend on the canary alone, so a canary inside a larger encoded blob is found too.
+- **`FAKETIME_DISABLE_SHM=1`**: measured without it, libfaketime 0.9.10 creates and unlinks a POSIX semaphore in
+  /dev/shm (three FILE_WRITE events attributed to the package). With it, only code loads are added. No capability and
+  no seccomp change.
+- **A trigger's value wins over a canary variable of the same name**, and that variable leaves the registry: a value
+  the package compares with a constant is known to it, so finding it in a payload would prove nothing.
+
+### Requirements covered
+
+- FR-4 (part): one counterfactual run per spec, real container, real trace. Check: `test_each_trigger_type_fires_under_its_spec_and_not_without_it` (env, date, file, hostname, argv).
+- Sandbox rule 7 (canaries only, random per run, registered). Check: `test_canaries_are_unique_in_a_run_and_new_in_every_run`, `test_no_host_environment_value_reaches_a_run`.
+- FR-13 (canary data flow): a canary in a write / send / connect is CANARY_EXFIL_ATTEMPT, a violation even under
+  `--network none`. Check: `test_reading_the_fake_aws_key_and_sending_it_is_a_canary_exfiltration_attempt`.
+- FR-6 / Q8 fail closed: a payload that cannot be checked is UNRESOLVED; a HOME that cannot be removed is UNRESOLVED.
+- Q7: time through libfaketime, no capability. Check: `test_the_date_spec_moves_the_packages_clock_and_nothing_else`.
+
+### Ch 7 Test cases
+
+| Test ID | Purpose | Input | Expected | Result |
+|---|---|---|---|---|
+| test_each_trigger_type_fires_under_its_spec_and_not_without_it[env/date/file/hostname/argv] (Docker) | each trigger fires | wheel with `CI=true` / date ≥ 2027-01-01 / ~/.kube/config / hostname build-prod-7 / `--deploy` | connect to 198.51.100.24:443 under the spec, none under canary_spec | pass |
+| test_the_date_spec_moves_the_packages_clock_and_nothing_else (Docker) | libfaketime | faketime 2031-05-06 07:08:09 | package prints that clock; judged OK | pass |
+| test_the_win32_wheel_is_unsimulable_and_gets_no_run (Docker file) | unsimulable | `sys.platform == 'win32'` | no spec; frontier_residual UNRESOLVED | pass |
+| test_reading_the_fake_aws_key_and_sending_it_is_a_canary_exfiltration_attempt (Docker) | canary leak | read ~/.aws/credentials, UDP sendto | CANARY_EXFIL_ATTEMPT file:aws-secret-key; VIOLATION | pass |
+| test_every_spec_has_the_file_and_variable_canaries, …_unique…, …_the_ones_the_frontier_counts… | canaries | canary_spec() | 9 canaries, each in its file / variable, new every run | pass |
+| test_canary_forms_… (3) | forms | value, prefixes, digits | verbatim / hex / base64 found at every offset; one hex form for digits | pass |
+| test_env_spec … test_argv_spec (8) | one spec per family | frontier entries | env, faketime + LD_PRELOAD, file with canary, dir, hostname, argv | pass |
+| test_a_trigger_that_sets_a_canary_variable_wins_and_that_canary_is_dropped | edge | GITHUB_TOKEN compared | trigger value, canary dropped | pass |
+| test_an_unsimulable_entry_gives_no_spec | failure | win32 entry | TRIGGER_UNSIMULABLE | pass |
+| test_a_spec_that_cannot_be_built_safely_is_refused (13), test_a_canary_path_or_parent_already_there_is_accepted | failure | HOME, LD_PRELOAD, PYTHONPATH, NUL, /etc, `..`, canary collisions, bad host, 1960, argv NUL | SPEC_REFUSED / accepted | pass |
+| test_the_spec_run_mounts_a_read_only_home_built_from_the_spec | HOME | canary_spec | bind readonly at /tmp/home; root 0700; files 0644; removed | pass |
+| test_the_fake_home_is_removed_after_a_timeout_or_a_failure (2), …_when_writing_it_fails, test_a_home_that_cannot_be_removed_is_unresolved | nothing left behind | TIMEOUT, engine fault, bad path, rmtree fails | HOME gone / SPEC_HOME_LEFT_BEHIND | pass |
+| test_the_steps_give_canaries_only_to_the_imports_step, test_the_spec_run_uses_its_own_strace…, test_the_pr9_strace_and_flags_are_unchanged | steps | — | install HOME=/tmp/install-home; STRACE_SPEC; PR 9 STRACE -s 4096, cavr-sandbox | pass |
+| test_no_host_environment_value_reaches_a_run | rule 7 | three host secrets set | absent from docker argv, job file, HOME; only the nonce variable | pass |
+| test_docker_refuses_an_invalid_hostname (4), test_a_wheel_whose_quarantine_bytes_changed… | failure | bad names; wrong sha | ValueError; WHEEL_HASH_MISMATCH, nothing started | pass |
+| test_a_canary_in_a_write_send_or_connect_is_an_exfiltration_attempt (6) | canary check | sendto, write, writev, sendmsg, AF_UNIX path, abstract name | one CANARY_EXFIL_ATTEMPT | pass |
+| base64 / hex, split over iov, env canary, escapes decoded, no canary, without canaries (7) | canary check | — | found / not found as stated | pass |
+| cut payload, cut with canary, shortened array, address buffer, file path kept (5) | not checkable | — | CANARY_UNCHECKED | pass |
+| exfil always a violation (2), in install step, failed under network none; unchecked UNRESOLVED; pip file write exempt; pip pipe / other path not (2) | judged | — | VIOLATION / UNRESOLVED / OK | pass |
+| test_recorded_leaks_are_each_found_with_the_canary_that_leaked, …_cut_write…, …_clean_run…, …_violation_under_any_contract | recorded runs | spec-canary, spec-clean (2026-11-23, image sha256:0e88dd46…) | 4 leaks with their canary and form; 1 unchecked (imports); clean run OK | pass |
+
+44 + 34 + 8 = 86 new tests, all passed. `CAVR_DOCKER=1 pytest tests/test_cavr_trigger_frontier.py
+tests/test_cavr_env_synthesis.py tests/test_cavr_canary_events.py tests/test_cavr_sandbox_*.py
+tests/test_cavr_deep_stage.py tests/test_cavr_contract_check.py`: 647 passed, 249 s; no fake HOME and no container
+left. Existing results changed: only the 43 removed tests (decision 1).
+
+After the review fixes: 113 frontier tests (84 + 29), 48 synthesis / spec-run tests, 36 canary-event tests, 8 Docker
+tests. `CAVR_DOCKER=1` run of the same files: 682 passed, 239 s; no fake HOME and no container left.
+
+| Test ID (review of PRs 10-11) | Purpose | Input | Expected | Result |
+|---|---|---|---|---|
+| test_the_baseline_environment_is_the_real_runs_so_an_early_exit_on_it_is_never_passed (4) | BLOCKER 1 | `if PYPI_TOKEN / GITHUB_TOKEN / PATH / HOME…: return` before a sink | not baseline-taken, unsimulable | pass |
+| test_a_condition_that_needs_a_canary_variable_unset_is_unsimulable, …_may_still_be_set_to_a_constant, test_a_sandbox_variable_cannot_be_changed | BLOCKER 1 | GITHUB_TOKEN is None / == const; HOME == /root | unsimulable / simulable / unsimulable | pass |
+| test_a_bool_op_used_as_a_value_with_an_unknown_operand_is_unknown (2), test_a_bool_op_in_a_condition_keeps_kleene_logic | BLOCKER 2a | `(helper() or getenv(...)) == 'prod'`; `helper() or getenv('CI')` | unknown / Kleene | pass |
+| test_a_keyword_default_of_environ_get_is_used | BLOCKER 2b | `environ.get('SAFE', default='1')` early exit | not baseline-taken | pass |
+| test_an_opaque_guard_alone_never_lets_the_baseline_take_the_entry, test_every_simulable_entry_needs_run_evidence_also_one_the_baseline_takes | BLOCKER 3 | `not getenv('CI')` + `uptime() > 3600` | baseline_takes_it False; UNRESOLVED until explored | pass |
+| test_an_elif_chain_of_early_exits_puts_every_condition_in_front_of_the_sink, test_a_nested_exit_…_makes_what_follows_opaque, test_a_loop_whose_body_breaks_does_not_hide_what_follows | MAJOR 1 | if/elif returns; nested return; loop break | both guards; may-exit; none | pass |
+| test_a_package_that_writes_its_own_environment_makes_env_reads_unknown (4), …_in_another_module…, test_a_constant_env_write_only_hides_that_variable, test_a_global_rebinding_… | MAJOR 2 | environ[]=, setdefault, putenv, update; other module; other key; global | unsimulable / simulable | pass |
+| test_is_between_strings_is_unknown, test_a_hostname_with_a_trailing_newline_is_not_a_hostname, test_a_method_does_not_see_its_class_scope | MINOR 2, 1, 6 | `is 'true'`, `'build\n'`, class attr | unknown, unsimulable, module name | pass |
+| test_a_frontier_whose_counts_do_not_add_up_is_unresolved (3), test_every_other_guard_is_listed | MINOR 4 | bad total / count / no id; 40 guards | FRONTIER_MALFORMED; all 40 listed | pass |
+| test_a_spec_path_that_is_not_normal_is_refused_…, test_an_iov_printed_as_an_address_is_unchecked (2), test_the_pr9_strace_and_flags_are_unchanged, test_the_frontiers_canary_variables_have_the_shapes_…, refusals of `X\n` / `build\n` | MINOR 5, 7, 9, 1 | — | refused / unchecked / identical / same shapes | pass |
+
+End-of-phase checks (after the review fixes):
+- Docker hidden (`DOCKER_HOST=unix:///nonexistent`), `tests/test_cavr_*.py tests/test_orchestrator_config.py
+  tests/test_gate_*.py tests/test_cli_gate.py tests/test_cli_report.py`: 2051 passed, 81 skipped (Docker and live),
+  0 failed, 393 s; `sandbox_deep.for_gate_run` -> no analyzer, ENGINE_UNAVAILABLE (today's verdicts); `run_spec` ->
+  UNRESOLVED ENGINE_UNAVAILABLE, fake HOME removed.
+- Full suite `.venv/bin/python -m pytest -q`: 2923 passed, 81 skipped, 1 xfailed, 0 failed, 1081 s.
+- `reports/scenario-validation.json` was not modified by the runs (no diff); nothing to restore.
+
+### Defects found and fixed
+
+- `canary_forms` dropped repeated forms and the normaliser named forms by position: for a canary of digits (hex
+  without letters, upper == lower) every base64 form was called "hex". Fixed: (kind, bytes) pairs; test added.
+- The test of a HOME that cannot be removed left its directory in /tmp (three runs, three directories). Fixed: the
+  test removes it and checks.
+- The file-trigger Docker test expected the quiet run to be OK; the condition itself stats ~/.kube/config, a
+  SECRET_READ attempt that a deny-all contract does not grant. The test now expects exactly that one violation.
+- Review (one cavr-reviewer pass over Steps M2-15 and M2-16; fixed here, tests in the table above):
+  - BLOCKER 1: the evaluator's baseline had an empty environment, so an early exit on a variable every run has
+    (`if "PYPI_TOKEN" in os.environ: return`) looked passed by the baseline. Fixed: `BASELINE_ENV` = the harness's
+    CHILD_ENV + the canary variables in their shapes; a sandbox variable keeps its value, a canary variable is never
+    unset (a condition that needs it unset is unsimulable).
+  - BLOCKER 2: `a or b` with an unknown operand returned True / False as its value; `os.environ.get(k, default=…)`
+    ignored the keyword. Fixed: `Evaluator.test` does Kleene logic only where truth is used; `e_BoolOp` returns the
+    Python value or unknown; the keyword default is read.
+  - BLOCKER 3: guards with no family were left out of `baseline_takes_it`, and `frontier_residual` trusted it. Fixed:
+    an entry with an opaque guard is never baseline-taken; `frontier_residual` needs every simulable id in
+    `explored` (PR 12 adds an id only when a run showed the entry's sink).
+  - MAJOR 1: only the last statement's exit counted. Fixed: `_fall_through` puts each `if` / `elif` early exit in
+    front of what follows; any other nested return / raise / exit adds a `may-exit` opaque guard.
+  - MAJOR 2: a package writing its own environment was not modelled. Fixed: `env_writes` (os.environ[...] =, del,
+    setdefault, pop, update, clear, putenv, unsetenv) over the whole tree makes those reads unknown; a `global`
+    rebinding makes the module name computed.
+  - MINOR 1-9 fixed: `fullmatch` for host and variable names; `is` only for None / booleans; the baseline-clock
+    limitation noted (Step M2-15); `frontier_residual` refuses malformed frontiers and `other_guards` is no longer
+    cut; spec paths must be normal; an iov printed as an address is unchecked; methods skip the class scope; the
+    canary-check gaps are listed below; the PR 9 strace and flags are compared in full.
+  - Review outcome: 1 pass, fix first (3 BLOCKER, 2 MAJOR, 9 MINOR), all fixed; 0 open MINOR.
+
+### Known limitations / deferred
+
+- Sandbox-evasion checks (`/.dockerenv`, files outside the sandbox HOME) are unsimulable and so UNRESOLVED by design.
+- Canary matching: verbatim, hex, base64 only; a canary split over two calls, only part of a canary
+  (`secret[:16]`), MIME line-wrapped base64, an encrypted or otherwise encoded canary is not found; a canary in exec
+  argv or in a file name is not checked.
+- What strace's view of a payload misses: another thread rewriting the buffer after strace read it (ptrace
+  time-of-check / time-of-use); data paths with no printed payload (sendfile, splice, vmsplice, writes through an
+  mmap'd file).
+- A canary written to stdout or a /tmp file counts as exfiltration (the user's rule: any write); a package that logs
+  its configuration is REJECTED by such a run, by design.
+- A package write over 64 KiB in the imports step is UNRESOLVED; a wheel whose install fills the 64 MiB trace cap is
+  UNRESOLVED.
+- HOME is read-only for the package; files only under HOME.
+- Not wired into any verdict; the loop, budget, `other_guards` rule and the swap of `high_risk_triggers` are PR 12.
+- `trigger_discovery.py` (fast gate, LOCAL lab) and `sandbox_runner.py` (`tests/test_cli_resources.py`,
+  `docker/asent-sandbox/`) stay until PR 12.
+
+### Tool disclosure (Ch 8.7)
+
+- **Generated by Claude Code:** `env_synthesis.py`, `sandbox_spec.py`, the edits to `sandbox_events.py`,
+  `contract_check.py`, `sandbox_exec.py`, `sandbox_observe.py`, the tests, the recordings, these notes and the plan
+  edits, from the approved plan. **Reviewed by Maryam:** the plan and decisions 1–4; the code not yet. **Verified
+  by:** the runs above (real Docker runs for every trigger type and the leak).
+
+### Supervisor Q&A prep
+
+1. **The sandbox has no network: how is a leak a leak?** The attempt is the evidence. strace prints the payload of
+   `sendto` before the kernel refuses it (ENETUNREACH), and a random value only this run's fake credential holds
+   cannot be in that payload by chance; the recorded run shows the secret in the sendto line.
+2. **Could libfaketime itself cause events and make a clean package look bad?** Measured: with shared memory off it
+   adds only code loads (`test_the_date_spec_moves_the_packages_clock_and_nothing_else` judges that run OK).
+3. **Why is a cut payload UNRESOLVED and not ignored?** The canary could be in the part strace did not print; Q8 says
+   anything incomplete is UNRESOLVED. pip's file writes are the only exemption, and they never reach the cut limit.

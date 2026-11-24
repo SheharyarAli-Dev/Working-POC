@@ -10,7 +10,13 @@
                     with FILE_READ granted); FILE_WRITE -> FILE_WRITE, or PERSISTENCE_WRITE, and also the sensitive
                     one when any path it names is sensitive (O_RDWR, rename / link of a secret); PROCESS_EXEC;
                     NETWORK_CONNECT, NETWORK_LISTEN and any other bind -> NETWORK_CONNECT
-    never allowed   CREDENTIAL_CHANGE, REFUSED_SYSCALL: no capability of the contract can allow them
+    never allowed   CREDENTIAL_CHANGE, REFUSED_SYSCALL: no capability of the contract can allow them;
+                    CANARY_EXFIL_ATTEMPT (PR 11): a canary value in a write, send or connect, in any step, also when
+                    the call failed (under --network none every send fails): always a violation
+    not checkable   CANARY_UNCHECKED (PR 11): a payload that could not be checked for canaries -> UNRESOLVED
+                    CANARY_CHECK_INCOMPLETE, except a pip write to a file under /tmp/ or /site/lib/ in the install
+                    step (pip's envelope, D3: those bytes are the verified wheel's, and the canaries are drawn after
+                    its hash was checked)
     unknown         UNKNOWN, or a type this module has no rule for
 
 An attempt counts like a success: a refused or failed call is judged as if it had worked.
@@ -45,7 +51,7 @@ import posixpath
 
 from backend.cavr import sandbox_events
 
-CHECK_VERSION = "cavr-contract-check/2"
+CHECK_VERSION = "cavr-contract-check/3"
 UNRESTRICTED = "*"
 RUNTIME_CAPABILITIES = ("FILE_READ", "SECRET_READ", "SENSITIVE_FILE_READ", "FILE_WRITE", "PERSISTENCE_WRITE",
                         "PROCESS_EXEC", "NETWORK_CONNECT")
@@ -108,6 +114,8 @@ def capability_of(event: dict):
         return "none", []
     if kind in NEVER_ALLOWED:
         return "never", [kind]
+    if kind == "CANARY_EXFIL_ATTEMPT":
+        return "never", ["CANARY_EXFIL"]
     if kind == "FILE_READ":
         return "capability", [event.get("sensitive") or "FILE_READ"]
     if kind == "FILE_WRITE":
@@ -125,6 +133,17 @@ def capability_of(event: dict):
 def _judge(events, grants, contract) -> dict:
     violations, unresolved, used = [], [], set()
     for event in events:
+        if event.get("type") == "CANARY_EXFIL_ATTEMPT":  # before the install envelope: a leak is never "outside" only
+            used.add("CANARY_EXFIL")
+            violations.append(_entry(event, "CONTRACT_VIOLATION", f"a canary value ({', '.join(event.get('canaries') or [])}) "
+                                     f"left the package in {event.get('syscall')} ({', '.join(event.get('canary_forms') or [])})",
+                                     "CANARY_EXFIL"))
+            continue
+        if event.get("type") == "CANARY_UNCHECKED":
+            if not (event.get("step") == INSTALL_STEP and _pip_file_write(event)):
+                unresolved.append(_entry(event, "CANARY_CHECK_INCOMPLETE", f"a payload could not be checked for "
+                                         f"canaries: {event.get('problem')}"))
+            continue
         if event.get("step") == INSTALL_STEP:
             why = _outside_envelope(event)
             if why:
@@ -238,6 +257,13 @@ def _outside_envelope(event: dict):
         return None
     what = event.get("sensitive") or kind
     return f"pip did {what} ({event.get('syscall')} {event.get('path') or event.get('address') or ''})".rstrip()
+
+
+def _pip_file_write(event) -> bool:
+    """A write of pip's into a regular file of its install target or its temporary directories (D3)."""
+    path = event.get("path")
+    return (event.get("syscall") in sandbox_events.WRITE_DATA and isinstance(path, str)
+            and any(path.startswith(root) for root in INSTALL_WRITES))
 
 
 def _loopback_probe(address) -> bool:

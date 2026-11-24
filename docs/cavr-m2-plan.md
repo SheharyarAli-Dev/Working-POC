@@ -105,9 +105,9 @@ design part. **not started** = nothing, or only a stub that returns constants (a
 
 | # | Component (ID) | Status | Proved by (code; tests) | Missing |
 |---|---|---|---|---|
-| 13 | Trigger discovery and priority (FR-12, P6) | partial | `trigger_discovery.scan` (demo analyzer; `ast_scan` uses it for sinks only), `triggers.discover_triggers` (legacy, `counterfactual.py` only); `test_modules.py::test_controlled_dormant_execution`, `test_cavr_targeted.py` | Only literal env-var and file-existence predicates; no hostname / user / platform / time / sleep / CI / container / cloud-metadata predicates; priority is `risk_weight × sinks`, the §6.3 formula exists only in legacy `triggers.py`; not used by `verify_request` |
+| 13 | Trigger discovery and priority (FR-12, P6) | partial (frontier done) | `trigger_frontier.frontier` + `frontier_residual` (2026-11-23, PR 10): env / time / file / host / user / argv / platform conditions in front of a sink, activation by evaluating the condition, risk from the contract, §6.3 factors, bounded order; `test_cavr_trigger_frontier.py` (84). `trigger_discovery.scan` stays for `ast_scan` and the demo analyzer until PR 12; `triggers.py` deleted (PR 11) | Not used by `verify_request` yet (PR 12); no `sleep`, cloud-metadata, `try`/`import`, `match` or conditional-expression guards; calls followed within one file only; no link to the import closure (`reachability`) |
 | 14 | Behaviour sandbox (NFR-1, P7, §6.8) | partial | `sandbox_runner.SandboxRunner` (flags), `harness.py`; `sandbox.run_counterfactual` + `lab_harness.py` (demo lab); `test_cavr_sandbox_runner.py` (33, Docker mocked), `test_modules.py::test_controlled_dormant_execution` | Not called by `verify_request` or the gate; its image has never been built or run; `image_digest` is a hardcoded constant; `harness.py` never installs a wheel and reports `test_passed: True`; timeout not enforced on a silent container and the kill stops the docker CLI, not the container; the package can forge the stdout report; invalid UTF-8 leaves the process un-waited; the seccomp profile (default `SCMP_ACT_ERRNO`, 57 allowed syscalls) has never been tried with Python; `sandbox.py` keeps a host mode for hash-pinned sources and adds `SYS_PTRACE`; tag clash: `asent-sandbox:local` is SATRA's image |
-| 15 | Counterfactual activation (FR-4, P7, §6.4) | partial | `counterfactual.py` (legacy loop, dashboard tests only), `sandbox.run_counterfactual` (two fixed runs, one env canary); same tests as row 14 | No frontier loop over real triggers; no file / hostname / time synthesis; no budget, no new-predicate feedback, no early stop; residual triggers do not reach the verdict; name-specific branches (`dormant-exfil`) |
+| 15 | Counterfactual activation (FR-4, P7, §6.4) | partial (one run per spec) | `env_synthesis.synthesize` / `canary_spec`, `sandbox_spec.run_spec` (2026-11-23, PR 11): env, libfaketime clock, HOME files, hostname, argv; per-run canaries and CANARY_EXFIL_ATTEMPT; `test_cavr_env_synthesis.py` (44), `test_cavr_canary_events.py` (34), `test_cavr_sandbox_spec.py` (8, Docker); `sandbox.run_counterfactual` stays for the demo lab; `counterfactual.py` deleted (PR 11) | No loop, budget, new-predicate feedback or early stop (PR 12); residual triggers do not reach the verdict yet (PR 12) |
 | 16 | OS observation and normalisation (FR-13, P8) | partial | `runtime_monitor.normalize` (strace); `normalizer.py` (legacy); `test_cavr_runtime_monitor.py` (5) | **Every failed syscall is dropped** except `connect … EINPROGRESS`: under `--network none` every connect fails (`ENETUNREACH`), so network attempts are invisible, and a denied open of a secret file is too; endpoint hardcoded `127.0.0.1:18765`; SECRET_ACCESS only for `canary.txt`; harness processes excluded by the substring `python`; harness `events` ignored (5 metrics only); no eBPF |
 | 17 | Causal capability graph (FR-5, P9, §6.6) | partial | `causal_graph.build` (demo analyzer), `build_causal_graph` (legacy: hardcoded `invoice-utils` -> `sub-telemetry-hook`), `threat_repo.source_sink_rules.correlate`; `test_cavr_sandbox_runner.py`, `test_modules.py` | No graph from the real tree + real events; no event -> package attribution; no canary data flow (`derived_from`); no cross-package path query |
 | 18 | Runtime policy + RESTRICTED (FR-6, FR-14, §6.7) | partial | `policy.verify_runtime` (rule `PDF_MINIMUM_CAPABILITY`); `final_gate.decide` accepts RESTRICTED only with `restriction_enforced`; `test_cavr_runtime_monitor.py` | Not driven by the contract's scopes; RESTRICTED is never produced and nothing enforces it |
@@ -332,6 +332,10 @@ counterfactual run; the §6.6 three-package canary path is found; unexplored tri
 - Tests first: one positive and one negative sample per family; the §6.3 high / low examples rank as in the design;
   helper-call predicates stay `unsupported`; priority is deterministic.
 - Docker: no.
+- As built (Maryam, 2026-11-23, Phase 3a): a new module `trigger_frontier.py` instead of changing `trigger_discovery`
+  (the fast gate's `ast_scan` and the LOCAL lab use it; changing it would change PR 9 verdicts). `triggers.py` goes
+  in PR 11 with `counterfactual.py`, its only user. The import-closure link to `reachability`, `sleep` and the cloud
+  metadata address are not in it (PR 12 / limitations, Step M2-15).
 
 ### PR 11 — `feat(cavr): safe environment synthesis with per-run canaries`
 
@@ -341,8 +345,22 @@ counterfactual run; the §6.6 three-package canary path is found; unexplored tri
 - Tests first: each family's spec; `test_no_host_environment_value_reaches_a_run` (sets a fake host secret, asserts
   absent); canaries differ between runs; an unsupported trigger produces no spec and stays residual.
 - Docker: one test that the spec is what the container sees.
+- As built (Maryam, 2026-11-23, Phase 3a decisions 1-4): `env_synthesis.py` (specs, canaries, `canary_forms`) and
+  `sandbox_spec.run_spec` (one run, never a verdict). The spec's HOME is a host directory (0700, removed after every
+  run) mounted read-only at /tmp/home; the spec run's strace is the PR 9 command with `-s 65536` and the write-family
+  syscalls; `sandbox_events.normalise(..., canaries=)` adds CANARY_EXFIL_ATTEMPT (verbatim, hex, base64; always a
+  violation, in every step) and CANARY_UNCHECKED (a cut payload -> UNRESOLVED, except pip's file writes, D3).
+  libfaketime needs `FAKETIME_DISABLE_SHM=1` and no seccomp change (measured). `triggers.py` and `counterfactual.py`
+  deleted (Q12) with their 43 tests; `trigger_discovery.py` and `sandbox_runner.py` stay until PR 12.
 
 ### PR 12 — `feat(cavr): budgeted counterfactual activation loop` (FR-4)
+
+- Recorded for PR 12 (Maryam, 2026-11-23, Phase 3a plan): the loop calls `trigger_frontier.frontier_residual(frontier,
+  explored)`; an unsimulable entry (any risk) can never give VERIFIED (tested in PR 10). `other_guards` that guard a
+  high-risk sink count as unexplored -> UNRESOLVED, unless the sink was exercised by a run. `sandbox_deep.high_risk_triggers`
+  (fast-gate `trigger_discovery.scan` triggers) is replaced by the frontier here, which is also when
+  `trigger_discovery.py` (LOCAL lab, `ast_scan`) and `sandbox_runner.py` (with `docker/asent-sandbox/`) can go.
+  Sandbox-evasion checks (`/.dockerenv`, files outside the sandbox HOME) are unsimulable and so UNRESOLVED by design.
 
 - Part: §6.4 loop: highest-priority unexplored trigger -> synthesized environment -> fresh container -> merge events;
   newly seen predicates join the frontier; early stop on a decisive violation (-> REJECTED); budget 8 runs, 20 s per
@@ -486,8 +504,8 @@ Stated as limitations in the report and on the dashboard, not implemented in M2:
 - [x] PR 9 one observed run for escalated packages (branch `cavr-m2-deep`, 2026-11-23; report notes Step M2-14): `sandbox_deep.py`; gate default `deep: "sandbox"`, off without the image; one `asent report` line per deep result; Flask / InvoiceHub verdicts unchanged
 
 ### Phase 3 — Counterfactual activation and causal graph
-- [ ] PR 10 trigger frontier
-- [ ] PR 11 environment synthesis (libfaketime, per-run canaries)
+- [x] PR 10 trigger frontier (branch `cavr-m2-frontier`, 2026-11-23; report notes Step M2-15): `trigger_frontier.py` (static scan of the verified wheel, activation by evaluating the condition, risk from the contract, bounded order); `frontier_residual` for PR 12; `trigger_discovery.py` kept (fast gate `ast_scan`, LOCAL lab)
+- [x] PR 11 environment synthesis (libfaketime, per-run canaries) (branch `cavr-m2-frontier`, 2026-11-23; report notes Step M2-16): `env_synthesis.py`, `sandbox_spec.py`, canary events; `triggers.py` and `counterfactual.py` deleted
 - [ ] PR 12 counterfactual loop
 - [ ] PR 13 causal graph
 - [ ] PR 14 RESTRICTED verdict

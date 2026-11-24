@@ -24,6 +24,11 @@ ENOENT is still a secret read attempt.
                        (ptrace, process_vm_*, io_uring_*, userfaultfd, bpf, perf_event_open, mount, chroot, unshare,
                        setns, ...); an attempt is the event
     UNKNOWN            a traced syscall with no rule here, or a line whose arguments cannot be read
+    CANARY_EXFIL_ATTEMPT  (PR 11, only with `canaries`) a canary value of the run, verbatim, as hex or as base64
+                       (`env_synthesis.canary_forms`), in the payload or address of a write, send or connect, after
+                       strace's escapes are decoded; also when the call failed. An extra event next to the call's own
+    CANARY_UNCHECKED   (PR 11, only with `canaries`) such a call whose payload cannot be checked whole: a string strace
+                       cut (`"..."...`), an array it shortened (`...`), a buffer printed as an address
 
 Structure (recorded, needs no capability, may appear in a clean baseline):
 
@@ -31,7 +36,9 @@ Structure (recorded, needs no capability, may appear in a clean baseline):
     STEP_START         the first execve of a step's first process with exactly the job's argv
     MARKER             the harness's own phase markers (stat of /.cavr/<nonce>/...)
     PROCESS            clone, clone3, fork, vfork, exit, exit_group, wait4, waitid, signal delivery, exit lines
-    NO_EFFECT also     open of /dev/null; sendfile between two files (into a socket it is NETWORK_CONNECT)
+    NO_EFFECT also     open of /dev/null; sendfile between two files (into a socket it is NETWORK_CONNECT);
+                       write, pwrite64, writev, pwritev, pwritev2 to a file or pipe (traced only in PR 11's spec runs;
+                       the open was the event; into a socket it is NETWORK_CONNECT)
     CWD_CHANGE         chdir, fchdir (followed: relative paths are resolved against each process's directory)
     SIGNAL             kill, tkill, tgkill, ...: in this container they reach only UID 10001 processes
     PROCESS_CONTROL    prctl
@@ -57,7 +64,7 @@ import posixpath
 import re
 from collections import Counter
 
-EVENTS_VERSION = "cavr-events/2"
+EVENTS_VERSION = "cavr-events/3"
 HOME = "/tmp/home"  # the sandbox HOME (sandbox_harness.CHILD_ENV)
 HOMES = (HOME, "/root", "/nonexistent")  # /nonexistent: the cavr user's home in /etc/passwd (Dockerfile useradd -d)
 # Paths that reach another file by a kernel alias, not by its name: the open of /proc/self/root/tmp/home/.aws/... or
@@ -66,7 +73,7 @@ ALIASES = re.compile(r"^/(?:proc/(?:[^/]+/(?:root|cwd|fd|task|map_files)|thread-
 
 STRUCTURE = ("HARNESS_START", "STEP_START", "MARKER", "PROCESS", "CWD_CHANGE", "SIGNAL", "PROCESS_CONTROL", "NO_EFFECT")
 JUDGED = ("FILE_READ", "FILE_WRITE", "PROCESS_EXEC", "NETWORK_CONNECT", "NETWORK_BIND", "NETWORK_LISTEN",
-          "CREDENTIAL_CHANGE", "REFUSED_SYSCALL", "UNKNOWN")
+          "CREDENTIAL_CHANGE", "REFUSED_SYSCALL", "UNKNOWN", "CANARY_EXFIL_ATTEMPT", "CANARY_UNCHECKED")
 TYPES = ("CODE_LOAD", *STRUCTURE, *JUDGED)
 CLEAN_BASELINE = ("CODE_LOAD", *STRUCTURE)
 
@@ -115,6 +122,10 @@ NETWORK = {"connect": ("NETWORK_CONNECT", 1), "sendto": ("NETWORK_CONNECT", 4), 
            "accept": ("NETWORK_LISTEN", None), "accept4": ("NETWORK_LISTEN", None)}
 # sendfile(out, in, ...) copies between two fds whose opens are already events; into a socket it is a network send.
 COPIES = ("sendfile", "sendfile64")
+WRITE_DATA = ("write", "pwrite64", "writev", "pwritev", "pwritev2")
+# The calls whose arguments carry data out of a process: their payload and address are checked for canaries (PR 11).
+CANARY_CALLS = WRITE_DATA + ("sendto", "sendmsg", "sendmmsg", "connect")
+QUOTED = re.compile(r'"((?:[^"\\]|\\.)*)"(\.\.\.)?')
 CREDENTIALS = ("setuid", "setgid", "setreuid", "setregid", "setresuid", "setresgid", "setfsuid", "setfsgid",
                "setgroups", "capset", "setuid32", "setgid32", "setreuid32", "setregid32", "setresuid32", "setresgid32",
                "setfsuid32", "setfsgid32", "setgroups32")
@@ -381,9 +392,14 @@ class _State:
                 self.cwd[other] = None
 
 
-def normalise(trace: str, processes: dict, step_pids: dict, steps) -> dict:
-    """{version, events, counts, incomplete, unknown}. Never raises: an unreadable line is an UNKNOWN event."""
+def normalise(trace: str, processes: dict, step_pids: dict, steps, canaries=None) -> dict:
+    """{version, events, counts, incomplete, unknown}. Never raises: an unreadable line is an UNKNOWN event.
+
+    `canaries` (PR 11): the run's canary registry ([{id, value, ...}]); with it every write, send and connect is
+    checked (`canary_check`) and marked `canary_checked`. Without it (every PR 9 run) nothing changes.
+    """
     state = _State(processes, step_pids, steps)
+    forms = _canary_forms(canaries) if canaries is not None else None
     events = []
     for number, pid, body, problem in joined_lines(trace if isinstance(trace, str) else str(trace)):
         if problem:
@@ -391,6 +407,8 @@ def normalise(trace: str, processes: dict, step_pids: dict, steps) -> dict:
             continue
         try:
             events.append(_line_event(state, number, pid, body))
+            if forms is not None and events[-1]["syscall"] in CANARY_CALLS:
+                events.extend(canary_check(state, events[-1], body, forms))
         except Unreadable as exc:
             events.append(_event(state, number, pid, body, "UNKNOWN", None, problem=f"cannot read the line: {exc}"))
         except Exception as exc:  # a line this code cannot handle is unknown, never a reason to lose the run's events
@@ -428,6 +446,12 @@ def _line_event(state, number, pid, body) -> dict:
             if path and not cut and path.startswith("/"):
                 state.cwd[pid] = _normal(path)
         return _event(state, number, pid, body, "NO_EFFECT", name, **done)
+    if name in WRITE_DATA:
+        target = fd_arg(args[0])[1] if args else None
+        if target is not None and target.startswith("socket:"):
+            return _event(state, number, pid, body, "NETWORK_CONNECT", name, **done)  # a send on a connected socket
+        return _event(state, number, pid, body, "NO_EFFECT", name,
+                      path=_normal(target) if target and target.startswith("/") else None, **done)
     if name in COPIES:
         target = fd_arg(args[0])[1] if args else None
         if target is None or not target.startswith("/"):
@@ -619,6 +643,68 @@ def _network_event(state, number, pid, body, name, kind, args, index, done) -> d
         address, problem = address_of(token)
     dns = bool(address and address.get("port") == 53)
     return _event(state, number, pid, body, kind, name, address=address, dns=dns, problem=problem, **done)
+
+
+# --- canaries (PR 11) ------------------------------------------------------------------------------------------------
+
+def _canary_forms(canaries) -> list:
+    from backend.cavr.env_synthesis import canary_forms
+    out = []
+    for item in canaries or []:
+        value = item.get("value") if isinstance(item, dict) else None
+        if isinstance(value, str) and value:
+            for kind, form in canary_forms(value):
+                out.append((item.get("id"), kind, form))
+    return out
+
+
+def canary_check(state, event, body, forms) -> list:
+    """The CANARY_EXFIL_ATTEMPT / CANARY_UNCHECKED events of one write, send or connect line (marks `event` checked)."""
+    event["canary_checked"] = True
+    try:
+        name, args, _ = split_call(body)
+    except Unreadable as exc:
+        return [_canary_event(state, event, "CANARY_UNCHECKED", problem=f"the arguments cannot be read: {exc}")]
+    text = ", ".join(args[1:])
+    pieces, cut = [], False
+    for match in QUOTED.finditer(text):
+        pieces.append(c_string(match.group(1)).encode("utf-8", errors="surrogateescape"))
+        cut = cut or bool(match.group(2))
+    rest = QUOTED.sub('""', text)
+    problems = []
+    if cut:
+        problems.append(f"strace cut the payload (longer than its -s limit)")
+    if re.search(r"(?:^|[\[{,] ?)\.\.\.(?:[\]},]|$)", rest):
+        problems.append("strace shortened an array of the payload")
+    if name in ("write", "pwrite64", "sendto") and len(args) > 1 and not args[1].startswith('"') and args[1] != "NULL":
+        problems.append("the buffer is printed as an address, not as its bytes")
+    if name in ("writev", "pwritev", "pwritev2", "sendmsg", "sendmmsg") and re.search(r"iov_base=0x", rest):
+        problems.append("a buffer is printed as an address, not as its bytes")
+    if name in ("writev", "pwritev", "pwritev2") and len(args) > 1 and not args[1].startswith("[") and args[1] != "NULL":
+        problems.append("the iov array is printed as an address, not as its buffers")
+    if name in ("sendmsg", "sendmmsg") and re.search(r"msg_iov=0x|^0x", rest):
+        problems.append("the message is printed as an address, not as its buffers")
+    hits, how = [], []
+    for data in pieces + [b"".join(pieces)]:
+        for ident, kind, form in forms:
+            if form in data and ident not in hits:
+                hits.append(ident)
+                how.append(kind)
+    out = []
+    if hits:
+        out.append(_canary_event(state, event, "CANARY_EXFIL_ATTEMPT", canaries=hits,
+                                 canary_forms=sorted(set(how))))
+    if problems:
+        out.append(_canary_event(state, event, "CANARY_UNCHECKED", problem="; ".join(problems)))
+    return out
+
+
+def _canary_event(state, event, kind, problem=None, **fields) -> dict:
+    out = _event(state, event["line"], event["pid"], event["raw"], kind, event["syscall"], problem=problem,
+                 path=event.get("path"), address=event.get("address"), ok=event.get("ok"), errno=event.get("errno"),
+                 **fields)
+    out["complete"] = True  # the event is what was found (or not checkable); `problem` says what could not be read
+    return out
 
 
 # --- the baseline ----------------------------------------------------------------------------------------------------
