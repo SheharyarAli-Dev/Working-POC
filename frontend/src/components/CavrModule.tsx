@@ -14,7 +14,10 @@ import { OverviewTab } from './cavr/OverviewTab';
 import { RequirementsTab } from './cavr/RequirementsTab';
 import { CapabilityContractTab } from './cavr/CapabilityContractTab';
 import { TriggersTab } from './cavr/TriggersTab';
-import { CounterfactualTab } from './cavr/CounterfactualTab';
+import { DeepAnalysisTab, packageViews } from './cavr/DeepAnalysisTab';
+import { RecordedChips, RecordedRun } from './cavr/RecordedChips';
+import { RecordedBanner } from './cavr/RecordedBanner';
+import { SafeText } from './cavr/SafeText';
 import { CausalGraphTab } from './cavr/CausalGraphTab';
 import { RepairTab } from './cavr/RepairTab';
 import { AssuranceTab } from './cavr/AssuranceTab';
@@ -43,7 +46,7 @@ export const CavrModule: React.FC = () => {
   const [cacheSearch, setCacheSearch] = useState('');
   const [copiedHash, setCopiedHash] = useState<string | null>(null);
 
-  // Active evidence tab: overview | requirements | contract | triggers | counterfactual | causal | repair | assurance | metrics
+  // Active evidence tab: overview | requirements | contract | triggers | deep | causal | repair | assurance | metrics
   const [activeEvidenceTab, setActiveEvidenceTab] = useState<string>('overview');
   const [newTabAlerts, setNewTabAlerts] = useState<Record<string, boolean>>({});
 
@@ -55,6 +58,9 @@ export const CavrModule: React.FC = () => {
   const [scenarios, setScenarios] = useState<Scenario[] | null>(null);
   const [scenariosFailed, setScenariosFailed] = useState(false);
   const [currentScenario, setCurrentScenario] = useState<string | null>(null);
+  // The recorded M2 runs (GET /api/cavr/recorded-runs); `null` until the backend has answered.
+  const [recordedRuns, setRecordedRuns] = useState<RecordedRun[] | null>(null);
+  const [recordedFailed, setRecordedFailed] = useState(false);
 
   const [runState, setRunState] = useState<CavrRunState>(EMPTY_RUN);
   const [alternativeDecision, setAlternativeDecision] = useState<'pending' | 'approved' | 'rejected'>('pending');
@@ -83,9 +89,22 @@ export const CavrModule: React.FC = () => {
     }
   };
 
+  const fetchRecorded = async () => {
+    try {
+      const res = await fetch('/api/cavr/recorded-runs');
+      if (!res.ok) throw new Error(String(res.status));
+      setRecordedRuns(await res.json());
+      setRecordedFailed(false);
+    } catch (err) {
+      console.error('Failed to load recorded runs:', err);
+      setRecordedFailed(true);
+    }
+  };
+
   useEffect(() => {
     fetchCache();
     fetchScenarios();
+    fetchRecorded();
   }, []);
 
   const copyToClipboard = (text: string, id: string) => {
@@ -125,30 +144,63 @@ export const CavrModule: React.FC = () => {
 
       // The request shown is the one the backend says it is verifying.
       setRunState(prev => ({ ...prev, runId: currentRunId, request: data.request }));
-
-      // Connect to SSE stream
-      const eventSource = new EventSource(data.stream_url);
-
-      eventSource.onmessage = (event) => {
-        try {
-          const payload = JSON.parse(event.data);
-          handlePipelineEvent(payload, currentRunId);
-        } catch (e) {
-          // heartbeat
-        }
-      };
-
-      // The backend ends the stream after the last event; the browser reports that as an error.
-      eventSource.onerror = () => {
-        eventSource.close();
-        setIsRunning(false);
-      };
+      follow(data.stream_url, currentRunId);
     } catch (err: any) {
       console.error('Workflow error:', err);
       setRunState(prev => ({
         ...prev,
         currentStateMessage: `No run was started: ${err?.message || err}`,
         currentPlainMessage: 'The check could not be started, so there is no result.'
+      }));
+      setIsRunning(false);
+    }
+  };
+
+  // Follow the run's event stream (the same for a live run and a replay).
+  const follow = (streamUrl: string, currentRunId: string) => {
+    const eventSource = new EventSource(streamUrl);
+    eventSource.onmessage = (event) => {
+      try {
+        handlePipelineEvent(JSON.parse(event.data), currentRunId);
+      } catch (e) {
+        // heartbeat
+      }
+    };
+    // The backend ends the stream after the last event; the browser reports that as an error.
+    eventSource.onerror = () => {
+      eventSource.close();
+      setIsRunning(false);
+    };
+  };
+
+  // Replay one recorded M2 run: the backend publishes its recorded verdict; nothing is run, and every event says so.
+  const replayRecorded = async (run: RecordedRun) => {
+    if (isRunning) return;
+    setIsRunning(true);
+    setCurrentScenario(`recorded:${run.id}`);
+    setActiveWorkflowBox('none');
+    setAlternativeDecision('pending');
+    setActiveEvidenceTab('deep');
+    setNewTabAlerts({});
+    setRunState({
+      ...EMPTY_RUN,
+      scenarioKey: `recorded:${run.id}`,
+      explainSimply: explainSimply,
+      currentStateMessage: `Replaying the recorded run '${run.id}'...`,
+      currentPlainMessage: `Showing the recorded result of '${run.id}' again.`
+    });
+    try {
+      const res = await fetch(`/api/cavr/recorded-runs/${encodeURIComponent(run.id)}`, { method: 'POST' });
+      if (!res.ok) throw new Error(`The replay could not be started (HTTP ${res.status})`);
+      const data = await res.json();
+      setRunState(prev => ({ ...prev, runId: data.run_id, request: data.request, recorded: data.recorded }));
+      follow(data.stream_url, data.run_id);
+    } catch (err: any) {
+      console.error('Replay error:', err);
+      setRunState(prev => ({
+        ...prev,
+        currentStateMessage: `No replay was started: ${err?.message || err}`,
+        currentPlainMessage: 'The recorded run could not be shown.'
       }));
       setIsRunning(false);
     }
@@ -168,6 +220,9 @@ export const CavrModule: React.FC = () => {
     } else if (type === 'action_completed') {
       setActiveWorkflowBox('action');
       setNewTabAlerts(a => ({ ...a, contract: true, triggers: true }));
+    } else if (type === 'deep_completed') {
+      setActiveWorkflowBox('env');
+      setNewTabAlerts(a => ({ ...a, deep: true, causal: true }));
     } else if (type === 'verdict_computed') {
       // The whole verdict and the timeline of this run.
       fetch(`/api/cavr/proof/${currentRunId}`)
@@ -338,7 +393,7 @@ export const CavrModule: React.FC = () => {
           </div>
           <h3 className="box-name">Environment checking</h3>
           <p className="box-info">
-            Sandbox execution and counterfactual runs (deep analysis, M2)
+            Sandbox runs of an escalated package: canary-only, then one per trigger
           </p>
           <div className="box-footer-row">
             <button
@@ -349,8 +404,8 @@ export const CavrModule: React.FC = () => {
               <Terminal size={14} />
               <span>Click to view</span>
             </button>
-            <span className="box-metric-tag" title="The fast gate runs no sandbox, so there is no sandbox result">
-              {shown(runState.counterfactualResults?.stop_reason)}
+            <span className="box-metric-tag" title="The deep rule of the first package that has a deep result in this run">
+              {shown((packageViews(runState) || []).find((view: any) => view.deep)?.deep?.rule)}
             </span>
           </div>
         </div>
@@ -379,6 +434,13 @@ export const CavrModule: React.FC = () => {
             disabled={isRunning}
             onRun={runScenario}
           />
+          <RecordedChips
+            runs={recordedRuns}
+            failed={recordedFailed}
+            current={currentScenario}
+            disabled={isRunning}
+            onReplay={replayRecorded}
+          />
         </div>
 
         {/* Request / Banner Row */}
@@ -395,7 +457,7 @@ export const CavrModule: React.FC = () => {
               {explainSimply ? 'Simple Explanation' : 'Pipeline State Transition'}
             </span>
             <p className="narrative-text">
-              {explainSimply ? runState.currentPlainMessage : runState.currentStateMessage}
+              <SafeText value={explainSimply ? runState.currentPlainMessage : runState.currentStateMessage} limit={400} />
             </p>
           </div>
 
@@ -409,6 +471,8 @@ export const CavrModule: React.FC = () => {
             </button>
           )}
         </div>
+
+        <RecordedBanner recorded={runState.recorded} />
 
         {/* TIMELINE: the six stages of the fast gate, filled from the proof of the run */}
         <Timeline stages={runState.proofData?.stages || null} runId={runState.runId} />
@@ -447,14 +511,14 @@ export const CavrModule: React.FC = () => {
           </button>
 
           <button
-            className={`evidence-tab-btn ${activeEvidenceTab === 'counterfactual' ? 'active' : ''}`}
-            onClick={() => setActiveEvidenceTab('counterfactual')}
+            className={`evidence-tab-btn ${activeEvidenceTab === 'deep' ? 'active' : ''} ${newTabAlerts.deep ? 'pulse-alert' : ''}`}
+            onClick={() => setActiveEvidenceTab('deep')}
           >
-            Counterfactual Runs
+            Deep analysis
           </button>
 
           <button
-            className={`evidence-tab-btn ${activeEvidenceTab === 'causal' ? 'active' : ''}`}
+            className={`evidence-tab-btn ${activeEvidenceTab === 'causal' ? 'active' : ''} ${newTabAlerts.causal ? 'pulse-alert' : ''}`}
             onClick={() => setActiveEvidenceTab('causal')}
           >
             Causal Graph
@@ -488,7 +552,7 @@ export const CavrModule: React.FC = () => {
           {activeEvidenceTab === 'requirements' && <RequirementsTab state={runState} />}
           {activeEvidenceTab === 'contract' && <CapabilityContractTab state={runState} />}
           {activeEvidenceTab === 'triggers' && <TriggersTab state={runState} />}
-          {activeEvidenceTab === 'counterfactual' && <CounterfactualTab state={runState} />}
+          {activeEvidenceTab === 'deep' && <DeepAnalysisTab state={runState} />}
           {activeEvidenceTab === 'causal' && <CausalGraphTab state={runState} />}
           {activeEvidenceTab === 'repair' && (
             <RepairTab
@@ -645,18 +709,19 @@ export const CavrModule: React.FC = () => {
             <div className="dialog-interactive-card">
               <h6>Sandbox fields of the proof</h6>
               <div className="proof-kv">
-                <div><span>Container command:</span> <code>{shown(proof?.docker_command)}</code></div>
-                <div><span>Container ID:</span> <code>{shown(proof?.container_id)}</code></div>
-                <div><span>Image digest:</span> <code>{shown(proof?.image_digest)}</code></div>
-                <div><span>Counterfactual runs:</span> <code>{shown(proof?.counterfactual_runs?.length)}</code></div>
+                <div><span>Container command:</span> <code><SafeText value={proof?.docker_command} /></code></div>
+                <div><span>Container ID:</span> <code><SafeText value={proof?.container_id} /></code></div>
+                <div><span>Image digest:</span> <code><SafeText value={proof?.image_digest} /></code></div>
+                <div><span>Sandbox runs:</span> <code>{shown(proof?.counterfactual_runs?.length)}</code></div>
               </div>
             </div>
 
             <div className="dialog-interactive-card limitation-card">
               <h6><AlertTriangle size={14} className="inline mr-1 text-amber-400" /> Limits of what is shown</h6>
               <ul className="limitations-list">
-                <li><strong>No execution:</strong> the fast gate never installs, imports or runs package code. Sandbox execution and counterfactual runs belong to deep analysis (M2).</li>
-                <li><strong>Escalation:</strong> when a sensitive call is reachable from the project, the verdict is UNRESOLVED and names the deep analysis as the next step. It is not run here.</li>
+                <li><strong>Fast gate:</strong> it never installs, imports or runs package code. Only an escalated package (a sensitive call the contract does not allow, reachable from the project) goes to the deep analysis.</li>
+                <li><strong>Live chips:</strong> the sample project has no escalated package and the live runs use the fast gate only, so they show "not available" here.</li>
+                <li><strong>Recorded M2 runs:</strong> real runs in the CAVR sandbox (no network, read-only, package code as UID 10001, fake canary secrets), recorded once and replayed; the Deep analysis tab shows them.</li>
                 <li><strong>No claim of safety:</strong> VERIFIED is bounded by the checks listed in the timeline. It never says the package is safe.</li>
               </ul>
             </div>

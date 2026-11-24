@@ -28,7 +28,11 @@ export interface CavrRunState {
   reverification: any | null;
   certificate: any | null;
   reconstruction: any | null;
-  
+  // PR 19: the per-package views of the deep_completed event (backend/cavr/dashboard_view.py), and the `recorded`
+  // block of a replayed recorded run (null for a live run).
+  deepPackages: any[] | null;
+  recorded: any | null;
+
   // The answer of /api/cavr/proof/{run_id}. `proofData.cavr_verdict` is the whole pipeline verdict:
   // status, stage, rule, reason, fast_gate_ms, cache_hit, escalated, escalation, packages[].evidence.
   // `proofData.stages` is the timeline: one StageSummary per stage of the fast gate.

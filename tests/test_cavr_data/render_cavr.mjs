@@ -17,6 +17,8 @@
 //   overview | requirements | assurance | stage | contract | triggers | repair
 //                {events, proof}      one tab, with the run state the page builds from the stream's events
 //   metrics      {metrics}            the Metrics tab for an answer of GET /api/cavr/metrics
+//   deep | causal | banner {events, proof}   (PR 19) the Deep analysis tab, the Causal graph tab, the recorded banner
+//   recorded_chips {runs}             the recorded-run chips for an answer of GET /api/cavr/recorded-runs
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -44,6 +46,10 @@ import { MetricsReport } from ${from('cavr/MetricsTab')};
 import { CapabilityContractTab } from ${from('cavr/CapabilityContractTab')};
 import { TriggersTab } from ${from('cavr/TriggersTab')};
 import { RepairTab } from ${from('cavr/RepairTab')};
+import { DeepAnalysisTab } from ${from('cavr/DeepAnalysisTab')};
+import { CausalGraphTab } from ${from('cavr/CausalGraphTab')};
+import { RecordedBanner } from ${from('cavr/RecordedBanner')};
+import { RecordedChips } from ${from('cavr/RecordedChips')};
 import { EMPTY_RUN, applyEvent } from ${from('cavr/runState')};
 
 // The run state exactly as the page builds it: the stream's events through the page's own reducer,
@@ -78,6 +84,12 @@ const VIEWS: Record<string, (props: any) => React.ReactElement> = {
   triggers: (props) => <TriggersTab state={runState(props)} />,
   repair: (props) => <RepairTab state={runState(props)} onApproveReject={() => undefined} decisionState="pending" />,
   metrics: ({ metrics }) => <MetricsReport metrics={metrics} />,
+  deep: (props) => <DeepAnalysisTab state={runState(props)} />,
+  causal: (props) => <CausalGraphTab state={runState(props)} />,
+  banner: (props) => <RecordedBanner recorded={runState(props).recorded} />,
+  recorded_chips: ({ runs }) => (
+    <RecordedChips runs={runs} failed={false} current={null} disabled={false} onReplay={() => undefined} />
+  ),
 };
 
 export const render = (views: any[]) => views.map(({ view, ...props }) => renderToStaticMarkup(VIEWS[view](props)));

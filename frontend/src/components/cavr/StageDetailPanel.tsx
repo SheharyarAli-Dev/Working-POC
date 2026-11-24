@@ -1,4 +1,5 @@
 import React from 'react';
+import { SafeText } from './SafeText';
 import { CavrRunState, NOT_COMPUTED, shown } from './types';
 import { Shield, Info, ArrowRight, CheckCircle2, AlertTriangle, XCircle, Search } from 'lucide-react';
 
@@ -99,7 +100,7 @@ export const StageDetailPanel: React.FC<StageDetailPanelProps> = ({ state }) => 
       <div className="stage-grid">
         <div className="stage-col">
           <span className="col-label">WHAT IS HAPPENING</span>
-          <p>{explainSimply ? state.currentPlainMessage : current.what}</p>
+          <p><SafeText value={explainSimply ? state.currentPlainMessage : current.what} limit={400} /></p>
         </div>
         <div className="stage-col">
           <span className="col-label">WHY THIS MATTERS</span>
@@ -107,7 +108,7 @@ export const StageDetailPanel: React.FC<StageDetailPanelProps> = ({ state }) => 
         </div>
         <div className="stage-col">
           <span className="col-label">EVIDENCE FOUND</span>
-          <p className="evidence-text">{current.evidence}</p>
+          <p className="evidence-text"><SafeText value={current.evidence} limit={400} /></p>
         </div>
         <div className="stage-col">
           <span className="col-label">WHAT HAPPENS NEXT</span>

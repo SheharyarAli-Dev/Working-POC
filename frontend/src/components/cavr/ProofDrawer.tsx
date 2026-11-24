@@ -1,5 +1,7 @@
 import React from 'react';
 import { shown } from './types';
+import { SafeText } from './SafeText';
+import { RecordedBanner } from './RecordedBanner';
 
 interface ProofDrawerProps {
   // The answer of GET /api/cavr/proof/{run_id}.
@@ -17,6 +19,7 @@ export const ProofDrawer: React.FC<ProofDrawerProps> = ({ proof, onClose }) => (
           <span className="modal-eyebrow">AUDIT RECORD</span>
           <h3>Proof of this run</h3>
           <p>Every line is a field of GET /api/cavr/proof/{shown(proof.run_id)}.</p>
+          <RecordedBanner recorded={proof.recorded} />
         </div>
         <button className="modal-close-btn" onClick={() => onClose()}>✕</button>
       </div>
@@ -28,7 +31,7 @@ export const ProofDrawer: React.FC<ProofDrawerProps> = ({ proof, onClose }) => (
             <div><span>Request:</span> <code>{shown(proof.request)}</code></div>
             <div><span>Status:</span> <strong>{shown(proof.cavr_verdict?.status)}</strong></div>
             <div><span>Stage / rule:</span> <code>{shown(proof.cavr_verdict?.stage)} / {shown(proof.cavr_verdict?.rule)}</code></div>
-            <div><span>Reason:</span> {shown(proof.cavr_verdict?.reason)}</div>
+            <div><span>Reason:</span> <SafeText value={proof.cavr_verdict?.reason} limit={400} /></div>
             <div><span>fast_gate_ms:</span> <code>{shown(proof.cavr_verdict?.fast_gate_ms)}</code></div>
             <div><span>cache_hit:</span> <code>{shown(proof.cavr_verdict?.cache_hit)}</code></div>
             <div><span>Demo condition:</span> <code>{shown(proof.demo_condition?.id)}</code> {proof.demo_condition?.description}</div>
@@ -48,19 +51,20 @@ export const ProofDrawer: React.FC<ProofDrawerProps> = ({ proof, onClose }) => (
         <div className="proof-group">
           <label>Sandbox:</label>
           <div className="proof-kv">
-            <div><span>Container command:</span> <code>{shown(proof.docker_command)}</code></div>
-            <div><span>Container ID:</span> <code>{shown(proof.container_id)}</code></div>
-            <div><span>Image digest:</span> <code>{shown(proof.image_digest)}</code></div>
+            <div><span>Container command:</span> <code><SafeText value={proof.docker_command} /></code></div>
+            <div><span>Container ID:</span> <code><SafeText value={proof.container_id} /></code></div>
+            <div><span>Image digest:</span> <code><SafeText value={proof.image_digest} /></code></div>
           </div>
         </div>
 
         <div className="proof-group">
           <label>Counterfactual runs ({shown(proof.counterfactual_runs?.length)}):</label>
           <div className="cf-proof-list">
-            {(proof.counterfactual_runs || []).map((r: any) => (
-              <div key={r.run_number} className="cf-proof-item">
-                <strong>Run {r.run_number}: {shown(r.condition_applied?.name)}</strong>
-                <span>Behaviors: {shown(r.behaviors_found?.map((b: any) => b.action).join(', '))}</span>
+            {(proof.counterfactual_runs || []).map((r: any, index: number) => (
+              <div key={index} className="cf-proof-item">
+                <strong>Run {shown(r.n)} (<SafeText value={r.kind} />): <SafeText value={r.rule} /></strong>
+                <span>Spec <SafeText value={r.spec_id} />, activation <SafeText value={r.activation ?? 'none'} />,{' '}
+                  {shown(r.elapsed_seconds)} s, container <SafeText value={r.container} /></span>
               </div>
             ))}
           </div>

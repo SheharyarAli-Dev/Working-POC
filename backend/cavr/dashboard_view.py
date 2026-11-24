@@ -93,6 +93,7 @@ def _deep_view(deep):
     used = _dict(loop.get("budget_used"))
     key_events = [event for event in _list(evidence.get("key_events")) if isinstance(event, dict)]
     causal = _dict(evidence.get("causal"))
+    checked = _graph_ok(graph, causal.get("digest"))
     return {
         "status": deep.get("status"), "rule": deep.get("rule"), "reason": deep.get("reason"),
         "elapsed_seconds": deep.get("elapsed_seconds"), "image_id": evidence.get("image_id"), "claim": evidence.get("claim"),
@@ -105,10 +106,28 @@ def _deep_view(deep):
                    "stop": loop.get("stop"), "stop_reason": loop.get("stop_reason")},
         "residual": evidence.get("residual"), "escalation_reasons": _list(evidence.get("escalation_reasons")),
         "key_events": key_events, "not_exercised": _list(evidence.get("not_exercised")),
-        "leaks": [event for event in key_events if event.get("type") == "CANARY_EXFIL_ATTEMPT"],
+        "leaks": _leaks(graph if checked else {}, key_events),
         "causal": {"digest": causal.get("digest"), "counts": causal.get("counts"), "cause": causal.get("cause"),
-                   "error": causal.get("error"), "digest_checked": _graph_ok(graph, causal.get("digest"))},
+                   "error": causal.get("error"), "digest_checked": checked},
     }
+
+
+LEAK = "CANARY_EXFIL_ATTEMPT"
+LEAK_FIELDS = ("type", "run", "step", "syscall", "address", "path", "line", "key")
+
+
+def _leaks(graph: dict, key_events: list) -> list[dict]:
+    """Every canary leak the runs showed: the graph's CANARY_EXFIL_ATTEMPT events (all runs; the graph lists every
+    event that violates), each with the key event's `why` (which canary id left the package) where there is one.
+    Without a graph, the key events' leaks (the decisive run only)."""
+    why = {event.get("key"): event.get("why") for event in key_events}
+    events = [node for node in _list(graph.get("nodes")) if isinstance(node, dict) and node.get("kind") == "event"
+              and node.get("type") == LEAK]
+    if not events:
+        events = [event for event in key_events if event.get("type") == LEAK]
+    leaks = [{key: event.get(key) for key in LEAK_FIELDS} | {"why": why.get(event.get("key"))} for event in events]
+    number = lambda value: value if isinstance(value, int) and not isinstance(value, bool) else -1
+    return sorted(leaks, key=lambda leak: (number(leak["run"]), number(leak["line"]), str(leak["key"])))  # trace order
 
 
 def _graph_ok(graph: dict, digest) -> bool:

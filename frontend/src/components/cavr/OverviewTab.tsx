@@ -1,4 +1,5 @@
 import React from 'react';
+import { SafeText } from './SafeText';
 import { CavrRunState, NOT_COMPUTED, shown } from './types';
 import { AdvisoryList } from './AdvisoryList';
 import { ShieldCheck, AlertOctagon, HelpCircle, CheckCircle, FileText, Clock, Cpu, Lock, AlertTriangle } from 'lucide-react';
@@ -109,7 +110,7 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({ state }) => {
             {findings.map((f, i) => (
               <li key={i} className="finding-item">
                 <span className="finding-num">{i + 1}</span>
-                <span>{f}</span>
+                <span><SafeText value={f} limit={400} /></span>
               </li>
             ))}
           </ul>
@@ -127,7 +128,7 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({ state }) => {
               <ul>
                 {limits.map((r: any, idx: number) => (
                   <li key={idx}>
-                    <code>{r.predicate}</code> ({r.file_line}): {r.reason}
+                    <code><SafeText value={r.predicate} /></code> (<SafeText value={r.file_line} />): <SafeText value={r.reason} limit={400} />
                   </li>
                 ))}
               </ul>

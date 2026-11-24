@@ -384,3 +384,176 @@ def test_the_advisory_card_without_advisories(dashboard, tmp_path):
     assert "<details" not in clean and "<details" not in not_asked
     assert "0 affect this version" in pieces_of(clean) and "pypdf 6.21.4: NO_KNOWN_VULNERABILITY" in " ".join(pieces_of(clean))
     assert after(pieces_of(not_asked), "OSV advisories") == DASH       # the gate blocked the request: OSV was never asked
+
+
+# --- PR 19: the deep analysis view, recorded runs, untrusted event text ----------------------------------------------
+
+from test_cavr_api import RECORDED_FILE  # noqa: E402  (the recorded M2 runs, backend/cavr/recorded/m2-demo-runs.json)
+
+CAVR_SOURCES = [PAGE, *sorted((FRONTEND / "src" / "components" / "cavr").glob("*.ts*"))]
+# Every link the CAVR page may contain. Each one is built from the backend's run id only, never from event text.
+ALLOWED_HREFS = {"AdvisoryList.tsx": ["href={`/api/cavr/proof/${runId}`}"],
+                 "ProofDrawer.tsx": ["href={`/api/cavr/proof/${proof.run_id}`}"],
+                 "AssuranceTab.tsx": ["href = url"]}
+
+
+def recorded_data(dashboard, name, runs=None, monkeypatch=None) -> dict:
+    """One replay of a recorded run (optionally from edited `runs`): what the page gets, as JSON."""
+    if runs is not None:
+        monkeypatch.setattr(api, "recorded_runs", lambda: runs)
+    run_id = f"replay-{name}-{dashboard.count}"
+    dashboard.count += 1
+    api.RUN_EVENTS[run_id], api.RUN_CHAINS[run_id] = [], api.EvidenceChain(run_id)
+    import asyncio
+    asyncio.run(api.run_recorded(run_id, name))
+    return json.loads(json.dumps({"events": api.RUN_EVENTS[run_id], "proof": api.get_proof(run_id)}))
+
+
+def deep_evidence(runs, name) -> dict:
+    return runs[name]["verdict"]["packages"][0]["evidence"]["deep"]["evidence"]
+
+
+def test_no_page_part_sets_inner_html_or_builds_a_link_from_data():
+    for path in CAVR_SOURCES:
+        text = path.read_text(encoding="utf-8")
+        assert "dangerouslySetInnerHTML" not in text and "innerHTML" not in text, path.name
+        assert re.findall(r"\b(?:src|xlinkHref|srcDoc)=\{", text) == [], path.name
+        hrefs = re.findall(r"href=\{`[^`]*`\}|href = \w+", text)
+        assert hrefs == ALLOWED_HREFS.get(path.name, []), (path.name, hrefs)
+
+
+def test_the_deep_view_of_a_live_fast_gate_run_says_why_there_is_no_deep_analysis(dashboard, tmp_path):
+    (view,) = render(tmp_path, {"view": "deep", **run_data(dashboard, "verified")})
+    assert "RECORDED RUN" not in view and "Fast gate" in view
+    assert any(piece.startswith("not run: the fast gate did not escalate this package (VERIFIED") for piece in view)
+    assert "Final rule:" not in view
+    (before,) = render(tmp_path, {"view": "deep", "events": [], "proof": {"run_id": None, "request": None}})
+    assert after(before, "Deep analysis") == DASH + " (no run has finished yet)"
+
+
+def test_the_deep_view_of_a_rejected_run_with_its_cause(dashboard, tmp_path):
+    data = recorded_data(dashboard, "env_ci")
+    (view,) = render(tmp_path, {"view": "deep", **data})
+    evidence = deep_evidence(RECORDED_FILE["runs"], "env_ci")
+    assert "RECORDED RUN" in view and after(view, "Final rule:") == "REJECTED" and "DEEP_CONTRACT_VIOLATION" in view
+    assert "Runs (2)" in view and "canary-only" in view and "counterfactual" in view
+    assert "CI=true" in view and "no trigger (canary-only)" in view
+    assert "(os.environ.get('CI') == 'true')" in view and "explored" in view
+    assert "demo.run()" in view and any(piece.startswith("Cause: caused by CI=true.") for piece in view)
+    assert "No canary leak in any run (every violating event is in the graph)." in view
+    assert len(evidence["runs"]) == 2 and view.count("9") >= 2       # 9 canary ids planted in each of the two runs
+    for stage in ("Artifact SHA-256", "Dependency tree", "OSV advisories", "Capability contract", "AST scan", "Sink reachability"):
+        assert stage in view
+
+
+def test_the_deep_view_of_a_verified_run(dashboard, tmp_path):
+    (view,) = render(tmp_path, {"view": "deep", **recorded_data(dashboard, "benign_triggered")})
+    assert after(view, "Final rule:") == "VERIFIED" and "DEEP_RUN_CLEAN" in view and "Runs (2)" in view
+    assert any(piece.startswith("Cause: none named.") for piece in view)
+
+
+def test_the_deep_view_of_unresolved_runs_names_what_was_not_explored(dashboard, tmp_path):
+    win32, budget = (render(tmp_path, {"view": "deep", **recorded_data(dashboard, name)})[0] for name in ("win32", "budget"))
+    assert after(win32, "Final rule:") == "UNRESOLVED" and "TRIGGER_UNSIMULABLE" in win32
+    assert "Unsimulable (1):" in win32 and "not explored" in win32 and "Runs (1)" in win32
+    assert any("the sandbox runs Linux" in piece for piece in win32)
+    assert "Runs (8)" in budget and "DEEP_RUN_BUDGET_EXHAUSTED" in budget
+    assert any(piece.startswith("8 of 8 runs") for piece in budget)
+    assert any("8 sandbox runs for this package is used up" in piece for piece in budget)
+
+
+def test_the_deep_view_shows_the_canaries_planted_and_the_leak_caught(dashboard, tmp_path):
+    (view,) = render(tmp_path, {"view": "deep", **recorded_data(dashboard, "canary_exfil")})
+    text = " ".join(view)
+    assert text.count("Leak caught: run 1, step") == 2
+    assert "a canary value (file:aws-secret-key) left the package in sendto (verbatim)" in text
+    assert "198.51.100.24:53" in view and "file:aws-secret-key" in text
+    assert "canary id not named in the key events" in text     # the second leak (drive step) has no key event
+
+
+def test_the_deep_view_lists_driven_call_sites_and_other_guards(dashboard, tmp_path):
+    driven, guard = (render(tmp_path, {"view": "deep", **recorded_data(dashboard, name)})[0]
+                     for name in ("driven_reject", "guard_out_of_scope"))
+    assert "Call sites driven (1)" in driven and "demo.send('x')" in driven
+    assert "Other guards (conditions CAVR cannot evaluate): 1" in guard and "hash('cavr') % 7 == 99" in guard
+    assert "Unexplored (1):" in guard
+
+
+def test_the_recorded_banner_and_chips(dashboard, tmp_path):
+    banner, live = render(tmp_path, {"view": "banner", **recorded_data(dashboard, "win32")},
+                          {"view": "banner", **run_data(dashboard, "verified")})
+    assert banner[0] == "RECORDED RUN" and RECORDED_FILE["recorded_at"] in " ".join(banner) and live == []
+    (chips,) = render(tmp_path, {"view": "recorded_chips", "runs": api.list_recorded_runs()})
+    assert chips[0].startswith("Recorded M2 runs") and len(chips) == 1 + len(RECORDED_FILE["runs"])
+    assert chips[1:] == [run["display_name"] for run in api.list_recorded_runs()]
+
+
+def test_the_proof_drawer_lists_the_deep_runs_of_a_recorded_run(dashboard, tmp_path):
+    data = recorded_data(dashboard, "env_ci")
+    (drawer,) = render(tmp_path, {"view": "proof", "proof": data["proof"]})
+    assert "Counterfactual runs (2):" in drawer and after(drawer, "Image digest:") == RECORDED_FILE["image_id"]
+    assert "RECORDED RUN" in drawer and after(drawer, "Container command:") == api.NOT_IN_EVIDENCE
+
+
+HOSTILE = {"script": "<script>alert('cavr')</script>", "img": "<img src=x onerror=alert(1)>",
+           "js": "javascript:alert(document.cookie)", "link": '<a href="javascript:alert(1)">click</a>',
+           "svg": "<svg onload=alert(1)>", "iframe": "<iframe src=javascript:alert(1)></iframe>"}
+LONG = "Z" * 20000
+
+
+def hostile_runs() -> dict:
+    """The recorded env_ci run with every event text an attacker controls replaced by hostile text."""
+    runs = json.loads(json.dumps(RECORDED_FILE["runs"]))
+    evidence = deep_evidence(runs, "env_ci")
+    event = evidence["key_events"][0]
+    event.update({"path": HOSTILE["script"], "argv": [HOSTILE["img"], LONG], "why": HOSTILE["js"], "syscall": HOSTILE["svg"],
+                  "address": {"host": HOSTILE["link"], "port": HOSTILE["iframe"]}, "step": HOSTILE["img"]})
+    trigger = evidence["triggers"][0]
+    trigger.update({"predicate": HOSTILE["link"], "outcome": LONG, "file": "../../etc/passwd" + HOSTILE["svg"]})
+    evidence["drives"]["driven"][0]["call"] = HOSTILE["js"]
+    evidence["frontier"]["other_guards"] = [{"id": "x", "package": HOSTILE["script"], "version": "1", "file": HOSTILE["iframe"],
+                                             "line": 1, "predicate": HOSTILE["img"], "risk": "medium",
+                                             "capabilities": [HOSTILE["link"]]}]
+    evidence["frontier"]["other_guards_count"] = 1
+    # The verdict's reason carries package text in a real deep run (a predicate, a path): hostile and long here.
+    for holder in (runs["env_ci"]["verdict"], runs["env_ci"]["verdict"]["packages"][0],
+                   runs["env_ci"]["verdict"]["packages"][0]["evidence"]["deep"]):
+        holder["reason"] = HOSTILE["script"] + LONG
+    return runs
+
+
+def check_hostile_markup(markup, run_id, printed=True):
+    tags = re.findall(r"<[^>]+>", markup)
+    assert "<script" not in markup.lower() and "<iframe" not in markup.lower() and "<img" not in markup.lower()
+    assert [tag for tag in tags if re.search(r"\son\w+\s*=", tag)] == []                   # no event handler attribute
+    assert [tag for tag in tags if "javascript:" in tag.lower() or "alert(" in tag] == []   # no hostile text in any tag
+    assert set(re.findall(r'href="([^"]*)"', markup)) <= {f"/api/cavr/proof/{run_id}"}
+    text = html.unescape(re.sub(r"<[^>]+>", "\x00", markup))
+    for value in HOSTILE.values() if printed else ():
+        assert value in text, value                                                        # printed, as text
+    # The long value is cut where it is shown, and whole only inside a closed "show more".
+    assert LONG not in html.unescape(re.sub(r"<details.*?</details>", "", markup, flags=re.S))
+    assert "<details open" not in markup and "show more (20" in text and LONG in text
+
+
+def test_hostile_event_text_is_printed_as_escaped_text_only(dashboard, tmp_path, monkeypatch):
+    data = recorded_data(dashboard, "env_ci", hostile_runs(), monkeypatch)
+    deep, *others = render_html(tmp_path, {"view": "deep", **data}, {"view": "proof", "proof": data["proof"]},
+                                {"view": "overview", **data}, {"view": "stage", **data}, {"view": "assurance", **data})
+    check_hostile_markup(deep, data["proof"]["run_id"])
+    for markup in others:      # these views print the verdict's reason (hostile, long), not the events
+        check_hostile_markup(markup, data["proof"]["run_id"], printed=False)
+
+
+def test_the_repair_tab_of_a_deep_rejection_says_repair_was_not_attempted_and_why(dashboard, tmp_path):
+    """PR 19 check of the repair proposal: a deep REJECTED gets the recorded NOT_ATTEMPTED block, printed as it is."""
+    data = recorded_data(dashboard, "env_ci")
+    repair = RECORDED_FILE["runs"]["env_ci"]["repair"]
+    (tab,) = render(tmp_path, {"view": "repair", **data})
+    text = " ".join(tab)
+    assert f"Result: {repair['result']} ({repair['rule']}). {repair['reason']}" in text
+    assert "deep / DEEP_CONTRACT_VIOLATION" in text and "Applied: false. Gate decision changed: false." in text
+    assert not any(piece.startswith("Pin ") or piece.startswith("Remove ") for piece in tab)
+    # Nothing was looked for, so no candidate count is printed; the limitations still say what a re-check would not do.
+    assert "No candidate was looked for (NOT_REPAIRABLE)." in tab and not any(p.startswith("Tried:") for p in tab)
+    assert "fast-gate re-check only: no sandbox and no deep analysis; an escalated candidate is skipped" in tab
