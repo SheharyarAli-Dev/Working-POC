@@ -9,7 +9,8 @@
        run whatever happened (failure, timeout, exception), and the evidence says so (`home_removed`);
     3. two steps: `install` (the same pip command; HOME=/tmp/install-home, no canary in its environment) and
        `imports` (SPEC_IMPORT_CODE: sets sys.argv to the spec's argv, then imports the modules) with the spec's
-       variables, libfaketime's when the spec has a clock (`env_synthesis.step_env`);
+       variables, libfaketime's when the spec has a clock (`env_synthesis.step_env`); with `drives` (PR 12) one
+       more step per driven call site (`call_drive.DRIVE_ARGV`), with the imports step's variables;
     4. `docker run --hostname <spec hostname>`, strace STRACE_SPEC: the PR 9 command with `-s 65536` and the
        write-family syscalls, so every write, send and connect payload up to 64 KiB is in the trace (pip writes at
        most 65536 bytes per call, measured 2026-11-23); trace cap SPEC_STDERR_CAP (64 MiB);
@@ -31,7 +32,7 @@ import shutil
 import tempfile
 from pathlib import Path
 
-from backend.cavr import contract_check, env_synthesis, sandbox_events, sandbox_observe
+from backend.cavr import call_drive, contract_check, env_synthesis, sandbox_events, sandbox_observe
 
 STRING_LIMIT = 65536
 WRITE_SYSCALLS = ("write", "pwrite64", "writev", "pwritev", "pwritev2")
@@ -55,10 +56,16 @@ def spec_strace() -> list[str]:
 STRACE_SPEC = spec_strace()
 
 
-def spec_steps(spec, modules, machine=None) -> list[dict]:
+def spec_steps(spec, modules, machine=None, drives=()) -> list[dict]:
+    """install, imports, and one step per drive of `call_drive.plan` (PR 12), with the imports step's environment."""
     job = json.dumps({"modules": list(modules), "argv": list(spec["argv"])})
-    return [sandbox_observe.step("install", sandbox_observe.PIP_INSTALL, {"HOME": INSTALL_HOME}),
-            sandbox_observe.step("imports", SPEC_IMPORT_ARGV + [job], env_synthesis.step_env(spec, machine))]
+    env = env_synthesis.step_env(spec, machine)
+    steps = [sandbox_observe.step("install", sandbox_observe.PIP_INSTALL, {"HOME": INSTALL_HOME}),
+             sandbox_observe.step("imports", SPEC_IMPORT_ARGV + [job], env)]
+    for drive in drives or ():
+        steps.append(sandbox_observe.step(drive["step"], call_drive.DRIVE_ARGV
+                                          + [call_drive.drive_job(drive, modules, spec["argv"])], env))
+    return steps
 
 
 def write_home(spec, root: Path) -> Path:
@@ -87,7 +94,7 @@ def write_home(spec, root: Path) -> Path:
 
 
 def run_spec(nodes, modules, spec, *, contract=None, quarantine_dir=None,
-             deadline: float = 20.0, run_id: str | None = None, n: int = 1, machine=None) -> dict:
+             deadline: float = 20.0, run_id: str | None = None, n: int = 1, machine=None, drives=()) -> dict:
     """Run the verified tree once under `spec`. Never raises; never a verdict."""
     home_root = None
     try:
@@ -95,7 +102,7 @@ def run_spec(nodes, modules, spec, *, contract=None, quarantine_dir=None,
             from backend.cavr.pipeline import default_quarantine_dir
             quarantine_dir = default_quarantine_dir()
         names = sandbox_observe.check_modules(modules)
-        steps = spec_steps(spec, names, machine)
+        steps = spec_steps(spec, names, machine, drives)
         with tempfile.TemporaryDirectory(prefix="cavr-pkg-") as stage:
             staged = sandbox_observe.stage_wheels(nodes, quarantine_dir, stage)
             offered = {name for wheel in staged for name in wheel["top_level"]}
@@ -108,7 +115,8 @@ def run_spec(nodes, modules, spec, *, contract=None, quarantine_dir=None,
                                                  tmpfs=[sandbox_observe.SITE_TMPFS], deadline=deadline,
                                                  stderr_cap=SPEC_STDERR_CAP, run_id=run_id, n=n, strace=STRACE_SPEC,
                                                  hostname=spec["hostname"])
-        result["evidence"].update({"wheels": staged, "modules": names, "spec": spec, "home_host": str(home_root)})
+        result["evidence"].update({"wheels": staged, "modules": names, "spec": spec, "home_host": str(home_root),
+                                   "drives": [drive["step"] for drive in drives or ()]})
     except sandbox_observe.NotStaged as exc:
         result = sandbox_observe._result(exc.rule, exc.reason, {"modules": modules if isinstance(modules, list) else None,
                                                                 "spec": spec})

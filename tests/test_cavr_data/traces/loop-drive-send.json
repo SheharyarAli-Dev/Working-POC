@@ -1,0 +1,223 @@
+{
+  "file": "loop-drive-send.txt",
+  "recorded": "2026-11-24",
+  "produced_by": "sandbox_spec.run_spec with drive demo.send('x'): wheel demo 1.0 under canary_spec() (send connects to 198.51.100.24:443)",
+  "rule": "DEEP_NOT_JUDGED",
+  "nonce": "0123456789abcdef0123456789abcdef",
+  "steps": [
+    {
+      "name": "install",
+      "argv": [
+        "/usr/local/bin/python",
+        "-I",
+        "-B",
+        "-c",
+        "import sys\nimport pip._internal.network.session as session\nsession.user_agent = lambda: 'cavr-sandbox'\nfrom pip._internal.cli.main import main\nsys.exit(main(sys.argv[1:]))\n",
+        "install",
+        "--isolated",
+        "--disable-pip-version-check",
+        "--no-cache-dir",
+        "--no-input",
+        "--no-index",
+        "--no-deps",
+        "--only-binary",
+        ":all:",
+        "--require-hashes",
+        "--no-compile",
+        "--find-links",
+        "/pkg",
+        "--target",
+        "/site/lib",
+        "-r",
+        "/pkg/hashes.txt"
+      ],
+      "env": {
+        "HOME": "/tmp/install-home"
+      }
+    },
+    {
+      "name": "imports",
+      "argv": [
+        "/usr/local/bin/python",
+        "-I",
+        "-S",
+        "-B",
+        "-c",
+        "import importlib, json, site, sys\njob = json.loads(sys.argv[1])\nsite.addsitedir('/site/lib')\nsys.argv = job['argv']\nfor name in job['modules']:\n    importlib.import_module(name)\n",
+        "{\"modules\": [\"demo\"], \"argv\": [\"-c\"]}"
+      ],
+      "env": {
+        "AWS_ACCESS_KEY_ID": "AKIA761BC283C3234959",
+        "AWS_SECRET_ACCESS_KEY": "0bcb1e7a83577ff0ac5149ac86d528710ce14d85",
+        "GITHUB_TOKEN": "ghp_d26407a491d046d5122861179c56533af6fc",
+        "PYPI_TOKEN": "pypi-4364dfbb4d614b414b48b66bdec418d7"
+      }
+    },
+    {
+      "name": "drive_1",
+      "argv": [
+        "/usr/local/bin/python",
+        "-I",
+        "-S",
+        "-B",
+        "-c",
+        "import ast, importlib, json, os, site, sys\njob = json.loads(sys.argv[1])\nsite.addsitedir('/site/lib')\nsys.argv = job['argv']\nfor name in job['modules']:\n    importlib.import_module(name)\nparts = job['symbol'].split('.')\ntry:\n    target = importlib.import_module(parts[0])\n    for i in range(1, len(parts)):\n        try:\n            target = getattr(target, parts[i])\n        except AttributeError:\n            target = importlib.import_module('.'.join(parts[:i + 1]))\n    target(*[ast.literal_eval(a) for a in job['args']],\n           **{k: ast.literal_eval(v) for k, v in job['kwargs'].items()})\nexcept BaseException as exc:\n    print('cavr-drive:', type(exc).__name__, flush=True)\nsys.stdout.flush()\nos._exit(0)\n",
+        "{\"modules\": [\"demo\"], \"argv\": [\"-c\"], \"symbol\": \"demo.send\", \"args\": [\"'x'\"], \"kwargs\": {}}"
+      ],
+      "env": {
+        "AWS_ACCESS_KEY_ID": "AKIA761BC283C3234959",
+        "AWS_SECRET_ACCESS_KEY": "0bcb1e7a83577ff0ac5149ac86d528710ce14d85",
+        "GITHUB_TOKEN": "ghp_d26407a491d046d5122861179c56533af6fc",
+        "PYPI_TOKEN": "pypi-4364dfbb4d614b414b48b66bdec418d7"
+      }
+    }
+  ],
+  "image_id": "sha256:0e88dd461ca40066496c9d3966fc0bf226c47556a044ff16ce6112b22e31350f",
+  "seccomp_sha256": "bd992341659ce9603bc78ddfcc8a577a2110447a2bf724fa6c65d422099499b6",
+  "harness_sha256": "8159ad05f1aa4fb9915ec4c4e9b3bcea211d51e6284c540d2e86866a8e2dd132",
+  "strace": [
+    "strace",
+    "-f",
+    "-q",
+    "--always-show-pid",
+    "-y",
+    "-s",
+    "65536",
+    "-e",
+    "trace=%file,%network,%process,%creds,ptrace,process_vm_readv,process_vm_writev,io_uring_setup,io_uring_enter,io_uring_register,userfaultfd,bpf,perf_event_open,fchdir,write,pwrite64,writev,pwritev,pwritev2",
+    "-u",
+    "cavr",
+    "--",
+    "/usr/local/bin/python",
+    "-I",
+    "-S",
+    "/opt/cavr/harness.py",
+    "/job/job.json"
+  ],
+  "trace_sha256": "b56df4d7c9fce68a26f9a2e8cf8c32be66f6085bbc1b58180f3bbc6f4c9ef229",
+  "wheels": [
+    {
+      "name": "demo",
+      "version": "1.0",
+      "filename": "demo-1.0-py3-none-any.whl",
+      "path": "/tmp/cavr-record-8kotafu5/demo-1.0-py3-none-any.whl",
+      "sha256": "47e36d7d30eb6dc1531583f75612dafda08603334a4f143bf10a5005ba6987d8"
+    }
+  ],
+  "docker": "29.9.3",
+  "note": "the marker nonce was fixed for the recording; the canaries are the run's own (fake, random) values",
+  "spec": {
+    "version": "cavr-env-synthesis/1",
+    "id": "spec-canaries",
+    "entry_id": null,
+    "activation": null,
+    "env": {
+      "AWS_ACCESS_KEY_ID": "AKIA761BC283C3234959",
+      "AWS_SECRET_ACCESS_KEY": "0bcb1e7a83577ff0ac5149ac86d528710ce14d85",
+      "GITHUB_TOKEN": "ghp_d26407a491d046d5122861179c56533af6fc",
+      "PYPI_TOKEN": "pypi-4364dfbb4d614b414b48b66bdec418d7"
+    },
+    "faketime": null,
+    "files": {
+      "/tmp/home/.aws/credentials": {
+        "kind": "file",
+        "canaries": [
+          "file:aws-access-key",
+          "file:aws-secret-key"
+        ],
+        "content": "[default]\naws_access_key_id = AKIAC13976C9DA44BA9B\naws_secret_access_key = 9b803cbfae29035bf16ef88e121d90b9ee911a80\n"
+      },
+      "/tmp/home/.env": {
+        "kind": "file",
+        "canaries": [
+          "file:env-api-key"
+        ],
+        "content": "API_KEY=7151b8e3fb13fde45acab51efdb6fc64\n"
+      },
+      "/tmp/home/.netrc": {
+        "kind": "file",
+        "canaries": [
+          "file:netrc-password"
+        ],
+        "content": "machine pypi.cavr.invalid login cavr password bc42c41001c04736863e43e174d423dc\n"
+      },
+      "/tmp/home/.ssh/id_ed25519": {
+        "kind": "file",
+        "canaries": [
+          "file:ssh-key"
+        ],
+        "content": "-----BEGIN OPENSSH PRIVATE KEY-----\n83a7ffb8e7afe8df5cbc39ef4f4cd2e1fd7561fa3bf03fea05683efaf7bb4dc7\n-----END OPENSSH PRIVATE KEY-----\n"
+      }
+    },
+    "hostname": "cavr-sandbox",
+    "argv": [
+      "-c"
+    ],
+    "canaries": [
+      {
+        "id": "file:aws-access-key",
+        "kind": "file",
+        "where": "/tmp/home/.aws/credentials",
+        "value": "AKIAC13976C9DA44BA9B"
+      },
+      {
+        "id": "file:aws-secret-key",
+        "kind": "file",
+        "where": "/tmp/home/.aws/credentials",
+        "value": "9b803cbfae29035bf16ef88e121d90b9ee911a80"
+      },
+      {
+        "id": "file:env-api-key",
+        "kind": "file",
+        "where": "/tmp/home/.env",
+        "value": "7151b8e3fb13fde45acab51efdb6fc64"
+      },
+      {
+        "id": "file:netrc-password",
+        "kind": "file",
+        "where": "/tmp/home/.netrc",
+        "value": "bc42c41001c04736863e43e174d423dc"
+      },
+      {
+        "id": "file:ssh-key",
+        "kind": "file",
+        "where": "/tmp/home/.ssh/id_ed25519",
+        "value": "83a7ffb8e7afe8df5cbc39ef4f4cd2e1fd7561fa3bf03fea05683efaf7bb4dc7"
+      },
+      {
+        "id": "env:AWS_ACCESS_KEY_ID",
+        "kind": "env",
+        "where": "AWS_ACCESS_KEY_ID",
+        "value": "AKIA761BC283C3234959"
+      },
+      {
+        "id": "env:AWS_SECRET_ACCESS_KEY",
+        "kind": "env",
+        "where": "AWS_SECRET_ACCESS_KEY",
+        "value": "0bcb1e7a83577ff0ac5149ac86d528710ce14d85"
+      },
+      {
+        "id": "env:GITHUB_TOKEN",
+        "kind": "env",
+        "where": "GITHUB_TOKEN",
+        "value": "ghp_d26407a491d046d5122861179c56533af6fc"
+      },
+      {
+        "id": "env:PYPI_TOKEN",
+        "kind": "env",
+        "where": "PYPI_TOKEN",
+        "value": "pypi-4364dfbb4d614b414b48b66bdec418d7"
+      }
+    ]
+  },
+  "drives": [
+    {
+      "step": "drive_1",
+      "symbol": "demo.send",
+      "args": [
+        "'x'"
+      ],
+      "kwargs": {}
+    }
+  ]
+}

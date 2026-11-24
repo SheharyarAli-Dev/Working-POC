@@ -5849,3 +5849,155 @@ End-of-phase checks (after the review fixes):
    adds only code loads (`test_the_date_spec_moves_the_packages_clock_and_nothing_else` judges that run OK).
 3. **Why is a cut payload UNRESOLVED and not ignored?** The canary could be in the part strace did not print; Q8 says
    anything incomplete is UNRESOLVED. pip's file writes are the only exemption, and they never reach the cut limit.
+
+
+## Step M2-17 — Counterfactual activation loop and driven call sites (PR 12) (2026-11-24)
+
+Plan: `docs/cavr-m2-plan.md` PR 12 and the Phase 3b plan approved by Maryam on 2026-11-24 (order PR 12, clean-up,
+PR 13; D1–D4 as recommended; demo option A, done in Step M2-18).
+
+### Ch 6 Implementation
+
+- `backend/cavr/activation_loop.py` (new). `explore(frontier, run, budget, clock, gate_left, synthesize,
+  canary_spec, started)` plans and makes the runs of one escalated package; `read_run` turns one `run_spec` result
+  into a record (events minus the baseline, judged by `contract_check.judge`, `completed` only for DEEP_NOT_JUDGED on
+  the checked image with an attributable trace); `new_events` (multiset difference by `sandbox_events.event_key`,
+  install step left out) and `drive_events` (a drive step minus the same run's imports step).
+  Algorithm: (1) run 1 is `canary_spec()`; (2) the simulable frontier entries are grouped by activation, in frontier
+  order, one `synthesize` spec per group (refused specs and unsimulable entries get no run); (3) runs are made until
+  8 runs, 120 s for the package (3 s kept for overhead) or the gate run's 300 s end, or a run has a violation, or the
+  canary-only run did not complete; (4) an entry is explored when a completed counterfactual run's new events (or, for
+  an entry the baseline takes, the canary-only run's events) contain an event of one of its sink capabilities.
+- `backend/cavr/call_drive.py` (new). `plan(package)`: for each `call` site of the contract, the project file is read
+  again and must have the context's SHA-256; every `ast.Call` at that line written as the expression is a candidate;
+  every argument must pass `ast.literal_eval` (no `*`/`**`, ≤ 4096 bytes), no string may look like a credential and no
+  keyword be named like one (D2); at most 4 distinct calls, file / line / column order, steps `drive_1`..`drive_4`.
+  `DRIVE_CODE`: import the modules, resolve the symbol, call it with the literals, catch `BaseException`, `os._exit(0)`.
+- `backend/cavr/sandbox_deep.py` (v2). `analyse`: baseline (now the spec strace and imports step), frontier, drive
+  plan, loop, verdict. `_verdict`: the seven clauses (violation -> REJECTED; no run / incomplete run / unjudged event /
+  `frontier_residual` / high-risk `other_guards` / escalation reasons -> UNRESOLVED; else VERIFIED DEEP_RUN_CLEAN).
+  `escalation_reasons(package, runs, drives)`: module-level sinks by an imports-step event, function sinks by a drive
+  step's `drive_events`, both only when the sink is the only reachable sink of its capability (D3).
+  `unexplored_guards`. `BUDGET` runs 8; `VERSION` cavr-sandbox-deep/2; identity adds the frontier, synthesis, loop and
+  drive versions, `STRACE_SPEC`, `SPEC_IMPORT_ARGV`, `DRIVE_ARGV`; `VERDICT_CODE` adds the five modules.
+  `high_risk_triggers` and DEEP_TRIGGERS_UNEXPLORED removed.
+- `backend/cavr/sandbox_spec.py`: `spec_steps` / `run_spec(..., drives=())` add the drive steps (default unchanged).
+- `backend/cavr/pipeline.py::_deep`: the package dict gains `project` (project_dir and each file's SHA-256 from the
+  context already read).
+- `backend/cavr/gate_adapter.py`: `DEEP_EVIDENCE` gains decisive_run, runs, triggers, residual, unexplored_guards,
+  drives, loop (unexplored_triggers removed); `BOUNDED_DEEP` states the loop.
+- `backend/commands/report.py` `[owner review]`: the VERIFIED deep line gives runs and driven call sites; a residual
+  names its first trigger.
+- Tests: `tests/test_cavr_activation_loop.py` (new), `tests/test_cavr_call_drive.py` (new),
+  `tests/test_cavr_m2_wheels.py` (new, Docker; also the demo script), `tests/test_cavr_sandbox_deep.py` (changed);
+  recordings `tests/test_cavr_data/traces/loop-drive-quiet` and `loop-drive-send` (`record_events.py`).
+
+### Design decisions
+
+- Canary-only run first, not the highest-risk trigger: it is the reference of every counterfactual difference
+  (PR 13's causal edges) and checks the entries the baseline takes. Alternative: no reference run, use the PR 9
+  empty-harness baseline — rejected, that baseline has no package code, so every package event would look "caused".
+- Explored = the sink's capability in the difference against the canary-only run, not "an event of the capability":
+  an event the package makes without the trigger does not show the branch ran. Cost: a sink that fires in both runs is
+  never explored (UNRESOLVED), which is the fail-closed side.
+- The 8 runs include the canary-only run (Q8 "8 runs per package"); the empty-harness baseline is once per gate run
+  and counts against the 300 s only.
+- Same steps in every run (install, imports, drives): a trigger inside a function the project calls is seen under its
+  spec; the differences compare like with like. Cost: each run is about 1 s longer per drive step.
+- Driving only literal-only call sites: the arguments are the project's own, so a violation found is the package's
+  behaviour under the project's call; computed arguments would need values CAVR would have to invent. The project's
+  own guards around the call are not evaluated (the call is driven regardless), which over-approximates the project.
+- D1 strict residual, D2 credential guard, D3 unique attribution, D4 no predicate feedback: see the plan's decisions.
+- The drive's own output is never read: only strace's trace is trusted (sandbox rule, PR 5).
+
+### Requirements covered
+
+- FR-4 (counterfactual activation): the loop with budget, order, early stop and residuals in the verdict —
+  `test_m2_demo_wheel_through_asent_gate[env_ci/date/hostname/argv/file_flag]` (REJECTED in run 2, clean in run 1).
+- FR-6 / Q8 (fail closed): every clause tested; `[win32]` UNRESOLVED TRIGGER_UNSIMULABLE; `[budget]` UNRESOLVED
+  DEEP_RUN_BUDGET_EXHAUSTED.
+- FR-12 (frontier used by the verdict): `frontier_residual` decides clause 4.
+- NFR-4: `loop.activation_rate`, `loop.new_sensitive_events`, `loop.budget_used` in the evidence.
+- NFR-5: no credential-like project literal enters a run (`test_a_credential_is_never_passed_into_a_run`, 7 cases).
+- NFR-6: `not_exercised` lists every unexplored trigger and every undriven call site with why.
+
+### Ch 7 Test cases
+
+| Test ID | Purpose | Input | Expected | Result |
+|---|---|---|---|---|
+| test_cavr_call_drive.py (33) | drive plan | literal call, no-arg call, imported name; 6 non-literal forms; 7 credential forms; 6 ordinary strings; decorator; changed file; 4 unfindable sites; 2 calls on a line + repeat; 6 calls; 4 KiB args; no project | driven with the literals / not driven with the reason / at most 4 / never raises | pass |
+| test_cavr_activation_loop.py (18) | loop | fake runs (events in normaliser shape) | canary-only first, frontier order, shared activation, difference rule, baseline entries, install step never explores, 8-run budget, package / gate time cut, early stop (trigger and canary run), incomplete runs, refused / unsimulable entries, image and trace checks, drive difference, determinism, no frontier | pass |
+| test_an_env_gated_sink_is_rejected_by_its_counterfactual_run (replaces …_unexplored_trigger_…_until_the_frontier_exists) | Q8 clause 1 | CI wheel, run 1 events-benign, run 2 events-probe | REJECTED in run 2 (spec-…), CI=true in its spec | pass |
+| test_a_trigger_run_that_shows_nothing_leaves_the_trigger_unexplored | clause 4 | both runs events-benign | UNRESOLVED TRIGGER_UNEXPLORED, outcome names run 2 | pass |
+| test_a_trigger_on_a_variable_the_sandbox_fixes_is_unsimulable_and_gets_no_run | clause 4 | `os.getenv('CAVR_DEMO_TRIGGER')` | UNRESOLVED TRIGGER_UNSIMULABLE, 1 run | pass |
+| test_a_driven_call_that_connects_outside_the_contract_is_rejected | drive | `demo.send('x')`, loop-drive-send, deny | REJECTED, key event step drive_1 | pass |
+| test_a_driven_call_inside_its_scope_exercises_the_sink_and_is_verified | drive | same, scoped grant | VERIFIED, exercised_by run 1 drive_1 | pass |
+| test_a_driven_call_that_never_reaches_the_sink_leaves_it_not_exercised | drive | `demo.run()`, loop-drive-quiet | UNRESOLVED DEEP_SINK_NOT_EXERCISED | pass |
+| test_a_call_with_a_computed_argument_is_not_driven_and_says_why | drive | `demo.send(data)` | not driven; reason and not_exercised name `data` | pass |
+| test_two_reachable_sinks_of_one_capability_cannot_be_told_apart_by_an_event | D3 | two connect sinks | UNRESOLVED, both reasons cite D3 | pass |
+| test_an_escalation_without_a_reachable_sink_is_unresolved (changed) | clause 6 | now with a real wheel; plus an empty tree | DEEP_ESCALATION_UNKNOWN; empty tree FRONTIER_INCOMPLETE | pass |
+| test_a_reachable_sink_the_import_never_ran_is_unresolved_not_exercised (changed) | clause 6 | BENIGN, `demo.run()` driven | same rule; reason names the driven call | pass |
+| test_an_import_time_sink_inside_a_scoped_contract_is_verified (changed) | VERIFIED | IMPORT_TIME | VERIFIED; reason "exercised"; 1 canary-only run | pass |
+| test_identity_changes_… (extended), test_report_text_line_for_each_deep_result (extended) | identity / report | new versions, STRACE_SPEC, DRIVE_ARGV; VERIFIED and residual rows | each a new identity; new line text | pass |
+| test_demo_wheel_on_the_real_sandbox[env_trigger] (Docker, changed) | demo | PR 9 TRIGGERED wheel | UNRESOLVED TRIGGER_UNSIMULABLE (was DEEP_TRIGGERS_UNEXPLORED) | pass |
+| test_demo_wheel_on_the_real_sandbox[ci_trigger] (Docker, new) | demo | CI=true wheel | REJECTED DEEP_CONTRACT_VIOLATION | pass |
+| test_m2_demo_wheel_through_asent_gate[env_ci, date, hostname, argv] (Docker) | trigger wheels | Phase 3a wheels, deny | REJECTED in run 2, BLOCK exit 1 | pass |
+| …[file_kube] / [file_flag] (Docker) | file trigger | ~/.kube/config / ~/.cache/deploy.flag with FILE_READ:/tmp/home/.cache | REJECTED in run 1 (SECRET_READ stat) / in run 2 | pass |
+| …[canary_exfil] (Docker) | canary | read ~/.aws/credentials, UDP sendto | REJECTED in run 1 | pass |
+| …[driven_reject] / [driven_verify] (Docker) | drive | `demo.send('x')` deny / scoped | REJECTED (drive_1) BLOCK / VERIFIED ACCEPT exit 0 | pass |
+| …[benign_triggered] (Docker) | in-contract branch | CI=true -> granted connect | VERIFIED ACCEPT exit 0 | pass |
+| …[win32] (Docker) | unsimulable | `sys.platform == 'win32'` | UNRESOLVED TRIGGER_UNSIMULABLE REVIEW exit 2, 1 run | pass |
+| …[budget] (Docker) | budget | 8 env triggers, scoped | UNRESOLVED DEEP_RUN_BUDGET_EXHAUSTED, 8 runs, DEPLOY_8 never run | pass |
+| …[function_sink] (Docker) | today's wheel | sink in `send()`, project calls `demo.run()` | UNRESOLVED DEEP_SINK_NOT_EXERCISED REVIEW exit 2 | pass |
+
+Removed: `test_trigger_gating_only_unrestricted_sinks_is_not_high_risk` (its function `high_risk_triggers` is gone; the
+frontier's risk tests cover it). New: 33 + 18 + 13 + 9 in `test_cavr_sandbox_deep.py` (8 unit, 1 Docker).
+Docker alone: `test_cavr_m2_wheels.py` 13 passed in 131.6 s; the 10 demo wheels of `test_cavr_sandbox_deep.py` 49.2 s.
+Run before the commit: `CAVR_DOCKER=1 pytest tests/test_cavr_*.py tests/test_orchestrator_config.py tests/test_gate_*.py
+tests/test_cli_gate.py tests/test_cli_report.py tests/test_integration.py tests/test_modules.py`: 2260 passed, 12
+skipped (live network), 0 failed, 998 s; no container left; `reports/` unchanged.
+
+### Defects found and fixed
+
+- The PR 9 demo wheel's trigger `os.getenv('CAVR_DEMO_TRIGGER')` is unsimulable: `CAVR_*` variables are fixed by the
+  sandbox (`trigger_frontier.RESERVED_ENV`, PR 10). Its result changed from UNRESOLVED DEEP_TRIGGERS_UNEXPLORED to
+  UNRESOLVED TRIGGER_UNSIMULABLE (status unchanged); the REJECTED env case uses the Phase 3a `CI=true` wheel.
+- The first CI wheel had no `try` around its connect, so its import step failed and the violating run was partial
+  (correctly REJECTED under D6); the demo wheel now catches OSError like the Phase 3a wheels, so its run completes.
+- An unsimulable residual's reason named the first entry twice; fixed.
+- A deep package with no wheel now stops at the frontier (FRONTIER_INCOMPLETE) before the escalation rule; the test
+  that checked DEEP_ESCALATION_UNKNOWN now uses a real wheel, and the empty tree is its own assertion.
+- Review: deferred to the end of Phase 3b (one cavr-reviewer pass over all three commits, Step M2-19).
+
+### Known limitations / deferred
+
+- strace cannot tie an event to a Python line: a driven call that shows an event of the sink's capability counts as
+  exercising the sink only if no other reachable sink shares that capability (D3); within that, the event may still
+  come from other code the call reached.
+- Not driven: call sites with computed arguments, `*`/`**`, decorators, methods on returned objects, async functions
+  and generators (returned, never run), work left to threads or atexit (cut by `os._exit`). The project is not mounted,
+  so a literal path of the project does not exist in the run.
+- The credential guard is a heuristic (D2): a credential that does not look like one is passed.
+- No predicate feedback (D4); `sleep`, cloud metadata, `try`/`import` guards are not in the frontier (Step M2-15).
+- A variable named `CAVR_*` (or any other variable the sandbox fixes) cannot be set, so a trigger on it is
+  unsimulable (UNRESOLVED by design).
+- Nondeterministic events (e.g. a file read only some runs make) could appear in a difference; they matter only when
+  they have the entry's sink capability.
+- The causal graph is PR 13 (Step M2-19); the legacy clean-up is Step M2-18.
+
+### Tool disclosure (Ch 8.7)
+
+- **Generated by Claude Code:** `activation_loop.py`, `call_drive.py`, the `sandbox_deep.py` rewrite, the edits to
+  `sandbox_spec.py`, `pipeline.py`, `gate_adapter.py`, `report.py`, the tests, the two recordings, these notes and the
+  plan edits, from the plan Maryam approved on 2026-11-24 (with D1–D4). **Reviewed by Maryam:** the plan and the
+  decisions; the code not yet. **Verified by:** the runs above (real Docker runs for all 13 demo wheels).
+
+### Supervisor Q&A prep
+
+1. **Why does a trigger run only count when the canary-only run lacks the event?** The trigger is a cause only if
+   changing it changed the behaviour; an event both runs have would have happened anyway. Example: `[env_ci]`'s
+   connect to 198.51.100.24:443 is in run 2 (CI=true) and not in run 1.
+2. **Is calling the project's function with its literals safe?** It runs in the same sandbox (no network, read-only,
+   UID 10001, canaries only), and a literal that looks like a credential is never passed (D2).
+3. **Why can a package with a high-risk trigger never be VERIFIED?** High risk means the sink's capability is not
+   granted; a run that shows it is a violation (REJECTED), and one that does not leaves it unexplored (UNRESOLVED).
