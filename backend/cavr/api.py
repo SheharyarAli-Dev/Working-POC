@@ -356,6 +356,13 @@ async def replay_recorded_run(name: str):
             "stream_url": f"/api/cavr/stream/{run_id}"}
 
 
+@cavr_router.post("/api/cavr/recorded-runs/{rest:path}")
+async def no_recorded_run(rest: str):
+    """Any other path under recorded-runs (several segments, a decoded "../", ...): 404 like an unknown name, so the
+    request never falls through to another route of the app. The path is not used."""
+    raise HTTPException(404, "No recorded run of that name")
+
+
 def _recorded_request(run: dict) -> str:
     command = ((run.get("verdict") or {}).get("request") or {}).get("command")
     return request_text(command) if isinstance(command, list) and all(isinstance(part, str) for part in command) else "recorded gate run"

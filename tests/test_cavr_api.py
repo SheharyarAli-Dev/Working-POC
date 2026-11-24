@@ -994,3 +994,37 @@ def test_without_the_recorded_file_the_list_is_empty_and_every_name_is_404(dashb
     with pytest.raises(HTTPException) as raised:
         asyncio.run(api.replay_recorded_run("env_ci"))
     assert raised.value.status_code == 404
+
+
+# The same names against the whole app (backend.main), sent as raw ASGI paths so no client normalises them first.
+# Without the catch-all route a path of several segments fell through to the dashboard's static files (405).
+MAIN_PROBE = r"""
+import asyncio, json, sys
+import backend.main as m
+
+async def post(raw):
+    path = raw.split("?")[0]
+    from urllib.parse import unquote
+    scope = {"type": "http", "asgi": {"version": "3.0"}, "http_version": "1.1", "method": "POST", "scheme": "http",
+             "path": unquote(path), "raw_path": path.encode(), "root_path": "", "query_string": b"",
+             "headers": [(b"host", b"127.0.0.1:8000")], "server": ("127.0.0.1", 8000), "client": ("127.0.0.1", 50000)}
+    status = []
+    async def receive():
+        return {"type": "http.request", "body": b"", "more_body": False}
+    async def send(message):
+        if message["type"] == "http.response.start":
+            status.append(message["status"])
+    await m.app(scope, receive, send)
+    return status[0]
+
+print(json.dumps([asyncio.run(post("/api/cavr/recorded-runs/" + name)) for name in json.loads(sys.argv[1])]))
+"""
+MAIN_BAD = ["../etc/passwd", "..%2Fetc%2Fpasswd", "%2e%2e", "%2e%2e%2f%2e%2e%2fetc%2fpasswd", "..", "/etc/passwd",
+            "%2Fetc%2Fpasswd", "x" * 5000, "env_ci/../win32", "env_ci/extra", "a/b/c/d"]
+
+
+def test_bad_names_are_404_on_the_whole_app_too(tmp_path):
+    done = subprocess.run([sys.executable, "-c", MAIN_PROBE, json.dumps(MAIN_BAD)], cwd=REPO,
+                          env={**os.environ, "ASENT_DATA": str(tmp_path / "data")}, capture_output=True, text=True, timeout=120)
+    assert done.returncode == 0, done.stderr
+    assert json.loads(done.stdout.strip().splitlines()[-1]) == [404] * len(MAIN_BAD)
