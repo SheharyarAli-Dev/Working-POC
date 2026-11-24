@@ -42,28 +42,35 @@ export const RepairTab: React.FC<RepairTabProps> = ({ state, onApproveReject, de
         <div className="reverification-card"><p>Removal not proposed: {repair.removal_reason}</p></div>
       )}
 
-      <div className="reverification-card">
-        <h6>Candidates</h6>
-        <p>
-          Tried: {shown(repair.budget?.tried)} of at most {shown(repair.budget?.max_candidates)} within{' '}
-          {shown(repair.budget?.seconds)} s. Stopped by the budget: {shown(repair.budget?.stopped_by)}.
-        </p>
-        <ul>
-          {skipped.map((candidate) => (
-            <li key={`skipped-${candidate.version}`}>
-              skipped {candidate.version}: {shown(candidate.status)} {shown(candidate.rule)}: {shown(candidate.reason)}
-            </li>
-          ))}
-        </ul>
-        <details>
-          <summary>{(repair.excluded || []).length} releases left out before any re-check</summary>
+      {repair.result === 'NOT_ATTEMPTED' ? (
+        <div className="reverification-card">
+          <h6>Candidates</h6>
+          <p>No candidate was looked for ({shown(repair.rule)}).</p>
+        </div>
+      ) : (
+        <div className="reverification-card">
+          <h6>Candidates</h6>
+          <p>
+            Tried: {shown(repair.budget?.tried)} of at most {shown(repair.budget?.max_candidates)} within{' '}
+            {shown(repair.budget?.seconds)} s. Stopped by the budget: {shown(repair.budget?.stopped_by)}.
+          </p>
           <ul>
-            {(repair.excluded || []).map((entry) => (
-              <li key={`excluded-${entry.version}`}>{entry.version}: {entry.rule}: {entry.reason}</li>
+            {skipped.map((candidate) => (
+              <li key={`skipped-${candidate.version}`}>
+                skipped {candidate.version}: {shown(candidate.status)} {shown(candidate.rule)}: {shown(candidate.reason)}
+              </li>
             ))}
           </ul>
-        </details>
-      </div>
+          <details>
+            <summary>{(repair.excluded || []).length} releases left out before any re-check</summary>
+            <ul>
+              {(repair.excluded || []).map((entry) => (
+                <li key={`excluded-${entry.version}`}>{entry.version}: {entry.rule}: {entry.reason}</li>
+              ))}
+            </ul>
+          </details>
+        </div>
+      )}
 
       <div className="reverification-card">
         <h6>Limitations</h6>

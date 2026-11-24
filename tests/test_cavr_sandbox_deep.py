@@ -287,6 +287,28 @@ def test_an_unevaluable_guard_in_front_of_a_scoped_sink_is_unexplored(world, tmp
     assert "hash('cavr')" in guard["predicate"] and len(sandbox.calls) == 1  # no frontier entry, so one run
 
 
+def test_the_evidence_lists_the_frontiers_other_guards(world, tmp_path, monkeypatch):
+    """PR 19: the dashboard shows every other_guard, not only the count (at most MAX_GUARDS_LISTED of them)."""
+    world.policy.update(SCOPED_POLICY)
+    escalated(world, OUT_OF_SCOPE_GUARD)
+    Sandbox(monkeypatch, [recorded_run("events-benign")])
+    _, package = verify(world, analyzer(tmp_path))
+    frontier = package["evidence"]["deep"]["evidence"]["frontier"]
+    (guard,) = frontier["other_guards"]
+    assert frontier["other_guards_count"] == 1
+    assert set(guard) == {"id", "package", "version", "file", "line", "predicate", "risk", "capabilities"}
+    assert (guard["file"], guard["line"], guard["risk"], guard["capabilities"]) == ("demo/__init__.py", 3, "medium",
+                                                                                   ["NETWORK_CONNECT"])
+    assert "hash('cavr')" in guard["predicate"]
+
+
+def test_the_listed_other_guards_are_capped():
+    guards = [{"id": str(i), "package": "p", "version": "1", "file": "f.py", "line": i, "predicate": "x", "risk": "low",
+               "sinks": []} for i in range(sandbox_deep.MAX_GUARDS_LISTED + 5)]
+    listed = sandbox_deep._listed_guards({"other_guards": guards})
+    assert len(listed) == sandbox_deep.MAX_GUARDS_LISTED and listed[0]["line"] == 0
+
+
 def test_an_unevaluable_guard_whose_sink_a_run_showed_is_not_this_rule(world, tmp_path, monkeypatch):
     world.policy.update(SCOPED_POLICY)
     shown = {"demo/__init__.py": IMPORT_TIME["demo/__init__.py"].replace(

@@ -1,4 +1,5 @@
 import React from 'react';
+import { SafeText } from './SafeText';
 import { CavrRunState, NOT_COMPUTED, shown } from './types';
 import { Shield, Info, ArrowRight, CheckCircle2, AlertTriangle, XCircle, Search } from 'lucide-react';
 
@@ -89,7 +90,7 @@ export const StageDetailPanel: React.FC<StageDetailPanelProps> = ({ state }) => 
           <h4>{current.title}</h4>
         </div>
         <div className="stage-status-indicator">
-          {verdict === 'ALLOW' && <span className="status-chip good"><CheckCircle2 size={13} /> Verified by the fast gate</span>}
+          {verdict === 'ALLOW' && <span className="status-chip good"><CheckCircle2 size={13} /> {(state.proofData?.packages || []).some((view: any) => view?.deep) ? 'Verified by the fast gate and the deep analysis' : 'Verified by the fast gate'}</span>}
           {verdict === 'BLOCK' && <span className="status-chip bad"><XCircle size={13} /> {policyState === 'BLOCK' ? 'Blocked by the project policy' : 'Rejected: a check failed'}</span>}
           {verdict === 'NEEDS_REVIEW' && <span className="status-chip warn"><AlertTriangle size={13} /> Unresolved (fail closed){v?.escalation ? `: ${v.escalation}` : ''}</span>}
           {!verdict && <span className="status-chip neutral"><Search size={13} /> {state.runId ? 'Run in progress' : 'No run yet'}</span>}
@@ -99,7 +100,7 @@ export const StageDetailPanel: React.FC<StageDetailPanelProps> = ({ state }) => 
       <div className="stage-grid">
         <div className="stage-col">
           <span className="col-label">WHAT IS HAPPENING</span>
-          <p>{explainSimply ? state.currentPlainMessage : current.what}</p>
+          <p><SafeText value={explainSimply ? state.currentPlainMessage : current.what} limit={400} /></p>
         </div>
         <div className="stage-col">
           <span className="col-label">WHY THIS MATTERS</span>
@@ -107,7 +108,7 @@ export const StageDetailPanel: React.FC<StageDetailPanelProps> = ({ state }) => 
         </div>
         <div className="stage-col">
           <span className="col-label">EVIDENCE FOUND</span>
-          <p className="evidence-text">{current.evidence}</p>
+          <p className="evidence-text"><SafeText value={current.evidence} limit={400} /></p>
         </div>
         <div className="stage-col">
           <span className="col-label">WHAT HAPPENS NEXT</span>

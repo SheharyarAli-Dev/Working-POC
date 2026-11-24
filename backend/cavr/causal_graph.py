@@ -208,6 +208,11 @@ def cause(graph, run_n, event):
     return f"in run {run_n}, and also without its trigger"
 
 
+def graph_digest(graph) -> str:
+    """The digest of a graph's content (version, package, nodes, edges): what `build` stores in `digest`."""
+    return _digest(graph)
+
+
 def _digest(graph) -> str:
     body = {key: graph[key] for key in ("version", "package", "nodes", "edges")}
     return hashlib.sha256(json.dumps(body, sort_keys=True, default=str).encode()).hexdigest()

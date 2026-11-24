@@ -215,7 +215,7 @@ def test_the_proof_drawer_prints_the_hash_result_of_each_run(dashboard, tmp_path
     for scenario, pieces in drawers.items():
         verdict = runs[scenario]["cavr_verdict"]
         assert after(pieces, "Status:") == verdict["status"] and after(pieces, "Reason:") == verdict["reason"]
-        assert after(pieces, "fast_gate_ms:") == shown(verdict["fast_gate_ms"]) and "Counterfactual runs (0):" in pieces
+        assert after(pieces, "fast_gate_ms:") == shown(verdict["fast_gate_ms"]) and "Sandbox runs (0):" in pieces
         assert after(pieces, "Container command:") == api.NOT_RUN and "VERIFIED MATCH" not in " ".join(pieces)
     assert after(drawers["tampered_wheel"], "Demo condition:") == "tampered_wheel"
     assert after(drawers["verified"], "Demo condition:") == DASH
@@ -248,10 +248,12 @@ def test_the_overview_of_a_run_without_a_download_names_the_rule_and_no_hash(das
 def test_the_requirements_tab_prints_what_a_stage_returned_and_no_pass_of_its_own(dashboard, tmp_path):
     blocked = run_data(dashboard, "not_on_allowlist")
     (table,) = render(tmp_path, {"view": "requirements", **blocked})
-    returned = lambda requirement: table[table.index(requirement):][5]     # id, name, description, module, event, returned
+    # id, name, description, module, tests, event, returned (PR 19 added the tests column)
+    returned = lambda requirement: table[table.index(requirement):][6]
     assert returned("FR-2") == "BLOCK (NOT_ON_ALLOWLIST)" and returned("FR-6") == "BLOCK (gate / NOT_ON_ALLOWLIST)"
     assert returned("FR-1") == "captured (" + blocked["proof"]["cavr_verdict"]["request"]["source"] + ")"
     assert [returned(requirement) for requirement in ("FR-3", "FR-4", "FR-5", "FR-7", "FR-8", "FR-9", "NFR-1", "NFR-2")] == [DASH] * 8
+    assert [returned(requirement) for requirement in ("FR-11", "FR-12", "FR-13", "FR-14", "FR-15", "NFR-3", "NFR-5")] == [DASH] * 7
     assert returned("FR-10") == blocked["proof"]["certificate_id"]
     assert "PASS" not in table and "FAIL" not in table and "NOT RUN" not in table
 
@@ -384,3 +386,375 @@ def test_the_advisory_card_without_advisories(dashboard, tmp_path):
     assert "<details" not in clean and "<details" not in not_asked
     assert "0 affect this version" in pieces_of(clean) and "pypdf 6.21.4: NO_KNOWN_VULNERABILITY" in " ".join(pieces_of(clean))
     assert after(pieces_of(not_asked), "OSV advisories") == DASH       # the gate blocked the request: OSV was never asked
+
+
+# --- PR 19: the deep analysis view, recorded runs, untrusted event text ----------------------------------------------
+
+from test_cavr_api import RECORDED_FILE  # noqa: E402  (the recorded M2 runs, backend/cavr/recorded/m2-demo-runs.json)
+
+CAVR_SOURCES = [PAGE, *sorted((FRONTEND / "src" / "components" / "cavr").glob("*.ts*"))]
+# Every link the CAVR page may contain. Each one is built from the backend's run id only, never from event text.
+ALLOWED_HREFS = {"AdvisoryList.tsx": ["href={`/api/cavr/proof/${runId}`}"],
+                 "ProofDrawer.tsx": ["href={`/api/cavr/proof/${proof.run_id}`}"],
+                 "AssuranceTab.tsx": ["href = url"]}
+
+
+def recorded_data(dashboard, name, runs=None, monkeypatch=None) -> dict:
+    """One replay of a recorded run (optionally from edited `runs`): what the page gets, as JSON."""
+    if runs is not None:
+        monkeypatch.setattr(api, "recorded_runs", lambda: runs)
+    run_id = f"replay-{name}-{dashboard.count}"
+    dashboard.count += 1
+    api.RUN_EVENTS[run_id], api.RUN_CHAINS[run_id] = [], api.EvidenceChain(run_id)
+    import asyncio
+    asyncio.run(api.run_recorded(run_id, name))
+    return json.loads(json.dumps({"events": api.RUN_EVENTS[run_id], "proof": api.get_proof(run_id)}))
+
+
+def deep_evidence(runs, name) -> dict:
+    return runs[name]["verdict"]["packages"][0]["evidence"]["deep"]["evidence"]
+
+
+def test_no_page_part_sets_inner_html_or_builds_a_link_from_data():
+    for path in CAVR_SOURCES:
+        text = path.read_text(encoding="utf-8")
+        assert "dangerouslySetInnerHTML" not in text and "innerHTML" not in text, path.name
+        assert re.findall(r"\b(?:src|xlinkHref|srcDoc)=\{", text) == [], path.name
+        # Every href in any form (JSX expression, string, template literal or an assignment).
+        hrefs = re.findall(r"href\s*=\s*(?:\{`[^`]*`\}|\{[^}]*\}|\"[^\"]*\"|'[^']*'|\w+)", text)
+        assert hrefs == ALLOWED_HREFS.get(path.name, []), (path.name, hrefs)
+        assert re.findall(r"(?i)xlink:?href", text) == [], path.name
+
+
+def test_the_deep_view_of_a_live_fast_gate_run_says_why_there_is_no_deep_analysis(dashboard, tmp_path):
+    (view,) = render(tmp_path, {"view": "deep", **run_data(dashboard, "verified")})
+    assert "RECORDED RUN" not in view and "Fast gate" in view
+    assert any(piece.startswith("not run: the fast gate did not escalate this package (VERIFIED") for piece in view)
+    assert "Final rule:" not in view
+    (before,) = render(tmp_path, {"view": "deep", "events": [], "proof": {"run_id": None, "request": None}})
+    assert after(before, "Deep analysis") == DASH + " (no run has finished yet)"
+
+
+def test_the_deep_view_of_a_rejected_run_with_its_cause(dashboard, tmp_path):
+    data = recorded_data(dashboard, "env_ci")
+    (view,) = render(tmp_path, {"view": "deep", **data})
+    evidence = deep_evidence(RECORDED_FILE["runs"], "env_ci")
+    assert "RECORDED RUN" in view and after(view, "Final rule:") == "REJECTED" and "DEEP_CONTRACT_VIOLATION" in view
+    assert "Runs (2)" in view and "canary-only" in view and "counterfactual" in view
+    assert "CI=true" in view and "no trigger (canary-only)" in view
+    assert "(os.environ.get('CI') == 'true')" in view and "explored" in view
+    assert "demo.run()" in view and any(piece.startswith("Cause: caused by CI=true.") for piece in view)
+    assert "No canary leak in any run (every violating event is in the graph)." in view
+    assert len(evidence["runs"]) == 2 and view.count("9") >= 2       # 9 canary ids planted in each of the two runs
+    for stage in ("Artifact SHA-256", "Dependency tree", "OSV advisories", "Capability contract", "AST scan", "Sink reachability"):
+        assert stage in view
+
+
+def test_the_deep_view_of_a_verified_run(dashboard, tmp_path):
+    (view,) = render(tmp_path, {"view": "deep", **recorded_data(dashboard, "benign_triggered")})
+    assert after(view, "Final rule:") == "VERIFIED" and "DEEP_RUN_CLEAN" in view and "Runs (2)" in view
+    assert any(piece.startswith("Cause: none named.") for piece in view)
+
+
+def test_the_deep_view_of_unresolved_runs_names_what_was_not_explored(dashboard, tmp_path):
+    win32, budget = (render(tmp_path, {"view": "deep", **recorded_data(dashboard, name)})[0] for name in ("win32", "budget"))
+    assert after(win32, "Final rule:") == "UNRESOLVED" and "TRIGGER_UNSIMULABLE" in win32
+    assert "Unsimulable (1):" in win32 and "not explored" in win32 and "Runs (1)" in win32
+    assert any("the sandbox runs Linux" in piece for piece in win32)
+    assert "Runs (8)" in budget and "DEEP_RUN_BUDGET_EXHAUSTED" in budget
+    assert any(piece.startswith("8 of 8 runs") for piece in budget)
+    assert any("8 sandbox runs for this package is used up" in piece for piece in budget)
+
+
+def test_the_deep_view_shows_the_canaries_planted_and_the_leak_caught(dashboard, tmp_path):
+    (view,) = render(tmp_path, {"view": "deep", **recorded_data(dashboard, "canary_exfil")})
+    text = " ".join(view)
+    assert text.count("Leak caught: run 1, step") == 2
+    assert "a canary value (file:aws-secret-key) left the package in sendto (verbatim)" in text
+    assert "198.51.100.24:53" in view and "file:aws-secret-key" in text
+    assert "canary id not named in the key events" in text     # the second leak (drive step) has no key event
+
+
+def test_the_deep_view_lists_driven_call_sites_and_other_guards(dashboard, tmp_path):
+    driven, guard = (render(tmp_path, {"view": "deep", **recorded_data(dashboard, name)})[0]
+                     for name in ("driven_reject", "guard_out_of_scope"))
+    assert "Call sites driven (1)" in driven and "demo.send('x')" in driven
+    assert "Other guards (conditions CAVR cannot evaluate): 1" in guard and "hash('cavr') % 7 == 99" in guard
+    assert "Unexplored (1):" in guard
+
+
+def test_the_recorded_banner_and_chips(dashboard, tmp_path):
+    banner, live = render(tmp_path, {"view": "banner", **recorded_data(dashboard, "win32")},
+                          {"view": "banner", **run_data(dashboard, "verified")})
+    assert banner[0] == "RECORDED RUN" and RECORDED_FILE["recorded_at"] in " ".join(banner) and live == []
+    (chips,) = render(tmp_path, {"view": "recorded_chips", "runs": api.list_recorded_runs()})
+    assert chips[0].startswith("Recorded M2 runs") and len(chips) == 1 + len(RECORDED_FILE["runs"])
+    assert chips[1:] == [run["display_name"] for run in api.list_recorded_runs()]
+
+
+def test_the_proof_drawer_lists_the_deep_runs_of_a_recorded_run(dashboard, tmp_path):
+    data = recorded_data(dashboard, "env_ci")
+    (drawer,) = render(tmp_path, {"view": "proof", "proof": data["proof"]})
+    assert "Sandbox runs (2, including 1 canary-only run):" in drawer and after(drawer, "Image digest:") == RECORDED_FILE["image_id"]
+    assert not [piece for piece in drawer if piece.startswith("Counterfactual runs")]
+    assert "RECORDED RUN" in drawer and after(drawer, "Container command:") == api.NOT_IN_EVIDENCE
+
+
+HOSTILE = {"script": "<script>alert('cavr')</script>", "img": "<img src=x onerror=alert(1)>",
+           "js": "javascript:alert(document.cookie)", "link": '<a href="javascript:alert(1)">click</a>',
+           "svg": "<svg onload=alert(1)>", "iframe": "<iframe src=javascript:alert(1)></iframe>"}
+LONG = "Z" * 20000
+
+
+def hostile_runs() -> dict:
+    """The recorded env_ci run with every event text an attacker controls replaced by hostile text."""
+    runs = json.loads(json.dumps(RECORDED_FILE["runs"]))
+    evidence = deep_evidence(runs, "env_ci")
+    event = evidence["key_events"][0]
+    event.update({"path": HOSTILE["script"], "argv": [HOSTILE["img"], LONG], "why": HOSTILE["js"], "syscall": HOSTILE["svg"],
+                  "address": {"host": HOSTILE["link"], "port": HOSTILE["iframe"]}, "step": HOSTILE["img"]})
+    trigger = evidence["triggers"][0]
+    trigger.update({"predicate": HOSTILE["link"], "outcome": LONG, "file": "../../etc/passwd" + HOSTILE["svg"]})
+    evidence["drives"]["driven"][0]["call"] = HOSTILE["js"]
+    evidence["frontier"]["other_guards"] = [{"id": "x", "package": HOSTILE["script"], "version": "1", "file": HOSTILE["iframe"],
+                                             "line": 1, "predicate": HOSTILE["img"], "risk": "medium",
+                                             "capabilities": [HOSTILE["link"]]}]
+    evidence["frontier"]["other_guards_count"] = 1
+    # The verdict's reason carries package text in a real deep run (a predicate, a path): hostile and long here.
+    for holder in (runs["env_ci"]["verdict"], runs["env_ci"]["verdict"]["packages"][0],
+                   runs["env_ci"]["verdict"]["packages"][0]["evidence"]["deep"]):
+        holder["reason"] = HOSTILE["script"] + LONG
+    return runs
+
+
+def check_hostile_markup(markup, run_id, printed=True):
+    tags = re.findall(r"<[^>]+>", markup)
+    assert "<script" not in markup.lower() and "<iframe" not in markup.lower() and "<img" not in markup.lower()
+    assert [tag for tag in tags if re.search(r"\son\w+\s*=", tag)] == []                   # no event handler attribute
+    assert [tag for tag in tags if "javascript:" in tag.lower() or "alert(" in tag] == []   # no hostile text in any tag
+    assert set(re.findall(r'href="([^"]*)"', markup)) <= {f"/api/cavr/proof/{run_id}"}
+    text = html.unescape(re.sub(r"<[^>]+>", "\x00", markup))
+    for value in HOSTILE.values() if printed else ():
+        assert value in text, value                                                        # printed, as text
+    # The long value is cut where it is shown, and whole only inside a closed "show more".
+    assert LONG not in html.unescape(re.sub(r"<details.*?</details>", "", markup, flags=re.S))
+    assert "<details open" not in markup and "show more (20" in text and LONG in text
+
+
+def test_hostile_event_text_is_printed_as_escaped_text_only(dashboard, tmp_path, monkeypatch):
+    data = recorded_data(dashboard, "env_ci", hostile_runs(), monkeypatch)
+    deep, *others = render_html(tmp_path, {"view": "deep", **data}, {"view": "proof", "proof": data["proof"]},
+                                {"view": "overview", **data}, {"view": "stage", **data}, {"view": "assurance", **data})
+    check_hostile_markup(deep, data["proof"]["run_id"])
+    for markup in others:      # these views print the verdict's reason (hostile, long), not the events
+        check_hostile_markup(markup, data["proof"]["run_id"], printed=False)
+
+
+def test_the_repair_tab_of_a_deep_rejection_says_repair_was_not_attempted_and_why(dashboard, tmp_path):
+    """PR 19 check of the repair proposal: a deep REJECTED gets the recorded NOT_ATTEMPTED block, printed as it is."""
+    data = recorded_data(dashboard, "env_ci")
+    repair = RECORDED_FILE["runs"]["env_ci"]["repair"]
+    (tab,) = render(tmp_path, {"view": "repair", **data})
+    text = " ".join(tab)
+    assert f"Result: {repair['result']} ({repair['rule']}). {repair['reason']}" in text
+    assert "deep / DEEP_CONTRACT_VIOLATION" in text and "Applied: false. Gate decision changed: false." in text
+    assert not any(piece.startswith("Pin ") or piece.startswith("Remove ") for piece in tab)
+    # Nothing was looked for, so no candidate count is printed; the limitations still say what a re-check would not do.
+    assert "No candidate was looked for (NOT_REPAIRABLE)." in tab and not any(p.startswith("Tried:") for p in tab)
+    assert "fast-gate re-check only: no sandbox and no deep analysis; an escalated candidate is skipped" in tab
+
+
+# --- PR 19: the causal graph tab ---------------------------------------------------------------------------------------
+
+def chains_of(pieces) -> str:
+    """The text of the cause chains: what follows the heading up to the SVG's first column title, joined."""
+    start, end = pieces.index("Cause chains") + 1, pieces.index("Trigger / call site")
+    return " ".join(pieces[start:end])
+
+
+def test_the_graph_of_a_rejected_run_shows_trigger_event_rule_verdict_with_the_caused_by_edge(dashboard, tmp_path):
+    (view,) = render(tmp_path, {"view": "causal", **recorded_data(dashboard, "env_ci")})
+    graph = deep_evidence(RECORDED_FILE["runs"], "env_ci")["causal_graph"]
+    assert "RECORDED RUN" in view and "demo==1.0: causal capability graph" in view
+    # Two events: the connect at import and again in the drive step (which imports the package too).
+    chain = " caused by (os.environ.get('CI') == 'true') (demo/__init__.py:2) → violates NETWORK_CONNECT: denied (default deny) → REJECTED DEEP_CONTRACT_VIOLATION"
+    nodes = {node["id"]: node for node in graph["nodes"]}
+    caused = [nodes[edge["to"]] for edge in graph["edges"] if edge["kind"] == "caused"]
+    assert sorted(event["step"] for event in caused) == ["drive_1", "imports"]
+    assert chains_of(view) == " ".join(f"NETWORK_CONNECT 198.51.100.24:443 (run 2, {event['step']}, trace line {event['line']}){chain}"
+                                       for event in caused)
+    for title in ("Trigger / call site", "Run spec", "Run", "Event", "Contract rule", "Verdict"):
+        assert title in view
+    assert "caused by" in view[view.index("Verdict"):]                       # the label on the drawn edge
+    assert f"{len(graph['nodes'])} nodes, {len(graph['edges'])} edges; digest" in " ".join(view)
+
+
+def test_the_graph_of_a_driven_call_names_the_call_as_the_cause(dashboard, tmp_path):
+    (view,) = render(tmp_path, {"view": "causal", **recorded_data(dashboard, "driven_reject")})
+    assert chains_of(view).startswith("NETWORK_CONNECT 198.51.100.24:443 (run 1, drive_1, trace line ")
+    assert chains_of(view).endswith(" caused by demo.send('x') at app/uses_demo.py:5"
+                                    " → violates NETWORK_CONNECT: denied (default deny) → REJECTED DEEP_CONTRACT_VIOLATION")
+
+
+def test_the_graph_of_a_canary_only_violation_has_no_cause_edge(dashboard, tmp_path):
+    (view,) = render(tmp_path, {"view": "causal", **recorded_data(dashboard, "canary_exfil")})
+    assert any(piece.startswith('No "caused by" edge') for piece in view)
+    assert any(piece.startswith("CANARY_EXFIL 198.51.100.24:53 (run 1, imports, trace line 3934)") for piece in view) and "CANARY_EXFIL: never allowed (no capability can allow it)" in view
+
+
+def test_the_graph_of_a_verified_run_has_a_cause_that_decides_nothing(dashboard, tmp_path):
+    (view,) = render(tmp_path, {"view": "causal", **recorded_data(dashboard, "benign_triggered")})
+    chains = chains_of(view)
+    assert chains.count(" caused by (os.environ.get('CI') == 'true') (demo/__init__.py:2) → within NETWORK_CONNECT: "
+                        "198.51.100.24:443 → does not decide the verdict") >= 1 and "decides" not in chains
+    assert "VERIFIED DEEP_RUN_CLEAN" in view
+
+
+def test_the_decisive_part_is_drawn_and_the_rest_is_on_request(dashboard, tmp_path):
+    (markup,) = render_html(tmp_path, {"view": "causal", **recorded_data(dashboard, "budget")})
+    graph = deep_evidence(RECORDED_FILE["runs"], "budget")["causal_graph"]
+    drawn = markup.count('class="node-group"')
+    assert 0 < drawn <= len(graph["nodes"])
+    assert f"Show all nodes ({len(graph['nodes']) - drawn} more)" in pieces_of(markup)
+
+
+def test_no_graph_is_not_available(dashboard, tmp_path, monkeypatch):
+    (live,) = render(tmp_path, {"view": "causal", **run_data(dashboard, "verified")})
+    assert "Not available: no deep analysis ran for this request, so there are no observed runs to draw." in live
+    runs = json.loads(json.dumps(RECORDED_FILE["runs"]))
+    deep_evidence(runs, "env_ci")["causal_graph"]["nodes"][0]["label"] = "edited after recording"
+    (edited,) = render(tmp_path, {"view": "causal", **recorded_data(dashboard, "env_ci", runs, monkeypatch)})
+    assert "Not available: the graph of this run is missing or does not hash to the digest its evidence names." in edited
+    assert "edited after recording" not in " ".join(edited)
+
+
+def test_hostile_text_in_the_graph_is_escaped_and_cut(dashboard, tmp_path, monkeypatch):
+    from backend.cavr.causal_graph import _digest
+    runs = hostile_runs()
+    evidence = deep_evidence(runs, "env_ci")
+    graph = evidence["causal_graph"]
+    events = [node for node in graph["nodes"] if node["kind"] == "event"]
+    trigger = next(node for node in graph["nodes"] if node["kind"] == "trigger")
+    events[0]["label"] = HOSTILE["script"] + LONG
+    trigger.update({"predicate": HOSTILE["link"], "file": HOSTILE["img"]})
+    next(node for node in graph["nodes"] if node["kind"] == "call")["call"] = HOSTILE["js"]
+    next(node for node in graph["nodes"] if node["kind"] == "rule")["grant"] = HOSTILE["svg"] + HOSTILE["iframe"]
+    # As if a real package had produced this text: the graph and its digest agree, so it is shown.
+    graph["digest"] = evidence["causal"]["digest"] = _digest(graph)
+    data = recorded_data(dashboard, "env_ci", runs, monkeypatch)
+    assert data["proof"]["causal_graphs"]          # shown: the digest matches
+    (markup,) = render_html(tmp_path, {"view": "causal", **data})
+    check_hostile_markup(markup, data["proof"]["run_id"])
+    svg = markup[markup.index("<svg class=\"causal-svg\""):markup.index("</svg>", markup.index("<svg class=\"causal-svg\""))]
+    assert LONG[:200] not in svg                     # SVG labels and titles are cut
+
+
+
+# --- PR 19: the requirements matrix ------------------------------------------------------------------------------------
+
+REQUIREMENT_IDS = [f"FR-{n}" for n in range(1, 16)] + [f"NFR-{n}" for n in range(1, 7)]
+
+
+def matrix_rows(table) -> dict:
+    """id -> [name, description, module, tests, event, returned] of each row."""
+    return {requirement: table[table.index(requirement) + 1:table.index(requirement) + 7] for requirement in REQUIREMENT_IDS}
+
+
+def test_the_matrix_has_every_fr_and_nfr_once_with_real_modules_and_tests(dashboard, tmp_path):
+    (table,) = render(tmp_path, {"view": "requirements", **run_data(dashboard, "not_on_allowlist")})
+    assert [piece for piece in table if re.fullmatch(r"N?FR-\d+", piece)] == REQUIREMENT_IDS
+    not_built = {"FR-9": "not implemented (PR 17, future work)", "FR-14": "not implemented (PR 14; enforcement is future work)"}
+    for requirement, (name, _, modules, tests, _, _) in matrix_rows(table).items():
+        if requirement in not_built:
+            assert modules == tests == not_built[requirement], requirement
+            continue
+        for module in modules.split(" / "):
+            path = REPO / module if "/" in module else REPO / "backend" / "cavr" / module
+            assert path.exists(), (requirement, module)
+        if requirement in ("NFR-2", "NFR-3"):
+            assert tests == "no test yet (PR 20)"
+            continue
+        for test in tests.split(", "):
+            assert (REPO / "tests" / test).is_file(), (requirement, test)
+    assert matrix_rows(table)["NFR-1"][0] == "Package code never runs as root; isolated sandbox"
+
+
+DEAD_MODULES = ("sandbox_runner.py", "counterfactual.py", "inspector.py", "triggers.py", "reconstructor.py", "normalizer.py",
+                "runtime_monitor.py", "harness.py", "lab_harness.py", "policy.py", "repair.py", "resolver.py", "reverifier.py",
+                "repair_engine.py", "trigger_discovery.py", "sandbox.py", "test_cavr_vendored_use.py", "test_cavr_runtime_monitor.py",
+                "test_cavr_sandbox_runner.py")
+
+
+def test_the_matrix_names_no_deleted_or_stub_module():
+    source = (FRONTEND / "src" / "components" / "cavr" / "RequirementsTab.tsx").read_text(encoding="utf-8")
+    named = set(re.findall(r"'([\w./-]+\.py)'", source))
+    assert named and not named & set(DEAD_MODULES)
+    assert not [name for name in DEAD_MODULES if re.search(rf"\b{re.escape(name)}\b", source)]
+
+
+def test_the_design_name_is_used_and_the_old_expansion_is_gone():
+    sources = {path.name: path.read_text(encoding="utf-8") for path in (FRONTEND / "src").rglob("*.ts*")}
+    assert [name for name, text in sources.items() if re.search(r"continuous artifact", text, re.I)] == []
+    assert "export const CAVR_NAME = 'Counterfactual Activation, Verified Repair & Recovery';" in sources["RequirementsTab.tsx"]
+    assert "CAVR module · {CAVR_NAME}" in sources["CavrModule.tsx"] and "<h4>{CAVR_NAME}: verification pipeline</h4>" in sources["CavrModule.tsx"]
+
+
+def test_the_page_header_shows_the_design_name(tmp_path):
+    (page,) = render(tmp_path, {"view": "page"})
+    # In the design document's own case: "VERIFIED" is a status word, and no status is printed before a run.
+    assert "CAVR module · Counterfactual Activation, Verified Repair & Recovery" in page
+    assert "Counterfactual Activation, Verified Repair & Recovery: verification pipeline" in page
+
+
+def test_the_scope_box_uses_the_design_name_and_marks_future_work_as_not_done(dashboard, tmp_path):
+    (table,) = render(tmp_path, {"view": "requirements", **run_data(dashboard, "verified")})
+    assert "CAVR: Counterfactual Activation, Verified Repair & Recovery" in table and "Not done (future work):" in table
+    assert "npm, eBPF observation, Tree-sitter parsing, Sigstore provenance" in table
+    assert "Supply chain typosquatting & homoglyphs" not in table
+
+
+def test_the_matrix_of_recorded_deep_runs_shows_their_values(dashboard, tmp_path):
+    rejected, verified, unresolved = (render(tmp_path, {"view": "requirements", **recorded_data(dashboard, name)})[0]
+                                      for name in ("env_ci", "benign_triggered", "budget"))
+    row = lambda table, requirement: matrix_rows(table)[requirement][5]
+    evidence = deep_evidence(RECORDED_FILE["runs"], "env_ci")
+    assert row(rejected, "FR-4") == "2 run(s), stop: violation"
+    assert row(rejected, "FR-5") == (f"{evidence['causal']['counts']['nodes']} nodes, {evidence['causal']['counts']['edges']} edges; "
+                                     "caused by CI=true")
+    assert row(rejected, "FR-6") == "REJECTED (deep / DEEP_CONTRACT_VIOLATION)"
+    assert row(rejected, "FR-7") == "NOT_ATTEMPTED"
+    assert row(rejected, "FR-11") == "HASH_MATCH / TREE_BUILT / NO_KNOWN_VULNERABILITY (recorded: local test index, OSV not asked)"
+    assert row(rejected, "FR-12") == "FRONTIER_COMPLETE: 1 trigger(s)"
+    assert row(rejected, "FR-13") == "run 1 OK, run 2 VIOLATION"
+    assert row(rejected, "FR-15") == "asent gate BLOCK (exit 1), recorded"
+    assert row(rejected, "NFR-1") == f"image {RECORDED_FILE['image_id'][:19]}…; 2 run(s), HOME removed after each: true"
+    assert row(rejected, "NFR-5") == "9, 9 canary id(s) per run"
+    # The request-level verdict of an all-VERIFIED request is ALL_CHECKS_PASSED; the deep rule is the package's.
+    assert row(verified, "FR-6") == "VERIFIED (verdict / ALL_CHECKS_PASSED)" and row(verified, "FR-4") == "2 run(s), stop: done" and row(verified, "FR-15") == "asent gate ACCEPT (exit 0), recorded"
+    assert row(unresolved, "FR-4") == "8 run(s), stop: runs" and row(unresolved, "FR-15") == "asent gate REVIEW (exit 2), recorded"
+    for table in (rejected, verified, unresolved):
+        assert [row(table, requirement) for requirement in ("FR-9", "FR-14", "NFR-2", "NFR-3")] == [DASH] * 4
+    assert "PASS" not in rejected and "FAIL" not in rejected
+
+
+
+def test_a_recorded_view_says_its_fast_gate_inputs_were_not_pypi_or_osv(dashboard, tmp_path):
+    data = recorded_data(dashboard, "env_ci")
+    banner, deep, table = render(tmp_path, {"view": "banner", **data}, {"view": "deep", **data},
+                                 {"view": "requirements", **data})
+    banner_text = " ".join(banner)
+    assert "Fast-gate inputs of the recorded run (not PyPI, not live OSV):" in banner_text
+    assert RECORDED_FILE["index"] in banner_text and RECORDED_FILE["advisories"] in banner_text
+    text = " ".join(deep)
+    assert "Recorded run: the artifact and tree came from a local test index" in text
+    assert "(seeded, OSV not asked)" in text and "(local test index)" in text
+    assert matrix_rows(table)["FR-11"][5] == "HASH_MATCH / TREE_BUILT / NO_KNOWN_VULNERABILITY (recorded: local test index, OSV not asked)"
+    (live,) = render(tmp_path, {"view": "deep", **run_data(dashboard, "verified")})
+    assert "local test index" not in " ".join(live)
+
+
+def test_the_verified_badge_names_the_deep_analysis_only_when_it_ran(dashboard, tmp_path):
+    deep, fast = render(tmp_path, {"view": "stage", **recorded_data(dashboard, "benign_triggered")},
+                        {"view": "stage", **run_data(dashboard, "verified")})
+    assert "Verified by the fast gate and the deep analysis" in " ".join(deep)
+    assert "Verified by the fast gate" in fast and "deep analysis" not in " ".join(p for p in fast if p.startswith("Verified"))

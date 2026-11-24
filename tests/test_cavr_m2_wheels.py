@@ -11,14 +11,23 @@ As a script (the commands in docs/cavr-demo.md, "M2 demo: real wheels"):
 
     CAVR_DOCKER=1 .venv/bin/python tests/test_cavr_m2_wheels.py <wheel> [<wheel> ...]
 
-prints the `asent report` text of that gate run. Nothing here fakes a verdict: the container, the trace and the
+prints the `asent report` text of that gate run.
+
+    CAVR_DOCKER=1 .venv/bin/python tests/test_cavr_m2_wheels.py --record backend/cavr/recorded/m2-demo-runs.json
+
+(PR 19) runs every wheel once, with repair on, and writes what the dashboard replays without Docker: for each wheel the
+whole pipeline verdict `verify_request` returned inside the gate run, the repair block, the gate decision, the exit code
+and the `asent report` deep line. The file says when, on which commit and image it was recorded. Nothing here fakes a verdict: the container, the trace and the
 judgement are real; only the package index is local (the wheels are not on PyPI).
 """
 from __future__ import annotations
 
 import json
+import platform
+import subprocess
 import sys
 import tempfile
+from datetime import datetime, timezone
 from pathlib import Path
 
 if __name__ == "__main__":  # run as a script: the same imports as under pytest
@@ -94,8 +103,8 @@ CAUSES = {"env_ci": "caused by CI=true", "date": "caused by clock 2027-01-02T12:
           "driven_reject": "caused by calling demo.send('x') at app/uses_demo.py:5"}
 
 
-def gate(name: str, workdir: Path):
-    """(exit code, report, the package's CAVR row) of `asent gate` on the wheel `name`."""
+def gate(name: str, workdir: Path, repair: bool = False):
+    """(exit code, report, the package's CAVR row) of `asent gate` on the wheel `name`. `repair` turns the gate's repair on."""
     files, call, policy_change, _ = WHEELS[name]
     index = FakeIndex()
     index.add("demo", "1.0", build_wheel(workdir / "wheels", "demo", "1.0", files=files))
@@ -110,7 +119,7 @@ def gate(name: str, workdir: Path):
                 tag="head")
     saved = gate_adapter.SETTINGS
     gate_adapter.SETTINGS = {**saved, "transport": index, "osv": None, "advisory_cache_dir": osv, "live_advisories": False,
-                             "repair": False, "deep": "sandbox"}
+                             "repair": repair, "deep": "sandbox"}
     try:
         code, report, _ = run_cli(repo, "base", "head", workdir / "out", "--data-dir", str(workdir / "data"))
     finally:
@@ -168,7 +177,78 @@ def test_m2_demo_wheel_through_asent_gate(name, tmp_path):
     assert cavr_containers() == []
 
 
+REPO = Path(__file__).resolve().parents[1]
+DEMO_DOC = REPO / "docs" / "cavr-demo.md"
+RECORDED_SCHEMA = "cavr.recorded-runs.v1"
+# What the fast-gate part of a recorded run was given (review of PR 19, BLOCKER 2): not PyPI and not live OSV.
+RECORDED_INDEX = ("local test index (FakeIndex): the demo wheels are built by the test and are not on PyPI; the "
+                  "registry digest is computed from the same bytes, so HASH_MATCH shows only that the bytes arrived intact")
+RECORDED_ADVISORIES = ("seeded OSV cache with no advisory for demo 1.0 and live OSV off: OSV was not asked, so "
+                       "NO_KNOWN_VULNERABILITY is the seeded answer")
+
+
+def demo_table() -> dict:
+    """name -> {what, policy, decision, deep_line}: the rows of the table in docs/cavr-demo.md, "M2 demo: real wheels"."""
+    rows = {}
+    text = DEMO_DOC.read_text(encoding="utf-8").split("## M2 demo: real wheels", 1)[1]
+    for line in text.splitlines():
+        cells = [cell.strip() for cell in line.strip().strip("|").split(" | ")]
+        if len(cells) == 5 and cells[0].startswith("`") and cells[0].strip("`") in WHEELS:
+            rows[cells[0].strip("`")] = {"what": cells[1].replace("`", ""), "policy": cells[2].replace("`", ""),
+                                         "decision": cells[3], "deep_line": cells[4].strip("` ")}
+    return rows
+
+
+def record(path: Path):
+    """Run every wheel once (repair on) and write what the dashboard replays (`backend/cavr/api.py`, recorded runs).
+
+    Refuses to run with uncommitted changes to tracked files: the header's commit must be the code that ran."""
+    dirty = subprocess.run(["git", "-C", str(REPO), "status", "--porcelain", "--untracked-files=no"],
+                           capture_output=True, text=True).stdout.strip()
+    if dirty:
+        raise SystemExit(f"--record needs a clean working tree (tracked changes):\n{dirty}")
+    identity = sandbox_identity()
+    table = demo_table()
+    runs = {}
+    for name in WHEELS:
+        verdicts = []
+        real = gate_adapter.verify_request
+
+        def keep(*args, **kwargs):
+            verdicts.append(real(*args, **kwargs))
+            return verdicts[-1]
+
+        gate_adapter.verify_request = keep
+        try:
+            with tempfile.TemporaryDirectory(prefix="cavr-m2-demo-") as directory:
+                code, report, row = gate(name, Path(directory), repair=True)
+        finally:
+            gate_adapter.verify_request = real
+        (verdict,) = verdicts
+        (line,) = cavr_deep(report)
+        runs[name] = {"name": name, "what": table[name]["what"], "policy": table[name]["policy"],
+                      "expected": dict(zip(("status", "rule", "decision", "exit_code"), WHEELS[name][3])),
+                      "decision": report["decision"], "exit_code": code, "deep_line": line.strip(),
+                      "verdict": json.loads(json.dumps(verdict, default=str)), "repair": row.get("repair")}
+        print(f"{name}: {report['decision']} (exit {code}) {line.strip()}", file=sys.stderr)
+    docker = subprocess.run(["docker", "version", "--format", "{{.Server.Version}}"], capture_output=True, text=True)
+    commit = subprocess.run(["git", "-C", str(REPO), "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
+    out = {"schema": RECORDED_SCHEMA,
+           "label": ("recorded: real gate runs with real CAVR sandbox runs, replayed by the dashboard; nothing is run again. "
+                     "The fast-gate inputs were a local test index and a seeded OSV cache (see index, advisories)"),
+           "recorded_at": datetime.now(timezone.utc).isoformat(timespec="seconds"), "commit": commit,
+           "image_id": identity.get("image_id"), "docker_version": docker.stdout.strip() or None,
+           "platform": platform.platform(),
+           "command": "CAVR_DOCKER=1 .venv/bin/python tests/test_cavr_m2_wheels.py --record " + str(path),
+           "source": "docs/cavr-demo.md, M2 demo: real wheels", "working_tree": "clean (tracked files)",
+           "index": RECORDED_INDEX, "advisories": RECORDED_ADVISORIES, "runs": runs}
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(out, indent=1, sort_keys=True) + "\n", encoding="utf-8")
+
+
 def main(names):
+    if names[:1] == ["--record"]:
+        return record(Path(names[1]))
     for name in names or list(WHEELS):
         with tempfile.TemporaryDirectory(prefix="cavr-m2-demo-") as directory:
             code, report, _ = gate(name, Path(directory))

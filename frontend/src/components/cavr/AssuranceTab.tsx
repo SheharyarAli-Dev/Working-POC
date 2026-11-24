@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { SafeText } from './SafeText';
 import { CavrRunState, shown } from './types';
 import { ShieldCheck, Download, CheckCircle2, XCircle, Link2, AlertTriangle, RefreshCw, FileCode, Printer } from 'lucide-react';
 
@@ -154,7 +155,7 @@ export const AssuranceTab: React.FC<AssuranceTabProps> = ({ state }) => {
         <div className="cert-body-preview">
           <div className="cert-verdict-callout">
             <strong>VERDICT: {cert.status} ({cert.stage} / {cert.rule})</strong>
-            <p>{cert.reason}</p>
+            <p><SafeText value={cert.reason} limit={400} /></p>
             <p>"{cert.bounded_trust_claim}"</p>
             <p>
               fast_gate_ms: {shown(cert.fast_gate_ms)} · cache_hit: {shown(cert.cache_hit)} · escalated: {shown(cert.escalated)}
@@ -194,7 +195,7 @@ export const AssuranceTab: React.FC<AssuranceTabProps> = ({ state }) => {
             <ul>
               {residuals.length > 0 ? (
                 residuals.map((r: any, i: number) => (
-                  <li key={i}><code>{r.predicate}</code> ({r.file_line}): {r.reason}</li>
+                  <li key={i}><code><SafeText value={r.predicate} /></code> (<SafeText value={r.file_line} />): <SafeText value={r.reason} limit={400} /></li>
                 ))
               ) : (
                 <li>None reported.</li>

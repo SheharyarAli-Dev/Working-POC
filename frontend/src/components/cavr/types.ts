@@ -21,14 +21,17 @@ export interface CavrRunState {
   resolution: any | null;
   cacheResult: any | null;
   actionData: any | null;
-  counterfactualResults: any | null;
   causalGraph: any | null;
   violatingPaths: any[] | null;
   repair: RepairBlock | null;
   reverification: any | null;
   certificate: any | null;
   reconstruction: any | null;
-  
+  // PR 19: the per-package views of the deep_completed event (backend/cavr/dashboard_view.py), and the `recorded`
+  // block of a replayed recorded run (null for a live run).
+  deepPackages: any[] | null;
+  recorded: any | null;
+
   // The answer of /api/cavr/proof/{run_id}. `proofData.cavr_verdict` is the whole pipeline verdict:
   // status, stage, rule, reason, fast_gate_ms, cache_hit, escalated, escalation, packages[].evidence.
   // `proofData.stages` is the timeline: one StageSummary per stage of the fast gate.
@@ -50,10 +53,6 @@ export const NOT_COMPUTED = '—';
 // A value from the backend as text, or the dash when there is none.
 export const shown = (value: unknown): string =>
   value === null || value === undefined || value === '' ? NOT_COMPUTED : String(value);
-
-// Text shown by a tab whose stage does not exist on the fast-gate path.
-export const NOT_RUN_ON_FAST_GATE =
-  'Not run. The fast gate checks the artifact without executing package code; this stage belongs to deep analysis (M2).';
 
 // One chip, as GET /api/cavr/scenarios describes it. The page holds no package name of its own.
 export interface Scenario {

@@ -754,3 +754,32 @@ Report: asent-report.json
 
 Lines that will differ on your run: the temporary paths, commit ids, `Generated`, the spec id (a hash of the trigger's
 place in the wheel), the canary values (random per run, never printed here).
+
+## Dashboard: recorded M2 runs (no Docker)
+
+The dashboard can show the 14 M2 demo wheels above on any laptop, without Docker or network (PR 19). Their real gate
+runs were recorded once in the CAVR sandbox:
+
+```bash
+CAVR_DOCKER=1 .venv/bin/python tests/test_cavr_m2_wheels.py --record backend/cavr/recorded/m2-demo-runs.json
+```
+
+Recorded 2026-11-24T20:06:15Z on commit `233a4ea` with no tracked change (the recorder refuses otherwise), image
+`sha256:0e88dd461ca4…`, Docker 29.9.3, repair on. Every `CAVR deep` line in the file equals the table above
+(`tests/test_cavr_recorded_runs.py` checks it).
+
+What is real and what is not: the containers, traces, events, frontier, loop, causal graph and gate decision are real.
+The fast-gate inputs are not PyPI or OSV: the wheels come from a local test index (they are not on PyPI; the registry
+digest is computed from the same bytes) and the advisories from a seeded empty OSV cache (OSV was not asked). The
+file's header, the dashboard banner, the fast-gate table and the FR-11 row say so.
+
+In the dashboard (`asent dashboard`, port 8000), the second chip row **"Recorded M2 runs"** replays one of them:
+the recorded verdict goes through the same events, timeline and certificate as a live run, nothing is run, nothing is
+logged or cached, and every view (and the printable certificate) shows a **RECORDED RUN** banner with the date, image,
+gate decision and the fast-gate inputs. Open the
+**Deep analysis** tab (runs, frontier, driven call sites, other guards, budget, canaries and leaks, final rule) and the
+**Causal Graph** tab (trigger or call site -> event -> contract rule -> verdict, "caused by" edges).
+
+Good ones to show: `env_ci` (REJECTED, caused by CI=true), `canary_exfil` (the canary leak), `driven_reject` (caused by
+a driven call), `benign_triggered` (VERIFIED), `budget` and `win32` (UNRESOLVED). Screenshots:
+`docs/report-notes/screenshots/`.

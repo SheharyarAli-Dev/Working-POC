@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { SafeText } from './SafeText';
 import { CavrRunState, NOT_COMPUTED } from './types';
 import { ChevronDown, ChevronRight, AlertTriangle, CheckCircle2, XCircle } from 'lucide-react';
 
@@ -130,7 +131,7 @@ export const CapabilityContractTab: React.FC<CapabilityContractTabProps> = ({ st
                       <td colSpan={5}>
                         <div className="matrix-detail-box">
                           <div className="detail-meta">
-                            <strong>Evidence:</strong> <code>{row.evidence}</code>
+                            <strong>Evidence:</strong> <code><SafeText value={row.evidence} /></code>
                           </div>
                           <p className="detail-justification">{row.justification}</p>
                           {hasMismatch && (

@@ -56,8 +56,9 @@ import time
 import tomllib
 from pathlib import Path
 
+from backend.cavr.causal_graph import activation_text
 from backend.cavr.manifest_parser import snapshot_requirements
-from backend.cavr.pipeline import verify_request
+from backend.cavr.pipeline import ESCALATION, verify_request
 from backend.cavr.repair_proposal import BUDGET_SECONDS, no_repair, not_attempted, propose_repair
 from backend.cavr.storage import CavrStorage
 from backend.cavr.verdict_cache import KEY_FIELDS
@@ -127,6 +128,73 @@ def _deep_row(evidence: dict):
     row.update({key: inner.get(key) for key in DEEP_EVIDENCE})
     row["baseline_sha256"] = (inner.get("baseline") or {}).get("sha256")
     return row
+
+
+# The fields of the orchestrator's assurance report (`asent.assurance.v1`) that read the LOCAL lab before Step M2-18
+# (PR 19). `assurance_fields` fills them from the CAVR rows' deep results.
+ASSURANCE_FIELDS = ("discovered_triggers", "triggered_conditions", "exercised_conditions", "unresolved_conditions",
+                    "execution_modes", "observed_security_events", "causal_evidence")
+NO_PACKAGE = "CAVR checked no package in this run"
+RUN_KEYS = ("n", "kind", "spec_id", "rule", "completed", "elapsed_seconds", "container")
+
+
+def assurance_fields(evidence: list) -> dict:
+    """The seven lab fields of the assurance report, from the CAVR evidence records' package rows. Never raises.
+
+    Each field is one entry per package: {"package": "name==version", ...the package's deep data...}, or
+    {"package", "not_available": why} when the deep stage did not run for it. With no CAVR package row at all each
+    field is [{"not_available": NO_PACKAGE}]: never an empty list, and never a value that was not observed.
+    """
+    fields = {name: [] for name in ASSURANCE_FIELDS}
+    for record in evidence or []:
+        if not isinstance(record, dict) or record.get("analyzer") != "CAVR":
+            continue
+        details = record.get("details") if isinstance(record.get("details"), dict) else {}
+        stage = details.get("deep_stage") if isinstance(details.get("deep_stage"), dict) else {}
+        for row in details.get("nodes") or []:
+            if isinstance(row, dict):
+                for name, entry in _package_fields(row, stage).items():
+                    fields[name].append(entry)
+    return {name: entries or [{"not_available": NO_PACKAGE}] for name, entries in fields.items()}
+
+
+def _package_fields(row: dict, stage: dict) -> dict:
+    package = f"{row.get('name')}=={row.get('version')}"
+    deep = row.get("deep")
+    if not isinstance(deep, dict):
+        if row.get("escalation") == ESCALATION:
+            why = f"escalated, but {stage.get('reason') or 'no deep analyzer was given'}"
+        else:
+            why = f"the fast gate did not escalate this package ({row.get('status')} {row.get('rule')})"
+        return {name: {"package": package, "not_available": f"the deep stage did not run: {why}"} for name in ASSURANCE_FIELDS}
+    items = lambda key: [item for item in (deep.get(key) if isinstance(deep.get(key), list) else []) if isinstance(item, dict)]
+    text = _activation_text
+    triggers, runs = items("triggers"), items("runs")
+    causal = deep.get("causal") if isinstance(deep.get("causal"), dict) else {}
+    return {
+        "discovered_triggers": {"package": package, "triggers": triggers},
+        "triggered_conditions": {"package": package, "conditions": [
+            {key: trigger.get(key) for key in ("id", "file", "line", "predicate", "risk", "run")}
+            | {"activation": text(trigger.get("activation"))} for trigger in triggers if trigger.get("outcome") == "explored"]},
+        "exercised_conditions": {"package": package, "runs": [
+            {key: run.get(key) for key in RUN_KEYS} | {"activation": text(run.get("activation"))} for run in runs]},
+        "unresolved_conditions": {"package": package, "residual": deep.get("residual"),
+                                  "unexplored_guards": items("unexplored_guards"),
+                                  "not_exercised": [item for item in deep.get("not_exercised") or [] if isinstance(item, str)]
+                                  if isinstance(deep.get("not_exercised"), list) else []},
+        "execution_modes": {"package": package, "mode": "CAVR sandbox (deep stage)" if runs else
+                            "CAVR sandbox (deep stage): no run was started", "image_id": deep.get("image_id"),
+                            "runs": len(runs), "elapsed_seconds": deep.get("elapsed_seconds")},
+        "observed_security_events": {"package": package, "events": items("key_events")},
+        "causal_evidence": {"package": package, **{key: causal.get(key) for key in ("digest", "counts", "cause", "error")}},
+    }
+
+
+def _activation_text(activation):
+    try:
+        return activation_text(activation) if isinstance(activation, dict) else None
+    except Exception:  # a malformed activation is shown as none, never raised (assurance_fields never raises)
+        return None
 
 
 def _deep_analyzer(settings, data_root):
