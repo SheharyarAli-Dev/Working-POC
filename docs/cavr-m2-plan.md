@@ -115,8 +115,8 @@ design part. **not started** = nothing, or only a stub that returns constants (a
 | 20 | Minimal safe repair (FR-7, P10, §6.9) | partial (level 1 done) | `repair_proposal.propose_repair` (2026-11-23): newer releases of the same package from the registry, minus pre-release, yanked, wheel-less and OSV-affected (package-wide answer, 24 h), same major first, at most 5 candidates in 60 s; removal when never imported and nothing depends on it; a proposed patch (requirements diff, lockfile entry, approved pins) for a person (Q9); `test_cavr_repair.py` (26), `test_cavr_repair_surfaces.py` (10). `repair.rank_repairs` + orchestrator `_repair` remain for the LOCAL-lab demo until PR 12 | Cost terms (w1–w4) not computed: the order is smallest upgrade, same major first; no constraints from other packages' Requires-Dist (no resolver); no downgrades; level 2 (transitive path) absent; level 4 (replacement) is future work (Q3); `repair.rank_repairs` and the orchestrator's CAVR `_repair` deleted with the LOCAL lab (Step M2-18) |
 | 21 | Re-verification (FR-8, P11, §6.10) | partial (fast gate) | Each candidate: full `verify_request` on a temporary copy of the project with the patched requirements, lockfile and policy, fresh quarantine, no store; the copy must read like the project; only VERIFIED, not escalated is proposed (`repair_proposal._check_pin`). `reverifier.py` deleted | Fresh sandbox per candidate; project tests (Q10); deep analysis of an escalated candidate |
 | 22 | Clean reconstruction (FR-9, P12, §6.11) | not started | `reconstructor.reconstruct_environment` returns a constant; its "baseline digest" is the hash of a time string (fixture-faked) | Build from the trusted baseline + verified hash-pinned tree in a fresh environment; check installed RECORD hashes; real baseline digest. Building block: `pip_shim.install_plan` |
-| 23 | Evidence chain and certificate (FR-10, P13) | partial | `assurance.EvidenceChain`, `verify_chain`, `certificate_for_verdict` (dashboard); orchestrator chain + `asent.assurance.v1` (orchestrator-owned); `test_cavr_api.py` | `compute_record_hash` does not hash `ts` or `substep` (changes to them are not detected); "Terminal Hash" is taken before the final record; certificate has no baseline digest, deep-run, repair or reconstruction fields; no SARIF |
-| 24 | Dashboard requirements matrix | partial | `RequirementsTab.tsx` (FR-1..10, NFR-1..2, prints backend values only); `test_cavr_frontend.py` (21) | Scope box expands CAVR as "Continuous Artifact Verification and Runtime" (design: Counterfactual Activation, Verified Repair & Recovery) and lists defences the fast gate does not do; module column names legacy modules; FR-4/5/7/8/9 and NFR-1 always show a dash; no rows for FR-11..15, NFR-3..6 |
+| 23 | Evidence chain and certificate (FR-10, P13) | partial | `assurance.EvidenceChain`, `verify_chain`, `certificate_for_verdict` (dashboard); orchestrator chain + `asent.assurance.v1` (orchestrator-owned); `test_cavr_api.py` | ~~`compute_record_hash` does not hash `ts` or `substep`~~ (done in PR 19: hash version 2, `test_cavr_assurance.py`); "Terminal Hash" is taken before the final record; certificate has no baseline digest, deep-run, repair or reconstruction fields; no SARIF |
+| 24 | Dashboard requirements matrix | done (PR 19, 2026-11-25: 21 rows from real modules and tests, deep values, design name) — was partial | `RequirementsTab.tsx` (FR-1..10, NFR-1..2, prints backend values only); `test_cavr_frontend.py` (21) | Scope box expands CAVR as "Continuous Artifact Verification and Runtime" (design: Counterfactual Activation, Verified Repair & Recovery) and lists defences the fast gate does not do; module column names legacy modules; FR-4/5/7/8/9 and NFR-1 always show a dash; no rows for FR-11..15, NFR-3..6 |
 
 ### Non-functional requirements
 
@@ -479,6 +479,11 @@ the evaluation script writes the metrics table for the report from real runs.
   done; remove the unreachable branches with hardcoded "OSV Clean" ticks. `CavrModule.tsx` as needed
   (`[owner review: frontend/src/components/CavrModule.tsx]`).
 - Tests first: `test_cavr_frontend.py` render tests per row with and without the stage's data.
+- As built (2026-11-25, Phase 5a, report notes Step M2-21): also the CAVR deep view per package (Deep analysis and
+  Causal Graph tabs), recorded M2 runs replayed without Docker (`backend/cavr/recorded/m2-demo-runs.json`,
+  labelled "recorded"; the name is only a key of that fixed list), untrusted event text escaped and cut (`SafeText`),
+  FR-10 record hash version 2 (ts and substep), and the orchestrator's assurance fields from the deep result
+  (`gate_adapter.assurance_fields`, `[owner review: backend/orchestrator/service.py]`).
 
 ### PR 20 — `test(cavr): NFR guards and legacy removal check`
 
@@ -545,6 +550,6 @@ Stated as limitations in the report and on the dashboard, not implemented in M2:
 - [ ] PR 18 assurance certificate
 
 ### Phase 5 — Dashboard and evaluation
-- [ ] PR 19 requirements matrix
+- [x] PR 19 dashboard (branch `cavr-m2-dashboard`, 2026-11-25; report notes Step M2-21): requirements matrix FR-1..15 / NFR-1..6, deep view per package, causal graph, recorded M2 runs without Docker, FR-10 hash v2, orchestrator assurance fields
 - [ ] PR 20 NFR guards + legacy removal check
 - [ ] PR 21 evaluation corpus

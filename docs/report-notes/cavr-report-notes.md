@@ -6428,3 +6428,155 @@ left. No full-suite run for this step.
    tested. Example: `guard_out_of_scope` would connect to 203.0.113.9, outside the grant.
 2. **Does this make clean packages UNRESOLVED?** Only those with such a guard in front of a scoped or denied sink; the
    13 other demo wheels kept their results byte for byte.
+
+## Step M2-21 — Dashboard: deep view, causal graph, recorded M2 runs, matrix (PR 19, Phase 5a) (2026-11-25)
+
+Plan agreed with Maryam on 2026-11-24 (Q1: versioned FR-10 hash; Q2: Playwright in a scratchpad environment; Q3: four
+screenshots; addition: the recorded-run name is only looked up in the fixed list). Branch `cavr-m2-dashboard`,
+commits `cbe252b` .. `c165af7`. Screenshots (dashboard on port 8000, headless Chromium):
+`docs/report-notes/screenshots/cavr-rejected-env_ci.png`, `cavr-rejected-env_ci-causal-graph.png`,
+`cavr-verified-benign_triggered.png`, `cavr-unresolved-budget.png`, `cavr-unresolved-win32.png`.
+
+### Ch 6 Implementation
+
+- `backend/cavr/assurance.py` (FR-10): `compute_record_hash(record)` hashes one canonical JSON list of `hash_version`,
+  seq, ts, phase, substep, type, data, prev_hash; new records carry `hash_version: 2`. `verify_chain` checks a record
+  without `hash_version` with `compute_record_hash_v1` (the old text hash) and counts it in `legacy_records`; refuses
+  an unknown version and a legacy record after a version-2 record. `certificate_for_verdict`: with deep evidence,
+  `sandbox_execution` names each deep result (rule, run count, image), a deep VERIFIED claim says what the runs did,
+  the residual lists `not_exercised`; the printable HTML shows a RECORDED block for a replay.
+- `backend/cavr/sandbox_deep.py`: `_listed_guards` puts the frontier's `other_guards` (at most `MAX_GUARDS_LISTED` =
+  50) into the deep evidence. `backend/cavr/causal_graph.py`: public `graph_digest`.
+- `tests/test_cavr_m2_wheels.py --record PATH`: runs the 14 demo wheels through `asent gate` in the CAVR sandbox
+  (repair on), keeps each run's pipeline verdict (by wrapping `gate_adapter.verify_request`), repair block, decision,
+  exit code and deep line; refuses a tree with tracked changes. Output `backend/cavr/recorded/m2-demo-runs.json`
+  (header: date, commit, image, Docker version, `index` and `advisories` provenance).
+- `backend/cavr/api.py`: `GET /api/cavr/recorded-runs`, `POST /api/cavr/recorded-runs/{name}` (`run_recorded` replays
+  through `publish_verdict`, the same events, timeline and certificate as a live run; `recorded` in every event, the
+  proof and the certificate; no store). The name is a key of the dictionary loaded once from `RECORDED_PATH`; a
+  catch-all `POST /api/cavr/recorded-runs/{rest:path}` answers 404. A `deep_completed` event (step 5) when deep
+  evidence exists; the proof has `packages` and `causal_graphs`; its sandbox fields come from the deep runs or say
+  `NOT_RUN` ("not available: no deep analysis ran for this request").
+- `backend/cavr/dashboard_view.py`: `package_views` (per package: fast-gate stage rules and reasons; the deep block:
+  runs with activation, judged result and canary ids, frontier entries and outcomes, driven / not-driven call sites,
+  other and unexplored guards, budget, residual, key events, leaks, causal summary) and `causal_graphs`. Leaks are the
+  graph's `CANARY_EXFIL_ATTEMPT` events with the key event's `why` (which canary id). A graph is used only when
+  `graph_digest(graph)` equals the digest its evidence names.
+- `backend/cavr/gate_adapter.py`: `assurance_fields(evidence)`; `backend/orchestrator/service.py` `[owner review]`
+  calls it for `discovered_triggers`, `triggered_conditions`, `exercised_conditions`, `unresolved_conditions` (CAVR
+  part), `execution_modes`, `observed_security_events`, `causal_evidence`.
+- Frontend (`frontend/src/components/cavr/`): `SafeText.tsx` (text only, cut at 160 characters with a closed "show
+  more"), `DeepAnalysisTab.tsx` (replaces `CounterfactualTab.tsx`), `CausalGraphTab.tsx` (rewritten: SVG columns
+  trigger / call -> spec -> run -> event -> rule -> verdict; cause chains; decisive part by default),
+  `RecordedChips.tsx`, `RecordedBanner.tsx`, `RequirementsTab.tsx` (21 rows, Tests column, `CAVR_NAME`);
+  `CavrModule.tsx` `[owner review]` (recorded chips, banner, tab "Deep analysis", design name).
+- Key algorithm (replay): look the name up in the fixed dictionary -> deep-copy the recorded verdict -> the live
+  path's `publish_verdict` with `recorded` set -> each event goes into the run's hash chain -> the page builds its state
+  from the stream with the same reducer as a live run.
+
+### Design decisions
+
+- FR-10 versioned (Q1 a) rather than strict: SABLE saves its chains, which would fail as tampered after a strict
+  change. A legacy record is reported, not hidden; going back to the old hash inside a chain is refused.
+- Recorded runs, not a fake: the file is the output of real gate runs; the replay reuses the live path, so the
+  recorded data meets the same code. Alternative (re-run in Docker on demand) fails the "any laptop" demo.
+- The name is only a dictionary key (Maryam's addition); a catch-all route keeps multi-segment paths from reaching
+  the static mount (405 before the fix).
+- View code in `dashboard_view.py`: an existing test forbids `api.py` importing the graph code or hashing; the view
+  needs the digest comparison and the activation text. The test was not changed; the indirect import is stated in the
+  module docstring. Open for Maryam: update that test's intent (it predates the PR 13 rewrite of `causal_graph.py`).
+- The graph is hand-written SVG (no new library). Only "caused by" edges carry a label on the drawing; all edges are
+  listed as text, so nothing depends on the picture alone.
+- Untrusted text only as React text through `SafeText`; no event value in any attribute.
+
+### Requirements covered
+
+- FR-4, FR-5, FR-12, FR-13, NFR-5: shown from the deep evidence — `test_the_deep_view_of_*`,
+  `test_the_graph_of_*`, `test_the_canary_leak_is_named_in_the_view`.
+- FR-10: `test_changing_any_one_field_of_a_record_is_detected[ts]`, `[substep]`.
+- FR-15 / orchestrator: `test_the_report_of_a_gate_run_carries_the_deep_fields`.
+- NFR-6: replayed deep certificate states runs and not-exercised conditions —
+  `test_the_certificate_of_a_replayed_deep_verified_run_says_what_the_sandbox_did`.
+- Dashboard matrix (checklist row 24): `test_the_matrix_has_every_fr_and_nfr_once_with_real_modules_and_tests`.
+
+### Ch 7 Test cases
+
+| Test ID | Purpose | Input | Expected | Result |
+|---|---|---|---|---|
+| test_cavr_assurance.py::test_changing_any_one_field_of_a_record_is_detected (6 cases) | FR-10 | one field of record 2 changed (ts, substep, seq, phase, type, data) | chain broken at that record | pass |
+| test_cavr_assurance.py::test_a_legacy_record_after_a_version_2_record_is_refused | no downgrade | v2 chain, tail rewritten with the old hash | refused | pass |
+| test_cavr_assurance.py::test_a_legacy_chain_still_verifies_and_is_reported_as_legacy | SABLE compatibility | 3 old-format records | intact, legacy_records 3 | pass |
+| test_cavr_recorded_runs.py::test_each_recorded_deep_line_is_the_line_docs_cavr_demo_md_shows (14) | recording = doc | recorded file | each line equals the doc table | pass |
+| test_cavr_recorded_runs.py::test_the_recorder_refuses_a_dirty_working_tree | provenance | tracked change | SystemExit, nothing written | pass |
+| test_cavr_recorded_runs.py::test_no_host_path_is_in_the_file, test_the_canary_leak_is_recorded_by_its_id_only | privacy, NFR-5 | recorded file | no home path, no canary value | pass |
+| test_cavr_api.py::test_a_replay_publishes_the_recorded_verdict_labelled_recorded_and_runs_nothing (5) | replay | env_ci, benign_triggered, win32, budget, canary_exfil | no download, not logged or cached, `recorded` on every event, chain intact | pass |
+| test_cavr_api.py::test_a_name_that_is_not_in_the_recorded_list_is_404_over_http (12) | lookup only | ../etc/passwd, %2e%2e, absolute, 5000 characters, ... | 404, no run | pass |
+| test_cavr_api.py::test_bad_names_are_404_on_the_whole_app_too | whole app | 11 raw ASGI paths on backend.main | all 404 | pass |
+| test_cavr_api.py::test_the_lookup_never_touches_the_filesystem_for_a_name (11) | no path built | open / read_text / exists patched to fail | 404 | pass |
+| test_cavr_api.py::test_a_recorded_graph_whose_digest_does_not_match_is_not_shown | consistency | one node label edited | graph left out, digest_checked false | pass |
+| test_cavr_api.py::test_the_certificate_of_a_replayed_deep_verified_run_says_what_the_sandbox_did | review BLOCKER 1 | benign_triggered | no "No package code was run"; runs and image; RECORDED block in HTML | pass |
+| test_cavr_api.py::test_a_malformed_recording_ends_its_stream_with_no_result | fail closed | verdict without stage / packages | final event, no proof, RECORDING_UNUSABLE | pass |
+| test_cavr_frontend.py::test_hostile_event_text_is_printed_as_escaped_text_only | XSS | `<script>`, `<img onerror>`, `javascript:`, 20000 characters in path, argv, predicate, address, reason | no tag, handler or javascript: in markup; only the run's proof link; long value only inside a closed "show more" | pass |
+| test_cavr_frontend.py::test_hostile_text_in_the_graph_is_escaped_and_cut | XSS in SVG | hostile node labels, digest recomputed | escaped; SVG labels cut | pass |
+| test_cavr_frontend.py::test_no_page_part_sets_inner_html_or_builds_a_link_from_data | sources | every CAVR source | no innerHTML; only 3 fixed hrefs; no src/xlink | pass |
+| test_cavr_frontend.py::test_the_graph_of_a_rejected_run_shows_trigger_event_rule_verdict_with_the_caused_by_edge | FR-5 | env_ci | two chains "… caused by (os.environ.get('CI') == 'true') … → violates NETWORK_CONNECT … → REJECTED" | pass |
+| test_cavr_frontend.py::test_the_deep_view_of_unresolved_runs_names_what_was_not_explored | FR-4 / Q8 | win32, budget | unsimulable reason; 8 of 8 runs, DEPLOY_8 not explored | pass |
+| test_cavr_frontend.py::test_a_recorded_view_says_its_fast_gate_inputs_were_not_pypi_or_osv | review BLOCKER 2 | env_ci | banner, table and FR-11 name the local index and seeded OSV | pass |
+| test_cavr_frontend.py::test_the_matrix_has_every_fr_and_nfr_once_with_real_modules_and_tests | row 24 | blocked run | 21 rows; every module and test file exists | pass |
+| test_cavr_assurance_fields.py::test_the_report_of_a_gate_run_carries_the_deep_fields | orchestrator | asent gate, fake sandbox | the 7 fields hold the deep data | pass |
+| test_cavr_assurance_fields.py::test_a_package_the_fast_gate_did_not_escalate_is_not_available_with_the_reason | never empty | fast VERIFIED row | not_available with the reason in every field | pass |
+
+Existing results that changed (all listed in the plan): `test_the_requirements_tab_prints_what_a_stage_returned_and_no_pass_of_its_own`
+(the returned cell moved from piece 5 to 6: new Tests column); the proof's `NOT_RUN` text (assertion unchanged); every
+evidence-chain hash (none hard-coded); the deep `analyzer_version` (cache miss only); the orchestrator's 7 fields
+(always empty before). Flask / InvoiceHub verdicts and the 7 live chips: unchanged. Test files: `test_cavr_assurance.py`
+18 collected (new), `test_cavr_recorded_runs.py` 63 (new), `test_cavr_assurance_fields.py` 12 (new),
+`test_cavr_api.py` 126 (48 -> 68 functions), `test_cavr_frontend.py` 52 (21 -> 46 functions), `test_cavr_sandbox_deep.py` 52.
+Per commit: `tsc -b`, `vite build`, the API, render and dashboard tests (287 to 326 passed). Re-recording: 14 of 14
+deep lines equal the doc.
+Full suite after the review fixes and the re-recording (`a7a1bce`, `.venv/bin/python -m pytest -q`): 3082 passed, 97
+skipped (Docker / live), 1 xfailed (SATRA known limit), 0 failed, 800 s. The badge fix after it (`c165af7`, one
+component and one render test) got the per-commit checks only: 297 passed.
+
+### Defects found and fixed
+
+- Recorded fixture provenance, replayed certificate wording and the recorded commit (review BLOCKERs 1–3): fixed in
+  `233a4ea`, re-recorded in `a7a1bce`.
+- A multi-segment POST under recorded-runs got 405 from the static mount on the real app (found on the live server):
+  catch-all 404 route, `693f2ed`.
+- Two identical-looking cause chains for env_ci (the connect at import and again in the drive step): event labels now
+  carry run, step and trace line.
+- Found on the screenshots: tiny section headings, fixed 380 px graph height, edge labels on top of nodes: `bcc1ce5`;
+  a replayed deep VERIFIED badged "Verified by the fast gate" although the fast gate had escalated it: `c165af7`.
+- Review (cavr-reviewer): 1 pass, fix first: 3 BLOCKER / 4 MAJOR / 10 MINOR; all BLOCKERs and MAJORs addressed
+  (MAJOR 2 by docstrings, the test left as it is), 9 MINORs fixed, 1 MINOR open (proof drawer label).
+
+### Known limitations / deferred
+
+- Live chips run the fast gate only (the sample project has no escalated package); the deep view is shown with the
+  recorded runs. Live deep runs from the dashboard: not in this PR.
+- The digest check proves consistency, not that the recording file was not edited; `counts` is not covered by it.
+- The certificate's terminal hash is still taken before the final record; certificate fields of PR 18 (baseline
+  digest, SARIF) not done.
+- Open MINOR: the proof drawer still says "Counterfactual runs (N)" while N includes the canary-only run (an existing
+  test asserts that label).
+- `test_api_imports_none_of_the_fixture_or_simulation_modules` still lists `backend.cavr.causal_graph` as forbidden
+  for `api.py` (written for the legacy graph); `api.py` reaches it through `dashboard_view`. For Maryam to decide.
+
+### Tool disclosure (Ch 8.7)
+
+- **Generated by Claude Code:** all code, tests, the recorder, the recording runs, the screenshots and these notes.
+  **Reviewed by Maryam:** the plan and its three decisions; the code not yet. **Verified by:** the per-commit checks,
+  the cavr-reviewer pass, the full suite, the 14 recorded lines compared with `docs/cavr-demo.md`, and the screenshots
+  taken from the running dashboard (`docs/report-notes/screenshots/`).
+
+### Supervisor Q&A prep
+
+1. **Which parts of a replayed result were really observed?** The sandbox part: containers, traces, events, frontier,
+   loop, graph and gate decision. The fast-gate inputs came from a local test index and a seeded OSV cache; the
+   banner, the fast-gate table, FR-11 and the certificate say so.
+2. **Could a replay be mistaken for a live run?** Every event, the proof, the certificate JSON and the printable
+   certificate carry `recorded`; the page shows a RECORDED RUN banner and a "RECORDED REPLAY" pill.
+3. **Can event text attack the dashboard?** It is only printed as React text, cut with a "show more"; no event value
+   goes into an attribute or link. `test_hostile_event_text_is_printed_as_escaped_text_only` uses `<script>`,
+   `javascript:` and 20000-character values.
