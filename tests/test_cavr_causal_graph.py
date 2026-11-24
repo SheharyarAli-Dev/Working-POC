@@ -20,6 +20,15 @@ def explore(found, events_for, contract=DENY_ALL):
                                    synthesize=env_synthesis.synthesize, canary_spec=env_synthesis.canary_spec)
 
 
+def reads_granted():
+    """The scoped contract with FILE_READ granted everywhere: reads are within it, other things still violate."""
+    contract = scoped_contract()
+    contract["allowed"] = contract["allowed"] + [{"capability": "FILE_READ", "scope": "*", "status": "OPTIONAL",
+                                                  "source": "test", "justification": "test"}]
+    contract["denied"] = [d for d in contract["denied"] if d["capability"] != "FILE_READ"]
+    return contract
+
+
 def kinds(graph, kind):
     return [n for n in graph["nodes"] if n["kind"] == kind]
 
@@ -118,22 +127,42 @@ def test_each_activation_family_is_named_in_the_cause():
 
 
 def test_the_graph_is_deterministic_and_its_digest_follows_every_event():
-    found, loop = ci_world()
-    first = causal_graph.build("demo 1.0", found, {"drives": []}, loop, DENY_ALL, REJECTED)
-    shuffled = copy.deepcopy(loop)
-    random.Random(7).shuffle(shuffled["runs"][0]["events"])
-    shuffled["outcomes"].reverse()
-    again = causal_graph.build("demo 1.0", copy.deepcopy(found), {"drives": []}, shuffled, DENY_ALL, REJECTED)
-    assert again == first and len(first["digest"]) == 64
+    """Review of Phase 3b, MINOR 1: perturb what is not evidence (the order of runs, outcomes, entries) of a loop whose
+    runs have events, two of them with the same key; the trace order of a run's events is evidence and is kept."""
+    found = frontier(entry("CI", activation={"env": {"CI": "true"}}), entry("B", risk="medium"))
+    twice = [event(), {**event(), "line": 2}, event(kind="FILE_READ", path="/tmp/home/x")]
+    loop = explore(found, lambda spec: twice if spec["env"].get("CI") == "true" else [twice[2]], contract=reads_granted())
+    assert len(loop["runs"]) == 3 and len(loop["runs"][1]["new_events"]) == 2
+    build = lambda f, l: causal_graph.build("demo 1.0", f, {"drives": []}, l, reads_granted(), REJECTED)
+    first = build(found, loop)
+    for seed in range(3):
+        shuffled, entries = copy.deepcopy(loop), copy.deepcopy(found)
+        random.Random(seed).shuffle(shuffled["runs"])
+        random.Random(seed).shuffle(shuffled["outcomes"])
+        random.Random(seed).shuffle(entries["entries"])
+        assert build(entries, shuffled) == first
+    assert len([n for n in first["nodes"] if n["kind"] == "event" and n["label"].startswith("NETWORK")]) == 2
     changed = copy.deepcopy(loop)
     changed["runs"][1]["events"][0]["address"]["port"] = 8443
     changed["runs"][1]["new_events"] = activation_loop.new_events(changed["runs"][1], changed["runs"][0])
-    assert causal_graph.build("demo 1.0", found, {"drives": []}, changed, DENY_ALL, REJECTED)["digest"] != first["digest"]
-    other = causal_graph.build("demo 1.0", found, {"drives": []}, loop, DENY_ALL, {"status": "UNRESOLVED", "rule": "x"})
+    assert build(found, changed)["digest"] != first["digest"]
+    other = causal_graph.build("demo 1.0", found, {"drives": []}, loop, reads_granted(), {"status": "UNRESOLVED", "rule": "x"})
     assert other["digest"] != first["digest"]
+
+
+def test_events_within_the_contract_without_a_cause_are_capped_and_counted(monkeypatch):
+    """Review of Phase 3b, MINOR 5: a run with many plain events does not make the report unbounded."""
+    monkeypatch.setattr(causal_graph, "MAX_PLAIN_EVENTS", 3)
+    reads = [event(kind="FILE_READ", path=f"/tmp/home/f{i}") for i in range(10)]
+    contract = reads_granted()
+    loop = explore(frontier(), lambda spec: reads + [event(host="203.0.113.9")], contract=contract)
+    graph = causal_graph.build("demo 1.0", frontier(), {"drives": []}, loop, contract, REJECTED)
+    events = kinds(graph, "event")
+    assert len(events) == 4 and graph["counts"]["events_within_contract_not_listed"] == 7
+    assert any(n["label"] == "NETWORK_CONNECT 203.0.113.9:443" for n in events)  # the violation is always listed
 
 
 def test_a_graph_that_cannot_be_built_says_so_and_never_raises():
     graph = causal_graph.build("demo 1.0", None, None, {"runs": [{"events": 5}]}, DENY_ALL, REJECTED)
     assert graph["nodes"] == [] and graph["error"] and len(graph["digest"]) == 64
-    assert causal_graph.cause(graph, 1, event()) == "cause not in the graph"
+    assert causal_graph.cause(graph, 1, event()) is None

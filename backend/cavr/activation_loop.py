@@ -18,12 +18,12 @@ D6), when the canary-only run did not complete (nothing could be compared with i
 is started with less than MIN_RUN_SECONDS of deadline, and OVERHEAD_SECONDS of the package's time is kept for staging,
 writing the fake HOME and normalising.
 
-An entry is explored only when a completed run (its trace complete, on the expected image) showed its sink:
+An entry is explored only when a completed run (its trace complete, on the expected image) showed every sink
+capability the entry gates:
 
-    - a counterfactual run: an event of one of the entry's sink capabilities is in that run and not in the
-      canary-only run (multiset difference of `sandbox_events.event_key`, install step left out): the trigger made
-      the difference;
-    - the canary-only run, for an entry the baseline takes: it has such an event outside the install step.
+    - a counterfactual run: events of those capabilities are in that run and not in the canary-only run (multiset
+      difference of `sandbox_events.event_key`, install step left out): the trigger made the difference;
+    - the canary-only run, for an entry the baseline takes: it has such events outside the install step.
 
 `baseline_takes_it` is a prediction and never evidence. There is no "newly seen predicate" feedback (decision D4):
 strace cannot show a predicate, so the frontier is computed once, from all the scanned source.
@@ -118,9 +118,16 @@ def explore(frontier, run, *, budget, clock, gate_left, synthesize, canary_spec,
             pool = (record["new_events"] if record["kind"] == COUNTERFACTUAL
                     else [e for e in record["events"] if e.get("step") != INSTALL])
             shown = [e for e in pool if capabilities & set(event_capabilities(e))]
-            if shown:
+            shown_capabilities = {c for e in shown for c in event_capabilities(e)} & capabilities
+            missing = sorted(capabilities - shown_capabilities)
+            if shown and not missing:
                 explored.append(ident)
                 outcome.update(outcome="explored", shown_by=_short(shown[0]))
+            elif shown:
+                # Every sink the entry gates must be shown (review of Phase 3b, MAJOR 1): a branch whose read ran but
+                # whose connect did not has not shown what the connect would do.
+                outcome["outcome"] = (f"ran in run {record['n']}; it showed {', '.join(sorted(shown_capabilities))} but "
+                                      f"not {', '.join(missing)} (not every sink of the branch was shown)")
             elif record["kind"] == COUNTERFACTUAL:
                 outcome["outcome"] = (f"ran in run {record['n']}; no event of {', '.join(sorted(capabilities))} "
                                       "that the canary-only run does not have (the sink was not shown)")
@@ -140,6 +147,7 @@ def explore(frontier, run, *, budget, clock, gate_left, synthesize, canary_spec,
 
 def read_run(result: dict, *, n: int, baseline, contract, image_id) -> dict:
     """The record of one `sandbox_spec.run_spec` result: events after the baseline, judged against the contract."""
+    result = result if isinstance(result, dict) else {"rule": "DEEP_NO_RESULT", "reason": "the run gave no result"}
     observed = (result or {}).get("evidence") or {}
     record = {"n": n, "rule": result.get("rule"), "reason": result.get("reason"), "container": observed.get("container"),
               "image_id": observed.get("image_id"), "elapsed_seconds": observed.get("elapsed_seconds"),

@@ -100,7 +100,9 @@ def deep_version(identity: dict) -> str:
              "flags": digest([sandbox_exec.lockdown_flags(), sandbox_observe.SITE_TMPFS]),
              "events": sandbox_events.EVENTS_VERSION, "check": contract_check.CHECK_VERSION,
              "frontier": trigger_frontier.VERSION, "synthesis": env_synthesis.VERSION, "loop": activation_loop.VERSION,
-             "drive": call_drive.VERSION, "graph": causal_graph.VERSION, "code": code}
+             "drive": call_drive.VERSION, "graph": causal_graph.VERSION, "code": code,
+             # normalize_name / python_sinks shape the frontier's sinks and the reasons (review of Phase 3b, MINOR 12)
+             "rules_code": _sha256(here.parent / "threat_repo" / "behavior_rules.py") or "missing"}
     return VERSION + "".join(f";{key}:{value}" for key, value in parts.items())
 
 
@@ -145,12 +147,14 @@ class SandboxDeepAnalyzer:
         if self.left() < MIN_RUN_SECONDS:
             return _answer("UNRESOLVED", "DEEP_RUN_BUDGET_USED_UP", f"the deep budget of this gate run "
                            f"({self.budget['gate_run_seconds']} s) is used up; {name} was not run", evidence)
+        # The package's 120 s start here, as deep_stage.run_deep's host clock does: a baseline this package has to
+        # record first (once per identity, then read from disk) counts against them (review of Phase 3b, BLOCKER 2).
+        started = CLOCK()
         baseline, problem = self.baseline()
         evidence["baseline"] = {"rule": problem[0] if problem else "BASELINE_OK",
                                 "sha256": baseline and baseline.get("sha256"), "events": baseline and baseline.get("event_count")}
         if problem:
             return _answer("UNRESOLVED", problem[0], f"{problem[1]}; {name} was not judged", evidence)
-        started = CLOCK()
         contract = package.get("contract") or {}
         nodes = (package.get("tree") or {}).get("nodes")
         modules = contract.get("import_names")
@@ -471,7 +475,19 @@ def _key_event(item: dict, record: dict) -> dict:
     return {"rule": item["rule"], "capability": item.get("capability"), "why": item["why"], "type": event.get("type"),
             "syscall": event.get("syscall"), "step": event.get("step"), "path": event.get("path"),
             "address": event.get("address"), "argv": event.get("argv"), "ok": event.get("ok"), "errno": event.get("errno"),
-            "line": event.get("line"), "run": record.get("n"), "run_kind": record.get("kind")}
+            "line": event.get("line"), "run": record.get("n"), "run_kind": record.get("kind"),
+            "key": _key_of(event, record)}
+
+
+def _key_of(event, record):
+    """The key digest of the full event in the run's record: the judge keeps a trimmed copy (no `access`); the trace
+    line, step and type find the original (one trace line is one event of one step)."""
+    full = next((e for e in record.get("events") or [] if e.get("line") == event.get("line")
+                 and e.get("step") == event.get("step") and e.get("type") == event.get("type")), None)
+    try:
+        return causal_graph.key_digest(full) if full is not None else None
+    except (KeyError, TypeError):  # no cause can be named for it
+        return None
 
 
 def _answer(status, rule, reason, evidence) -> dict:

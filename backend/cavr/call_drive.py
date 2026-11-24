@@ -12,18 +12,21 @@ For each call site of the contract (`capability_contract`: file, line, symbol, e
     2. every `ast.Call` at that line whose callee, written out, is the recorded expression is a candidate;
     3. every positional and keyword argument must be accepted by `ast.literal_eval` (numbers, strings, bytes, None,
        booleans, tuples, lists, sets, dicts of those); no `*args`, no `**kwargs`; at most MAX_ARG_BYTES of source;
-    4. no string in an argument may look like a credential, and no keyword may be named like one (NFR-5: no real
-       credential ever enters a run; decision D2, Maryam 2026-11-24). This is a heuristic guard, stated as one:
-       known token prefixes, a PEM block, a long letters-and-digits token, keyword names such as password / token.
+    4. nothing in the call may look like a credential (NFR-5: no real credential ever enters a run; decision D2,
+       Maryam 2026-11-24): a heuristic guard, stated as one, over the call's whole source (`holds_credential`):
+       known token prefixes, a PEM block, a URL with a password, a long letters-and-digits token, keyword names and
+       dict keys such as password / token. Such a call's text is never recorded either (only file, line and the
+       expression's name), so the value cannot reach the evidence or asent-report.json.
 
 Anything else is listed in `not_driven` with the reason, and stays undriven: the deep verdict cannot count a sink
 that only such a call reaches as exercised. Decorators (`@demo.register`) are never driven: their argument is a
 function. At most LIMIT distinct calls (symbol and arguments) are driven per run, ordered by file, line and column.
 
 In the sandbox each drive is one harness step (`drive_1` ... `drive_4`), a fresh Python with the imports step's
-environment: DRIVE_CODE imports the modules (as the imports step does), resolves the symbol (attribute by attribute,
-importing a submodule when the attribute is not there yet), calls it with the literals and catches every exception
-(BaseException: SystemExit and KeyboardInterrupt too), then ends with os._exit(0) so that a thread the call left
+environment: DRIVE_CODE imports the modules (as the imports step does; an import that fails there fails the step,
+and with it the run, as in the imports step), resolves the symbol (attribute by attribute, importing a submodule when
+the attribute is not there yet), calls it with the literals and catches every exception of the resolution and the
+call (BaseException: SystemExit and KeyboardInterrupt too), then ends with os._exit(0) so that a thread the call left
 running cannot hold the run until its deadline. What the call printed goes to the untrusted output and is never
 read for a verdict; only the trace (strace, which the package cannot write) is evidence.
 
@@ -49,6 +52,7 @@ STEP_PREFIX = "drive_"
 TOKEN_PREFIXES = ("AKIA", "ASIA", "ghp_", "gho_", "ghs_", "github_pat_", "pypi-", "sk-", "xoxb-", "xoxp-", "glpat-",
                   "AIza", "-----BEGIN")
 TOKEN = re.compile(r"^[A-Za-z0-9+/=_-]{24,}$")
+USERINFO = re.compile(r"://[^/@\s:]*:[^/@\s]+@")
 SECRET_NAME = re.compile(r"(?i)(pass|secret|token|cred|auth|api_?key|private_?key|^key$)")
 
 DRIVE_CODE = (f"import ast, importlib, json, os, site, sys\njob = json.loads(sys.argv[1])\n"
@@ -95,6 +99,12 @@ def _plan(package):
             not_driven.append({**where, "why": problem})
             continue
         for call in calls:
+            if holds_credential(call):
+                # Never recorded: the call's text would put the value into the evidence and asent-report.json (review
+                # of Phase 3b, BLOCKER 1). Only the place and the expression's name are kept.
+                not_driven.append({**where, "call": None, "why": "a value in the call looks like a credential; it is "
+                                   "never passed into a run and its text is not recorded (NFR-5)"})
+                continue
             drive, why = _drive(call, site)
             text = ast.unparse(call)
             if why:
@@ -154,8 +164,6 @@ def _drive(call, site):
     for keyword in call.keywords:
         if keyword.arg is None:
             return None, f"`**{ast.unparse(keyword.value)}`: its values are not literals"
-        if SECRET_NAME.search(keyword.arg):
-            return None, f"keyword `{keyword.arg}` is named like a credential; it is never passed into a run (NFR-5)"
         text, why = _literal(keyword.value, f"keyword `{keyword.arg}`")
         if why:
             return None, why
@@ -168,31 +176,36 @@ def _drive(call, site):
 def _literal(node, label):
     text = ast.unparse(node)
     try:
-        value = ast.literal_eval(node)
+        ast.literal_eval(node)
     except (ValueError, TypeError, SyntaxError, MemoryError, RecursionError):
         return None, f"{label} `{text}` is not a literal"
-    secret = next((s for s in _strings(value) if looks_like_credential(s)), None)
-    if secret is not None:
-        return None, f"{label} looks like a credential; it is never passed into a run (NFR-5)"
     return text, None
 
 
-def _strings(value):
-    if isinstance(value, (str, bytes)):
-        yield value.decode("latin-1") if isinstance(value, bytes) else value
-    elif isinstance(value, dict):
-        for key, item in value.items():
-            yield from _strings(key)
-            yield from _strings(item)
-    elif isinstance(value, (list, tuple, set, frozenset)):
-        for item in value:
-            yield from _strings(item)
+def holds_credential(call) -> bool:
+    """D2 (a heuristic): anything in the call's source that looks like a credential, literal or not: a string or bytes
+    constant (`looks_like_credential`), a dict key or a keyword named like one (`password=`, `{"token": ...}`)."""
+    for node in ast.walk(call):
+        if isinstance(node, ast.Constant) and isinstance(node.value, (str, bytes)):
+            value = node.value.decode("latin-1") if isinstance(node.value, bytes) else node.value
+            if looks_like_credential(value):
+                return True
+        elif isinstance(node, ast.keyword) and node.arg and SECRET_NAME.search(node.arg):
+            return True
+        elif isinstance(node, ast.Dict):
+            if any(isinstance(k, ast.Constant) and isinstance(k.value, str) and SECRET_NAME.search(k.value)
+                   for k in node.keys):
+                return True
+    return False
 
 
 def looks_like_credential(text: str) -> bool:
-    """A heuristic (D2): a known token prefix or PEM block, or a 24+ character token of letters and digits."""
+    """A known token prefix or PEM block, a URL with a password (`scheme://user:pass@host`), or a 24+ character token
+    of letters and digits."""
     stripped = text.strip()
     if any(stripped.startswith(prefix) for prefix in TOKEN_PREFIXES) or "PRIVATE KEY" in stripped:
+        return True
+    if USERINFO.search(stripped):
         return True
     return bool(TOKEN.match(stripped) and re.search(r"[A-Za-z]", stripped) and re.search(r"[0-9]", stripped))
 

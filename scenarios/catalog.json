@@ -69,7 +69,7 @@
   },
   {
     "id": "sable_unresolved_role_binding",
-    "title": "Storage refactor \u00b7 unresolved role binding",
+    "title": "Storage refactor · unresolved role binding",
     "subtitle": "A valid active-bucket grant is accompanied by a broad policy with a dynamic, unresolved role binding.",
     "source": "CONTROLLED REPRODUCTION",
     "group": "Infrastructure continuity",

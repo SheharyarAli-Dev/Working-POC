@@ -533,6 +533,7 @@ Stated as limitations in the report and on the dashboard, not implemented in M2:
 - [x] PR 12 counterfactual loop (branch `cavr-m2-loop`, 2026-11-24; report notes Step M2-17): `activation_loop.py`, `call_drive.py`, `sandbox_deep.py` v2; 13 demo wheels through `asent gate` (`tests/test_cavr_m2_wheels.py`)
 - [x] Legacy clean-up (Q12; branch `cavr-m2-loop`, 2026-11-24; report notes Step M2-18): `sandbox.py`, `lab_harness.py`, `runtime_monitor.py`, `sandbox_runner.py`, `harness.py`, `trigger_discovery.py` (moved into `ast_scan.rule_scan`), `policy.py`, `repair.py`, `capability_contract.infer`, `docker/asent-sandbox/`, the LOCAL-lab path of `analyzer.py`, the CAVR half of the orchestrator `_repair`; scenarios `cavr_canary` and `cross_module` retired (option A)
 - [x] PR 13 causal graph (branch `cavr-m2-loop`, 2026-11-24; report notes Step M2-19): `causal_graph.py` rewritten from the loop's runs (trigger, spec, run, call, event, rule, verdict; `caused` only for the counterfactual difference); digest in the deep evidence; the `asent report` deep line names the cause; `docs/cavr-demo.md` "M2 demo: real wheels"
+- Phase 3b review (2026-11-24): one cavr-reviewer pass, 2 BLOCKER / 2 MAJOR / 12 MINOR fixed (report notes, "Review of Steps M2-17 to M2-19"); Flask / InvoiceHub verdicts unchanged
 - [ ] PR 14 RESTRICTED verdict
 
 ### Phase 4 — Repair, re-verification, reconstruction and assurance

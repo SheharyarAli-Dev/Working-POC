@@ -75,11 +75,26 @@ def test_a_call_whose_arguments_are_not_literals_is_not_driven(tmp_path, call, w
     "demo.login('9f86d081884c7d659a2feaa0c55ad015a3bf4f1b')",
     "demo.login(user='me', password='hunter2')",
     "demo.login(api_key='short')",
+    "demo.connect('https://admin:hunter2@db.internal/x')",  # review of Phase 3b, MAJOR 2
+    "demo.login({'password': 'hunter2'})",
 ])
 def test_a_credential_is_never_passed_into_a_run(tmp_path, call):
     proj = project(tmp_path, {"app/a.py": f"import demo\n{call}\n"})
-    got = call_drive.plan(package(proj, site("app/a.py", 2, "demo.login")))
+    got = call_drive.plan(package(proj, site("app/a.py", 2, call.split("(")[0])))
     assert got["drives"] == [] and "NFR-5" in got["not_driven"][0]["why"]
+    assert got["not_driven"][0]["call"] is None
+
+
+@pytest.mark.parametrize("call, secret", [
+    ("demo.login('ghp_abcdefghijklmnopqrstuvwxyz0123456789')", "ghp_abcdefghijklmnopqrstuvwxyz0123456789"),
+    ("demo.login(user, password='hunter2')", "hunter2"),
+    ("demo.login(f'{user}', 'AKIAIOSFODNN7EXAMPLE')", "AKIAIOSFODNN7EXAMPLE"),  # next to a non-literal argument
+])
+def test_a_refused_credential_is_recorded_nowhere(tmp_path, call, secret):
+    """Review of Phase 3b, BLOCKER 1: the guard must not publish what it refused (evidence, asent-report.json)."""
+    proj = project(tmp_path, {"app/a.py": f"import demo\nuser = 'me'\n{call}\n"})
+    got = call_drive.plan(package(proj, site("app/a.py", 3, "demo.login")))
+    assert got["drives"] == [] and secret not in json.dumps(got)
 
 
 @pytest.mark.parametrize("value", ["fixtures/invoice.pdf", "/tmp/out.txt", "https://example.invalid/api", "hello world",

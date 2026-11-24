@@ -64,8 +64,9 @@ class Sandbox:
     """Replaces the container: each spec run returns `runs[i]` (the last one again once they are used up), normalised
     as `sandbox_spec.run_spec` does it (with that run's canaries), and advances the clock by `seconds` per run."""
 
-    def __init__(self, monkeypatch, runs, seconds=5.0, baseline="events-baseline"):
+    def __init__(self, monkeypatch, runs, seconds=5.0, baseline="events-baseline", baseline_seconds=2.0):
         self.runs, self.seconds, self.now, self.calls, self.deadlines = list(runs), seconds, 1000.0, [], []
+        self.baseline_seconds = baseline_seconds
         self.baseline_runs = 0
         monkeypatch.setattr(sandbox_deep, "CLOCK", lambda: self.now)
         monkeypatch.setattr(deep_stage, "CLOCK", lambda: self.now)
@@ -83,7 +84,7 @@ class Sandbox:
 
     def harness(self, steps, tmpfs=(), deadline=None, **options):
         self.baseline_runs += 1
-        self.now += 2.0
+        self.now += self.baseline_seconds
         if isinstance(self.baseline, dict):
             return self.baseline
         return recorded_run(self.baseline)
@@ -242,6 +243,29 @@ def test_two_reachable_sinks_of_one_capability_cannot_be_told_apart_by_an_event(
     reasons = package["evidence"]["deep"]["evidence"]["escalation_reasons"]
     assert len(reasons) == 2 and not any(r["exercised"] for r in reasons)
     assert all("2 reachable sinks share NETWORK_CONNECT" in r["why"] and "(D3)" in r["why"] for r in reasons)
+
+
+def test_a_fresh_baseline_counts_against_the_package_budget(world, tmp_path, monkeypatch):
+    """Review of Phase 3b, BLOCKER 2: the baseline this package records first is inside its 120 s (deep_stage's clock)."""
+    world.policy.update(SCOPED_POLICY)
+    eight = {"demo/__init__.py": "import os, socket\n" + "".join(
+        f"if os.environ.get('DEPLOY_{i}') == 'yes':\n    socket.create_connection(('198.51.100.24', 443))\n"
+        for i in range(1, 9)) + "\n\ndef run():\n    return 1\n"}
+    escalated(world, eight)
+    sandbox = Sandbox(monkeypatch, [recorded_run("events-benign")], seconds=16.0, baseline_seconds=20.0)
+    _, package = verify(world, analyzer(tmp_path))
+    assert package["rule"] == "DEEP_RUN_BUDGET_EXHAUSTED", package["reason"]  # was DEEP_BUDGET_EXCEEDED (137 s)
+    assert package["evidence"]["deep"]["elapsed_seconds"] <= 120 and sandbox.baseline_runs == 1
+    assert sandbox.deadlines[0] == 20 and min(sandbox.deadlines) >= sandbox_deep.MIN_RUN_SECONDS
+
+
+def test_a_refused_credential_reaches_no_verdict_field(world, tmp_path, monkeypatch):
+    """Review of Phase 3b, BLOCKER 1: not in the drive plan, the reasons, not_exercised or anything else of the verdict."""
+    token = "ghp_abcdefghijklmnopqrstuvwxyz0123456789"
+    driven(world, call=f"demo.send('{token}')")
+    Sandbox(monkeypatch, [recorded_run("loop-drive-quiet")])
+    verdict, package = verify(world, analyzer(tmp_path))
+    assert package["rule"] == "DEEP_SINK_NOT_EXERCISED" and token not in json.dumps(verdict, default=str)
 
 
 def test_sink_placement_reads_the_wheel(tmp_path):

@@ -5900,8 +5900,11 @@ PR 13; D1–D4 as recommended; demo option A, done in Step M2-18).
 - Explored = the sink's capability in the difference against the canary-only run, not "an event of the capability":
   an event the package makes without the trigger does not show the branch ran. Cost: a sink that fires in both runs is
   never explored (UNRESOLVED), which is the fail-closed side.
-- The 8 runs include the canary-only run (Q8 "8 runs per package"); the empty-harness baseline is once per gate run
-  and counts against the 300 s only.
+- The 8 runs include the canary-only run (Q8 "8 runs per package"); the empty-harness baseline is not one of them.
+  Corrected after the review (as first written, this line said the baseline is "once per gate run and counts against
+  the 300 s only", which was not true): it is recorded once per identity and stored on disk, and its time counts
+  against the gate run's 300 s and against the 120 s of the package that records it (the package clock starts
+  before it, as `deep_stage.run_deep`'s does).
 - Same steps in every run (install, imports, drives): a trigger inside a function the project calls is seen under its
   spec; the differences compare like with like. Cost: each run is about 1 s longer per drive step.
 - Driving only literal-only call sites: the arguments are the project's own, so a violation found is the package's
@@ -6229,3 +6232,118 @@ left; `reports/` unchanged.
    stored with it; the verdict rules (Step M2-17) do not read it.
 3. **Why does `canary_exfil` say "no trigger needed"?** Its import reads the fake AWS key in the canary-only run
    already; there is no counterfactual run to compare with, and none was needed.
+
+
+## Review of Steps M2-17 to M2-19 — fixes (End of Phase 3b) (2026-11-24)
+
+One cavr-reviewer pass over `18497c2..810c01b` (the three Phase 3b commits). Review outcome: 1 pass, fix first
+(2 BLOCKER, 2 MAJOR, 12 MINOR), all fixed in this commit except MINOR 8 (threat-repository data, outside CAVR's scope,
+recorded below); 0 open MINOR in CAVR's scope. None of the findings let a package reach VERIFIED.
+
+### Ch 6 Implementation
+
+- `call_drive.holds_credential(call)`: the D2 check now runs over the whole call's source (string and bytes
+  constants, keyword names, dict keys); `looks_like_credential` also refuses a URL with a password. A refused call
+  is recorded with `call: None` and its place only; its text never reaches `not_driven`, `not_exercised`, a reason or
+  `asent-report.json` (BLOCKER 1, MAJOR 2).
+- `sandbox_deep.analyse`: the package's clock starts before the baseline, so a baseline the package records counts
+  against its 120 s, as `deep_stage.run_deep` measures (BLOCKER 2).
+- `activation_loop.explore`: an entry is explored only when every sink capability it gates is shown; otherwise its
+  outcome names what was and was not shown (MAJOR 1). `read_run` accepts a missing result (MINOR 6).
+- `causal_graph`: event nodes carry their `event_key` digest and `cause` matches on it and the trace line (MINOR 4);
+  `cause` returns None for an event it cannot find and only a real cause is appended (MINOR 3); events within the
+  contract with no cause are listed up to 500 per graph, the rest counted (MINOR 5). `sandbox_deep._key_event` gives
+  each key event the digest of the full event in its run (the judge keeps a trimmed copy).
+- Deep identity: `rules_code`, the SHA-256 of `backend/threat_repo/behavior_rules.py` (MINOR 12).
+- `call_drive` docstring: what the driver catches (resolution and call, not the module imports) (MINOR 2).
+- `scenarios/catalog.json`: the one SABLE title that had a literal "·" in the base is literal again; the file now
+  differs from the base only by the two removed entries (MINOR 9).
+- Report notes: the Step M2-17 baseline sentence corrected in place (BLOCKER 2); this section (MINOR 7).
+
+### Design decisions
+
+- Redact instead of hashing the refused call: a hash of a short password is guessable; the place and the
+  expression's name are enough for a person to find the call.
+- All sinks of an entry, not the worst one: a branch is only explored when what it would do was seen; a partly shown
+  branch stays UNRESOLVED (fail closed).
+- The graph is capped only for events with nothing to say (within the contract, no cause); everything that decides or
+  explains the verdict is always listed.
+
+### Requirements covered
+
+- NFR-5: `test_a_refused_credential_is_recorded_nowhere` (3), `test_a_refused_credential_reaches_no_verdict_field`.
+- Q8 / NFR-4 budget: `test_a_fresh_baseline_counts_against_the_package_budget`.
+- FR-4 / Q8: `test_an_entry_with_two_sinks_needs_both_shown`.
+- FR-5 / FR-10: `test_the_graph_is_deterministic_and_its_digest_follows_every_event` (rewritten),
+  `test_events_within_the_contract_without_a_cause_are_capped_and_counted`.
+
+### Ch 7 Test cases
+
+| Test ID | Purpose | Input | Expected | Result |
+|---|---|---|---|---|
+| test_a_credential_is_never_passed_into_a_run (9 cases, 2 new) | MAJOR 2 | + `'https://admin:hunter2@db.internal/x'`, `{'password': 'hunter2'}` | not driven, `call` None | pass |
+| test_a_refused_credential_is_recorded_nowhere (3) | BLOCKER 1 | token literal; `password=` next to a name; token next to an f-string | the secret not in `json.dumps(plan)` | pass |
+| test_a_refused_credential_reaches_no_verdict_field | BLOCKER 1 | project calls `demo.send('ghp_…')` | DEEP_SINK_NOT_EXERCISED; token not in the verdict JSON | pass |
+| test_a_fresh_baseline_counts_against_the_package_budget | BLOCKER 2 | 20 s baseline, 16 s runs, 8 triggers | DEEP_RUN_BUDGET_EXHAUSTED, elapsed ≤ 120 s; on the old code DEEP_BUDGET_EXCEEDED (checked) | pass |
+| test_an_entry_with_two_sinks_needs_both_shown | MAJOR 1 | read shown, connect not / both | not explored ("not NETWORK_CONNECT") / explored | pass |
+| test_a_missing_run_result_is_not_a_completed_run | MINOR 6 | `read_run(None)` | DEEP_NO_RESULT, not completed | pass |
+| test_the_graph_is_deterministic_… (rewritten) | MINOR 1 | 3 runs with events, two with one key; runs, outcomes, entries shuffled ×3 | identical graph; port / verdict change -> new digest | pass |
+| test_events_within_the_contract_without_a_cause_are_capped_and_counted | MINOR 5 | 10 granted reads + 1 violation, cap 3 | 4 event nodes, 7 counted, the violation listed | pass |
+| test_a_graph_that_cannot_be_built_… (changed) | MINOR 3 | malformed runs | `cause` None | pass |
+
+### End-of-phase checks (after the review fixes, in the same commit)
+
+- `CAVR_DOCKER=1 pytest tests/test_cavr_*.py tests/test_orchestrator_config.py tests/test_gate_*.py tests/test_cli_gate.py
+  tests/test_cli_report.py tests/test_integration.py tests/test_modules.py`: 2197 passed, 12 skipped (live network),
+  0 failed, 822 s; no container left. The 13 demo wheels give the same verdicts, causes and lines as recorded in
+  `docs/cavr-demo.md`.
+- Docker hidden (`DOCKER_HOST=unix:///nonexistent`), `tests/test_cavr_*.py tests/test_orchestrator_config.py
+  tests/test_gate_*.py tests/test_cli_gate.py tests/test_cli_report.py`: 2049 passed, 95 skipped (Docker and live),
+  0 failed, 453 s; `sandbox_deep.for_gate_run` -> no analyzer, ENGINE_UNAVAILABLE (today's verdicts).
+- Full suite `.venv/bin/python -m pytest -q`: 2916 passed, 95 skipped, 1 xfailed, 0 failed, 776 s (before Phase 3b:
+  2923 passed, 81 skipped, 1 xfailed; 86 legacy tests deleted in Step M2-18, new tests in M2-17 / M2-19 / this fix).
+- `reports/scenario-validation.json` was not modified by any run (no diff); nothing to restore.
+
+Real projects, `asent gate --head main` with a fresh data directory each (image `sha256:0e88dd461ca4…`):
+
+| Project | Before (`18497c2`) | After (`810c01b`, during the review) | After (the review fixes, quiet machine) |
+|---|---|---|---|
+| asent-target-flask (main) | ACCEPT exit 0; VERIFIED / ACCEPT / PRESERVED; 184.6 s | ACCEPT exit 0; same; 175.4 s | ACCEPT exit 0; same; 145.5 s |
+| asent-target-invoicehub (main) | ACCEPT exit 0; VERIFIED / ACCEPT / PRESERVED; 39.2 s | ACCEPT exit 0; same; 67.6 s (56.8 s re-run) | ACCEPT exit 0; same; 38.5 s |
+
+No verdict changed. Neither project reached the deep stage (Flask: no requirement changed; InvoiceHub: pypdf==6.21.4
+VERIFIED by the fast gate). The slower InvoiceHub runs during the review were SATRA (37.6 s -> 65.1 s) and SABLE, which
+this phase did not change, on a loaded machine (load average 3.4 while the reviewer ran tests); on a quiet machine it
+took 38.5 s.
+
+### Defects found and fixed
+
+- BLOCKER 1, BLOCKER 2, MAJOR 1, MAJOR 2, MINOR 1-7, 9, 10-12: as above.
+- While fixing MINOR 4: the judge's violation entries hold a trimmed event (no `access`), so the key could not be
+  computed from them (every deep test with a violation became UNRESOLVED INTERNAL_ERROR, fail closed); the key event
+  now takes the digest of the full event in its run.
+- MINOR 9 was right for one line only: the base file escapes "·" everywhere except one SABLE title.
+
+### Known limitations / deferred
+
+- MINOR 8: `backend/threat_repo/seed/sources.json` (SRC-LAB) still names the deleted lab file (Step M2-18 limitation).
+- MINOR 10: an orchestrator run in which only CAVR is REJECTED no longer creates a repair worktree or passes through
+  REPAIRING (there is nothing CAVR applies, Q9); SATRA's repair path is unchanged.
+- MINOR 11: `other_guards` in front of a medium-risk (scoped) sink do not block VERIFIED (the PR 10 rule names
+  high-risk sinks only); a guard CAVR cannot evaluate could hide an out-of-scope use of a scoped capability. Left as
+  the approved rule, to be decided with Maryam.
+- The credential guard stays a heuristic (D2).
+
+### Tool disclosure (Ch 8.7)
+
+- **Generated by Claude Code:** the review (cavr-reviewer agent) and the fixes, tests and notes. **Reviewed by
+  Maryam:** not yet. **Verified by:** the runs above; the budget test was checked to fail on the old code.
+
+### Supervisor Q&A prep
+
+1. **The guard detects a credential; where does it go?** Nowhere: the call is not driven and its text is not recorded,
+   only its file, line and the function's name (`test_a_refused_credential_reaches_no_verdict_field`).
+2. **From when is the 120 s measured?** From the start of the package's deep analysis, baseline included, by the
+   host's clock (`deep_stage.run_deep`); the loop plans its runs against the same start.
+3. **An entry gates a read and a connect; only the read ran?** Not explored: the verdict cannot claim what the connect
+   would have done, so it is UNRESOLVED.

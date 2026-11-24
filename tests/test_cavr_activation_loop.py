@@ -111,6 +111,29 @@ def test_an_entry_the_baseline_takes_is_explored_only_by_the_canary_only_run_sho
     assert hidden["explored"] == [] and "taken by the baseline, but" in hidden["outcomes"][0]["outcome"]
 
 
+def test_an_entry_with_two_sinks_needs_both_shown():
+    """Review of Phase 3b, MAJOR 1: the read ran, the connect did not; the entry is not explored."""
+    clock = Clock()
+    two = entry("A")
+    two["sinks"] = [{"capability": "FILE_READ"}, {"capability": "NETWORK_CONNECT"}]
+    read = event(kind="FILE_READ", path="/tmp/home/data.txt")
+    contract = scoped_contract()
+    contract["allowed"] = contract["allowed"] + [{"capability": "FILE_READ", "scope": "*", "status": "OPTIONAL",
+                                                  "source": "test", "justification": "test"}]
+    contract["denied"] = [d for d in contract["denied"] if d["capability"] != "FILE_READ"]
+    half = explore(frontier(two), FakeRun(clock, lambda spec: [read] if "A" in spec["env"] else [], contract=contract), clock)
+    assert half["explored"] == [] and "not NETWORK_CONNECT" in half["outcomes"][0]["outcome"]
+    clock = Clock()
+    both = explore(frontier(two), FakeRun(clock, lambda spec: [read, event()] if "A" in spec["env"] else [],
+                                          contract=contract), clock)
+    assert both["explored"] == ["A"]
+
+
+def test_a_missing_run_result_is_not_a_completed_run():
+    record = activation_loop.read_run(None, n=1, baseline=None, contract=scoped_contract(), image_id="img")
+    assert (record["rule"], record["completed"]) == ("DEEP_NO_RESULT", False)
+
+
 def test_an_install_step_event_never_explores_an_entry():
     clock = Clock()
     fake = FakeRun(clock, lambda spec: [event(step="install")] if "A" in spec["env"] else [])

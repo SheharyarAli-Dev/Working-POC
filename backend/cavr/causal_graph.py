@@ -28,10 +28,11 @@ An event of the canary-only run's imports step has no cause edge: no trigger was
 Deterministic: every id is a hash of the node's content (an event's: its run, `sandbox_events.event_key` and its
 occurrence number among equal keys), nodes and edges are sorted, and `digest` is the SHA-256 of the canonical JSON of
 both. The same evidence always gives the same graph and digest; two real runs differ where their traces differ
-(random canaries, container names, trace hashes). Install-step events the judge passed are counted, not listed.
+(random canaries, container names, trace hashes). Install-step events the judge passed are counted, not listed;
+events within the contract with no cause are listed up to MAX_PLAIN_EVENTS (by id), the rest counted.
 
 `cause(graph, run, event)` is the text the report prints for one event: "caused by CI=true", "caused by calling
-demo.send('x') at app/uses_demo.py:5", or "in the canary-only run (no trigger needed)".
+demo.send('x') at app/uses_demo.py:5", "in the canary-only run (no trigger needed)", or None (no such event).
 """
 from __future__ import annotations
 
@@ -41,7 +42,14 @@ import json
 from backend.cavr import activation_loop, contract_check, sandbox_events
 
 VERSION = "cavr-causal-graph/1"
+# Events within the contract with no cause edge are listed up to this many per graph, the rest only counted; events that
+# violate, cannot be judged or have a cause are always listed (review of Phase 3b, MINOR 5).
+MAX_PLAIN_EVENTS = 500
 EVENT_FIELDS = ("type", "syscall", "step", "path", "address", "argv", "ok", "errno", "line")
+
+
+def key_digest(event) -> str:
+    return hashlib.sha256(json.dumps(list(sandbox_events.event_key(event)), default=str).encode()).hexdigest()[:16]
 
 
 def _id(kind, content) -> str:
@@ -106,6 +114,7 @@ def _build(name, frontier, drives, loop, contract, verdict):
         nodes[node_id] = {"id": node_id, "kind": "call", "step": drive.get("step"), "call": drive.get("call"),
                           "file": drive.get("file"), "line": drive.get("line"), "symbol": drive.get("symbol")}
     install_passed = 0
+    plain = []  # (event node, its rules, its edges): within the contract, no cause; listed up to MAX_PLAIN_EVENTS
     for record in loop.get("runs") or []:
         spec_id = _id("spec", [record.get("spec_id"), record.get("activation")])
         run_id = _id("run", [record.get("n"), record.get("kind"), record.get("trace_sha256")])
@@ -137,37 +146,54 @@ def _build(name, frontier, drives, loop, contract, verdict):
             if not capabilities and answer == "OK":
                 continue
             event_id = _id("event", [record.get("n"), list(key), occurrence])
-            nodes[event_id] = {"id": event_id, "kind": "event", "run": record.get("n"), "label": event_label(event),
-                               **{field: event.get(field) for field in EVENT_FIELDS}}
-            edges.add((run_id, event_id, "observed"))
-            for cause_id in caused.get(id(event), []):
-                edges.add((cause_id, event_id, "caused"))
+            node = {"id": event_id, "kind": "event", "run": record.get("n"), "label": event_label(event),
+                    "key": key_digest(event), **{field: event.get(field) for field in EVENT_FIELDS}}
+            own = [(run_id, event_id, "observed")] + [(cause_id, event_id, "caused") for cause_id in caused.get(id(event), [])]
+            rules = []
             never = contract_check.capability_of(event)[0] == "never"
             for capability in capabilities or [event.get("type")]:
                 scope = grants.get(capability)
                 grant = ("never allowed (no capability can allow it)" if never
                          else "denied (default deny)" if scope is None else scope)
                 rule_id = _id("rule", [capability, grant])
-                nodes[rule_id] = {"id": rule_id, "kind": "rule", "capability": capability, "grant": grant}
+                rules.append({"id": rule_id, "kind": "rule", "capability": capability, "grant": grant})
                 kind = {"VIOLATION": "violates", "UNRESOLVED": "unjudged"}.get(answer, "within")
-                edges.add((event_id, rule_id, kind))
+                own.append((event_id, rule_id, kind))
                 if kind == "violates" and verdict.get("status") == "REJECTED":
-                    edges.add((rule_id, verdict_id, "decides"))
+                    own.append((rule_id, verdict_id, "decides"))
+            if answer == "OK" and not caused.get(id(event)):
+                plain.append((node, rules, own))
+                continue
+            nodes[event_id] = node
+            nodes.update({rule["id"]: rule for rule in rules})
+            edges.update(own)
+    plain.sort(key=lambda item: item[0]["id"])
+    for node, rules, own in plain[:MAX_PLAIN_EVENTS]:
+        nodes[node["id"]] = node
+        nodes.update({rule["id"]: rule for rule in rules})
+        edges.update(own)
     graph = {"version": VERSION, "package": name,
              "nodes": sorted(nodes.values(), key=lambda n: n["id"]),
              "edges": [{"from": a, "to": b, "kind": k} for a, b, k in sorted(edges)],
-             "counts": {"nodes": len(nodes), "edges": len(edges), "install_events_within_envelope": install_passed}}
+             "counts": {"nodes": len(nodes), "edges": len(edges), "install_events_within_envelope": install_passed,
+                        "events_within_contract_not_listed": max(0, len(plain) - MAX_PLAIN_EVENTS)}}
     graph["digest"] = _digest(graph)
     return graph
 
 
-def cause(graph, run_n, event) -> str:
-    """The report's text for the cause of `event` of run `run_n` (the event the verdict names first)."""
+def cause(graph, run_n, event):
+    """The report's text for the cause of `event` of run `run_n` (the event the verdict names first), or None when the
+    graph has no node for it. The event is found by its `sandbox_events.event_key` and trace line (review of Phase 3b,
+    MINOR 4), not by the shown fields."""
     nodes = {n["id"]: n for n in graph.get("nodes") or []}
-    match = [n for n in nodes.values() if n["kind"] == "event" and n["run"] == run_n
-             and all(n.get(f) == event.get(f) for f in EVENT_FIELDS)]
+    try:
+        wanted = event.get("key") or key_digest(event)  # a key event of the evidence carries its key digest
+    except (KeyError, TypeError, AttributeError):
+        return None
+    match = [n for n in nodes.values() if n["kind"] == "event" and n["run"] == run_n and n.get("key") == wanted
+             and n.get("line") == event.get("line")]
     if not match:
-        return "cause not in the graph"
+        return None
     target = match[0]["id"]
     causes = [nodes[e["from"]] for e in graph.get("edges") or [] if e["to"] == target and e["kind"] == "caused"]
     calls = [c for c in causes if c["kind"] == "call"]
