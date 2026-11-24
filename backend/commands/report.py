@@ -99,10 +99,14 @@ def cavr_deep(report: dict) -> list[str]:
         else:
             missed = next((r for r in deep.get("escalation_reasons") or [] if isinstance(r, dict) and not r.get("exercised")), None)
             residual = next((e for e in (deep.get("residual") or {}).get("entries") or [] if isinstance(e, dict)), None)
+            guard = next((g for g in deep.get("unexplored_guards") or [] if isinstance(g, dict)), None)
             if missed:
                 line += f" - not exercised: {missed.get('file')}:{missed.get('line')} {missed.get('sink')} ({missed.get('placement')})"
             elif residual:
                 line += f" - {residual.get('file')}:{residual.get('line')} `{residual.get('predicate')}`: {residual.get('outcome')}"
+            elif guard:
+                line += (f" - unevaluable guard {guard.get('file')}:{guard.get('line')} `{guard.get('predicate')}` gates "
+                         f"{', '.join(guard.get('capabilities') or [])} ({guard.get('risk')} risk), no run showed it")
         lines.append(line)
     return lines
 

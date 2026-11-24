@@ -78,6 +78,11 @@ WHEELS = {
         f"if os.environ.get('DEPLOY_{i}') == 'yes':\n{FIRE}" for i in range(1, 9)) + RUN}, "demo.run()", SCOPED,
                ("UNRESOLVED", "DEEP_RUN_BUDGET_EXHAUSTED", "REVIEW", 2)),
     "function_sink": (BENIGN_FUNCTION, "demo.run()", None, ("UNRESOLVED", "DEEP_SINK_NOT_EXERCISED", "REVIEW", 2)),
+    # Maryam, 2026-11-24: a guard CAVR cannot evaluate (no family: no environment, clock, file, host, user, argv or
+    # platform read; never true) in front of a connect to an address outside the only grant.
+    "guard_out_of_scope": ({"demo/__init__.py": "import socket\nif hash('cavr') % 7 == 99:\n"
+                                                + FIRE.replace(TARGET, "('203.0.113.9', 443)") + RUN},
+                           "demo.run()", SCOPED, ("UNRESOLVED", "DEEP_GUARD_UNEXPLORED", "REVIEW", 2)),
 }
 
 
@@ -144,6 +149,10 @@ def test_m2_demo_wheel_through_asent_gate(name, tmp_path):
         assert [d["call"] for d in deep["drives"]["driven"]] == ["demo.send('x')"]
     if name == "driven_reject":
         assert deep["key_events"][0]["step"] == "drive_1"
+    if name == "guard_out_of_scope":
+        (guard,) = deep["unexplored_guards"]
+        assert (guard["risk"], guard["not_shown"]) == ("medium", ["NETWORK_CONNECT"]) and len(runs) == 1
+        assert "unevaluable guard demo/__init__.py:2" in line
     if name == "function_sink":
         assert "demo.run() at app/uses_demo.py:5 showed no NETWORK_CONNECT event" in deep["reason"]
     graph, causal = deep["causal_graph"], deep["causal"]

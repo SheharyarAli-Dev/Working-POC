@@ -375,7 +375,8 @@ counterfactual run; the §6.6 three-package canary path is found; unexplored tri
 
 - Recorded for PR 12 (Maryam, 2026-11-23, Phase 3a plan): the loop calls `trigger_frontier.frontier_residual(frontier,
   explored)`; an unsimulable entry (any risk) can never give VERIFIED (tested in PR 10). `other_guards` that guard a
-  high-risk sink count as unexplored -> UNRESOLVED, unless the sink was exercised by a run. `sandbox_deep.high_risk_triggers`
+  high-risk sink count as unexplored -> UNRESOLVED, unless the sink was exercised by a run (changed on 2026-11-24, see
+  below: high or medium risk). `sandbox_deep.high_risk_triggers`
   (fast-gate `trigger_discovery.scan` triggers) is replaced by the frontier here, which is also when
   `trigger_discovery.py` (LOCAL lab, `ast_scan`) and `sandbox_runner.py` (with `docker/asent-sandbox/`) can go.
   Sandbox-evasion checks (`/.dockerenv`, files outside the sandbox HOME) are unsimulable and so UNRESOLVED by design.
@@ -533,6 +534,7 @@ Stated as limitations in the report and on the dashboard, not implemented in M2:
 - [x] PR 12 counterfactual loop (branch `cavr-m2-loop`, 2026-11-24; report notes Step M2-17): `activation_loop.py`, `call_drive.py`, `sandbox_deep.py` v2; 13 demo wheels through `asent gate` (`tests/test_cavr_m2_wheels.py`)
 - [x] Legacy clean-up (Q12; branch `cavr-m2-loop`, 2026-11-24; report notes Step M2-18): `sandbox.py`, `lab_harness.py`, `runtime_monitor.py`, `sandbox_runner.py`, `harness.py`, `trigger_discovery.py` (moved into `ast_scan.rule_scan`), `policy.py`, `repair.py`, `capability_contract.infer`, `docker/asent-sandbox/`, the LOCAL-lab path of `analyzer.py`, the CAVR half of the orchestrator `_repair`; scenarios `cavr_canary` and `cross_module` retired (option A)
 - [x] PR 13 causal graph (branch `cavr-m2-loop`, 2026-11-24; report notes Step M2-19): `causal_graph.py` rewritten from the loop's runs (trigger, spec, run, call, event, rule, verdict; `caused` only for the counterfactual difference); digest in the deep evidence; the `asent report` deep line names the cause; `docs/cavr-demo.md` "M2 demo: real wheels"
+- `other_guards` rule widened (Maryam, 2026-11-24, after the review's MINOR 11; report notes Step M2-20): a guard CAVR cannot evaluate in front of any sink not granted with "*" (high or medium risk) is unexplored -> UNRESOLVED `DEEP_GUARD_UNEXPLORED` unless a completed run showed every sink it gates; Docker wheel `guard_out_of_scope`; the 13 other demo wheels unchanged
 - Phase 3b review (2026-11-24): one cavr-reviewer pass, 2 BLOCKER / 2 MAJOR / 12 MINOR fixed (report notes, "Review of Steps M2-17 to M2-19"); Flask / InvoiceHub verdicts unchanged
 - [ ] PR 14 RESTRICTED verdict
 

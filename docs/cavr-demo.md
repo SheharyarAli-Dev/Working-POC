@@ -682,11 +682,12 @@ One command per wheel (prints the `asent report` text of that gate run):
 CAVR_DOCKER=1 .venv/bin/python tests/test_cavr_m2_wheels.py env_ci
 ```
 
-Replace `env_ci` by any name in the table; with no name it runs all 13 (150 s on this machine). Each run makes a new
+Replace `env_ci` by any name in the table; with no name it runs all 14 (about 3 minutes on this machine). Each run makes a new
 temporary repository and data directory and removes them afterwards.
 
 **Recorded output** (2026-11-24, branch `cavr-m2-loop` with PR 13, image `sha256:0e88dd461ca4…`, Docker 29.9.3, WSL2;
-the `CAVR deep` line of each run, exactly as printed):
+the `CAVR deep` line of each run, exactly as printed). `guard_out_of_scope` was added and recorded the same day after the
+`other_guards` rule was widened (report notes Step M2-20); on that re-run the other 13 lines were byte for byte the same.
 
 | Wheel | What the wheel does | Policy | Decision | `asent report` deep line |
 |---|---|---|---|---|
@@ -703,6 +704,7 @@ the `CAVR deep` line of each run, exactly as printed):
 | `win32` | `if sys.platform == 'win32': connect(...)` | default policy | REVIEW (exit 2) | `` demo==1.0 UNRESOLVED TRIGGER_UNSIMULABLE - demo/__init__.py:2 `(sys.platform == 'win32')`: not run: unsimulable (the condition is true only when sys.platform is 'win32' (os.name 'nt', platform.system() 'Windows'); the sandbox runs Linux) `` |
 | `budget` | 8 branches `if DEPLOY_i == 'yes': connect(...)` | `NETWORK_CONNECT:198.51.100.24:443` granted | REVIEW (exit 2) | `` demo==1.0 UNRESOLVED DEEP_RUN_BUDGET_EXHAUSTED - demo/__init__.py:37 `(os.environ.get('DEPLOY_8') == 'yes')`: not run: the budget of 8 sandbox runs for this package is used up `` |
 | `function_sink` | `def send(data): connect(...)`; the app calls only `demo.run()` | default policy | REVIEW (exit 2) | `` demo==1.0 UNRESOLVED DEEP_SINK_NOT_EXERCISED - not exercised: demo/net.py:5 socket.create_connection (function send) `` |
+| `guard_out_of_scope` | `if hash('cavr') % 7 == 99: connect(203.0.113.9:443)` (a guard CAVR cannot evaluate) | `NETWORK_CONNECT:198.51.100.24:443` granted | REVIEW (exit 2) | `` demo==1.0 UNRESOLVED DEEP_GUARD_UNEXPLORED - unevaluable guard demo/__init__.py:2 `hash('cavr') % 7 == 99` gates NETWORK_CONNECT (medium risk), no run showed it `` |
 
 What each row shows:
 
@@ -722,6 +724,10 @@ What each row shows:
 - **`win32`: UNRESOLVED.** No Linux environment makes `sys.platform == 'win32'` true; an unsimulable trigger can never
   give VERIFIED.
 - **`budget`: UNRESOLVED.** 1 canary-only + 7 trigger runs use the 8 runs; `DEPLOY_8` was never run.
+- **`guard_out_of_scope`: UNRESOLVED.** `hash('cavr') % 7 == 99` reads nothing CAVR can set (no variable, clock, file,
+  host, user, argv or platform), so no run can be made to take the branch; behind it is a connect to an address the
+  grant does not cover. A guard CAVR cannot evaluate in front of a sink not granted with `*` is unexplored, so the
+  package cannot be VERIFIED (before this rule it was UNRESOLVED for another reason, `DEEP_SINK_NOT_EXERCISED`).
 - **`function_sink`: UNRESOLVED.** The app only calls `demo.run()`; driving it shows no connect, so the sink in
   `send()` is not exercised.
 

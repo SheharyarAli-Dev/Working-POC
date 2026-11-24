@@ -37,7 +37,8 @@ then score (descending), then package, file, line, id, and cut at `limit`; `drop
 
 `frontier_residual(frontier, explored)` is the check PR 12 calls: an incomplete, truncated or missing frontier, an
 unsimulable entry, or a simulable entry that no run explored (and the baseline does not take) can never give VERIFIED.
-PR 12 adds the rule for `other_guards` in front of a high-risk sink (unexplored unless the sink was exercised).
+PR 12 adds the rule for `other_guards` in front of a sink not granted with "*" (high or medium risk; medium added by
+Maryam on 2026-11-24): unexplored unless a completed run showed the sink.
 """
 from __future__ import annotations
 

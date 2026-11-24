@@ -32,8 +32,9 @@ Verdict (Q8, Maryam 2026-11-22 and 2026-11-24), first match wins:
        incomplete or truncated, an entry (any risk) is unsimulable, or a simulable entry was not explored  -> UNRESOLVED
        (its rule; DEEP_RUN_BUDGET_EXHAUSTED when entries were never run because the budget ended; D1: kept as strict
        as PR 10 wrote it)
-    5. an `other_guards` entry in front of a high-risk sink, and no completed run showed that sink -> UNRESOLVED
-       DEEP_GUARD_UNEXPLORED
+    5. an `other_guards` entry in front of a sink the contract does not grant with "*" (high or medium risk: denied, or
+       granted only for a scope; Maryam 2026-11-24, after the Phase 3b review), and no completed run showed every
+       sink capability it gates                                                        -> UNRESOLVED DEEP_GUARD_UNEXPLORED
     6. no escalation reason / one that no completed run exercised                      -> UNRESOLVED DEEP_ESCALATION_UNKNOWN
                                                                                           / DEEP_SINK_NOT_EXERCISED
     7. otherwise                                                                       -> VERIFIED DEEP_RUN_CLEAN
@@ -221,8 +222,8 @@ class SandboxDeepAnalyzer:
         if guards:
             first = guards[0]
             return _answer("UNRESOLVED", "DEEP_GUARD_UNEXPLORED", f"{name}: the runs were clean, but {len(guards)} "
-                           f"guard(s) CAVR cannot evaluate stand in front of a sink the contract does not grant, and no "
-                           f"run showed that sink; first: {first['package']} {first['file']}:{first['line']} "
+                           f"guard(s) CAVR cannot evaluate stand in front of a sink the contract does not grant with \"*\", "
+                           f"and no run showed that sink; first: {first['package']} {first['file']}:{first['line']} "
                            f"`{first['predicate']}` gates {', '.join(first['capabilities'])}", evidence)
         reasons = escalation_reasons(package, runs, drives)
         evidence["escalation_reasons"] = reasons
@@ -374,8 +375,15 @@ def _why(placement, capability, hits, shared, drives) -> str:
     return f"the call is in {placement}, which an import does not run, and no call site could be driven ({why})"
 
 
+GUARDED_RISKS = ("high", "medium")  # every sink not granted with "*" (low risk = granted with "*")
+
+
 def unexplored_guards(found, runs) -> list[dict]:
-    """`other_guards` in front of a high-risk sink whose capability no completed run showed (outside the install step)."""
+    """`other_guards` (guards CAVR cannot evaluate) in front of a sink not granted with "*" (high or medium risk), for
+    which no completed run showed every sink capability the guard gates (outside the install step).
+
+    Medium risk counts too (Maryam, 2026-11-24): behind a guard CAVR cannot evaluate, a capability granted only for a
+    scope could be used outside it, and no run made the branch run."""
     seen = set()
     for record in runs or []:
         if record.get("completed"):
@@ -385,9 +393,10 @@ def unexplored_guards(found, runs) -> list[dict]:
     out = []
     for guard in (found or {}).get("other_guards") or []:
         capabilities = activation_loop.sink_capabilities(guard)
-        if guard.get("risk") == "high" and not capabilities & seen:
+        if guard.get("risk") in GUARDED_RISKS and not capabilities <= seen:
             out.append({"id": guard.get("id"), "package": guard.get("package"), "file": guard.get("file"),
-                        "line": guard.get("line"), "predicate": guard.get("predicate"), "capabilities": sorted(capabilities)})
+                        "line": guard.get("line"), "predicate": guard.get("predicate"), "risk": guard.get("risk"),
+                        "capabilities": sorted(capabilities), "not_shown": sorted(capabilities - seen)})
     return out
 
 

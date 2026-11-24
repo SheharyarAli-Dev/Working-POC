@@ -6331,7 +6331,7 @@ took 38.5 s.
   REPAIRING (there is nothing CAVR applies, Q9); SATRA's repair path is unchanged.
 - MINOR 11: `other_guards` in front of a medium-risk (scoped) sink do not block VERIFIED (the PR 10 rule names
   high-risk sinks only); a guard CAVR cannot evaluate could hide an out-of-scope use of a scoped capability. Left as
-  the approved rule, to be decided with Maryam.
+  the approved rule, to be decided with Maryam. Decided the same day: the rule now covers medium risk too (Step M2-20).
 - The credential guard stays a heuristic (D2).
 
 ### Tool disclosure (Ch 8.7)
@@ -6347,3 +6347,84 @@ took 38.5 s.
    host's clock (`deep_stage.run_deep`); the loop plans its runs against the same start.
 3. **An entry gates a read and a connect; only the read ran?** Not explored: the verdict cannot claim what the connect
    would have done, so it is UNRESOLVED.
+
+
+## Step M2-20 — Unevaluable guards in front of scoped sinks are unexplored (2026-11-24)
+
+Decision (Maryam, 2026-11-24, after the Phase 3b review's MINOR 11): the PR 10 `other_guards` rule covers every sink
+that is not granted with `*`, high or medium risk. A guard CAVR cannot evaluate in front of such a sink is unexplored:
+UNRESOLVED `DEEP_GUARD_UNEXPLORED`, unless a completed run showed that sink.
+
+### Ch 6 Implementation
+
+- `backend/cavr/sandbox_deep.py`: `GUARDED_RISKS = ("high", "medium")`; `unexplored_guards(found, runs)` lists every
+  `other_guards` entry of those risks for which no completed run showed every sink capability it gates (outside the
+  install step; the same all-sinks rule as frontier entries since the review's MAJOR 1), with `risk` and `not_shown`.
+  Clause 5 of the verdict and its reason say "not granted with \"*\"".
+- `backend/commands/report.py` `[owner review]`: the deep line of a DEEP_GUARD_UNEXPLORED verdict names the guard
+  ("unevaluable guard <file>:<line> `<predicate>` gates <capabilities> (<risk> risk), no run showed it").
+- `backend/cavr/trigger_frontier.py`: docstring only (the rule PR 12 adds).
+- Tests: `test_cavr_sandbox_deep.py` (2 unit tests, the report line), `test_cavr_m2_wheels.py` (Docker wheel
+  `guard_out_of_scope`). `docs/cavr-demo.md`: the new row; `docs/cavr-m2-plan.md`: the rule text and progress.
+
+### Design decisions
+
+- Medium risk counts because a scope is a promise about where a capability is used; behind a guard CAVR cannot make
+  true, no run tested that promise. Alternative (keep high only): a scoped grant would let an unevaluable branch hide
+  an out-of-scope use, as the review showed. Cost: packages with such a guard in front of a scoped sink are UNRESOLVED
+  (they were not VERIFIED before either when the sink was an escalation reason; see the test below).
+- "Showed that sink" uses every sink capability of the guard (consistent with frontier entries).
+- Low risk (granted with `*`) stays out: any use is within the contract, so the branch cannot hide a violation.
+
+### Requirements covered
+
+- FR-6 / Q8 (fail closed): `test_an_unevaluable_guard_in_front_of_a_scoped_sink_is_unexplored`,
+  `test_m2_demo_wheel_through_asent_gate[guard_out_of_scope]`.
+- NFR-6: the guard, its risk and what was not shown are in `unexplored_guards` and the report line.
+
+### Ch 7 Test cases
+
+| Test ID | Purpose | Input | Expected | Result |
+|---|---|---|---|---|
+| test_an_unevaluable_guard_in_front_of_a_scoped_sink_is_unexplored | new rule | `if hash('cavr') % 7 == 99: connect(203.0.113.9:443)`, only 198.51.100.24:443 granted, recording events-benign | UNRESOLVED DEEP_GUARD_UNEXPLORED, guard medium, not_shown NETWORK_CONNECT, 1 run; with the old rule (checked): UNRESOLVED DEEP_SINK_NOT_EXERCISED | pass |
+| test_an_unevaluable_guard_whose_sink_a_run_showed_is_not_this_rule | "unless shown" | the same guard + a module-level in-scope connect, recording events-scoped | not DEEP_GUARD_UNEXPLORED (DEEP_SINK_NOT_EXERCISED by D3: two connect sinks) | pass |
+| test_report_text_line_for_each_deep_result (extended) | report | a DEEP_GUARD_UNEXPLORED row | "- unevaluable guard g/__init__.py:3 `hash('cavr') % 7 == 99` gates NETWORK_CONNECT (medium risk), no run showed it" | pass |
+| test_m2_demo_wheel_through_asent_gate[guard_out_of_scope] (Docker, new) | end to end | the wheel above through `asent gate` | UNRESOLVED DEEP_GUARD_UNEXPLORED, REVIEW exit 2, 1 run | pass |
+| test_m2_demo_wheel_through_asent_gate[13 other wheels] (Docker) | no other change | as in Step M2-17 | unchanged | pass |
+
+Demo wheels re-run (`CAVR_DOCKER=1 pytest tests/test_cavr_m2_wheels.py`): 14 passed in 187 s. The demo script for all
+14 compared line by line with the output recorded in `docs/cavr-demo.md`: the 13 earlier `CAVR deep` lines and
+decisions are byte for byte the same; the only new line is `guard_out_of_scope` (UNRESOLVED DEEP_GUARD_UNEXPLORED,
+REVIEW exit 2). No result changed.
+Run before the commit (deep and gate tests, as Maryam asked): `CAVR_DOCKER=1 pytest tests/test_cavr_sandbox_deep.py
+tests/test_cavr_deep_stage.py tests/test_cavr_m2_wheels.py tests/test_cavr_activation_loop.py tests/test_cavr_causal_graph.py
+tests/test_cavr_call_drive.py tests/test_cavr_trigger_frontier.py tests/test_cavr_gate_adapter.py tests/test_gate_*.py
+tests/test_cli_gate.py tests/test_cli_report.py`: 397 passed, 1 skipped (live network), 0 failed, 426 s; no container
+left. No full-suite run for this step.
+
+### Defects found and fixed
+
+- None in this step.
+
+### Known limitations / deferred
+
+- The Phase 3b review limitation MINOR 11 is closed by this step.
+- Which guards are "unevaluable" is the frontier's: a guard that reads none of its families (Step M2-15). A guard that
+  reads a family but whose value CAVR cannot compute is a frontier entry (unsimulable -> UNRESOLVED), not an
+  other_guard.
+- A completed run that shows the guarded sink's capability through other code also clears the guard (strace cannot
+  name the Python line; the same limit as D3).
+
+### Tool disclosure (Ch 8.7)
+
+- **Generated by Claude Code:** the rule change, the report line, the tests, the demo wheel, these notes, the plan and
+  demo-doc edits, as Maryam asked on 2026-11-24. **Reviewed by Maryam:** the decision; the code not yet. **Verified
+  by:** the runs above; the new unit test was checked to fail with the old rule.
+
+### Supervisor Q&A prep
+
+1. **Why is a guard CAVR cannot evaluate a reason for UNRESOLVED when the sink is granted for a scope?** The scope is
+   a claim about where the package connects; behind that guard no run ever executed the connect, so the claim was not
+   tested. Example: `guard_out_of_scope` would connect to 203.0.113.9, outside the grant.
+2. **Does this make clean packages UNRESOLVED?** Only those with such a guard in front of a scoped or denied sink; the
+   13 other demo wheels kept their results byte for byte.

@@ -268,6 +268,37 @@ def test_a_refused_credential_reaches_no_verdict_field(world, tmp_path, monkeypa
     assert package["rule"] == "DEEP_SINK_NOT_EXERCISED" and token not in json.dumps(verdict, default=str)
 
 
+# Maryam, 2026-11-24 (after the Phase 3b review): an unevaluable guard in front of a sink granted only for a scope
+# counts as unexplored. `hash('cavr') % 7 == 99` reads no family (no environment, clock, file, ...), so it is an
+# other_guard; it is never true, so no run takes the branch.
+OUT_OF_SCOPE_GUARD = {"demo/__init__.py": "import socket\n\nif hash('cavr') % 7 == 99:\n    try:\n"
+                                          "        socket.create_connection(('203.0.113.9', 443), timeout=1)\n"
+                                          "    except OSError:\n        pass\n\n\ndef run():\n    return 1\n"}
+
+
+def test_an_unevaluable_guard_in_front_of_a_scoped_sink_is_unexplored(world, tmp_path, monkeypatch):
+    world.policy.update(SCOPED_POLICY)  # only NETWORK_CONNECT:198.51.100.24:443 is granted
+    escalated(world, OUT_OF_SCOPE_GUARD)
+    sandbox = Sandbox(monkeypatch, [recorded_run("events-benign")])
+    _, package = verify(world, analyzer(tmp_path))
+    assert (package["status"], package["rule"]) == ("UNRESOLVED", "DEEP_GUARD_UNEXPLORED"), package["reason"]
+    (guard,) = package["evidence"]["deep"]["evidence"]["unexplored_guards"]
+    assert (guard["risk"], guard["capabilities"], guard["not_shown"]) == ("medium", ["NETWORK_CONNECT"], ["NETWORK_CONNECT"])
+    assert "hash('cavr')" in guard["predicate"] and len(sandbox.calls) == 1  # no frontier entry, so one run
+
+
+def test_an_unevaluable_guard_whose_sink_a_run_showed_is_not_this_rule(world, tmp_path, monkeypatch):
+    world.policy.update(SCOPED_POLICY)
+    shown = {"demo/__init__.py": IMPORT_TIME["demo/__init__.py"].replace(
+        "\n\ndef run():", "\nif hash('cavr') % 7 == 99:\n    socket.create_connection(('203.0.113.9', 443))\n\n\ndef run():")}
+    escalated(world, shown)
+    Sandbox(monkeypatch, [recorded_run("events-scoped")])  # the in-scope connect at import shows NETWORK_CONNECT
+    _, package = verify(world, analyzer(tmp_path))
+    deep = package["evidence"]["deep"]["evidence"]
+    assert package["rule"] != "DEEP_GUARD_UNEXPLORED" and deep["unexplored_guards"] == []
+    assert package["rule"] == "DEEP_SINK_NOT_EXERCISED"  # two reachable connect sinks: D3
+
+
 def test_sink_placement_reads_the_wheel(tmp_path):
     source = "\n".join(["import os", "os.system('x')", "", "", "def f():", "    os.system('y')", "", "",
                         "g = lambda: os.system('z')", "class C:", "    def m(self):", "        os.system('w')", ""])
@@ -605,6 +636,10 @@ def test_report_text_line_for_each_deep_result():
             {"name": "d", "version": "4", "deep": {"status": "UNRESOLVED", "rule": "DEEP_SINK_NOT_EXERCISED", "key_events": [],
                                                     "escalation_reasons": [{"file": "d/net.py", "line": 5, "sink": "socket.create_connection",
                                                                             "placement": "function send", "exercised": False}]}},
+            {"name": "g", "version": "6", "deep": {"status": "UNRESOLVED", "rule": "DEEP_GUARD_UNEXPLORED", "key_events": [],
+                                                    "unexplored_guards": [{"file": "g/__init__.py", "line": 3,
+                                                                           "predicate": "hash('cavr') % 7 == 99",
+                                                                           "capabilities": ["NETWORK_CONNECT"], "risk": "medium"}]}},
             {"name": "c", "version": "3", "deep": None}]}]}}]}}
     assert cavr_deep(report) == [
         "  CAVR deep: a==1 VERIFIED DEEP_RUN_CLEAN (2 run(s): canary-only + 1 counterfactual, 1 call site(s) driven; "
@@ -613,7 +648,9 @@ def test_report_text_line_for_each_deep_result():
         "unsimulable (non-Linux platform)",
         "  CAVR deep: b==2 REJECTED DEEP_CONTRACT_VIOLATION - SECRET_READ openat /tmp/home/.aws/credentials = ENOENT "
         "caused by CI=true",
-        "  CAVR deep: d==4 UNRESOLVED DEEP_SINK_NOT_EXERCISED - not exercised: d/net.py:5 socket.create_connection (function send)"]
+        "  CAVR deep: d==4 UNRESOLVED DEEP_SINK_NOT_EXERCISED - not exercised: d/net.py:5 socket.create_connection (function send)",
+        "  CAVR deep: g==6 UNRESOLVED DEEP_GUARD_UNEXPLORED - unevaluable guard g/__init__.py:3 `hash('cavr') % 7 == 99` gates "
+        "NETWORK_CONNECT (medium risk), no run showed it"]
 
 
 # --- the demo wheels on Docker -------------------------------------------------------------------------------------------
