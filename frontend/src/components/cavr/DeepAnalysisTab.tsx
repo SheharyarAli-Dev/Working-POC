@@ -1,6 +1,6 @@
 import React from 'react';
 import { CavrRunState, shown } from './types';
-import { SafeText, addressText, asText } from './SafeText';
+import { SafeText, addressText, asText, cut } from './SafeText';
 import { RecordedBanner } from './RecordedBanner';
 
 interface DeepAnalysisTabProps {
@@ -11,6 +11,9 @@ interface DeepAnalysisTabProps {
 // the deep_completed event. Null before any run.
 export const packageViews = (state: CavrRunState): any[] | null =>
   state.proofData?.packages ?? state.deepPackages ?? null;
+
+// Section headings of a package card (the pane's own h6 style is too small next to its tables).
+const HEADING: React.CSSProperties = { fontSize: 13, fontWeight: 700, margin: '16px 0 6px' };
 
 const list = (value: unknown): any[] => (Array.isArray(value) ? value : []);
 const place = (item: any): string => `${asText(item?.file)}:${asText(item?.line)}`;
@@ -46,7 +49,7 @@ const PackageView: React.FC<{ view: any }> = ({ view }) => (
     </h5>
     <p className="deep-reason"><SafeText value={view.reason} limit={400} /></p>
 
-    <h6>Fast gate</h6>
+    <h6 style={HEADING}>Fast gate</h6>
     <table className="trace-table deep-fast-table">
       <thead><tr><th>Stage</th><th>Rule</th><th>Reason</th></tr></thead>
       <tbody>
@@ -80,7 +83,7 @@ const DeepBlock: React.FC<{ deep: any }> = ({ deep }) => {
   const budget = deep.budget || {};
   return (
     <div className="deep-block">
-      <h6>Deep analysis (CAVR sandbox)</h6>
+      <h6 style={HEADING}>Deep analysis (CAVR sandbox)</h6>
       <div className="proof-kv">
         <div><span>Final rule:</span> <strong>{shown(deep.status)}</strong> <code><SafeText value={deep.rule} /></code></div>
         <div><span>Reason:</span> <SafeText value={deep.reason} limit={400} /></div>
@@ -91,7 +94,7 @@ const DeepBlock: React.FC<{ deep: any }> = ({ deep }) => {
         <div><span>Loop stop:</span> <code>{shown(budget.stop)}</code> <SafeText value={budget.stop_reason} /></div>
       </div>
 
-      <h6>Runs ({runs.length})</h6>
+      <h6 style={HEADING}>Runs ({runs.length})</h6>
       <table className="trace-table deep-runs-table">
         <thead><tr><th>Run</th><th>Kind</th><th>Spec</th><th>Activation</th><th>Status</th><th>Contract check</th><th>Seconds</th><th>New events</th><th>Canaries planted</th></tr></thead>
         <tbody>
@@ -111,7 +114,7 @@ const DeepBlock: React.FC<{ deep: any }> = ({ deep }) => {
         </tbody>
       </table>
 
-      <h6>Frontier: <code><SafeText value={deep.frontier?.rule} /></code> ({shown(deep.frontier?.total)} trigger(s))</h6>
+      <h6 style={HEADING}>Frontier: <code><SafeText value={deep.frontier?.rule} /></code> ({shown(deep.frontier?.total)} trigger(s))</h6>
       <p><SafeText value={deep.frontier?.reason} /></p>
       {triggers.length === 0 ? <p>No trigger in front of a sink.</p> : (
         <table className="trace-table deep-frontier-table">
@@ -140,7 +143,7 @@ const DeepBlock: React.FC<{ deep: any }> = ({ deep }) => {
         </div>
       )}
 
-      <h6>Call sites driven ({driven.length})</h6>
+      <h6 style={HEADING}>Call sites driven ({driven.length})</h6>
       <ul className="deep-drives">
         {driven.map((drive, index) => (
           <li key={index}><code><SafeText value={drive.call} /></code> at <code><SafeText value={place(drive)} /></code> (step <SafeText value={drive.step} />)</li>
@@ -152,7 +155,7 @@ const DeepBlock: React.FC<{ deep: any }> = ({ deep }) => {
         {driven.length === 0 && notDriven.length === 0 && <li>No call site of the project reaches the package.</li>}
       </ul>
 
-      <h6>Other guards (conditions CAVR cannot evaluate): {shown(deep.frontier?.other_guards_count)}</h6>
+      <h6 style={HEADING}>Other guards (conditions CAVR cannot evaluate): {shown(deep.frontier?.other_guards_count)}</h6>
       {guards.length > 0 && (
         <ul className="deep-guards">
           {guards.map((guard, index) => (
@@ -174,7 +177,7 @@ const DeepBlock: React.FC<{ deep: any }> = ({ deep }) => {
           <SafeText value={deep.residual.reason} limit={300} /></p>
       )}
 
-      <h6>Key events ({keyEvents.length})</h6>
+      <h6 style={HEADING}>Key events ({keyEvents.length})</h6>
       <ul className="deep-key-events">
         {keyEvents.map((event, index) => (
           <li key={index}>
@@ -187,7 +190,7 @@ const DeepBlock: React.FC<{ deep: any }> = ({ deep }) => {
         ))}
       </ul>
 
-      <h6>Canary evidence</h6>
+      <h6 style={HEADING}>Canary evidence</h6>
       <p>Canaries planted: every run got fresh random fake secrets; only their ids are kept (see the Runs table).</p>
       {leaks.length === 0 ? (
         <p>{deep.causal?.digest_checked ? 'No canary leak in any run (every violating event is in the graph).'
@@ -204,9 +207,9 @@ const DeepBlock: React.FC<{ deep: any }> = ({ deep }) => {
         </ul>
       )}
 
-      <h6>Causal graph</h6>
+      <h6 style={HEADING}>Causal graph</h6>
       <p>
-        Cause: <SafeText value={deep.causal?.cause ?? 'none named'} />. Digest <code><SafeText value={deep.causal?.digest} limit={16} /></code>{' '}
+        Cause: <SafeText value={deep.causal?.cause ?? 'none named'} />. Digest <code>{cut(deep.causal?.digest, 16)}</code>{' '}
         ({deep.causal?.digest_checked ? 'the graph hashes to it' : 'the graph is not available or does not hash to it'}).
       </p>
       <p className="deep-claim">What this claims: <SafeText value={deep.claim} limit={300} /></p>

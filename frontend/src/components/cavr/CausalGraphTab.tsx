@@ -28,9 +28,12 @@ const EDGE_TEXT: Record<string, string> = {
   violates: 'violates', within: 'within', unjudged: 'not judged', decides: 'decides',
 };
 const DECISIVE_EDGES = new Set(['caused', 'violates', 'unjudged']);
-const COLUMN_WIDTH = 200;
+// Stroke of each edge kind on the drawing; only "caused by" carries a label there (every edge is listed as text below).
+const EDGE_STROKES: Record<string, string> = { caused: '#ea580c', violates: '#dc2626', unjudged: '#a16207', within: '#16a34a',
+  decides: '#475569' };
+const COLUMN_WIDTH = 236;
 const ROW_HEIGHT = 56;
-const NODE_WIDTH = 176;
+const NODE_WIDTH = 170;
 const NODE_HEIGHT = 40;
 
 const list = (value: unknown): any[] => (Array.isArray(value) ? value : []);
@@ -163,7 +166,8 @@ const GraphView: React.FC<{ name: string; graph: any }> = ({ name, graph }) => {
       )}
 
       <div className="svg-canvas-container" style={{ overflowX: 'auto' }}>
-        <svg className="causal-svg" viewBox={`0 0 ${width} ${height}`} width={width} height={height} role="img">
+        <svg className="causal-svg" viewBox={`0 0 ${width} ${height}`} role="img"
+          style={{ width: '100%', maxWidth: width, height: 'auto' }}>
           <defs>
             <marker id="cavr-arrow" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="6" markerHeight="6" orient="auto">
               <path d="M 0 0 L 10 5 L 0 10 z" fill="#94a3b8" />
@@ -180,14 +184,17 @@ const GraphView: React.FC<{ name: string; graph: any }> = ({ name, graph }) => {
             if (!from || !to) return null;
             const caused = edge.kind === 'caused';
             const x1 = from.x + NODE_WIDTH, y1 = from.y + NODE_HEIGHT / 2, x2 = to.x, y2 = to.y + NODE_HEIGHT / 2;
-            const bend = caused ? -28 : 0;
+            const bend = caused ? -14 * Math.max(1, Math.round((x2 - x1) / COLUMN_WIDTH)) : 0;
+            const stroke = EDGE_STROKES[edge.kind] ?? '#94a3b8';
             const path = `M ${x1} ${y1} Q ${(x1 + x2) / 2} ${(y1 + y2) / 2 + bend} ${x2} ${y2}`;
             return (
               <g key={index} className={`edge-group edge-${caused ? 'caused' : 'plain'}`}>
-                <path d={path} fill="none" stroke={caused ? '#ea580c' : '#94a3b8'} strokeWidth={caused ? 2.5 : 1.2}
+                <path d={path} fill="none" stroke={stroke} strokeWidth={caused ? 2.5 : 1.4}
                   strokeDasharray={caused ? '6,3' : undefined} markerEnd={caused ? 'url(#cavr-arrow-caused)' : 'url(#cavr-arrow)'} />
-                <text x={(x1 + x2) / 2} y={(y1 + y2) / 2 + bend / 2 - 4} textAnchor="middle" fontSize="10"
-                  fontWeight={caused ? 700 : 400} fill={caused ? '#c2410c' : '#64748b'}>{EDGE_TEXT[edge.kind] ?? 'edge'}</text>
+                {caused && (
+                  <text x={(x1 + x2) / 2} y={(y1 + y2) / 2 + bend / 2 - 4} textAnchor="middle" fontSize="11"
+                    fontWeight={700} fill="#c2410c">caused by</text>
+                )}
               </g>
             );
           })}
@@ -207,6 +214,11 @@ const GraphView: React.FC<{ name: string; graph: any }> = ({ name, graph }) => {
         </svg>
       </div>
 
+      <p className="graph-legend-text" style={{ fontSize: 12 }}>
+        Lines: <span style={{ color: '#ea580c', fontWeight: 700 }}>orange dashed = caused by</span> ·{' '}
+        <span style={{ color: '#dc2626' }}>red = violates the contract</span> · <span style={{ color: '#16a34a' }}>green = within the contract</span> ·{' '}
+        <span style={{ color: '#a16207' }}>brown = not judged</span> · grey = synthesized as / configured / observed / decides.
+      </p>
       <details className="graph-edge-list">
         <summary>Edges as text ({edges.length})</summary>
         <ul>
