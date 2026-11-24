@@ -557,3 +557,85 @@ def test_the_repair_tab_of_a_deep_rejection_says_repair_was_not_attempted_and_wh
     # Nothing was looked for, so no candidate count is printed; the limitations still say what a re-check would not do.
     assert "No candidate was looked for (NOT_REPAIRABLE)." in tab and not any(p.startswith("Tried:") for p in tab)
     assert "fast-gate re-check only: no sandbox and no deep analysis; an escalated candidate is skipped" in tab
+
+
+# --- PR 19: the causal graph tab ---------------------------------------------------------------------------------------
+
+def chains_of(pieces) -> str:
+    """The text of the cause chains: what follows the heading up to the SVG's first column title, joined."""
+    start, end = pieces.index("Cause chains") + 1, pieces.index("Trigger / call site")
+    return " ".join(pieces[start:end])
+
+
+def test_the_graph_of_a_rejected_run_shows_trigger_event_rule_verdict_with_the_caused_by_edge(dashboard, tmp_path):
+    (view,) = render(tmp_path, {"view": "causal", **recorded_data(dashboard, "env_ci")})
+    graph = deep_evidence(RECORDED_FILE["runs"], "env_ci")["causal_graph"]
+    assert "RECORDED RUN" in view and "demo==1.0: causal capability graph" in view
+    # Two events: the connect at import and again in the drive step (which imports the package too).
+    chain = " caused by (os.environ.get('CI') == 'true') (demo/__init__.py:2) → violates NETWORK_CONNECT: denied (default deny) → REJECTED DEEP_CONTRACT_VIOLATION"
+    assert chains_of(view) == (f"NETWORK_CONNECT 198.51.100.24:443 (run 2, drive_1, trace line 4194){chain} "
+                               f"NETWORK_CONNECT 198.51.100.24:443 (run 2, imports, trace line 3948){chain}")
+    for title in ("Trigger / call site", "Run spec", "Run", "Event", "Contract rule", "Verdict"):
+        assert title in view
+    assert "caused by" in view[view.index("Verdict"):]                       # the label on the drawn edge
+    assert f"{len(graph['nodes'])} nodes, {len(graph['edges'])} edges; digest" in " ".join(view)
+
+
+def test_the_graph_of_a_driven_call_names_the_call_as_the_cause(dashboard, tmp_path):
+    (view,) = render(tmp_path, {"view": "causal", **recorded_data(dashboard, "driven_reject")})
+    assert chains_of(view).startswith("NETWORK_CONNECT 198.51.100.24:443 (run 1, drive_1, trace line ")
+    assert chains_of(view).endswith(" caused by demo.send('x') at app/uses_demo.py:5"
+                                    " → violates NETWORK_CONNECT: denied (default deny) → REJECTED DEEP_CONTRACT_VIOLATION")
+
+
+def test_the_graph_of_a_canary_only_violation_has_no_cause_edge(dashboard, tmp_path):
+    (view,) = render(tmp_path, {"view": "causal", **recorded_data(dashboard, "canary_exfil")})
+    assert any(piece.startswith('No "caused by" edge') for piece in view)
+    assert any(piece.startswith("CANARY_EXFIL 198.51.100.24:53 (run 1, imports, trace line 3934)") for piece in view) and "CANARY_EXFIL: never allowed (no capability can allow it)" in view
+
+
+def test_the_graph_of_a_verified_run_has_a_cause_that_decides_nothing(dashboard, tmp_path):
+    (view,) = render(tmp_path, {"view": "causal", **recorded_data(dashboard, "benign_triggered")})
+    chains = chains_of(view)
+    assert chains.count(" caused by (os.environ.get('CI') == 'true') (demo/__init__.py:2) → within NETWORK_CONNECT: "
+                        "198.51.100.24:443 → does not decide the verdict") >= 1 and "decides" not in chains
+    assert "VERIFIED DEEP_RUN_CLEAN" in view
+
+
+def test_the_decisive_part_is_drawn_and_the_rest_is_on_request(dashboard, tmp_path):
+    (markup,) = render_html(tmp_path, {"view": "causal", **recorded_data(dashboard, "budget")})
+    graph = deep_evidence(RECORDED_FILE["runs"], "budget")["causal_graph"]
+    drawn = markup.count('class="node-group"')
+    assert 0 < drawn <= len(graph["nodes"])
+    assert f"Show all nodes ({len(graph['nodes']) - drawn} more)" in pieces_of(markup)
+
+
+def test_no_graph_is_not_available(dashboard, tmp_path, monkeypatch):
+    (live,) = render(tmp_path, {"view": "causal", **run_data(dashboard, "verified")})
+    assert "Not available: no deep analysis ran for this request, so there are no observed runs to draw." in live
+    runs = json.loads(json.dumps(RECORDED_FILE["runs"]))
+    deep_evidence(runs, "env_ci")["causal_graph"]["nodes"][0]["label"] = "edited after recording"
+    (edited,) = render(tmp_path, {"view": "causal", **recorded_data(dashboard, "env_ci", runs, monkeypatch)})
+    assert "Not available: the graph of this run is missing or does not hash to the digest its evidence names." in edited
+    assert "edited after recording" not in " ".join(edited)
+
+
+def test_hostile_text_in_the_graph_is_escaped_and_cut(dashboard, tmp_path, monkeypatch):
+    from backend.cavr.causal_graph import _digest
+    runs = hostile_runs()
+    evidence = deep_evidence(runs, "env_ci")
+    graph = evidence["causal_graph"]
+    events = [node for node in graph["nodes"] if node["kind"] == "event"]
+    trigger = next(node for node in graph["nodes"] if node["kind"] == "trigger")
+    events[0]["label"] = HOSTILE["script"] + LONG
+    trigger.update({"predicate": HOSTILE["link"], "file": HOSTILE["img"]})
+    next(node for node in graph["nodes"] if node["kind"] == "call")["call"] = HOSTILE["js"]
+    next(node for node in graph["nodes"] if node["kind"] == "rule")["grant"] = HOSTILE["svg"] + HOSTILE["iframe"]
+    # As if a real package had produced this text: the graph and its digest agree, so it is shown.
+    graph["digest"] = evidence["causal"]["digest"] = _digest(graph)
+    data = recorded_data(dashboard, "env_ci", runs, monkeypatch)
+    assert data["proof"]["causal_graphs"]          # shown: the digest matches
+    (markup,) = render_html(tmp_path, {"view": "causal", **data})
+    check_hostile_markup(markup, data["proof"]["run_id"])
+    svg = markup[markup.index("<svg class=\"causal-svg\""):markup.index("</svg>", markup.index("<svg class=\"causal-svg\""))]
+    assert LONG[:200] not in svg                     # SVG labels and titles are cut

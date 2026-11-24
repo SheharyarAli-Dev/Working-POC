@@ -55,10 +55,6 @@ export const NOT_COMPUTED = '—';
 export const shown = (value: unknown): string =>
   value === null || value === undefined || value === '' ? NOT_COMPUTED : String(value);
 
-// Text shown by a tab whose stage does not exist on the fast-gate path.
-export const NOT_RUN_ON_FAST_GATE =
-  'Not run. The fast gate checks the artifact without executing package code; this stage belongs to deep analysis (M2).';
-
 // One chip, as GET /api/cavr/scenarios describes it. The page holds no package name of its own.
 export interface Scenario {
   id: string;
