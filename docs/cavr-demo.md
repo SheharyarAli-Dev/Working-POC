@@ -659,3 +659,92 @@ that exact path contains only this demo's data. Do not remove a general project 
 restore `frontend/tsconfig.tsbuildinfo` over edits you did not create.
 
 Nothing was installed by any command in this script.
+
+
+---
+
+## M2 demo: real wheels
+
+The M2 deep stage (docs/cavr-m2-plan.md PRs 9-13): an escalated package gets a **canary-only run**, then one
+**counterfactual run per trigger** of its frontier (at most 8 runs), each in the CAVR sandbox
+(`asent-cavr-sandbox:local`: no network, read-only, package code as UID 10001, fake canary secrets only), with the
+project's literal-only call sites called; every verdict names its **cause** from the causal graph of those runs.
+
+Each wheel below is a real wheel built on the fly and served by a local package index (they are not on PyPI); the
+repository, the commit, `asent gate`, the container and the trace are real. The wheel files and the expected results
+are in `tests/test_cavr_m2_wheels.py`, which is also the test (`CAVR_DOCKER=1 pytest tests/test_cavr_m2_wheels.py`).
+
+Before: the image must be built (`bash docker/cavr-sandbox/build.sh`, once) and Docker running.
+
+One command per wheel (prints the `asent report` text of that gate run):
+
+```bash
+CAVR_DOCKER=1 .venv/bin/python tests/test_cavr_m2_wheels.py env_ci
+```
+
+Replace `env_ci` by any name in the table; with no name it runs all 13 (150 s on this machine). Each run makes a new
+temporary repository and data directory and removes them afterwards.
+
+**Recorded output** (2026-11-24, branch `cavr-m2-loop` with PR 13, image `sha256:0e88dd461ca4…`, Docker 29.9.3, WSL2;
+the `CAVR deep` line of each run, exactly as printed):
+
+| Wheel | What the wheel does | Policy | Decision | `asent report` deep line |
+|---|---|---|---|---|
+| `env_ci` | `if os.environ.get('CI') == 'true': connect(198.51.100.24:443)` | default policy (connect denied) | BLOCK (exit 1) | `` demo==1.0 REJECTED DEEP_CONTRACT_VIOLATION - NETWORK_CONNECT connect 198.51.100.24:443 = ENETUNREACH caused by CI=true `` |
+| `date` | `if date.today() >= date(2027, 1, 1): connect(...)` | default policy | BLOCK (exit 1) | `` demo==1.0 REJECTED DEEP_CONTRACT_VIOLATION - NETWORK_CONNECT connect 198.51.100.24:443 = ENETUNREACH caused by clock 2027-01-02T12:00:00 `` |
+| `hostname` | `if socket.gethostname() == 'build-prod-7': connect(...)` | default policy | BLOCK (exit 1) | `` demo==1.0 REJECTED DEEP_CONTRACT_VIOLATION - NETWORK_CONNECT connect 198.51.100.24:443 = ENETUNREACH caused by hostname build-prod-7 `` |
+| `argv` | `if '--deploy' in sys.argv: connect(...)` | default policy | BLOCK (exit 1) | `` demo==1.0 REJECTED DEEP_CONTRACT_VIOLATION - NETWORK_CONNECT connect 198.51.100.24:443 = ENETUNREACH caused by argv ['-c', '--deploy'] `` |
+| `file_flag` | `if os.path.exists('~/.cache/deploy.flag'): connect(...)` | `FILE_READ:/tmp/home/.cache` granted, connect denied | BLOCK (exit 1) | `` demo==1.0 REJECTED DEEP_CONTRACT_VIOLATION - NETWORK_CONNECT connect 198.51.100.24:443 = ENETUNREACH caused by /tmp/home/.cache/deploy.flag exists `` |
+| `file_kube` | `if os.path.exists('~/.kube/config'): connect(...)` | default policy | BLOCK (exit 1) | `` demo==1.0 REJECTED DEEP_CONTRACT_VIOLATION - SECRET_READ newfstatat /tmp/home/.kube/config = ENOENT in the canary-only run (no trigger needed) `` |
+| `canary_exfil` | import reads `~/.aws/credentials`, sends the secret by UDP | default policy | BLOCK (exit 1) | `` demo==1.0 REJECTED DEEP_CONTRACT_VIOLATION - SECRET_READ openat /tmp/home/.aws/credentials = ok in the canary-only run (no trigger needed) `` |
+| `driven_reject` | `def send(data): connect(...)`; the app calls `demo.send('x')` | default policy | BLOCK (exit 1) | `` demo==1.0 REJECTED DEEP_CONTRACT_VIOLATION - NETWORK_CONNECT connect 198.51.100.24:443 = ENETUNREACH caused by calling demo.send('x') at app/uses_demo.py:5 `` |
+| `driven_verify` | the same wheel and call | `NETWORK_CONNECT:198.51.100.24:443` granted | ACCEPT (exit 0) | `` demo==1.0 VERIFIED DEEP_RUN_CLEAN (1 run(s): canary-only + 0 counterfactual, 1 call site(s) driven; nothing outside the contract) `` |
+| `benign_triggered` | `if CI == 'true': connect(198.51.100.24:443)` | `NETWORK_CONNECT:198.51.100.24:443` granted | ACCEPT (exit 0) | `` demo==1.0 VERIFIED DEEP_RUN_CLEAN (2 run(s): canary-only + 1 counterfactual, 1 call site(s) driven; nothing outside the contract) `` |
+| `win32` | `if sys.platform == 'win32': connect(...)` | default policy | REVIEW (exit 2) | `` demo==1.0 UNRESOLVED TRIGGER_UNSIMULABLE - demo/__init__.py:2 `(sys.platform == 'win32')`: not run: unsimulable (the condition is true only when sys.platform is 'win32' (os.name 'nt', platform.system() 'Windows'); the sandbox runs Linux) `` |
+| `budget` | 8 branches `if DEPLOY_i == 'yes': connect(...)` | `NETWORK_CONNECT:198.51.100.24:443` granted | REVIEW (exit 2) | `` demo==1.0 UNRESOLVED DEEP_RUN_BUDGET_EXHAUSTED - demo/__init__.py:37 `(os.environ.get('DEPLOY_8') == 'yes')`: not run: the budget of 8 sandbox runs for this package is used up `` |
+| `function_sink` | `def send(data): connect(...)`; the app calls only `demo.run()` | default policy | REVIEW (exit 2) | `` demo==1.0 UNRESOLVED DEEP_SINK_NOT_EXERCISED - not exercised: demo/net.py:5 socket.create_connection (function send) `` |
+
+What each row shows:
+
+- **A trigger REJECTED with its cause** (`env_ci`, `date`, `hostname`, `argv`, `file_flag`): the canary-only run is
+  clean, the run with the synthesized environment connects, and the connect is in that run only, so the graph's
+  `caused` edge goes from the trigger to the event. The clock is the one the frontier synthesized (one day and a half
+  after the constant).
+- **`file_kube` and `canary_exfil`: no trigger needed.** Checking `~/.kube/config` is itself an attempt to read a
+  credential path, and reading `~/.aws/credentials` at import is a violation in the canary-only run already. The
+  canary leak is in the same run's evidence: a `CANARY_EXFIL_ATTEMPT` (`sendto` to 198.51.100.24:53 carrying the fake
+  secret), in the key events and in the graph.
+- **A driven call** (`driven_reject`, `driven_verify`): the sink is inside `send()`, which an import never runs; the
+  app's call `demo.send('x')` passes only a literal, so CAVR calls it in a drive step. Denied -> REJECTED, caused by the
+  call; granted for that endpoint -> VERIFIED (1 run: no frontier entry, the drive exercised the sink).
+- **`benign_triggered`: VERIFIED.** The guarded branch connects only to the granted endpoint; the CI=true run explores
+  it and stays inside the contract.
+- **`win32`: UNRESOLVED.** No Linux environment makes `sys.platform == 'win32'` true; an unsimulable trigger can never
+  give VERIFIED.
+- **`budget`: UNRESOLVED.** 1 canary-only + 7 trigger runs use the 8 runs; `DEPLOY_8` was never run.
+- **`function_sink`: UNRESOLVED.** The app only calls `demo.run()`; driving it shows no connect, so the sink in
+  `send()` is not exercised.
+
+Full recorded output of the first command (`env_ci`); the temporary paths and commit ids differ on every run:
+
+```text
+ASENT gate: BLOCK (exit 1)
+Repository: /tmp/cavr-m2-demo-wx1ngjn1/repo
+Base: base (5f48584a251b)   Head: head (bd10d5ed23ea)
+Generated: 2026-11-24T16:35:07.009942+00:00 by ASENT 1.0.0
+Config: base commit 5f48584a251bd8ed785038430e11af8f2d922b77: .asent/; digest 6aedd0da60c14338ce9f3da4040e6242abb143b755456c41073c285720a95a28
+
+Modules:
+  CAVR   block                                    requirements.txt: REJECTED DEEP_CONTRACT_VIOLATION: demo==1.0: demo 1.0: run 2 (the counterfactual run spec-ded3a61ac21291f8): 2 event(s) outside the contract; 
+  SATRA  not assessed (disabled by base config)   not part of this test
+  SABLE  not assessed (disabled by base config)   not part of this test
+  CAVR deep: demo==1.0 REJECTED DEEP_CONTRACT_VIOLATION - NETWORK_CONNECT connect 198.51.100.24:443 = ENETUNREACH caused by CI=true
+
+Reasons:
+  - CAVR: REJECTED
+
+Report: asent-report.json
+```
+
+Lines that will differ on your run: the temporary paths, commit ids, `Generated`, the spec id (a hash of the trigger's
+place in the wheel), the canary values (random per run, never printed here).

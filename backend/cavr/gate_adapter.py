@@ -79,7 +79,7 @@ BOUNDED_DEEP = ("fast gate (artifact hash, dependency tree, advisories, capabili
 DEEP_ROW = ("status", "rule", "reason", "elapsed_seconds")
 DEEP_EVIDENCE = ("image_id", "trace_sha256", "trace_lines", "trace_check", "run_rule", "decisive_run", "key_events",
                  "escalation_reasons", "claim", "not_exercised", "runs", "triggers", "residual", "unexplored_guards",
-                 "drives", "loop")
+                 "drives", "loop", "causal", "causal_graph")
 
 
 def map_status(status) -> str:

@@ -90,7 +90,8 @@ def explore(frontier, run, *, budget, clock, gate_left, synthesize, canary_spec,
             break
         record = run(item["spec"], deadline, len(runs) + 1)
         record.update({"kind": item["kind"], "spec_id": item["spec"].get("id"), "entries": list(item["entries"]),
-                       "activation": item["spec"].get("activation"), "deadline_seconds": round(deadline, 3)})
+                       "activation": item["spec"].get("activation"), "deadline_seconds": round(deadline, 3),
+                       "canary_ids": [c.get("id") for c in item["spec"].get("canaries") or []]})  # ids, never values
         runs.append(record)
         if (record.get("judged") or {}).get("result") == "VIOLATION":
             stop = "violation"

@@ -69,7 +69,8 @@ def _cavr_packages(report: dict):
 
 
 def cavr_deep(report: dict) -> list[str]:
-    """One line per package that had a CAVR deep result (docs/cavr-m2-plan.md PRs 9, 12): verdict, rule, first key event.
+    """One line per package that had a CAVR deep result (docs/cavr-m2-plan.md PRs 9, 12, 13): verdict, rule, first key
+    event and its cause from the causal graph (e.g. "caused by CI=true").
 
     Display only, read from the CAVR evidence record; a report without deep results gives no lines.
     """
@@ -86,6 +87,9 @@ def cavr_deep(report: dict) -> list[str]:
                                          else address.get("path")) or " ".join((key.get("argv") or [])[:3])
             line += f" - {key.get('capability') or key.get('rule')} {key.get('syscall')} {target} = " \
                     f"{'ok' if key.get('ok') else key.get('errno')}"
+            cause = (deep.get("causal") or {}).get("cause")
+            if cause:
+                line += f" {cause}"
         elif deep.get("status") == "VERIFIED":
             runs = [r for r in deep.get("runs") or [] if isinstance(r, dict)]
             counter = sum(1 for r in runs if r.get("kind") == "counterfactual")

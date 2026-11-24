@@ -6124,3 +6124,108 @@ passed, 12 skipped (live network), 0 failed, 885 s; no container left; `reports/
    wheels in the real sandbox, through the command a developer runs.
 3. **What happens to a project that vendors a `.py` package in its lock?** It is UNRESOLVED `LOCAL_NOT_SUPPORTED`:
    CAVR does not claim to have verified something it cannot verify.
+
+
+## Step M2-19 — Causal capability graph from the real runs (PR 13) (2026-11-24)
+
+Plan: `docs/cavr-m2-plan.md` PR 13 as set in the Phase 3b plan approved by Maryam on 2026-11-24.
+
+### Ch 6 Implementation
+
+- `backend/cavr/causal_graph.py` (rewritten; the legacy `build` / `build_causal_graph` had no user left after Step
+  M2-18). `build(name, frontier, drives, loop, contract, verdict)`: nodes trigger, spec, run, call, event, rule,
+  verdict; edges synthesized_as, configured, observed, violates / within / unjudged, decides, caused. Algorithm:
+  (1) one trigger node per frontier entry, one call node per driven call site; (2) per run a spec and a run node; (3)
+  the run's `new_events` (counterfactual difference) get a `caused` edge from each trigger of that run, and each drive
+  step's `drive_events` one from its call; (4) every event with a capability (or not passed by the judge) outside the
+  install step becomes a node, judged alone against the contract, with an edge to its rule node (capability + grant);
+  install events the judge passed are counted; (5) ids are content hashes, nodes and edges sorted, `digest` = SHA-256
+  of the canonical JSON. `cause(graph, run, event)`: "caused by <activation>", "caused by calling <call> at
+  <file>:<line>", "in the canary-only run (no trigger needed)", or "in run N, and also without its trigger".
+  `activation_text`: env `A=1`, `clock …`, `<path> exists`, `hostname …`, `argv […]`.
+- `backend/cavr/sandbox_deep.py`: `with_graph` builds the graph after the verdict, puts `causal_graph` and `causal`
+  {version, digest, counts, cause, error} in the evidence, and appends the cause to a REJECTED reason; `VERDICT_CODE`
+  adds `causal_graph.py`, the identity `graph:cavr-causal-graph/1`.
+- `backend/cavr/activation_loop.py`: each run record keeps its spec's canary ids (never values).
+- `backend/cavr/gate_adapter.py`: `causal` and `causal_graph` in the row's deep block (so in `asent-report.json`).
+- `backend/commands/report.py` `[owner review]`: the deep line appends the cause.
+- `docs/cavr-demo.md`: section "M2 demo: real wheels" (the user's addition to option A) with the one command per
+  wheel and the recorded `asent report` line of all 13 wheels.
+- Tests: `tests/test_cavr_causal_graph.py` (new), `tests/test_cavr_m2_wheels.py` (causes), `tests/test_cavr_sandbox_deep.py`.
+
+### Design decisions
+
+- The cause is the counterfactual difference, not "the trigger of the run the event is in": an event the canary-only
+  run also has would have happened without the trigger (`test_an_event_both_runs_have_has_no_cause_edge`).
+- A call node, not in the listed node types: a driven call is the only cause of a sink inside a function, and the
+  report must be able to name it.
+- Each event is judged alone for its edge (the same `contract_check.judge` the verdict uses), so the edge says what
+  the judge says for that event; the verdict itself is unchanged by the graph.
+- Install-step events the judge passed are counted, not listed: pip's file writes are hundreds of nodes with nothing
+  to say; anything the install envelope refused is listed.
+- Deterministic by construction from the recorded evidence; two real runs differ where their traces differ (canary
+  values, containers, trace hashes), which the digest then shows.
+
+### Requirements covered
+
+- FR-5 (causal capability graph): `test_a_trigger_caused_the_event_only_its_run_has`, the eight REJECTED demo wheels
+  with their cause in the graph and the report line.
+- FR-10 (evidence): the graph's digest is in the deep evidence, hence in the verdict, the evidence chain and
+  `asent-report.json`; `test_the_graph_is_deterministic_and_its_digest_follows_every_event`.
+- NFR-6: the report line names why (`caused by CI=true`, `in the canary-only run`).
+
+### Ch 7 Test cases
+
+| Test ID | Purpose | Input | Expected | Result |
+|---|---|---|---|---|
+| test_a_trigger_caused_the_event_only_its_run_has | caused edge | CI entry; connect only under CI=true | one `caused` trigger -> event (run 2); violates denied rule; decides REJECTED; cause "caused by CI=true" | pass |
+| test_an_event_both_runs_have_has_no_cause_edge | no false cause | the same in-scope connect in both runs | no `caused` edge; two `within` edges | pass |
+| test_a_violation_of_the_canary_only_run_needs_no_trigger | canary-only cause | read of ~/.aws/credentials in run 1 | 1 run, cause "in the canary-only run (no trigger needed)" | pass |
+| test_a_canary_leak_points_at_a_rule_nothing_can_allow | rule node | CANARY_EXFIL_ATTEMPT | rule CANARY_EXFIL "never allowed …" | pass |
+| test_a_driven_call_caused_what_its_step_did_beyond_the_import | call cause | drive step connect; the same read in both steps | `caused` call -> connect only | pass |
+| test_the_real_drive_recording_gives_the_drive_as_the_cause | real trace | `loop-drive-send` | connect 198.51.100.24:443 ENETUNREACH caused by the call; install events counted, not listed | pass |
+| test_each_activation_family_is_named_in_the_cause (8 forms) | cause text | env, time, file, dir, hostname, argv, two, none | the texts as listed | pass |
+| test_the_graph_is_deterministic_and_its_digest_follows_every_event | determinism | events shuffled, outcomes reversed; one port changed; another verdict | identical graph; digest changes | pass |
+| test_a_graph_that_cannot_be_built_says_so_and_never_raises | fail closed | malformed runs | empty graph with `error`, digest; "cause not in the graph" | pass |
+| test_an_env_gated_sink_is_rejected_by_its_counterfactual_run (extended) | deep evidence | CI wheel | cause "caused by CI=true", reason ends with it, digest = graph digest | pass |
+| test_report_text_line_for_each_deep_result (extended), test_identity_changes_… (extended) | report / identity | a row with a cause; graph version | line ends "caused by CI=true"; new identity | pass |
+| test_m2_demo_wheel_through_asent_gate[13 wheels] (Docker, extended) | end to end | as in Step M2-17 | each REJECTED wheel's cause as in `docs/cavr-demo.md`; no cause and no `decides` edge otherwise; digest present | pass |
+
+9 new graph tests. Docker: `tests/test_cavr_m2_wheels.py` 13 passed (146 s); the demo command for all 13 wheels:
+150 s, output recorded in `docs/cavr-demo.md`. Run before the commit: `CAVR_DOCKER=1 pytest tests/test_cavr_*.py
+tests/test_orchestrator_config.py tests/test_gate_*.py tests/test_cli_gate.py tests/test_cli_report.py
+tests/test_integration.py tests/test_modules.py`: 2187 passed, 12 skipped (live network), 0 failed, 921 s; no container
+left; `reports/` unchanged.
+
+### Defects found and fixed
+
+- A never-allowed event (canary leak) pointed at a rule labelled "denied (default deny)"; it now points at "never
+  allowed (no capability can allow it)" (`test_a_canary_leak_points_at_a_rule_nothing_can_allow`).
+- The first expectation for the date wheel's cause was the constant `2027-01-01`; the real cause is the clock the
+  frontier synthesized, `2027-01-02T12:00:00`; the test now expects the real value.
+- Review: one cavr-reviewer pass over the three Phase 3b commits, after this commit ("End of Phase 3b" below).
+
+### Known limitations / deferred
+
+- Not in the graph yet: the dependency tree (`depends_on`), event -> package attribution by each wheel's RECORD, canary
+  `derived_from` flow, the cross-package path query of the design's §6.6 example (Phase 5 / future work).
+- A frontier entry id hashes the file, the guard lines and their shape, not the predicate text, so two different wheels
+  with a guard at the same place have the same spec id (`env_ci` and `date`); ids are unique within one package, which
+  is what the graph needs.
+- The dashboard view of the graph is Phase 5 (`CausalGraphTab.tsx` still reads the old API field).
+- The cause names the first event the verdict lists; other violating events carry their own `caused` edges in the graph.
+
+### Tool disclosure (Ch 8.7)
+
+- **Generated by Claude Code:** `causal_graph.py`, the edits to `sandbox_deep.py`, `activation_loop.py`,
+  `gate_adapter.py`, `report.py`, the tests, the `docs/cavr-demo.md` section (its output recorded from real runs),
+  these notes and the plan edits. **Reviewed by Maryam:** the plan; the code not yet. **Verified by:** the runs above.
+
+### Supervisor Q&A prep
+
+1. **What makes an edge "caused"?** The event is in the run with the trigger's environment and not in the canary-only
+   run (counted, so a second identical event still counts once more). Example: `env_ci`'s connect is caused by CI=true.
+2. **Is the graph part of the verdict?** It is evidence: built after the verdict from the same records, hashed, and
+   stored with it; the verdict rules (Step M2-17) do not read it.
+3. **Why does `canary_exfil` say "no trigger needed"?** Its import reads the fake AWS key in the canary-only run
+   already; there is no counterfactual run to compare with, and none was needed.

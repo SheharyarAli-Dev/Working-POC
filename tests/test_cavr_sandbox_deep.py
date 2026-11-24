@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from backend.cavr import (activation_loop, call_drive, contract_check, deep_stage, env_synthesis, gate_adapter, sandbox_deep,
+from backend.cavr import (activation_loop, call_drive, causal_graph, contract_check, deep_stage, env_synthesis, gate_adapter, sandbox_deep,
                           sandbox_events, sandbox_exec, sandbox_image, sandbox_observe, sandbox_spec, trigger_frontier)
 from backend.cavr.pipeline import ESCALATION, analyzer_version
 from backend.cavr.sandbox_trace import check_trace
@@ -331,6 +331,9 @@ def test_an_env_gated_sink_is_rejected_by_its_counterfactual_run(world, tmp_path
     assert sandbox.calls[1]["spec"]["env"]["CI"] == "true"
     deep = package["evidence"]["deep"]["evidence"]
     assert deep["decisive_run"] == 2 and deep["loop"]["stop"] == "violation" and deep["key_events"][0]["run"] == 2
+    # PR 13: the event the verdict names first is in the CI=true run and not in the canary-only run.
+    assert deep["causal"]["cause"] == "caused by CI=true" and package["reason"].endswith("; caused by CI=true")
+    assert deep["causal"]["digest"] == deep["causal_graph"]["digest"]
 
 
 def test_a_trigger_run_that_shows_nothing_leaves_the_trigger_unexplored(world, tmp_path, monkeypatch):
@@ -451,6 +454,7 @@ def test_identity_changes_with_image_harness_profile_and_budget(tmp_path, monkey
                (call_drive, "DRIVE_ARGV", call_drive.DRIVE_ARGV + ["x"]),
                (trigger_frontier, "VERSION", "cavr-trigger-frontier/x"), (env_synthesis, "VERSION", "cavr-env-synthesis/x"),
                (activation_loop, "VERSION", "cavr-activation-loop/x"), (call_drive, "VERSION", "cavr-call-drive/x"),
+               (causal_graph, "VERSION", "cavr-causal-graph/x"),
                (sandbox_observe, "SITE_TMPFS", sandbox_observe.SITE_TMPFS.replace("128m", "64m")),
                (sandbox_events, "EVENTS_VERSION", "cavr-events/x"), (contract_check, "CHECK_VERSION", "cavr-contract-check/x"),
                (sandbox_exec, "CAPABILITIES", sandbox_exec.CAPABILITIES + ("NET_RAW",))]
@@ -459,7 +463,8 @@ def test_identity_changes_with_image_harness_profile_and_budget(tmp_path, monkey
             patch.setattr(module, name, value)
             assert deep_stage.identity(analyzer(tmp_path)) != base, name
     assert set(sandbox_deep.VERDICT_CODE) >= {"sandbox_events.py", "contract_check.py", "sandbox_deep.py", "trigger_frontier.py",
-                                              "env_synthesis.py", "sandbox_spec.py", "activation_loop.py", "call_drive.py"}
+                                              "env_synthesis.py", "sandbox_spec.py", "activation_loop.py", "call_drive.py",
+                                              "causal_graph.py"}
     assert sandbox_deep.BUDGET == {"runs": 8, "run_seconds": 20, "package_seconds": 120, "gate_run_seconds": 300}
     real = sandbox_deep.deep_version(IDENTITY)
     with monkeypatch.context() as patch:
@@ -572,7 +577,7 @@ def test_report_text_line_for_each_deep_result():
                                                                               "outcome": "not run: unsimulable (non-Linux platform)"}]}}},
             {"name": "b", "version": "2", "deep": {"status": "REJECTED", "rule": "DEEP_CONTRACT_VIOLATION", "key_events": [
                 {"capability": "SECRET_READ", "syscall": "openat", "path": "/tmp/home/.aws/credentials", "ok": False,
-                 "errno": "ENOENT", "address": None, "argv": None}]}},
+                 "errno": "ENOENT", "address": None, "argv": None}], "causal": {"cause": "caused by CI=true"}}},
             {"name": "d", "version": "4", "deep": {"status": "UNRESOLVED", "rule": "DEEP_SINK_NOT_EXERCISED", "key_events": [],
                                                     "escalation_reasons": [{"file": "d/net.py", "line": 5, "sink": "socket.create_connection",
                                                                             "placement": "function send", "exercised": False}]}},
@@ -582,7 +587,8 @@ def test_report_text_line_for_each_deep_result():
         "nothing outside the contract)",
         "  CAVR deep: w==5 UNRESOLVED TRIGGER_UNSIMULABLE - w/__init__.py:3 `sys.platform == 'win32'`: not run: "
         "unsimulable (non-Linux platform)",
-        "  CAVR deep: b==2 REJECTED DEEP_CONTRACT_VIOLATION - SECRET_READ openat /tmp/home/.aws/credentials = ENOENT",
+        "  CAVR deep: b==2 REJECTED DEEP_CONTRACT_VIOLATION - SECRET_READ openat /tmp/home/.aws/credentials = ENOENT "
+        "caused by CI=true",
         "  CAVR deep: d==4 UNRESOLVED DEEP_SINK_NOT_EXERCISED - not exercised: d/net.py:5 socket.create_connection (function send)"]
 
 

@@ -1,11 +1,12 @@
-"""PR 12 of docs/cavr-m2-plan.md, Docker: the M2 demo wheels through `asent gate` on the real sandbox.
+"""PRs 12 and 13 of docs/cavr-m2-plan.md, Docker: the M2 demo wheels through `asent gate` on the real sandbox.
 
 Each wheel is a real wheel built in a temporary directory, served by a local package index (`FakeIndex`, the real
 bytes with a registry response whose digest is computed from them), committed to a real git repository as the head's
 `requirements.txt` (`demo==1.0`) with an application file that calls it, and judged by `asent gate` (the CLI,
 in-process) with the CAVR sandbox image: fast gate, escalation, frontier, drive plan, counterfactual loop.
 
-As a test (CAVR_DOCKER=1): one test per wheel, with the verdict, rule, decision and exit code it must give.
+As a test (CAVR_DOCKER=1): one test per wheel, with the verdict, rule, decision and exit code it must give, and
+(PR 13) the cause its causal graph names for a REJECTED verdict.
 As a script (the commands in docs/cavr-demo.md, "M2 demo: real wheels"):
 
     CAVR_DOCKER=1 .venv/bin/python tests/test_cavr_m2_wheels.py <wheel> [<wheel> ...]
@@ -80,6 +81,14 @@ WHEELS = {
 }
 
 
+# PR 13: the cause the causal graph gives for the event a REJECTED verdict names first (and the report line shows).
+CAUSES = {"env_ci": "caused by CI=true", "date": "caused by clock 2027-01-02T12:00:00", "hostname": "caused by hostname build-prod-7",
+          "argv": "caused by argv [", "file_kube": "in the canary-only run (no trigger needed)",
+          "file_flag": "caused by /tmp/home/.cache/deploy.flag exists",
+          "canary_exfil": "in the canary-only run (no trigger needed)",
+          "driven_reject": "caused by calling demo.send('x') at app/uses_demo.py:5"}
+
+
 def gate(name: str, workdir: Path):
     """(exit code, report, the package's CAVR row) of `asent gate` on the wheel `name`."""
     files, call, policy_change, _ = WHEELS[name]
@@ -137,6 +146,16 @@ def test_m2_demo_wheel_through_asent_gate(name, tmp_path):
         assert deep["key_events"][0]["step"] == "drive_1"
     if name == "function_sink":
         assert "demo.run() at app/uses_demo.py:5 showed no NETWORK_CONNECT event" in deep["reason"]
+    graph, causal = deep["causal_graph"], deep["causal"]
+    assert causal["digest"] == graph["digest"] and len(graph["digest"]) == 64 and not causal["error"]
+    if name in CAUSES:
+        assert causal["cause"].startswith(CAUSES[name]), causal["cause"]
+        assert causal["cause"] in line and causal["cause"] in deep["reason"]
+        if name == "argv":
+            assert "--deploy" in causal["cause"]
+        assert any(e["kind"] == "decides" for e in graph["edges"])
+    else:
+        assert causal["cause"] is None and not any(e["kind"] == "decides" for e in graph["edges"])
     assert cavr_containers() == []
 
 

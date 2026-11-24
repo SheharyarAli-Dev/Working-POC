@@ -64,8 +64,8 @@ import os
 import time
 from pathlib import Path
 
-from backend.cavr import (activation_loop, call_drive, contract_check, env_synthesis, sandbox_events, sandbox_exec,
-                          sandbox_image, sandbox_observe, sandbox_spec, trigger_frontier)
+from backend.cavr import (activation_loop, call_drive, causal_graph, contract_check, env_synthesis, sandbox_events,
+                          sandbox_exec, sandbox_image, sandbox_observe, sandbox_spec, trigger_frontier)
 from backend.orchestrator.hashing import digest
 from backend.threat_repo.behavior_rules import normalize_name
 
@@ -85,7 +85,7 @@ RUN_HARNESS = None  # tests replace it; None means sandbox_observe.run_harness (
 # by older code is reused (review of PRs 7-9; the version strings alone would need a manual bump).
 VERDICT_CODE = ("sandbox_deep.py", "sandbox_events.py", "contract_check.py", "sandbox_trace.py", "sandbox_observe.py",
                 "sandbox_exec.py", "trigger_frontier.py", "env_synthesis.py", "sandbox_spec.py", "activation_loop.py",
-                "call_drive.py")
+                "call_drive.py", "causal_graph.py")
 RESIDUAL_RULES = ("FRONTIER_MISSING", "FRONTIER_MALFORMED", "FRONTIER_INCOMPLETE", "FRONTIER_TRUNCATED",
                   "TRIGGER_UNSIMULABLE", "TRIGGER_UNEXPLORED", "DEEP_RUN_BUDGET_EXHAUSTED")
 
@@ -100,7 +100,7 @@ def deep_version(identity: dict) -> str:
              "flags": digest([sandbox_exec.lockdown_flags(), sandbox_observe.SITE_TMPFS]),
              "events": sandbox_events.EVENTS_VERSION, "check": contract_check.CHECK_VERSION,
              "frontier": trigger_frontier.VERSION, "synthesis": env_synthesis.VERSION, "loop": activation_loop.VERSION,
-             "drive": call_drive.VERSION, "code": code}
+             "drive": call_drive.VERSION, "graph": causal_graph.VERSION, "code": code}
     return VERSION + "".join(f";{key}:{value}" for key, value in parts.items())
 
 
@@ -172,7 +172,8 @@ class SandboxDeepAnalyzer:
                                        synthesize=env_synthesis.synthesize, canary_spec=env_synthesis.canary_spec,
                                        started=started)
         self.last = {"package": name, "frontier": found, "drives": drives, "loop": loop}
-        return self._verdict(package, found, drives, loop, evidence)
+        answer = self._verdict(package, found, drives, loop, evidence)
+        return with_graph(answer, name, found, drives, loop, contract)
 
     def _verdict(self, package, found, drives, loop, evidence) -> dict:
         name = f"{package.get('name')} {package.get('version')}"
@@ -290,6 +291,20 @@ class SandboxDeepAnalyzer:
         except OSError:
             pass  # not stored: still used for this gate run
         return record
+
+
+def with_graph(answer, name, found, drives, loop, contract) -> dict:
+    """The causal graph of the runs (PR 13) and the cause of the event the verdict names first, in the evidence."""
+    evidence = answer["evidence"]
+    graph = causal_graph.build(name, found, drives, loop, contract, answer)
+    key = next(iter(evidence.get("key_events") or []), None)
+    cause = causal_graph.cause(graph, key.get("run"), key) if key else None
+    evidence["causal_graph"] = graph
+    evidence["causal"] = {"version": graph["version"], "digest": graph["digest"], "counts": graph.get("counts"),
+                          "cause": cause, "error": graph.get("error")}
+    if cause and answer["status"] == "REJECTED":
+        answer["reason"] = f"{answer['reason']}; {cause}"
+    return answer
 
 
 def escalation_reasons(package: dict, runs: list, drives: dict) -> list[dict]:
