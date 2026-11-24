@@ -1,7 +1,7 @@
 """
 Phase 13: Assurance Evidence & Tamper-Evident Cryptographic Hash Chain.
 Hash-chains every evidence transition event into an immutable ledger:
-Record = {seq, ts, phase, type, data, prev_hash, sha256}
+Record = {hash_version, seq, ts, phase, substep, type, data, prev_hash, sha256}
 Provides verification function re-walking the chain.
 Generates Certificate JSON and printable HTML report with bounded trust claim.
 
@@ -16,8 +16,24 @@ from html import escape
 
 GENESIS_HASH = "0000000000000000000000000000000000000000000000000000000000000000"
 
-def compute_record_hash(seq: int, phase: str, event_type: str, data: dict, prev_hash: str) -> str:
-    raw = f"{seq}|{phase}|{event_type}|{json.dumps(data, sort_keys=True)}|{prev_hash}"
+HASH_VERSION = 2  # FR-10 (PR 19): the record hash covers every field, also ts and substep
+
+
+def compute_record_hash(record: dict) -> str:
+    """The SHA-256 of a version-2 record: seq, ts, phase, substep, type, data, prev_hash and hash_version.
+
+    The fields go into one canonical JSON list, so no field can be moved into another (the old "|"-joined text
+    could not tell `a|b` in one field from two fields). A float `ts` survives a JSON round trip exactly.
+    """
+    fields = [record.get("hash_version"), record.get("seq"), record.get("ts"), record.get("phase"), record.get("substep"),
+              record.get("type"), record.get("data"), record.get("prev_hash")]
+    return hashlib.sha256(json.dumps(fields, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+
+
+def compute_record_hash_v1(record: dict) -> str:
+    """The hash of a record written before PR 19 (no `hash_version`). It does not cover ts or substep."""
+    raw = (f"{record.get('seq')}|{record.get('phase', '')}|{record.get('type', '')}|"
+           f"{json.dumps(record.get('data', {}), sort_keys=True)}|{record.get('prev_hash', '')}")
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 class EvidenceChain:
@@ -29,8 +45,8 @@ class EvidenceChain:
     def add_record(self, phase: str, event_type: str, data: dict, substep: str = "") -> dict:
         seq = len(self.records) + 1
         ts = time.time()
-        curr_hash = compute_record_hash(seq, phase, event_type, data, self.last_hash)
         record = {
+            "hash_version": HASH_VERSION,
             "seq": seq,
             "ts": ts,
             "phase": phase,
@@ -38,57 +54,55 @@ class EvidenceChain:
             "type": event_type,
             "data": data,
             "prev_hash": self.last_hash,
-            "sha256": curr_hash
         }
+        record["sha256"] = compute_record_hash(record)
         self.records.append(record)
-        self.last_hash = curr_hash
+        self.last_hash = record["sha256"]
         return record
 
 def verify_chain(records: list[dict]) -> dict:
+    """Re-walk the chain: every prev_hash link and every record's own hash.
+
+    A record with `hash_version: 2` is checked with `compute_record_hash` (every field). A record without
+    `hash_version` was written before PR 19 (SABLE keeps its chains on disk) and is checked with the old hash; it is
+    counted in `legacy_records`, because its ts and substep are not covered. Any other version is refused, and so is
+    a legacy record after a version-2 record: a chain cannot go back to the weaker hash.
+    """
     if not records:
-        return {"intact": True, "total_records": 0, "verified_links": 0, "message": "Empty evidence ledger"}
+        return {"intact": True, "total_records": 0, "verified_links": 0, "legacy_records": 0,
+                "message": "Empty evidence ledger"}
 
-    expected_prev = GENESIS_HASH
+    expected_prev, legacy, seen_v2 = GENESIS_HASH, 0, False
     for idx, r in enumerate(records):
-        # 1. Check prev_hash link
+        seq = r.get("seq", idx + 1)
         if r.get("prev_hash") != expected_prev:
-            return {
-                "intact": False,
-                "broken_link_seq": r.get("seq", idx + 1),
-                "error": "Link discontinuity: prev_hash does not match preceding block digest.",
-                "expected_prev_hash": expected_prev,
-                "actual_prev_hash": r.get("prev_hash"),
-                "tampered_record_index": idx
-            }
-
-        # 2. Check record's own SHA-256
-        data = r.get("data", {})
-        computed = compute_record_hash(
-            r.get("seq", idx + 1),
-            r.get("phase", ""),
-            r.get("type", ""),
-            data,
-            r.get("prev_hash", "")
-        )
-        if computed.lower() != r.get("sha256", "").lower():
-            return {
-                "intact": False,
-                "broken_link_seq": r.get("seq", idx + 1),
-                "error": "Digest mismatch: block content has been tampered with or altered.",
-                "expected_sha256": computed,
-                "actual_sha256": r.get("sha256"),
-                "tampered_record_index": idx
-            }
-
+            return {"intact": False, "broken_link_seq": seq,
+                    "error": "Link discontinuity: prev_hash does not match preceding block digest.",
+                    "expected_prev_hash": expected_prev, "actual_prev_hash": r.get("prev_hash"),
+                    "tampered_record_index": idx}
+        version = r.get("hash_version")
+        if "hash_version" not in r:
+            if seen_v2:
+                return {"intact": False, "broken_link_seq": seq, "tampered_record_index": idx,
+                        "error": "A legacy record (no hash_version) follows a version-2 record: refused."}
+            computed, legacy = compute_record_hash_v1(r), legacy + 1
+        elif version == HASH_VERSION and not isinstance(version, bool):
+            computed, seen_v2 = compute_record_hash(r), True
+        else:
+            return {"intact": False, "broken_link_seq": seq, "tampered_record_index": idx,
+                    "error": f"Unknown hash_version {version!r}: the record cannot be checked."}
+        if computed.lower() != str(r.get("sha256", "")).lower():
+            return {"intact": False, "broken_link_seq": seq,
+                    "error": "Digest mismatch: block content has been tampered with or altered.",
+                    "expected_sha256": computed, "actual_sha256": r.get("sha256"), "tampered_record_index": idx}
         expected_prev = r.get("sha256")
 
-    return {
-        "intact": True,
-        "total_records": len(records),
-        "verified_links": len(records),
-        "terminal_digest": expected_prev,
-        "message": f"Cryptographic evidence chain verified intact ({len(records)}/{len(records)} blocks verified)."
-    }
+    message = f"Cryptographic evidence chain verified intact ({len(records)}/{len(records)} blocks verified)."
+    if legacy:
+        message += (f" {legacy} legacy record(s) written before hash version 2: their ts and substep are not "
+                    "covered by the hash.")
+    return {"intact": True, "total_records": len(records), "verified_links": len(records), "legacy_records": legacy,
+            "terminal_digest": expected_prev, "message": message}
 
 CLAIMS = {
     "VERIFIED": "Every fast-gate check passed for this file and this project: registry SHA-256, dependency tree, OSV "
