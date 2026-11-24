@@ -82,7 +82,9 @@ def test_unresolved_conditions_list_only_what_was_left_open():
                                                 "not_exercised": []}]
 
 
-@pytest.mark.parametrize("broken", [None, "text", {"triggers": "x", "runs": None, "key_events": 5}])
+@pytest.mark.parametrize("broken", [None, "text", {"triggers": "x", "runs": None, "key_events": 5},
+                                    {"triggers": [{"outcome": "explored", "activation": {"env": "x", "files": 3}}],
+                                     "runs": [{"n": 1, "activation": {"env": ["a"]}}]}])
 def test_a_malformed_deep_row_never_raises(broken):
     fields = assurance_fields(evidence({"name": "demo", "version": "1.0", "deep": broken}))
     assert set(fields) == set(ASSURANCE_FIELDS) and all(len(fields[name]) == 1 for name in ASSURANCE_FIELDS)
@@ -117,3 +119,8 @@ def test_the_report_of_a_fast_gate_run_says_not_available(tmp_path, monkeypatch)
     _, report, _ = run_cli(repo, "base", "head", tmp_path / "out")
     (entry,) = report["assurance"]["causal_evidence"]
     assert entry["package"] == "demo==1.0" and entry["not_available"].startswith("the deep stage did not run: escalated, but deep stage off")
+
+
+def test_a_deep_row_with_no_run_says_so_in_the_execution_mode():
+    fields = assurance_fields(evidence({"name": "demo", "version": "1.0", "deep": {**DEEP, "runs": []}}))
+    assert fields["execution_modes"][0]["mode"] == "CAVR sandbox (deep stage): no run was started"

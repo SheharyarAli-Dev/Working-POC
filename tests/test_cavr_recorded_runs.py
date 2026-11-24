@@ -10,7 +10,8 @@ from pathlib import Path
 
 import pytest
 
-from test_cavr_m2_wheels import CAUSES, RECORDED_SCHEMA, WHEELS, demo_table
+import test_cavr_m2_wheels
+from test_cavr_m2_wheels import CAUSES, RECORDED_ADVISORIES, RECORDED_INDEX, RECORDED_SCHEMA, WHEELS, demo_table
 
 REPO = Path(__file__).resolve().parents[1]
 RECORDED = REPO / "backend" / "cavr" / "recorded" / "m2-demo-runs.json"
@@ -90,3 +91,15 @@ def test_each_recorded_graph_hashes_to_its_digest(name):
     from backend.cavr.dashboard_view import _graph_ok
     evidence = deep(name)["evidence"]
     assert _graph_ok(evidence["causal_graph"], evidence["causal"]["digest"]) is True
+
+
+
+
+def test_the_recorder_refuses_a_dirty_working_tree(monkeypatch, tmp_path):
+    class Done:
+        stdout = " M backend/cavr/sandbox_deep.py\n"
+    monkeypatch.setattr(test_cavr_m2_wheels.subprocess, "run", lambda *args, **kwargs: Done())
+    monkeypatch.setattr(test_cavr_m2_wheels, "sandbox_identity", lambda: pytest.fail("ran with a dirty tree"))
+    with pytest.raises(SystemExit) as stopped:
+        test_cavr_m2_wheels.record(tmp_path / "out.json")
+    assert "clean working tree" in str(stopped.value) and not (tmp_path / "out.json").exists()

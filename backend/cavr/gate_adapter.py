@@ -168,7 +168,7 @@ def _package_fields(row: dict, stage: dict) -> dict:
             why = f"the fast gate did not escalate this package ({row.get('status')} {row.get('rule')})"
         return {name: {"package": package, "not_available": f"the deep stage did not run: {why}"} for name in ASSURANCE_FIELDS}
     items = lambda key: [item for item in (deep.get(key) if isinstance(deep.get(key), list) else []) if isinstance(item, dict)]
-    text = lambda activation: activation_text(activation) if isinstance(activation, dict) else None
+    text = _activation_text
     triggers, runs = items("triggers"), items("runs")
     causal = deep.get("causal") if isinstance(deep.get("causal"), dict) else {}
     return {
@@ -182,11 +182,19 @@ def _package_fields(row: dict, stage: dict) -> dict:
                                   "unexplored_guards": items("unexplored_guards"),
                                   "not_exercised": [item for item in deep.get("not_exercised") or [] if isinstance(item, str)]
                                   if isinstance(deep.get("not_exercised"), list) else []},
-        "execution_modes": {"package": package, "mode": "CAVR sandbox (deep stage)", "image_id": deep.get("image_id"),
+        "execution_modes": {"package": package, "mode": "CAVR sandbox (deep stage)" if runs else
+                            "CAVR sandbox (deep stage): no run was started", "image_id": deep.get("image_id"),
                             "runs": len(runs), "elapsed_seconds": deep.get("elapsed_seconds")},
         "observed_security_events": {"package": package, "events": items("key_events")},
         "causal_evidence": {"package": package, **{key: causal.get(key) for key in ("digest", "counts", "cause", "error")}},
     }
+
+
+def _activation_text(activation):
+    try:
+        return activation_text(activation) if isinstance(activation, dict) else None
+    except Exception:  # a malformed activation is shown as none, never raised (assurance_fields never raises)
+        return None
 
 
 def _deep_analyzer(settings, data_root):

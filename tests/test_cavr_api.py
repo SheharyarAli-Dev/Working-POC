@@ -1028,3 +1028,46 @@ def test_bad_names_are_404_on_the_whole_app_too(tmp_path):
                           env={**os.environ, "ASENT_DATA": str(tmp_path / "data")}, capture_output=True, text=True, timeout=120)
     assert done.returncode == 0, done.stderr
     assert json.loads(done.stdout.strip().splitlines()[-1]) == [404] * len(MAIN_BAD)
+
+
+
+# --- review of PR 19: certificates of replayed deep runs, provenance, malformed recordings ------------------------------
+
+
+def test_the_certificate_of_a_replayed_deep_rejection_names_its_sandbox_runs(dashboard):
+    run_id, _ = replay("env_ci")
+    certificate = api.RUN_CERTIFICATES[run_id]
+    assert certificate["security_checks"]["sandbox_execution"].startswith("demo==1.0: REJECTED DEEP_CONTRACT_VIOLATION (2 sandbox run(s)")
+
+
+def test_the_certificate_of_a_live_fast_gate_run_is_unchanged(dashboard):
+    run_id, _ = dashboard.run("verified")
+    certificate = api.RUN_CERTIFICATES[run_id]
+    assert certificate["security_checks"]["sandbox_execution"] == "NOT_RUN (M2)"
+    assert certificate["residual_uncertainty"][0]["predicate"] == "package code was not executed"
+    page = api.get_certificate_html(run_id)
+    assert "RECORDED RUN" not in page and "Result of this run" in page
+
+
+
+def test_a_malformed_recording_ends_its_stream_with_no_result(dashboard, monkeypatch):
+    runs = json.loads(json.dumps(RECORDED_FILE["runs"]))
+    runs["env_ci"]["verdict"] = {"status": "VERIFIED"}          # no stage, no rule, no packages: unusable
+    monkeypatch.setattr(api, "recorded_runs", lambda: runs)
+    run_id = "replay-malformed"
+    api.RUN_EVENTS[run_id], api.RUN_CHAINS[run_id] = [], api.EvidenceChain(run_id)
+    answer = asyncio.run(api.run_recorded(run_id, "env_ci"))
+    assert answer["rule"] == "RECORDING_UNUSABLE" and run_id in api.RUN_FINISHED and run_id not in api.RUN_PROOFS
+    last = api.RUN_EVENTS[run_id][-1]["payload"]
+    assert last["state"] == "DECIDED" and last["verdict"] is None and "could not be replayed" in last["message"]
+
+
+def test_canary_ids_come_only_from_a_graph_that_matches_its_digest(dashboard, monkeypatch):
+    runs = json.loads(json.dumps(RECORDED_FILE["runs"]))
+    runs["env_ci"]["verdict"]["packages"][0]["evidence"]["deep"]["evidence"]["causal_graph"]["nodes"][0]["label"] = "x"
+    monkeypatch.setattr(api, "recorded_runs", lambda: runs)
+    run_id = "replay-canaries"
+    api.RUN_EVENTS[run_id], api.RUN_CHAINS[run_id] = [], api.EvidenceChain(run_id)
+    asyncio.run(api.run_recorded(run_id, "env_ci"))
+    (view,) = api.get_proof(run_id)["packages"]
+    assert view["deep"]["causal"]["digest_checked"] is False and all(run["canaries"] == [] for run in view["deep"]["runs"])

@@ -89,7 +89,7 @@ export const causeChains = (graph: any): string[][] => {
     const judged = edges.find((e) => String(e.from) === String(edge.to) && ['violates', 'within', 'unjudged'].includes(e.kind));
     const rule = judged ? nodes.get(String(judged.to)) : null;
     const verdict = rule ? out(String(rule.id), 'decides').map((id) => nodes.get(id)).find(Boolean) : null;
-    chains.push([nodeLabel(cause), nodeLabel(event), rule ? `${EDGE_TEXT[judged!.kind]} ${nodeLabel(rule)}` : 'not judged',
+    chains.push([nodeLabel(cause), nodeLabel(event), rule ? `${Object.hasOwn(EDGE_TEXT, judged!.kind) ? EDGE_TEXT[judged!.kind] : 'judged'} ${nodeLabel(rule)}` : 'not judged',
                  verdict ? nodeLabel(verdict) : 'does not decide the verdict']);
   }
   return chains;
@@ -133,7 +133,7 @@ const GraphView: React.FC<{ name: string; graph: any }> = ({ name, graph }) => {
   const rows: number[] = [0, 0, 0, 0, 0, 0];
   const placed = new Map<string, { x: number; y: number; node: any }>();
   for (const node of nodes) {
-    const column = COLUMNS[node.kind] ?? 5;
+    const column = Object.hasOwn(COLUMNS, node.kind) ? COLUMNS[node.kind] : 5;
     placed.set(String(node.id), { x: 10 + column * COLUMN_WIDTH, y: 40 + rows[column] * ROW_HEIGHT, node });
     rows[column] += 1;
   }
@@ -185,7 +185,7 @@ const GraphView: React.FC<{ name: string; graph: any }> = ({ name, graph }) => {
             const caused = edge.kind === 'caused';
             const x1 = from.x + NODE_WIDTH, y1 = from.y + NODE_HEIGHT / 2, x2 = to.x, y2 = to.y + NODE_HEIGHT / 2;
             const bend = caused ? -14 * Math.max(1, Math.round((x2 - x1) / COLUMN_WIDTH)) : 0;
-            const stroke = EDGE_STROKES[edge.kind] ?? '#94a3b8';
+            const stroke = Object.hasOwn(EDGE_STROKES, edge.kind) ? EDGE_STROKES[edge.kind] : '#94a3b8';
             const path = `M ${x1} ${y1} Q ${(x1 + x2) / 2} ${(y1 + y2) / 2 + bend} ${x2} ${y2}`;
             return (
               <g key={index} className={`edge-group edge-${caused ? 'caused' : 'plain'}`}>
@@ -201,7 +201,7 @@ const GraphView: React.FC<{ name: string; graph: any }> = ({ name, graph }) => {
           {nodes.map((node) => {
             const at = placed.get(String(node.id));
             if (!at) return null;
-            const color = COLORS[node.kind] ?? COLORS.other;
+            const color = Object.hasOwn(COLORS, node.kind) ? COLORS[node.kind] : COLORS.other;
             const label = nodeLabel(node);
             return (
               <g key={String(node.id)} className="node-group" transform={`translate(${at.x}, ${at.y})`} onClick={() => setSelected(node)}>
@@ -226,7 +226,7 @@ const GraphView: React.FC<{ name: string; graph: any }> = ({ name, graph }) => {
             const from = placed.get(String(edge.from))?.node, to = placed.get(String(edge.to))?.node;
             return edge.kind === 'caused'
               ? <li key={index}><SafeText value={nodeLabel(to)} /> <strong>caused by</strong> <SafeText value={nodeLabel(from)} /></li>
-              : <li key={index}><SafeText value={nodeLabel(from)} /> {EDGE_TEXT[edge.kind] ?? 'edge'} <SafeText value={nodeLabel(to)} /></li>;
+              : <li key={index}><SafeText value={nodeLabel(from)} /> {(Object.hasOwn(EDGE_TEXT, edge.kind) ? EDGE_TEXT[edge.kind] : 'edge')} <SafeText value={nodeLabel(to)} /></li>;
           })}
         </ul>
       </details>

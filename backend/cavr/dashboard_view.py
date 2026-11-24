@@ -4,14 +4,20 @@
 `sandbox_deep` evidence: runs, frontier entries, driven call sites, other guards, budget, residual, key events, canary
 ids per run and the canary leaks, the causal summary), or why the deep stage did not run for it. `causal_graphs`
 gives each package's causal graph, only when the graph hashes to the digest its evidence names
-(`causal_graph._digest`); a graph that does not is left out, and the view says `digest_checked: false`.
+(`causal_graph.graph_digest`); a graph that does not is left out, and the view says `digest_checked: false`. That
+check is consistency only: the graph and its digest come from the same evidence (for a replay, the same recorded
+file), so it shows the graph was not changed apart from its digest, not that nobody edited the file. `counts` is not
+covered by the digest.
 
-Every value is copied from the verdict (or is the length of one of its lists); nothing here decides anything.
-Kept apart from `api.py`, which only copies and publishes (it neither hashes nor imports the graph code).
+Values are copied from the verdict, or are the length of one of its lists, an activation formatted as text
+(`causal_graph.activation_text`), or the result of that digest comparison; nothing here decides a verdict.
+`api.py` imports this module and so, indirectly, the graph code; `api.py` itself computes no hash it shows.
 """
 from __future__ import annotations
 
-from backend.cavr.causal_graph import _digest as graph_digest, activation_text
+import json
+
+from backend.cavr.causal_graph import activation_text, graph_digest
 from backend.cavr.pipeline import ESCALATION
 
 
@@ -78,22 +84,23 @@ def _deep_view(deep):
         return None
     evidence = _dict(deep.get("evidence"))
     graph = _dict(evidence.get("causal_graph"))
+    causal = _dict(evidence.get("causal"))
+    checked = _graph_ok(graph, causal.get("digest"))
+    # The canary ids planted per run are the spec nodes' (ids only); only from a graph that matches its digest.
     specs = {node.get("spec"): [str(c) for c in _list(node.get("canaries"))] for node in _list(graph.get("nodes"))
-             if isinstance(node, dict) and node.get("kind") == "spec"}
+             if checked and isinstance(node, dict) and node.get("kind") == "spec"}
     runs = [{**{key: run.get(key) for key in RUN_FIELDS},
-             "activation": activation_text(run.get("activation")) if run.get("activation") else None,
+             "activation": _activation(run.get("activation")),
              "judged": _dict(run.get("judged")).get("result"), "judged_rule": _dict(run.get("judged")).get("rule"),
              "canaries": specs.get(run.get("spec_id"), [])}
             for run in _list(evidence.get("runs")) if isinstance(run, dict)]
     triggers = [{key: trigger.get(key) for key in ("id", "package", "file", "line", "predicate", "risk", "simulable",
                                                   "outcome", "run", "capabilities")}
-                | {"activation": activation_text(trigger.get("activation")) if trigger.get("activation") else None}
+                | {"activation": _activation(trigger.get("activation"))}
                 for trigger in _list(evidence.get("triggers")) if isinstance(trigger, dict)]
     frontier, loop = _dict(evidence.get("frontier")), _dict(evidence.get("loop"))
     used = _dict(loop.get("budget_used"))
     key_events = [event for event in _list(evidence.get("key_events")) if isinstance(event, dict)]
-    causal = _dict(evidence.get("causal"))
-    checked = _graph_ok(graph, causal.get("digest"))
     return {
         "status": deep.get("status"), "rule": deep.get("rule"), "reason": deep.get("reason"),
         "elapsed_seconds": deep.get("elapsed_seconds"), "image_id": evidence.get("image_id"), "claim": evidence.get("claim"),
@@ -110,6 +117,23 @@ def _deep_view(deep):
         "causal": {"digest": causal.get("digest"), "counts": causal.get("counts"), "cause": causal.get("cause"),
                    "error": causal.get("error"), "digest_checked": checked},
     }
+
+
+def _activation(activation):
+    """An activation as text (CI=true, clock ..., ...); None for none; a malformed one as JSON text, never raised."""
+    if not activation:
+        return None
+    try:
+        return activation_text(activation) if isinstance(activation, dict) else asText(activation)
+    except Exception:
+        return asText(activation)
+
+
+def asText(value) -> str:
+    try:
+        return value if isinstance(value, str) else json.dumps(value, sort_keys=True, default=str)
+    except Exception:
+        return str(value)
 
 
 LEAK = "CANARY_EXFIL_ATTEMPT"

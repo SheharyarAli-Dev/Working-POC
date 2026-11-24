@@ -36,12 +36,15 @@ export const DeepAnalysisTab: React.FC<DeepAnalysisTabProps> = ({ state }) => {
       {views && views.length === 0 && (
         <div className="tab-intro-card"><div><h5>Deep analysis</h5><p>No package was checked in this run.</p></div></div>
       )}
-      {(views || []).map((view, index) => <PackageView key={index} view={view} />)}
+      {(views || []).map((view, index) => <PackageView key={index} view={view} recorded={state.recorded} />)}
     </div>
   );
 };
 
-const PackageView: React.FC<{ view: any }> = ({ view }) => (
+// The fast-gate stages whose input a recorded run did not get from PyPI or live OSV (see the recording's header).
+const RECORDED_INPUT: Record<string, string> = { artifact: 'local test index', tree: 'local test index', advisories: 'seeded, OSV not asked' };
+
+const PackageView: React.FC<{ view: any; recorded: any | null }> = ({ view, recorded }) => (
   <div className="reverification-card deep-package">
     <h5>
       <SafeText value={view.package} /> <SafeText value={view.version} />: <strong>{shown(view.status)}</strong>{' '}
@@ -50,6 +53,7 @@ const PackageView: React.FC<{ view: any }> = ({ view }) => (
     <p className="deep-reason"><SafeText value={view.reason} limit={400} /></p>
 
     <h6 style={HEADING}>Fast gate</h6>
+    {recorded && <p className="recorded-fast-note">Recorded run: the artifact and tree came from a local test index and the advisories from a seeded cache (see the banner); they were not observed on PyPI or OSV.</p>}
     <table className="trace-table deep-fast-table">
       <thead><tr><th>Stage</th><th>Rule</th><th>Reason</th></tr></thead>
       <tbody>
@@ -57,6 +61,7 @@ const PackageView: React.FC<{ view: any }> = ({ view }) => (
           <tr key={index}>
             <td>{shown(stage.title)}</td>
             <td><code><SafeText value={stage.rule} /></code>
+              {recorded && Object.hasOwn(RECORDED_INPUT, stage.id) ? ` (${RECORDED_INPUT[stage.id]})` : ''}
               {stage.id === 'advisories' && stage.affected !== null && stage.affected !== undefined ? ` (${stage.affected} affect it)` : ''}</td>
             <td><SafeText value={stage.reason} /></td>
           </tr>
@@ -210,7 +215,8 @@ const DeepBlock: React.FC<{ deep: any }> = ({ deep }) => {
       <h6 style={HEADING}>Causal graph</h6>
       <p>
         Cause: <SafeText value={deep.causal?.cause ?? 'none named'} />. Digest <code>{cut(deep.causal?.digest, 16)}</code>{' '}
-        ({deep.causal?.digest_checked ? 'the graph hashes to it' : 'the graph is not available or does not hash to it'}).
+        ({deep.causal?.digest_checked ? 'the graph matches its recorded digest: a consistency check, not proof against editing'
+          : 'the graph is not available or does not match its digest'}).
       </p>
       <p className="deep-claim">What this claims: <SafeText value={deep.claim} limit={300} /></p>
     </div>

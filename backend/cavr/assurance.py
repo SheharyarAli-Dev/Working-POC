@@ -82,6 +82,7 @@ def verify_chain(records: list[dict]) -> dict:
                     "tampered_record_index": idx}
         version = r.get("hash_version")
         if "hash_version" not in r:
+            r = r if "seq" in r else {**r, "seq": idx + 1}  # as the old check did for a record without seq
             if seen_v2:
                 return {"intact": False, "broken_link_seq": seq, "tampered_record_index": idx,
                         "error": "A legacy record (no hash_version) follows a version-2 record: refused."}
@@ -133,6 +134,9 @@ def certificate_for_verdict(run_id: str, verdict: dict, terminal_hash: str, demo
     requested = requested if isinstance(requested, dict) else {}
     advisories = evidence.get("advisories") or []
     scans = evidence.get("scan") or []
+    # PR 19: the packages the deep stage ran for (sandbox runs), as (name==version, deep result).
+    deeps = [(f"{p.get('package')}=={p.get('version')}", (p.get("evidence") or {}).get("deep")) for p in packages
+             if isinstance(p, dict) and isinstance((p.get("evidence") or {}).get("deep"), dict)]
     return {
         "certificate_id": f"CERT-ASENT-{run_id}",
         "schema": "https://asent.dev/schema/assurance-certificate/v2.json",
@@ -148,7 +152,7 @@ def certificate_for_verdict(run_id: str, verdict: dict, terminal_hash: str, demo
         },
         "verdict": ALIASES.get(status, "NEEDS_REVIEW"),
         "status": status, "stage": verdict.get("stage"), "rule": verdict.get("rule"), "reason": verdict.get("reason"),
-        "bounded_trust_claim": CLAIMS.get(status, CLAIMS["UNRESOLVED"]),
+        "bounded_trust_claim": _claim(status, deeps),
         "demo_condition": demo_condition,
         "fast_gate_ms": verdict.get("fast_gate_ms"), "cache_hit": verdict.get("cache_hit"),
         "escalated": verdict.get("escalated"), "escalation": verdict.get("escalation"),
@@ -163,15 +167,48 @@ def certificate_for_verdict(run_id: str, verdict: dict, terminal_hash: str, demo
             "capability_contract": contract.get("rule") or NOT_REACHED,
             "ast_scan": sorted({str(scan.get("rule")) for scan in scans}) or NOT_REACHED,
             "sink_reachability": reachability.get("rule") or NOT_REACHED,
-            "sandbox_execution": "NOT_RUN (M2)",
+            "sandbox_execution": "; ".join(_sandbox_line(name, deep) for name, deep in deeps) or "NOT_RUN (M2)",
         },
         "residual_uncertainty": [
-            {"predicate": "package code was not executed", "file_line": "fast gate", "reason": "static checks only; deep analysis is M2"},
+            *(_deep_residual(deeps) if deeps else
+              [{"predicate": "package code was not executed", "file_line": "fast gate", "reason": "static checks only; deep analysis is M2"}]),
             *[{"predicate": proof.get("id"), "file_line": proof.get("file"), "reason": proof.get("limit")}
               for proof in reachability.get("proofs") or [] if proof.get("limit")],
         ],
         "evidence_chain_root": terminal_hash,
     }
+
+DEEP_VERIFIED_CLAIM = ("Every fast-gate check passed, and the deep analysis ran the package in the CAVR sandbox: {claim}. "
+                       "Nothing outside the contract was observed in those runs. This is not a claim that the package is "
+                       "safe; the conditions no run exercised are listed below.")
+
+
+def _claim(status, deeps) -> str:
+    """The bounded claim; for a VERIFIED verdict with deep runs, what those runs did (never "no code was run")."""
+    if status == "VERIFIED" and deeps:
+        claims = sorted({str((deep.get("evidence") or {}).get("claim") or "the runs listed") for _, deep in deeps})
+        return DEEP_VERIFIED_CLAIM.format(claim="; ".join(claims))
+    return CLAIMS.get(status, CLAIMS["UNRESOLVED"])
+
+
+def _sandbox_line(name: str, deep: dict) -> str:
+    evidence = deep.get("evidence") if isinstance(deep.get("evidence"), dict) else {}
+    runs = evidence.get("runs") if isinstance(evidence.get("runs"), list) else []
+    return (f"{name}: {deep.get('status')} {deep.get('rule')} ({len(runs)} sandbox run(s), image "
+            f"{evidence.get('image_id') or 'unknown'})")
+
+
+def _deep_residual(deeps) -> list:
+    """What the deep runs did not exercise, per package (the deep evidence's `not_exercised`)."""
+    out = []
+    for name, deep in deeps:
+        evidence = deep.get("evidence") if isinstance(deep.get("evidence"), dict) else {}
+        items = [item for item in evidence.get("not_exercised") or [] if isinstance(item, str)]
+        out += [{"predicate": item, "file_line": name, "reason": "not exercised by any sandbox run"} for item in items]
+        out.append({"predicate": "outside the runs", "file_line": name,
+                    "reason": "only the sandbox runs listed were observed; other environments, inputs and call paths were not"})
+    return out
+
 
 def generate_printable_html_certificate(cert: dict) -> str:
     subject = cert.get("subject", {})
@@ -185,6 +222,12 @@ def generate_printable_html_certificate(cert: dict) -> str:
     ])
     check_rows = "".join(f"<tr><td>{escape(str(name))}</td><td><code>{escape(str(value))}</code></td></tr>" for name, value in checks.items())
 
+    recorded = cert.get("recorded") if isinstance(cert.get("recorded"), dict) else None
+    recorded_block = "" if recorded is None else (
+        "<div class=\"verdict-box block\" style=\"border-color:#d97706\"><strong>RECORDED RUN: replayed, not run now.</strong>"
+        "<p class=\"honesty-text\">" + " · ".join(f"{escape(str(key))}: {escape(str(recorded.get(key)))}" for key in
+                                                ("id", "recorded_at", "commit", "image_id", "index", "advisories")) +
+        "</p><p class=\"honesty-text\">The checks below are the recorded run's; this certificate was issued for the replay.</p></div>")
     res_list = "".join([
         f"<li><strong>{escape(str(r.get('predicate')))}</strong> ({escape(str(r.get('file_line')))}): {escape(str(r.get('reason')))}</li>"
         for r in residuals
@@ -219,6 +262,7 @@ def generate_printable_html_certificate(cert: dict) -> str:
   <h1>Assurance Certificate</h1>
   <div class="meta">Certificate ID: <code>{escape(str(cert.get('certificate_id')))}</code> · Terminal Hash: <code>{escape(str(cert.get('evidence_chain_root'))[:16])}...</code></div>
 
+  {recorded_block}
   <div class="verdict-box {'allow' if cert.get('status')=='VERIFIED' else 'block'}">
     <strong style="font-size:18px; color:{'#22c55e' if cert.get('status')=='VERIFIED' else '#ef4444'};">
       VERDICT: {escape(str(cert.get('status')))} ({escape(str(cert.get('stage')))} / {escape(str(cert.get('rule')))})
@@ -241,7 +285,7 @@ def generate_printable_html_certificate(cert: dict) -> str:
 
   <h3>Checks</h3>
   <table>
-    <tr><th width="30%">Check</th><th>Result of this run</th></tr>
+    <tr><th width="30%">Check</th><th>{'Result of the recorded run' if recorded else 'Result of this run'}</th></tr>
     {check_rows}
   </table>
 

@@ -106,7 +106,7 @@ export const returnedValues = (state: CavrRunState): Record<string, unknown> => 
   const runs: any[] = Array.isArray(deep?.runs) ? deep.runs : [];
   const fast = (id: string) => (first?.fast || []).find((stage: any) => stage.id === id)?.rule;
   const resolved = first && (fast('artifact') || fast('tree') || fast('advisories'))
-    ? `${shown(fast('artifact'))} / ${shown(fast('tree'))} / ${shown(fast('advisories'))}` : null;
+    ? `${shown(fast('artifact'))} / ${shown(fast('tree'))} / ${shown(fast('advisories'))}${recorded ? ' (recorded: local test index, OSV not asked)' : ''}` : null;
   return {
     'FR-1': v?.request?.source ? `captured (${v.request.source})` : null,
     'FR-2': gateResult ? `${gateResult.result} (${gateResult.matched_rule})` : null,
@@ -125,7 +125,7 @@ export const returnedValues = (state: CavrRunState): Record<string, unknown> => 
     'FR-13': deep && runs.length ? runs.map((run: any) => `run ${shown(run.n)} ${shown(run.judged)}`).join(', ') : null,
     'FR-14': null,
     'FR-15': recorded ? `asent gate ${shown(recorded.decision)} (exit ${shown(recorded.exit_code)}), recorded` : null,
-    'NFR-1': deep ? `image ${cut(deep.image_id, 19)}; ${runs.length} run(s), HOME removed after each: ${runs.every((run: any) => run.home_removed === true)}` : null,
+    'NFR-1': deep && runs.length ? `image ${cut(deep.image_id, 19)}; ${runs.length} run(s), HOME removed after each: ${runs.every((run: any) => run.home_removed === true)}` : null,
     'NFR-2': null,
     'NFR-3': null,
     'NFR-4': v && v.fast_gate_ms !== null && v.fast_gate_ms !== undefined

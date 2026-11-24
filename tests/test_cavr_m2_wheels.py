@@ -180,6 +180,11 @@ def test_m2_demo_wheel_through_asent_gate(name, tmp_path):
 REPO = Path(__file__).resolve().parents[1]
 DEMO_DOC = REPO / "docs" / "cavr-demo.md"
 RECORDED_SCHEMA = "cavr.recorded-runs.v1"
+# What the fast-gate part of a recorded run was given (review of PR 19, BLOCKER 2): not PyPI and not live OSV.
+RECORDED_INDEX = ("local test index (FakeIndex): the demo wheels are built by the test and are not on PyPI; the "
+                  "registry digest is computed from the same bytes, so HASH_MATCH shows only that the bytes arrived intact")
+RECORDED_ADVISORIES = ("seeded OSV cache with no advisory for demo 1.0 and live OSV off: OSV was not asked, so "
+                       "NO_KNOWN_VULNERABILITY is the seeded answer")
 
 
 def demo_table() -> dict:
@@ -195,7 +200,13 @@ def demo_table() -> dict:
 
 
 def record(path: Path):
-    """Run every wheel once (repair on) and write what the dashboard replays (`backend/cavr/api.py`, recorded runs)."""
+    """Run every wheel once (repair on) and write what the dashboard replays (`backend/cavr/api.py`, recorded runs).
+
+    Refuses to run with uncommitted changes to tracked files: the header's commit must be the code that ran."""
+    dirty = subprocess.run(["git", "-C", str(REPO), "status", "--porcelain", "--untracked-files=no"],
+                           capture_output=True, text=True).stdout.strip()
+    if dirty:
+        raise SystemExit(f"--record needs a clean working tree (tracked changes):\n{dirty}")
     identity = sandbox_identity()
     table = demo_table()
     runs = {}
@@ -223,12 +234,14 @@ def record(path: Path):
     docker = subprocess.run(["docker", "version", "--format", "{{.Server.Version}}"], capture_output=True, text=True)
     commit = subprocess.run(["git", "-C", str(REPO), "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
     out = {"schema": RECORDED_SCHEMA,
-           "label": "recorded: real gate runs in the CAVR sandbox, replayed by the dashboard; nothing is run again",
+           "label": ("recorded: real gate runs with real CAVR sandbox runs, replayed by the dashboard; nothing is run again. "
+                     "The fast-gate inputs were a local test index and a seeded OSV cache (see index, advisories)"),
            "recorded_at": datetime.now(timezone.utc).isoformat(timespec="seconds"), "commit": commit,
            "image_id": identity.get("image_id"), "docker_version": docker.stdout.strip() or None,
            "platform": platform.platform(),
            "command": "CAVR_DOCKER=1 .venv/bin/python tests/test_cavr_m2_wheels.py --record " + str(path),
-           "source": "docs/cavr-demo.md, M2 demo: real wheels", "runs": runs}
+           "source": "docs/cavr-demo.md, M2 demo: real wheels", "working_tree": "clean (tracked files)",
+           "index": RECORDED_INDEX, "advisories": RECORDED_ADVISORIES, "runs": runs}
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(out, indent=1, sort_keys=True) + "\n", encoding="utf-8")
 

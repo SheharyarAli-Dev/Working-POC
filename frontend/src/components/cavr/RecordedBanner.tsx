@@ -16,6 +16,12 @@ export const RecordedBanner: React.FC<{ recorded: any | null }> = ({ recorded })
         <code>{cut(recorded.image_id, 19)}</code> (commit <code>{cut(recorded.commit, 12)}</code>)
         · gate decision <SafeText value={recorded.decision} /> (exit {shown(recorded.exit_code)}) · replayed: nothing is run now.
       </span>
+      {(recorded.index || recorded.advisories) && (
+        <div className="recorded-inputs" style={{ fontSize: 12, marginTop: 4 }}>
+          Fast-gate inputs of the recorded run (not PyPI, not live OSV): <SafeText value={recorded.index} limit={400} />;{' '}
+          <SafeText value={recorded.advisories} limit={400} />. The sandbox runs are real.
+        </div>
+      )}
     </div>
   );
 };

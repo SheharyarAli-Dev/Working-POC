@@ -417,7 +417,7 @@ export const CavrModule: React.FC = () => {
           <div className="workflow-title-area">
             <span className="live-status-pill">
               <span className={`status-dot ${isRunning ? 'pulsing' : ''}`} />
-              {isRunning ? 'RUN IN PROGRESS' : 'FAST GATE'}
+              {isRunning ? 'RUN IN PROGRESS' : runState.recorded ? 'RECORDED REPLAY' : 'FAST GATE'}
             </span>
             <h4>{CAVR_NAME}: verification pipeline</h4>
             <p>
@@ -710,7 +710,7 @@ export const CavrModule: React.FC = () => {
               <h6>Sandbox fields of the proof</h6>
               <div className="proof-kv">
                 <div><span>Container command:</span> <code><SafeText value={proof?.docker_command} /></code></div>
-                <div><span>Container ID:</span> <code><SafeText value={proof?.container_id} /></code></div>
+                <div><span>Containers:</span> <code><SafeText value={proof?.container_id} /></code></div>
                 <div><span>Image digest:</span> <code><SafeText value={proof?.image_digest} /></code></div>
                 <div><span>Sandbox runs:</span> <code>{shown(proof?.counterfactual_runs?.length)}</code></div>
               </div>

@@ -99,8 +99,9 @@ NOT_IN_EVIDENCE = "not in the deep evidence (it keeps the image, the lockdown fl
 # The recorded M2 runs (PR 19): one fixed file, read once. A name is only ever a key of its "runs".
 RECORDED_PATH = Path(__file__).resolve().parent / "recorded" / "m2-demo-runs.json"
 RECORDED_ORDER = ("REJECTED", "VERIFIED", "UNRESOLVED")
-RECORDED_KEYS = ("recorded_at", "commit", "image_id", "docker_version", "source", "label")
+RECORDED_KEYS = ("recorded_at", "commit", "image_id", "docker_version", "source", "label", "index", "advisories")
 _RECORDED = None  # (header, runs) once loaded
+REPLAYS: set = set()  # running replay tasks, kept so they are not garbage-collected
 # The stages of the page's timeline, in pipeline order.
 STAGE_TITLES = {"capture": "Request (C1)", "gate": "Requirement gate (C2)", "artifact": "Artifact, tree and advisories (C3)",
                 "cache": "Verdict cache lookup", "analysis": "Contract, AST scan and sinks (C4)", "verdict": "Verdict"}
@@ -351,7 +352,9 @@ async def replay_recorded_run(name: str):
         raise HTTPException(404, "No recorded run of that name")
     run_id = _new_run()
     label = recorded_label(name, run)
-    asyncio.create_task(run_recorded(run_id, name))
+    task = asyncio.create_task(run_recorded(run_id, name))
+    REPLAYS.add(task)
+    task.add_done_callback(REPLAYS.discard)
     return {"run_id": run_id, "request": _recorded_request(run), "recorded": label, "status": "REPLAYING",
             "stream_url": f"/api/cavr/stream/{run_id}"}
 
@@ -379,7 +382,15 @@ async def run_recorded(run_id: str, name: str) -> dict:
         "state": "INTERCEPTED", "step_index": 0, "request": shown, "demo_condition": None, "recorded": label,
         "message": f"Recorded run '{name}' (recorded {label.get('recorded_at')}): replayed, nothing is run now.",
         "plain_explanation": f"This is a recorded result of '{name}' from a real sandbox run; it is shown again, not re-run."})
-    return publish_verdict(run_id, shown, verdict, None, copy.deepcopy(run.get("repair")), label)
+    try:
+        return publish_verdict(run_id, shown, verdict, None, copy.deepcopy(run.get("repair")), label)
+    except Exception as exc:  # a malformed recording: say so and end the stream, never leave it open
+        publish_event(run_id, 0, "P13", "AssuranceFinalized", "state_change", "FAILED", {
+            "state": "DECIDED", "step_index": 0, "verdict": None, "policy_state": None, "recorded": label,
+            "message": f"The recorded run '{name}' could not be replayed: {type(exc).__name__}: {exc}",
+            "plain_explanation": "The recorded result could not be shown, so there is no result."})
+        RUN_FINISHED.add(run_id)
+        return {"status": "UNRESOLVED", "rule": "RECORDING_UNUSABLE", "reason": f"{type(exc).__name__}: {exc}"}
 
 
 # ----------------- THE VERIFICATION RUN -----------------

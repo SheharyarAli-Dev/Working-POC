@@ -52,7 +52,7 @@ export const ProofDrawer: React.FC<ProofDrawerProps> = ({ proof, onClose }) => (
           <label>Sandbox:</label>
           <div className="proof-kv">
             <div><span>Container command:</span> <code><SafeText value={proof.docker_command} /></code></div>
-            <div><span>Container ID:</span> <code><SafeText value={proof.container_id} /></code></div>
+            <div><span>Containers:</span> <code><SafeText value={proof.container_id} /></code></div>
             <div><span>Image digest:</span> <code><SafeText value={proof.image_digest} /></code></div>
           </div>
         </div>

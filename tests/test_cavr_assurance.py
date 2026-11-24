@@ -129,3 +129,12 @@ def test_a_legacy_record_after_a_version_2_record_is_refused():
 
 def test_an_empty_chain():
     assert verify_chain([])["intact"] is True
+
+
+
+def test_a_legacy_record_without_seq_is_checked_with_its_position():
+    """As before PR 19: a legacy record with no `seq` is hashed with its 1-based position."""
+    records = legacy_chain(2)
+    for record in records:
+        del record["seq"]
+    assert verify_chain(records)["intact"] is True

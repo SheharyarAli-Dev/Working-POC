@@ -420,8 +420,10 @@ def test_no_page_part_sets_inner_html_or_builds_a_link_from_data():
         text = path.read_text(encoding="utf-8")
         assert "dangerouslySetInnerHTML" not in text and "innerHTML" not in text, path.name
         assert re.findall(r"\b(?:src|xlinkHref|srcDoc)=\{", text) == [], path.name
-        hrefs = re.findall(r"href=\{`[^`]*`\}|href = \w+", text)
+        # Every href in any form (JSX expression, string, template literal or an assignment).
+        hrefs = re.findall(r"href\s*=\s*(?:\{`[^`]*`\}|\{[^}]*\}|\"[^\"]*\"|'[^']*'|\w+)", text)
         assert hrefs == ALLOWED_HREFS.get(path.name, []), (path.name, hrefs)
+        assert re.findall(r"(?i)xlink:?href", text) == [], path.name
 
 
 def test_the_deep_view_of_a_live_fast_gate_run_says_why_there_is_no_deep_analysis(dashboard, tmp_path):
@@ -717,7 +719,7 @@ def test_the_matrix_of_recorded_deep_runs_shows_their_values(dashboard, tmp_path
                                      "caused by CI=true")
     assert row(rejected, "FR-6") == "REJECTED (deep / DEEP_CONTRACT_VIOLATION)"
     assert row(rejected, "FR-7") == "NOT_ATTEMPTED"
-    assert row(rejected, "FR-11") == "HASH_MATCH / TREE_BUILT / NO_KNOWN_VULNERABILITY"
+    assert row(rejected, "FR-11").startswith("HASH_MATCH / TREE_BUILT / NO_KNOWN_VULNERABILITY (recorded: ")
     assert row(rejected, "FR-12") == "FRONTIER_COMPLETE: 1 trigger(s)"
     assert row(rejected, "FR-13") == "run 1 OK, run 2 VIOLATION"
     assert row(rejected, "FR-15") == "asent gate BLOCK (exit 1), recorded"
