@@ -83,3 +83,10 @@ def test_no_host_path_is_in_the_file():
     assert str(Path.home()) not in TEXT and str(REPO) not in TEXT
     # Every /home path is the sandbox's own HOME, /tmp/home.
     assert {match.start() for match in re.finditer(r"/home/", TEXT)} == {m.start() + 4 for m in re.finditer(r"/tmp/home/", TEXT)}
+
+
+@pytest.mark.parametrize("name", list(WHEELS))
+def test_each_recorded_graph_hashes_to_its_digest(name):
+    from backend.cavr.dashboard_view import _graph_ok
+    evidence = deep(name)["evidence"]
+    assert _graph_ok(evidence["causal_graph"], evidence["causal"]["digest"]) is True

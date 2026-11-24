@@ -16,7 +16,7 @@ import sys
 from pathlib import Path
 
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
 from backend.cavr import api, pipeline, requirement_gate
@@ -820,3 +820,177 @@ def test_the_running_app_loads_none_of_the_fixture_or_simulation_modules(tmp_pat
     assert not loaded & {"backend.cavr.fixtures", "backend.cavr.fixtures.scenarios", "backend.cavr.resolver",
                          "backend.cavr.reverifier", "backend.cavr.reconstructor", "backend.cavr.triggers",
                          "backend.cavr.repair_engine", "backend.cavr.counterfactual"}
+
+
+# --- PR 19: recorded M2 runs, replayed without Docker ------------------------------------------------------------------
+
+RECORDED_FILE = json.loads((REPO / "backend" / "cavr" / "recorded" / "m2-demo-runs.json").read_text(encoding="utf-8"))
+
+
+def replay(name):
+    """One replay without HTTP. Returns (run id, the recorded run)."""
+    run_id = f"replay-{name}"
+    api.RUN_EVENTS[run_id] = []
+    api.RUN_CHAINS[run_id] = api.EvidenceChain(run_id)
+    asyncio.run(api.run_recorded(run_id, name))
+    return run_id, RECORDED_FILE["runs"][name]
+
+
+def test_the_recorded_runs_are_listed_with_their_label_and_origin():
+    listed = api.list_recorded_runs()
+    assert sorted(item["id"] for item in listed) == sorted(RECORDED_FILE["runs"])
+    assert [item["expected_status"] for item in listed] == sorted((item["expected_status"] for item in listed),
+                                                                  key=api.RECORDED_ORDER.index)
+    for item in listed:
+        run = RECORDED_FILE["runs"][item["id"]]
+        assert item["display_name"].startswith("Recorded: ") and item["recorded_at"] == RECORDED_FILE["recorded_at"]
+        assert (item["what"], item["decision"], item["exit_code"]) == (run["what"], run["decision"], run["exit_code"])
+        assert item["image_id"] == RECORDED_FILE["image_id"] and item["label"] == RECORDED_FILE["label"]
+
+
+@pytest.mark.parametrize("name", ["env_ci", "benign_triggered", "win32", "budget", "canary_exfil"])
+def test_a_replay_publishes_the_recorded_verdict_labelled_recorded_and_runs_nothing(dashboard, name):
+    run_id, run = replay(name)
+    assert dashboard.index.calls == [] and not dashboard.quarantine.exists()       # no download, no network
+    assert dashboard.store.get_verdict_log() == [] and dashboard.store.list_cached_verdicts() == []   # not logged, not cached
+    events = dashboard.events(run_id)
+    assert [e["type"] for e in events] == ["state_change", "requirement_gate_evaluated", "package_resolved", "cache_result",
+                                           "action_completed", "deep_completed", "verdict_computed", "state_change"]
+    assert all(e["payload"]["recorded"]["id"] == name for e in events)
+    assert all(e["payload"]["recorded"]["recorded_at"] == RECORDED_FILE["recorded_at"] for e in events)
+    proof, certificate = api.get_proof(run_id), api.RUN_CERTIFICATES[run_id]
+    assert proof["recorded"]["id"] == name and certificate["recorded"]["id"] == name
+    assert proof["cavr_verdict"] == run["verdict"] and proof["policy_state"] == run["verdict"]["status"]
+    assert proof["repair"] == run["repair"] and api.verify_run_evidence(run_id)["intact"] is True
+    assert "recorded" in events[0]["payload"]["message"].lower()
+
+
+def test_a_replay_shows_the_deep_runs_in_the_proofs_sandbox_fields(dashboard):
+    run_id, run = replay("env_ci")
+    evidence = run["verdict"]["packages"][0]["evidence"]["deep"]["evidence"]
+    proof = api.get_proof(run_id)
+    assert proof["image_digest"] == evidence["image_id"]
+    assert proof["container_id"] == ", ".join(r["container"] for r in evidence["runs"])
+    assert [r["n"] for r in proof["counterfactual_runs"]] == [r["n"] for r in evidence["runs"]] == [1, 2]
+    assert proof["docker_command"] == api.NOT_IN_EVIDENCE
+
+
+def test_a_fast_gate_run_says_not_available_in_the_sandbox_fields_and_has_no_deep_event(dashboard):
+    run_id, _ = dashboard.run("verified")
+    proof = api.get_proof(run_id)
+    assert (proof["docker_command"], proof["container_id"], proof["image_digest"]) == (api.NOT_RUN,) * 3
+    assert api.NOT_RUN.startswith("not available") and proof["counterfactual_runs"] == [] and proof["recorded"] is None
+    assert dashboard.events(run_id, "deep_completed") == [] and "recorded" not in api.RUN_CERTIFICATES[run_id]
+    assert all("recorded" not in e["payload"] for e in dashboard.events(run_id))
+    (view,) = proof["packages"]
+    assert view["deep"] is None and view["deep_not_run"].startswith("not run: the fast gate did not escalate")
+
+
+def test_the_deep_event_and_the_package_view_copy_the_deep_evidence(dashboard):
+    run_id, run = replay("budget")
+    (package,) = run["verdict"]["packages"]
+    deep = package["evidence"]["deep"]
+    evidence = deep["evidence"]
+    (view,) = api.get_proof(run_id)["packages"]
+    assert (view["package"], view["version"], view["status"], view["rule"]) == ("demo", "1.0", "UNRESOLVED", package["rule"])
+    block = view["deep"]
+    assert (block["status"], block["rule"], block["reason"], block["elapsed_seconds"]) == (
+        deep["status"], deep["rule"], deep["reason"], deep["elapsed_seconds"])
+    assert [(r["n"], r["kind"], r["spec_id"], r["rule"], r["elapsed_seconds"]) for r in block["runs"]] == [
+        (r["n"], r["kind"], r["spec_id"], r["rule"], r["elapsed_seconds"]) for r in evidence["runs"]]
+    assert len(block["runs"]) == 8 and block["budget"]["runs"] == 8 and block["budget"]["runs_limit"] == 8
+    assert block["budget"]["stop"] == evidence["loop"]["stop"] == "runs"
+    assert [t["id"] for t in block["triggers"]] == [t["id"] for t in evidence["triggers"]]
+    unexplored = [t for t in block["triggers"] if t["outcome"] != "explored"]
+    assert len(unexplored) == 1 and "DEPLOY_8" in unexplored[0]["predicate"] and "8 sandbox runs" in unexplored[0]["outcome"]
+    assert block["frontier"]["rule"] == evidence["frontier"]["rule"] and block["other_guards"] == evidence["frontier"]["other_guards"]
+    assert block["drives"] == evidence["drives"] and block["key_events"] == evidence.get("key_events", [])
+    # Every run planted the canary ids of its spec (ids only).
+    assert all(r["canaries"] and all(":" in c for c in r["canaries"]) for r in block["runs"])
+    stages = {stage["id"]: stage for stage in view["fast"]}
+    assert stages["artifact"]["rule"] == package["evidence"]["artifact"]["rule"] == "HASH_MATCH"
+    assert stages["reachability"]["rule"] == package["evidence"]["reachability"]["rule"]
+    (payload,) = [e["payload"] for e in dashboard.events(run_id, "deep_completed")]
+    (in_event,) = payload["packages"]
+    assert in_event == view  # the same view is in the hash chain
+    assert "causal_graph" not in json.dumps(payload) and '"edges": [' not in json.dumps(payload)  # the graph is in the proof
+
+
+def test_the_canary_leak_is_named_in_the_view(dashboard):
+    run_id, _ = replay("canary_exfil")
+    (view,) = api.get_proof(run_id)["packages"]
+    leaks = view["deep"]["leaks"]
+    assert leaks and leaks[0]["type"] == "CANARY_EXFIL_ATTEMPT" and "file:aws-secret-key" in leaks[0]["why"]
+    assert view["deep"]["runs"][0]["canaries"] and "file:aws-secret-key" in view["deep"]["runs"][0]["canaries"]
+
+
+def test_the_graph_is_in_the_proof_and_its_digest_is_the_one_in_the_chain(dashboard):
+    run_id, run = replay("env_ci")
+    graph = run["verdict"]["packages"][0]["evidence"]["deep"]["evidence"]["causal_graph"]
+    proof = api.get_proof(run_id)
+    assert proof["causal_graphs"] == {"demo==1.0": graph}
+    (payload,) = [e["payload"] for e in dashboard.events(run_id, "deep_completed")]
+    (view,) = payload["packages"]
+    assert view["deep"]["causal"]["digest"] == graph["digest"] and view["deep"]["causal"]["digest_checked"] is True
+    # The event carries the digest and the counts, not the graph.
+    assert set(view["deep"]["causal"]) == {"digest", "counts", "cause", "error", "digest_checked"}
+
+
+def test_a_recorded_graph_whose_digest_does_not_match_is_not_shown(dashboard, monkeypatch):
+    runs = json.loads(json.dumps(RECORDED_FILE["runs"]))
+    graph = runs["env_ci"]["verdict"]["packages"][0]["evidence"]["deep"]["evidence"]["causal_graph"]
+    graph["nodes"][0]["label"] = "edited"
+    monkeypatch.setattr(api, "recorded_runs", lambda: runs)
+    run_id = "replay-edited"
+    api.RUN_EVENTS[run_id], api.RUN_CHAINS[run_id] = [], api.EvidenceChain(run_id)
+    asyncio.run(api.run_recorded(run_id, "env_ci"))
+    proof = api.get_proof(run_id)
+    assert proof["causal_graphs"] == {}
+    assert proof["packages"][0]["deep"]["causal"]["digest_checked"] is False
+
+
+def test_the_replay_endpoint_over_http(dashboard, client):
+    started = client.post("/api/cavr/recorded-runs/env_ci").json()
+    assert started["status"] == "REPLAYING" and started["recorded"]["id"] == "env_ci"
+    events = stream_events(client, started["stream_url"])
+    assert events[-1]["payload"]["state"] == "DECIDED" and all(e["payload"]["recorded"]["id"] == "env_ci" for e in events)
+    assert client.get("/api/cavr/recorded-runs").status_code == 200
+
+
+BAD_NAMES = ["../etc/passwd", "..%2Fetc%2Fpasswd", "%2e%2e", "%2e%2e%2fm2-demo-runs.json", "..", "/etc/passwd",
+             "%2Fetc%2Fpasswd", "x" * 5000, "m2-demo-runs.json", "__class__", "env_ci%00", "ENV_CI"]
+
+
+@pytest.mark.parametrize("name", BAD_NAMES)
+def test_a_name_that_is_not_in_the_recorded_list_is_404_over_http(dashboard, client, name):
+    response = client.post(f"/api/cavr/recorded-runs/{name}")
+    assert response.status_code == 404, (name, response.status_code)
+    assert api.RUN_EVENTS == {}
+
+
+@pytest.mark.parametrize("name", ["../etc/passwd", "..", "/etc/passwd", "/" + "a" * 4096, "x" * 100000,
+                                  "%2e%2e", "env_ci/", " env_ci", "env_ci\x00", "env_ci/../win32", "./env_ci"])
+def test_the_lookup_never_touches_the_filesystem_for_a_name(dashboard, monkeypatch, name):
+    api.recorded_runs()      # the fixed list, loaded once from the fixed path
+    def no_files(*args, **kwargs):
+        raise AssertionError(f"the filesystem was used for {name!r}")
+    monkeypatch.setattr("builtins.open", no_files)
+    monkeypatch.setattr(Path, "read_text", no_files)
+    monkeypatch.setattr(Path, "exists", no_files)
+    with pytest.raises(HTTPException) as raised:
+        asyncio.run(api.replay_recorded_run(name))
+    assert raised.value.status_code == 404 and api.RUN_EVENTS == {}
+
+
+def test_the_recorded_file_is_read_from_one_fixed_path():
+    assert api.RECORDED_PATH == REPO / "backend" / "cavr" / "recorded" / "m2-demo-runs.json"
+    assert sorted(api.recorded_runs()) == sorted(RECORDED_FILE["runs"])
+
+
+def test_without_the_recorded_file_the_list_is_empty_and_every_name_is_404(dashboard, monkeypatch, tmp_path):
+    monkeypatch.setattr(api, "RECORDED_PATH", tmp_path / "missing.json")
+    monkeypatch.setattr(api, "_RECORDED", None)
+    assert api.list_recorded_runs() == []
+    with pytest.raises(HTTPException) as raised:
+        asyncio.run(api.replay_recorded_run("env_ci"))
+    assert raised.value.status_code == 404

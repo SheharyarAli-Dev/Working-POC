@@ -37,11 +37,21 @@ verdict event's `repair` and in the proof. It is a proposal only: the verdict, t
 run's status are the pipeline's, and nothing is written to the project. Under a demo condition the same
 condition applies to the candidates' downloads.
 
-Not run on this path: the sandbox, the counterfactual engine, the causal graph, project tests on the
-repair proposal, and reconstruction (M2). Their fields in the events are null.
+Recorded M2 runs (PR 19): `GET /api/cavr/recorded-runs` lists the real gate runs of the M2 demo wheels that
+`tests/test_cavr_m2_wheels.py --record` wrote to `backend/cavr/recorded/m2-demo-runs.json` (CAVR sandbox, Docker).
+`POST /api/cavr/recorded-runs/{name}` replays one of them without Docker or network: the recorded pipeline verdict goes
+through the same `verdict_events`, `stage_summary` and certificate as a live run, and every event, the proof and the
+certificate carry `recorded` (id, date, commit, image). A replay is never logged or cached. The name is looked up in
+the fixed list loaded from that one file; no path is ever built from it.
+
+The live chips run the fast gate only (the sample project has no escalated package). For a package with deep evidence
+the events have a `deep_completed` event, and the proof has `packages` (`package_views`: each package's fast-gate
+stages and its deep block) and `causal_graphs`. Without deep evidence the sandbox fields of the proof say NOT_RUN.
+Not run on this path: project tests on the repair proposal and reconstruction.
 """
 from __future__ import annotations
 import asyncio
+import copy
 import json
 import time
 import uuid
@@ -57,6 +67,7 @@ from backend.cavr import requirement_gate
 from backend.cavr.advisories import FIRST_IDS, summarise_ids
 from backend.cavr.assurance import EvidenceChain, certificate_for_verdict, generate_printable_html_certificate, verify_chain
 from backend.cavr.capture import redact
+from backend.cavr.dashboard_view import causal_graphs, package_views
 from backend.cavr.context_extractor import SAMPLE_PROJECT_DIR
 from backend.cavr.pipeline import default_quarantine_dir, metrics as pipeline_metrics, verify_request
 from backend.cavr.pypi_client import FILES_HOST, HttpxTransport, TransportError
@@ -83,7 +94,13 @@ RUN_CHAINS: dict[str, EvidenceChain] = {}
 RUN_CERTIFICATES: dict[str, dict] = {}
 
 ALIASES = {"VERIFIED": "ALLOW", "REJECTED": "BLOCK", "BLOCK": "BLOCK", "UNRESOLVED": "NEEDS_REVIEW"}
-NOT_RUN = "not run: the fast gate does not execute package code (deep analysis is M2)"
+NOT_RUN = "not available: no deep analysis ran for this request"
+NOT_IN_EVIDENCE = "not in the deep evidence (it keeps the image, the lockdown flags' digest and each run's container)"
+# The recorded M2 runs (PR 19): one fixed file, read once. A name is only ever a key of its "runs".
+RECORDED_PATH = Path(__file__).resolve().parent / "recorded" / "m2-demo-runs.json"
+RECORDED_ORDER = ("REJECTED", "VERIFIED", "UNRESOLVED")
+RECORDED_KEYS = ("recorded_at", "commit", "image_id", "docker_version", "source", "label")
+_RECORDED = None  # (header, runs) once loaded
 # The stages of the page's timeline, in pipeline order.
 STAGE_TITLES = {"capture": "Request (C1)", "gate": "Requirement gate (C2)", "artifact": "Artifact, tree and advisories (C3)",
                 "cache": "Verdict cache lookup", "analysis": "Contract, AST scan and sinks (C4)", "verdict": "Verdict"}
@@ -286,6 +303,78 @@ async def cavr_stream(run_id: str, request: Request):
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 
+# ----------------- RECORDED M2 RUNS (PR 19) -----------------
+def _recorded():
+    """(header, runs) of RECORDED_PATH, loaded once; ({}, {}) when the file is missing or not a recording."""
+    global _RECORDED
+    if _RECORDED is None:
+        try:
+            data = json.loads(RECORDED_PATH.read_text(encoding="utf-8"))
+            runs = data.get("runs") if data.get("schema") == "cavr.recorded-runs.v1" else None
+            _RECORDED = ({key: data.get(key) for key in RECORDED_KEYS}, runs if isinstance(runs, dict) else {})
+        except (OSError, ValueError, AttributeError):
+            _RECORDED = ({}, {})
+    return _RECORDED
+
+
+def recorded_runs() -> dict:
+    """name -> recorded run. The fixed list; tests replace it."""
+    return _recorded()[1]
+
+
+def _recorded_run(name):
+    """The recorded run called `name`, or None. A dictionary lookup only: no path is built from the name."""
+    runs = recorded_runs()
+    return runs.get(name) if isinstance(name, str) and name in runs else None
+
+
+def recorded_label(name: str, run: dict) -> dict:
+    return {"id": name, **_recorded()[0], "decision": run.get("decision"), "exit_code": run.get("exit_code"),
+            "deep_line": run.get("deep_line")}
+
+
+@cavr_router.get("/api/cavr/recorded-runs")
+def list_recorded_runs():
+    header, runs = _recorded()
+    listed = [{"id": name, "display_name": f"Recorded: {name} ({(run.get('expected') or {}).get('status')})",
+               "what": run.get("what"), "policy": run.get("policy"),
+               "expected_status": (run.get("expected") or {}).get("status"), "decision": run.get("decision"),
+               "exit_code": run.get("exit_code"), **header} for name, run in runs.items()]
+    rank = lambda status: RECORDED_ORDER.index(status) if status in RECORDED_ORDER else len(RECORDED_ORDER)
+    return sorted(listed, key=lambda item: (rank(item["expected_status"]), item["id"]))
+
+
+@cavr_router.post("/api/cavr/recorded-runs/{name}")
+async def replay_recorded_run(name: str):
+    run = _recorded_run(name)
+    if run is None:
+        raise HTTPException(404, "No recorded run of that name")
+    run_id = _new_run()
+    label = recorded_label(name, run)
+    asyncio.create_task(run_recorded(run_id, name))
+    return {"run_id": run_id, "request": _recorded_request(run), "recorded": label, "status": "REPLAYING",
+            "stream_url": f"/api/cavr/stream/{run_id}"}
+
+
+def _recorded_request(run: dict) -> str:
+    command = ((run.get("verdict") or {}).get("request") or {}).get("command")
+    return request_text(command) if isinstance(command, list) and all(isinstance(part, str) for part in command) else "recorded gate run"
+
+
+async def run_recorded(run_id: str, name: str) -> dict:
+    """One replay: the recorded verdict, published like a live one, labelled `recorded`. Nothing is run."""
+    run = _recorded_run(name)
+    if run is None:
+        raise HTTPException(404, "No recorded run of that name")
+    label, verdict = recorded_label(name, run), copy.deepcopy(run["verdict"])
+    shown = _recorded_request(run)
+    publish_event(run_id, 0, "P1", "Capture", "state_change", "RUNNING", {
+        "state": "INTERCEPTED", "step_index": 0, "request": shown, "demo_condition": None, "recorded": label,
+        "message": f"Recorded run '{name}' (recorded {label.get('recorded_at')}): replayed, nothing is run now.",
+        "plain_explanation": f"This is a recorded result of '{name}' from a real sandbox run; it is shown again, not re-run."})
+    return publish_verdict(run_id, shown, verdict, None, copy.deepcopy(run.get("repair")), label)
+
+
 # ----------------- THE VERIFICATION RUN -----------------
 @cavr_router.post("/api/cavr/intercept")
 async def intercept_package_endpoint(body: InterceptRequest):
@@ -299,7 +388,8 @@ async def run_scenario_endpoint(scenario: str = "verified"):
     return await launch_cavr_pipeline(InterceptRequest(package=chosen["package"], version=chosen["version"],
                                                        scenario_type=chosen["condition"] or chosen["id"]))
 
-async def launch_cavr_pipeline(body: InterceptRequest):
+def _new_run() -> str:
+    """A new run id with an empty event list and hash chain; the oldest runs are dropped after MAX_RUNS."""
     run_id = f"cavr-{int(time.time() * 1000)}-{uuid.uuid4().hex[:6]}"
     for old in list(RUN_EVENTS)[:max(len(RUN_EVENTS) - MAX_RUNS + 1, 0)]:
         for runs in (RUN_EVENTS, RUN_PROOFS, RUN_CHAINS, RUN_CERTIFICATES):
@@ -307,6 +397,11 @@ async def launch_cavr_pipeline(body: InterceptRequest):
         RUN_FINISHED.discard(old)
     RUN_EVENTS[run_id] = []
     RUN_CHAINS[run_id] = EvidenceChain(run_id)
+    return run_id
+
+
+async def launch_cavr_pipeline(body: InterceptRequest):
+    run_id = _new_run()
     request = pip_request(body)
     asyncio.create_task(run_verification(run_id, body))
     return {"run_id": run_id, "request": request_text(request), "demo_condition": demo_condition(body),
@@ -411,39 +506,63 @@ async def run_verification(run_id: str, body: InterceptRequest) -> dict:
         "plain_explanation": f"ASENT received the request '{shown}' and is checking it before anything is installed."})
     verdict = await asyncio.to_thread(verify_dashboard_request, request, condition["id"] if condition else None)
     repair = await asyncio.to_thread(dashboard_repair, verdict, condition["id"] if condition else None)
-    for step_index, phase, substep, event_type, status, payload in verdict_events(verdict, condition, repair):
-        publish_event(run_id, step_index, phase, substep, event_type, status, payload)
+    return publish_verdict(run_id, shown, verdict, condition, repair)
+
+
+def publish_verdict(run_id: str, shown: str, verdict: dict, condition, repair, recorded=None) -> dict:
+    """Publish the events of one verdict, its certificate, its proof and the final event. Returns the verdict.
+
+    `recorded` (a replay of a recorded run) is written into every event, the proof and the certificate.
+    """
+    views = package_views(verdict)
+    for step_index, phase, substep, event_type, status, payload in verdict_events(verdict, condition, repair, views):
+        publish_event(run_id, step_index, phase, substep, event_type, status, _labelled(payload, recorded))
 
     last_step = RUN_EVENTS[run_id][-1]["step_index"]
     chain = RUN_CHAINS[run_id]
-    certificate = RUN_CERTIFICATES[run_id] = certificate_for_verdict(run_id, verdict, chain.last_hash, condition)
+    certificate = certificate_for_verdict(run_id, verdict, chain.last_hash, condition)
+    if recorded is not None:
+        certificate["recorded"] = recorded
+    RUN_CERTIFICATES[run_id] = certificate
     artifact = _first_artifact(verdict)
+    deep = next((view["deep"] for view in views if view["deep"]), None)
     RUN_PROOFS[run_id] = {
-        "run_id": run_id, "request": shown, "demo_condition": condition,
+        "run_id": run_id, "request": shown, "demo_condition": condition, "recorded": recorded,
         "package": certificate["subject"]["package"], "version": certificate["subject"]["version"],
         "verdict": ALIASES.get(verdict["status"], "NEEDS_REVIEW"), "policy_state": verdict["status"],
-        "cavr_verdict": verdict, "stages": stage_summary(verdict),
+        "cavr_verdict": verdict, "stages": stage_summary(verdict), "packages": views,
+        "causal_graphs": causal_graphs(verdict),
         "hash_comparison": {"declared_or_expected": artifact.get("registry_sha256"), "actual_sha256": artifact.get("sha256"),
                             "rule": artifact.get("rule"), "matches": HASH_MATCHES.get(artifact.get("rule"))},
-        "docker_command": NOT_RUN, "container_id": NOT_RUN, "image_digest": NOT_RUN, "counterfactual_runs": [],
+        # The sandbox fields: the first deep package's runs, or "not available" (never empty, never invented).
+        "docker_command": NOT_IN_EVIDENCE if deep else NOT_RUN,
+        "container_id": ", ".join(str(r.get("container")) for r in deep["runs"]) if deep and deep["runs"] else NOT_RUN,
+        "image_digest": (deep.get("image_id") or NOT_RUN) if deep else NOT_RUN,
+        "counterfactual_runs": deep["runs"] if deep else [],
         "evidence_chain_root": chain.last_hash, "evidence_records_count": len(chain.records),
         "certificate_id": certificate["certificate_id"], "repair": repair,
     }
-    publish_event(run_id, last_step, "P13", "AssuranceFinalized", "state_change", "FINALIZED", {
+    finished = "Replayed" if recorded is not None else "Finished"
+    publish_event(run_id, last_step, "P13", "AssuranceFinalized", "state_change", "FINALIZED", _labelled({
         "state": "DECIDED", "step_index": last_step, "verdict": ALIASES.get(verdict["status"], "NEEDS_REVIEW"),
         "policy_state": verdict["status"], "certificate": certificate, "reconstruction": None, "demo_condition": condition,
         "evidence_chain_summary": {"total_blocks": len(chain.records), "terminal_hash": chain.last_hash},
-        "message": f"Finished: {verdict['status']}. Nothing was installed.",
-        "plain_explanation": f"The check is finished: {verdict['status']}. Nothing was installed."})
+        "message": f"{finished}: {verdict['status']}. Nothing was installed.",
+        "plain_explanation": f"The check is finished: {verdict['status']}. Nothing was installed."}, recorded))
     RUN_FINISHED.add(run_id)
     return verdict
 
 
-def verdict_events(verdict: dict, condition=None, repair=None) -> list[tuple]:
+def _labelled(payload: dict, recorded) -> dict:
+    return payload if recorded is None else {**payload, "recorded": recorded}
+
+
+def verdict_events(verdict: dict, condition=None, repair=None, views=None) -> list[tuple]:
     """The events of one verdict, in pipeline order: (step_index, phase, substep, type, status, payload).
 
     A stage that did not run has no event, so the last step index is the last stage that ran:
-    1 gate, 2 artifact / tree / advisories, 3 cache lookup, 4 contract / scan / sinks.
+    1 gate, 2 artifact / tree / advisories, 3 cache lookup, 4 contract / scan / sinks, 5 deep analysis (only for a
+    package with deep evidence; `views` are its `package_views`).
     """
     events = []
     gate = verdict.get("gate") or {}
@@ -524,6 +643,17 @@ def verdict_events(verdict: dict, condition=None, repair=None) -> list[tuple]:
                            f"Scan: {len(scans)} wheels, {len(sinks)} sink calls judged.",
                 "plain_explanation": "Read how the project uses the package, scanned the package's code without running it, "
                                      "and judged each sensitive call against what the project allows."}))
+
+    deep_views = [view for view in (package_views(verdict) if views is None else views) if view["deep"]]
+    if deep_views:
+        last = 5
+        first = deep_views[0]["deep"]
+        events.append((5, "P7_P9", "DeepAnalysis", "deep_completed", str(first["status"]), {
+            "state": "DEEP_ANALYSIS", "step_index": 5, "packages": deep_views, "demo_condition": condition,
+            "message": f"Deep analysis: {first['status']} {first['rule']} ({len(first['runs'])} sandbox run(s)). "
+                       f"{first['reason']}",
+            "plain_explanation": "The package was run in the CAVR sandbox: once with only fake canary secrets, then once "
+                                 "per hidden trigger CAVR could set up, and each event was checked against the contract."}))
 
     status = verdict["status"]
     events.append((last, "VERDICT", "Verdict", "verdict_computed", ALIASES.get(status, "NEEDS_REVIEW"), {
