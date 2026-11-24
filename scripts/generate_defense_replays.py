@@ -106,7 +106,7 @@ def card_items(module, run, ev, model):
             ('03  CAPABILITY CONTRACT', f'Required: {required} · denied: {denied}'),
             ('04  TRIGGER SELECTION', f"Stored static trigger candidates: {trigger_count}; selected runtime trigger: not recorded · {static.get('coverage','coverage not recorded')}"),
             ('05  NORMAL EXECUTION', f"Dynamic runtime evidence: {'present' if node.get('runtime') else 'not present'} · static result: {node.get('status','UNKNOWN')}"),
-            ('06  CONTROLLED ACTIVATION', f"Catalog scenario '{next((s.get('title') for s in model[0] if s.get('id')=='cavr_canary'), 'controlled canary')}' is separate; not executed in this stored run"),
+            ('06  CONTROLLED ACTIVATION', "Counterfactual runs belong to the CAVR deep stage of gate runs (docs/cavr-demo.md, M2 demo: real wheels); not executed in this stored run"),
             ('07  OBSERVED SECURITY EVENTS', f'Stored event nodes: {event_count}; CAVR violations: {len(node.get("violations",[]))}'),
             ('08  CAUSAL LINKAGE', f"Stored graph: {len(graph.get('nodes',[]))} node(s), {len(graph.get('edges',[]))} edge(s); linkage exists only when events are evidenced"),
             ('09  GATE DECISION', f'CAVR {cavr}  ·  non-success statuses remain visible'),

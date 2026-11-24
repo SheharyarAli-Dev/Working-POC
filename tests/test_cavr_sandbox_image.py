@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from backend.cavr import sandbox_exec, sandbox_image, sandbox_observe, sandbox_runner
+from backend.cavr import sandbox_exec, sandbox_image, sandbox_observe
 from tests.test_cavr_support import cavr_containers, requires_docker, sandbox_identity
 
 REPO = Path(__file__).resolve().parents[1]
@@ -157,12 +157,6 @@ def test_dockerfile_base_is_pinned_by_digest():
 def test_image_is_cavr_own_not_satra():
     assert sandbox_image.IMAGE == "asent-cavr-sandbox:local" != "asent-sandbox:local"
     assert sandbox_image.DOCKERFILE == REPO / "docker/cavr-sandbox/Dockerfile"
-
-
-def test_sandbox_runner_has_no_hardcoded_digest():
-    source = Path(sandbox_runner.__file__).read_text()
-    assert "image_digest" not in source and "7f9a2e8c1b5049" not in source
-    assert not hasattr(sandbox_runner.SandboxRunner(), "image_digest")
 
 
 def _names(profile):

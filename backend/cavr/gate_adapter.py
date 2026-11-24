@@ -73,11 +73,13 @@ RUN_BUDGET_USED_UP = "repair budget for this run used up"
 CLOCK = time.monotonic
 BOUNDED = "M1 fast gate: artifact hash, dependency tree, advisories, capability contract and AST sink scan; no deep runtime analysis (M2)"
 BOUNDED_DEEP = ("fast gate (artifact hash, dependency tree, advisories, capability contract, AST sink scan) and, for "
-                "escalated packages, one observed install + import run in the CAVR sandbox; the project's call sites are "
-                "not executed and gated branches are not explored (Phase 3)")
+                "escalated packages, the counterfactual activation loop in the CAVR sandbox (a canary-only run and one "
+                "run per trigger of the frontier, at most 8 runs; install, import, and the project's literal-only call "
+                "sites called); call sites with computed arguments and code outside the scanned source are not exercised")
 DEEP_ROW = ("status", "rule", "reason", "elapsed_seconds")
-DEEP_EVIDENCE = ("image_id", "trace_sha256", "trace_lines", "trace_check", "run_rule", "key_events", "unexplored_triggers",
-                 "escalation_reasons", "claim", "not_exercised")
+DEEP_EVIDENCE = ("image_id", "trace_sha256", "trace_lines", "trace_check", "run_rule", "decisive_run", "key_events",
+                 "escalation_reasons", "claim", "not_exercised", "runs", "triggers", "residual", "unexplored_guards",
+                 "drives", "loop", "causal", "causal_graph")
 
 
 def map_status(status) -> str:

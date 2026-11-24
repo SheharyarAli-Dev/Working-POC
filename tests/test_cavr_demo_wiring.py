@@ -18,7 +18,7 @@ from backend.cavr.storage import CavrStorage
 from backend.cavr.verdict_cache import KEY_FIELDS
 from backend.integrations import osv_adapter
 from backend.orchestrator.context_service import ContextService
-from backend.orchestrator.scenarios import apply_scenario, replace_lab
+from backend.orchestrator.scenarios import apply_scenario
 from backend.project_config.frozen import FROZEN_DIR
 from test_cavr_support import (INVOICEHUB, build_wheel, PIN_REGISTRY, PIN_SHA256, PIN_VERSION, PIN_WHEEL, PYPDF_SHA256, RECORDED_5_1_0,
                                RECORDED_6_19_0_NOW, World, recorded_demo_settings, sha256_file, write_osv_cache)
@@ -144,15 +144,20 @@ def test_pipeline_fault_in_a_demo_run_is_unresolved(scenario, service, tmp_path,
     assert any("INTERNAL_ERROR" in item for item in uncertainty)
 
 
-def test_local_lab_node_keeps_the_lab_path_labelled_demo_lab(scenario, service, tmp_path):
-    _, context = scenario("cavr_canary")
-    status, details, _, _ = run_cavr(context, service, tmp_path)
-    lab = row(details, "invoice-pdf-lab")
-    assert status == "REJECTED" and (lab["engine"], lab["status"]) == ("demo-lab", "REJECTED")
-    # pypdf is judged by the pipeline here too; the app reaches it through the unguarded lab adapter.
-    pypdf = row(details, "pypdf")
-    assert pypdf["engine"] == "pipeline" and (pypdf["status"], pypdf["rule"]) == ("UNRESOLVED", "SINK_REACHABLE")
-    assert pypdf["escalation"]
+def test_a_local_lock_node_is_unresolved_local_not_supported(scenario, service, tmp_path):
+    """Step M2-18 (was: the LOCAL node went through the demo lab): the pipeline verifies registry artifacts only."""
+    run, _ = scenario("safe")
+    vendor = Path(run.candidate_workspace) / "vendor"
+    vendor.mkdir(exist_ok=True)
+    (vendor / "invoice_pdf_safe.py").write_text(SAFE_ADAPTER)
+    edit_lock(run, lambda lock: lock["packages"].append({"name": "invoice-pdf-safe", "version": "1.0.0", "ecosystem": "LOCAL",
+                                                          "artifact": "vendor/invoice_pdf_safe.py",
+                                                          "sha256": sha256_file(vendor / "invoice_pdf_safe.py")}))
+    status, details, uncertainty, _ = run_cavr(fresh_context(service, run), service, tmp_path)
+    local = row(details, "invoice-pdf-safe")
+    assert (local["engine"], local["status"], local["rule"]) == ("demo", "UNRESOLVED", "LOCAL_NOT_SUPPORTED")
+    assert status == "UNRESOLVED" and any("LOCAL lock artifact" in item for item in uncertainty)
+    assert row(details, "pypdf")["status"] == "VERIFIED"  # the pipeline's own verdict is unchanged
 
 
 def test_locked_pypi_node_no_request_verifies_is_unresolved(scenario, service, tmp_path):
@@ -190,7 +195,19 @@ def test_disabled_trigger_rule_does_not_change_the_fast_gate(scenario, service, 
     assert row(after, "pypdf")["key_fields"] == row(before, "pypdf")["key_fields"]
 
 
-# --- the reachability proof and the vendored adapter of the cross_module repair ---------------------------------
+# --- the reachability proof and a vendored adapter ---------------------------------------------------------------
+
+# The reviewed adapter of the retired LOCAL-lab demo (scenarios/cavr_controlled/invoice_pdf_safe.py until Step M2-18).
+SAFE_ADAPTER = '''"""Local, reviewed API-compatible PDF adapter. No network or secret access."""
+from io import BytesIO
+from pypdf import PdfReader, apply_configuration
+
+def extract_invoice_text(content: bytes) -> str:
+    with apply_configuration(jbig2dec_binary=None):
+        # Bound to one name: CAVR's guard proof follows `reader = PdfReader(...)`, not an inline `PdfReader(...).pages`.
+        reader = PdfReader(BytesIO(content))
+        return '\\n'.join(page.extract_text() or '' for page in reader.pages)
+'''
 
 INLINE_ADAPTER = '''from io import BytesIO
 from pypdf import PdfReader, apply_configuration
@@ -214,14 +231,17 @@ def test_inline_pdfreader_pages_form_is_unresolved_never_verified(tmp_path):
     assert proof["accepted"] is False and "does not bind the reader to one plain name" in proof["reason"]
 
 
-def test_repaired_cross_module_state_verifies_pypdf(scenario, service, tmp_path):
-    """The reviewed replacement adapter binds the reader to a name, so the guard proof holds after the repair."""
-    run, _ = scenario("cross_module")
-    replace_lab(run.candidate_workspace)
+def test_a_vendored_adapter_that_binds_the_reader_verifies_pypdf(scenario, service, tmp_path):
+    """The adapter binds the reader to a name, so the guard proof holds (as in the retired LOCAL-lab repair demo)."""
+    run, _ = scenario("safe")
+    vendor = Path(run.candidate_workspace) / "vendor"
+    vendor.mkdir(exist_ok=True)
+    (vendor / "__init__.py").write_text("")
+    (vendor / "invoice_pdf_safe.py").write_text(SAFE_ADAPTER)
+    (Path(run.candidate_workspace) / "app" / "pdf_adapter.py").write_text("from vendor.invoice_pdf_safe import extract_invoice_text\n")
     status, details, _, _ = run_cavr(fresh_context(service, run), service, tmp_path)
     pypdf = row(details, "pypdf")
     assert (pypdf["status"], pypdf["rule"]) == ("VERIFIED", "ALL_CHECKS_PASSED"), pypdf["reason"]
-    assert row(details, "invoice-pdf-safe")["engine"] == "demo-lab"
 
 
 # --- fail-closed edges of a demo run (review of Step M2-1) -------------------------------------------------------
@@ -239,7 +259,7 @@ def edit_lock(run, change):
 
 
 def test_local_wheel_in_the_lock_is_unresolved_never_verified(scenario, service, tmp_path):
-    """A LOCAL wheel would carry its own Requires-Dist; the lab reads only .py sources, so it is not verified."""
+    """A LOCAL wheel would carry its own Requires-Dist; no LOCAL artifact is verified (Step M2-18)."""
     run, _ = scenario("safe")
     wheel = build_wheel(Path(run.candidate_workspace) / "vendor", "invoice-pdf-safe", "1.0.0", requires=("missing-dep>=1",))
     relative = wheel.relative_to(run.candidate_workspace).as_posix()
@@ -247,8 +267,8 @@ def test_local_wheel_in_the_lock_is_unresolved_never_verified(scenario, service,
                                                           "artifact": relative, "sha256": sha256_file(wheel)}))
     status, details, uncertainty, _ = run_cavr(fresh_context(service, run), service, tmp_path)
     local = row(details, "invoice-pdf-safe")
-    assert (local["engine"], local["status"], local["rule"]) == ("demo-lab", "UNRESOLVED", "LOCAL_ARTIFACT_NOT_SUPPORTED")
-    assert status == "UNRESOLVED" and any("LOCAL_ARTIFACT_NOT_SUPPORTED" in item for item in uncertainty)
+    assert (local["engine"], local["status"], local["rule"]) == ("demo", "UNRESOLVED", "LOCAL_NOT_SUPPORTED")
+    assert status == "UNRESOLVED" and any("LOCAL lock artifact" in item for item in uncertainty)
 
 
 def test_non_pypi_ecosystem_in_the_lock_is_unresolved(scenario, service, tmp_path):

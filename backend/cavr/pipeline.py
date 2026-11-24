@@ -413,7 +413,11 @@ def _deep(root: dict, tree: dict, contract: dict, analysis: dict, run) -> dict:
         "tree": {"subtree_digest": tree["subtree_digest"],
                  "nodes": [{key: node[key] for key in ("name", "version", "sha256", "filename", "path")} for node in tree["nodes"]]},
         "contract": contract, "scan": analysis["scan"], "reachability": analysis["reachability"],
-        "fast": {key: analysis[key] for key in ("status", "stage", "rule", "reason")}})
+        "fast": {key: analysis[key] for key in ("status", "stage", "rule", "reason")},
+        # The project's files with the SHA-256 the context read them with (in the contract digest through
+        # sources_digest): the deep stage drives a call site only from exactly these bytes (PR 12, call_drive).
+        "project": {"project_dir": run.context.get("project_dir"),
+                    "files": {entry["path"]: entry["sha256"] for entry in run.context.get("files") or []}}})
     result = run_deep(run.deep, package)
     return {**analysis, "status": result["status"], "stage": result["stage"], "rule": result["rule"],
             "reason": result["reason"], "escalation": DEEP_ESCALATION, "deep": result}

@@ -5849,3 +5849,582 @@ End-of-phase checks (after the review fixes):
    adds only code loads (`test_the_date_spec_moves_the_packages_clock_and_nothing_else` judges that run OK).
 3. **Why is a cut payload UNRESOLVED and not ignored?** The canary could be in the part strace did not print; Q8 says
    anything incomplete is UNRESOLVED. pip's file writes are the only exemption, and they never reach the cut limit.
+
+
+## Step M2-17 — Counterfactual activation loop and driven call sites (PR 12) (2026-11-24)
+
+Plan: `docs/cavr-m2-plan.md` PR 12 and the Phase 3b plan approved by Maryam on 2026-11-24 (order PR 12, clean-up,
+PR 13; D1–D4 as recommended; demo option A, done in Step M2-18).
+
+### Ch 6 Implementation
+
+- `backend/cavr/activation_loop.py` (new). `explore(frontier, run, budget, clock, gate_left, synthesize,
+  canary_spec, started)` plans and makes the runs of one escalated package; `read_run` turns one `run_spec` result
+  into a record (events minus the baseline, judged by `contract_check.judge`, `completed` only for DEEP_NOT_JUDGED on
+  the checked image with an attributable trace); `new_events` (multiset difference by `sandbox_events.event_key`,
+  install step left out) and `drive_events` (a drive step minus the same run's imports step).
+  Algorithm: (1) run 1 is `canary_spec()`; (2) the simulable frontier entries are grouped by activation, in frontier
+  order, one `synthesize` spec per group (refused specs and unsimulable entries get no run); (3) runs are made until
+  8 runs, 120 s for the package (3 s kept for overhead) or the gate run's 300 s end, or a run has a violation, or the
+  canary-only run did not complete; (4) an entry is explored when a completed counterfactual run's new events (or, for
+  an entry the baseline takes, the canary-only run's events) contain an event of one of its sink capabilities.
+- `backend/cavr/call_drive.py` (new). `plan(package)`: for each `call` site of the contract, the project file is read
+  again and must have the context's SHA-256; every `ast.Call` at that line written as the expression is a candidate;
+  every argument must pass `ast.literal_eval` (no `*`/`**`, ≤ 4096 bytes), no string may look like a credential and no
+  keyword be named like one (D2); at most 4 distinct calls, file / line / column order, steps `drive_1`..`drive_4`.
+  `DRIVE_CODE`: import the modules, resolve the symbol, call it with the literals, catch `BaseException`, `os._exit(0)`.
+- `backend/cavr/sandbox_deep.py` (v2). `analyse`: baseline (now the spec strace and imports step), frontier, drive
+  plan, loop, verdict. `_verdict`: the seven clauses (violation -> REJECTED; no run / incomplete run / unjudged event /
+  `frontier_residual` / high-risk `other_guards` / escalation reasons -> UNRESOLVED; else VERIFIED DEEP_RUN_CLEAN).
+  `escalation_reasons(package, runs, drives)`: module-level sinks by an imports-step event, function sinks by a drive
+  step's `drive_events`, both only when the sink is the only reachable sink of its capability (D3).
+  `unexplored_guards`. `BUDGET` runs 8; `VERSION` cavr-sandbox-deep/2; identity adds the frontier, synthesis, loop and
+  drive versions, `STRACE_SPEC`, `SPEC_IMPORT_ARGV`, `DRIVE_ARGV`; `VERDICT_CODE` adds the five modules.
+  `high_risk_triggers` and DEEP_TRIGGERS_UNEXPLORED removed.
+- `backend/cavr/sandbox_spec.py`: `spec_steps` / `run_spec(..., drives=())` add the drive steps (default unchanged).
+- `backend/cavr/pipeline.py::_deep`: the package dict gains `project` (project_dir and each file's SHA-256 from the
+  context already read).
+- `backend/cavr/gate_adapter.py`: `DEEP_EVIDENCE` gains decisive_run, runs, triggers, residual, unexplored_guards,
+  drives, loop (unexplored_triggers removed); `BOUNDED_DEEP` states the loop.
+- `backend/commands/report.py` `[owner review]`: the VERIFIED deep line gives runs and driven call sites; a residual
+  names its first trigger.
+- Tests: `tests/test_cavr_activation_loop.py` (new), `tests/test_cavr_call_drive.py` (new),
+  `tests/test_cavr_m2_wheels.py` (new, Docker; also the demo script), `tests/test_cavr_sandbox_deep.py` (changed);
+  recordings `tests/test_cavr_data/traces/loop-drive-quiet` and `loop-drive-send` (`record_events.py`).
+
+### Design decisions
+
+- Canary-only run first, not the highest-risk trigger: it is the reference of every counterfactual difference
+  (PR 13's causal edges) and checks the entries the baseline takes. Alternative: no reference run, use the PR 9
+  empty-harness baseline — rejected, that baseline has no package code, so every package event would look "caused".
+- Explored = the sink's capability in the difference against the canary-only run, not "an event of the capability":
+  an event the package makes without the trigger does not show the branch ran. Cost: a sink that fires in both runs is
+  never explored (UNRESOLVED), which is the fail-closed side.
+- The 8 runs include the canary-only run (Q8 "8 runs per package"); the empty-harness baseline is not one of them.
+  Corrected after the review (as first written, this line said the baseline is "once per gate run and counts against
+  the 300 s only", which was not true): it is recorded once per identity and stored on disk, and its time counts
+  against the gate run's 300 s and against the 120 s of the package that records it (the package clock starts
+  before it, as `deep_stage.run_deep`'s does).
+- Same steps in every run (install, imports, drives): a trigger inside a function the project calls is seen under its
+  spec; the differences compare like with like. Cost: each run is about 1 s longer per drive step.
+- Driving only literal-only call sites: the arguments are the project's own, so a violation found is the package's
+  behaviour under the project's call; computed arguments would need values CAVR would have to invent. The project's
+  own guards around the call are not evaluated (the call is driven regardless), which over-approximates the project.
+- D1 strict residual, D2 credential guard, D3 unique attribution, D4 no predicate feedback: see the plan's decisions.
+- The drive's own output is never read: only strace's trace is trusted (sandbox rule, PR 5).
+
+### Requirements covered
+
+- FR-4 (counterfactual activation): the loop with budget, order, early stop and residuals in the verdict —
+  `test_m2_demo_wheel_through_asent_gate[env_ci/date/hostname/argv/file_flag]` (REJECTED in run 2, clean in run 1).
+- FR-6 / Q8 (fail closed): every clause tested; `[win32]` UNRESOLVED TRIGGER_UNSIMULABLE; `[budget]` UNRESOLVED
+  DEEP_RUN_BUDGET_EXHAUSTED.
+- FR-12 (frontier used by the verdict): `frontier_residual` decides clause 4.
+- NFR-4: `loop.activation_rate`, `loop.new_sensitive_events`, `loop.budget_used` in the evidence.
+- NFR-5: no credential-like project literal enters a run (`test_a_credential_is_never_passed_into_a_run`, 7 cases).
+- NFR-6: `not_exercised` lists every unexplored trigger and every undriven call site with why.
+
+### Ch 7 Test cases
+
+| Test ID | Purpose | Input | Expected | Result |
+|---|---|---|---|---|
+| test_cavr_call_drive.py (33) | drive plan | literal call, no-arg call, imported name; 6 non-literal forms; 7 credential forms; 6 ordinary strings; decorator; changed file; 4 unfindable sites; 2 calls on a line + repeat; 6 calls; 4 KiB args; no project | driven with the literals / not driven with the reason / at most 4 / never raises | pass |
+| test_cavr_activation_loop.py (18) | loop | fake runs (events in normaliser shape) | canary-only first, frontier order, shared activation, difference rule, baseline entries, install step never explores, 8-run budget, package / gate time cut, early stop (trigger and canary run), incomplete runs, refused / unsimulable entries, image and trace checks, drive difference, determinism, no frontier | pass |
+| test_an_env_gated_sink_is_rejected_by_its_counterfactual_run (replaces …_unexplored_trigger_…_until_the_frontier_exists) | Q8 clause 1 | CI wheel, run 1 events-benign, run 2 events-probe | REJECTED in run 2 (spec-…), CI=true in its spec | pass |
+| test_a_trigger_run_that_shows_nothing_leaves_the_trigger_unexplored | clause 4 | both runs events-benign | UNRESOLVED TRIGGER_UNEXPLORED, outcome names run 2 | pass |
+| test_a_trigger_on_a_variable_the_sandbox_fixes_is_unsimulable_and_gets_no_run | clause 4 | `os.getenv('CAVR_DEMO_TRIGGER')` | UNRESOLVED TRIGGER_UNSIMULABLE, 1 run | pass |
+| test_a_driven_call_that_connects_outside_the_contract_is_rejected | drive | `demo.send('x')`, loop-drive-send, deny | REJECTED, key event step drive_1 | pass |
+| test_a_driven_call_inside_its_scope_exercises_the_sink_and_is_verified | drive | same, scoped grant | VERIFIED, exercised_by run 1 drive_1 | pass |
+| test_a_driven_call_that_never_reaches_the_sink_leaves_it_not_exercised | drive | `demo.run()`, loop-drive-quiet | UNRESOLVED DEEP_SINK_NOT_EXERCISED | pass |
+| test_a_call_with_a_computed_argument_is_not_driven_and_says_why | drive | `demo.send(data)` | not driven; reason and not_exercised name `data` | pass |
+| test_two_reachable_sinks_of_one_capability_cannot_be_told_apart_by_an_event | D3 | two connect sinks | UNRESOLVED, both reasons cite D3 | pass |
+| test_an_escalation_without_a_reachable_sink_is_unresolved (changed) | clause 6 | now with a real wheel; plus an empty tree | DEEP_ESCALATION_UNKNOWN; empty tree FRONTIER_INCOMPLETE | pass |
+| test_a_reachable_sink_the_import_never_ran_is_unresolved_not_exercised (changed) | clause 6 | BENIGN, `demo.run()` driven | same rule; reason names the driven call | pass |
+| test_an_import_time_sink_inside_a_scoped_contract_is_verified (changed) | VERIFIED | IMPORT_TIME | VERIFIED; reason "exercised"; 1 canary-only run | pass |
+| test_identity_changes_… (extended), test_report_text_line_for_each_deep_result (extended) | identity / report | new versions, STRACE_SPEC, DRIVE_ARGV; VERIFIED and residual rows | each a new identity; new line text | pass |
+| test_demo_wheel_on_the_real_sandbox[env_trigger] (Docker, changed) | demo | PR 9 TRIGGERED wheel | UNRESOLVED TRIGGER_UNSIMULABLE (was DEEP_TRIGGERS_UNEXPLORED) | pass |
+| test_demo_wheel_on_the_real_sandbox[ci_trigger] (Docker, new) | demo | CI=true wheel | REJECTED DEEP_CONTRACT_VIOLATION | pass |
+| test_m2_demo_wheel_through_asent_gate[env_ci, date, hostname, argv] (Docker) | trigger wheels | Phase 3a wheels, deny | REJECTED in run 2, BLOCK exit 1 | pass |
+| …[file_kube] / [file_flag] (Docker) | file trigger | ~/.kube/config / ~/.cache/deploy.flag with FILE_READ:/tmp/home/.cache | REJECTED in run 1 (SECRET_READ stat) / in run 2 | pass |
+| …[canary_exfil] (Docker) | canary | read ~/.aws/credentials, UDP sendto | REJECTED in run 1 | pass |
+| …[driven_reject] / [driven_verify] (Docker) | drive | `demo.send('x')` deny / scoped | REJECTED (drive_1) BLOCK / VERIFIED ACCEPT exit 0 | pass |
+| …[benign_triggered] (Docker) | in-contract branch | CI=true -> granted connect | VERIFIED ACCEPT exit 0 | pass |
+| …[win32] (Docker) | unsimulable | `sys.platform == 'win32'` | UNRESOLVED TRIGGER_UNSIMULABLE REVIEW exit 2, 1 run | pass |
+| …[budget] (Docker) | budget | 8 env triggers, scoped | UNRESOLVED DEEP_RUN_BUDGET_EXHAUSTED, 8 runs, DEPLOY_8 never run | pass |
+| …[function_sink] (Docker) | today's wheel | sink in `send()`, project calls `demo.run()` | UNRESOLVED DEEP_SINK_NOT_EXERCISED REVIEW exit 2 | pass |
+
+Removed: `test_trigger_gating_only_unrestricted_sinks_is_not_high_risk` (its function `high_risk_triggers` is gone; the
+frontier's risk tests cover it). New: 33 + 18 + 13 + 9 in `test_cavr_sandbox_deep.py` (8 unit, 1 Docker).
+Docker alone: `test_cavr_m2_wheels.py` 13 passed in 131.6 s; the 10 demo wheels of `test_cavr_sandbox_deep.py` 49.2 s.
+Run before the commit: `CAVR_DOCKER=1 pytest tests/test_cavr_*.py tests/test_orchestrator_config.py tests/test_gate_*.py
+tests/test_cli_gate.py tests/test_cli_report.py tests/test_integration.py tests/test_modules.py`: 2260 passed, 12
+skipped (live network), 0 failed, 998 s; no container left; `reports/` unchanged.
+
+### Defects found and fixed
+
+- The PR 9 demo wheel's trigger `os.getenv('CAVR_DEMO_TRIGGER')` is unsimulable: `CAVR_*` variables are fixed by the
+  sandbox (`trigger_frontier.RESERVED_ENV`, PR 10). Its result changed from UNRESOLVED DEEP_TRIGGERS_UNEXPLORED to
+  UNRESOLVED TRIGGER_UNSIMULABLE (status unchanged); the REJECTED env case uses the Phase 3a `CI=true` wheel.
+- The first CI wheel had no `try` around its connect, so its import step failed and the violating run was partial
+  (correctly REJECTED under D6); the demo wheel now catches OSError like the Phase 3a wheels, so its run completes.
+- An unsimulable residual's reason named the first entry twice; fixed.
+- A deep package with no wheel now stops at the frontier (FRONTIER_INCOMPLETE) before the escalation rule; the test
+  that checked DEEP_ESCALATION_UNKNOWN now uses a real wheel, and the empty tree is its own assertion.
+- Review: deferred to the end of Phase 3b (one cavr-reviewer pass over all three commits, Step M2-19).
+
+### Known limitations / deferred
+
+- strace cannot tie an event to a Python line: a driven call that shows an event of the sink's capability counts as
+  exercising the sink only if no other reachable sink shares that capability (D3); within that, the event may still
+  come from other code the call reached.
+- Not driven: call sites with computed arguments, `*`/`**`, decorators, methods on returned objects, async functions
+  and generators (returned, never run), work left to threads or atexit (cut by `os._exit`). The project is not mounted,
+  so a literal path of the project does not exist in the run.
+- The credential guard is a heuristic (D2): a credential that does not look like one is passed.
+- No predicate feedback (D4); `sleep`, cloud metadata, `try`/`import` guards are not in the frontier (Step M2-15).
+- A variable named `CAVR_*` (or any other variable the sandbox fixes) cannot be set, so a trigger on it is
+  unsimulable (UNRESOLVED by design).
+- Nondeterministic events (e.g. a file read only some runs make) could appear in a difference; they matter only when
+  they have the entry's sink capability.
+- The causal graph is PR 13 (Step M2-19); the legacy clean-up is Step M2-18.
+
+### Tool disclosure (Ch 8.7)
+
+- **Generated by Claude Code:** `activation_loop.py`, `call_drive.py`, the `sandbox_deep.py` rewrite, the edits to
+  `sandbox_spec.py`, `pipeline.py`, `gate_adapter.py`, `report.py`, the tests, the two recordings, these notes and the
+  plan edits, from the plan Maryam approved on 2026-11-24 (with D1–D4). **Reviewed by Maryam:** the plan and the
+  decisions; the code not yet. **Verified by:** the runs above (real Docker runs for all 13 demo wheels).
+
+### Supervisor Q&A prep
+
+1. **Why does a trigger run only count when the canary-only run lacks the event?** The trigger is a cause only if
+   changing it changed the behaviour; an event both runs have would have happened anyway. Example: `[env_ci]`'s
+   connect to 198.51.100.24:443 is in run 2 (CI=true) and not in run 1.
+2. **Is calling the project's function with its literals safe?** It runs in the same sandbox (no network, read-only,
+   UID 10001, canaries only), and a literal that looks like a credential is never passed (D2).
+3. **Why can a package with a high-risk trigger never be VERIFIED?** High risk means the sink's capability is not
+   granted; a run that shows it is a violation (REJECTED), and one that does not leaves it unexplored (UNRESOLVED).
+
+
+## Step M2-18 — Legacy clean-up and the retired LOCAL-lab demos (Q12) (2026-11-24)
+
+Plan: the Phase 3b plan (legacy clean-up), demo option A chosen by Maryam on 2026-11-24, with two additions: every
+reference to `cross_module` / `cavr_canary` updated or removed plus a test that no non-historical file names them,
+and an "M2 demo: real wheels" section in `docs/cavr-demo.md` (written with PR 13, Step M2-19, because its recorded
+output shows each verdict's cause).
+
+### Ch 6 Implementation
+
+Deleted, with what used each one before:
+
+| Deleted | Used by (before) | Now |
+|---|---|---|
+| `backend/cavr/sandbox.py`, `lab_harness.py` | `analyzer._lab`, orchestrator `_repair` | deep stage (`sandbox_deep`, PRs 9-12) |
+| `backend/cavr/runtime_monitor.py` | `sandbox.py`; `test_modules` | `sandbox_events.normalise` (PR 7) |
+| `backend/cavr/sandbox_runner.py`, `harness.py`, `docker/asent-sandbox/` | `test_cavr_sandbox_runner`, `test_cli_resources` (its `SECCOMP_PROFILE`), `doctor.RESOURCES`, `scripts/ci/check_wheel.py`, `test_cli_packaging` | `sandbox_exec` / `sandbox_observe` / `sandbox_harness`, image `asent-cavr-sandbox:local`; the shared profile is `sandbox_image.SHARED_SECCOMP_PROFILE` |
+| `backend/cavr/trigger_discovery.py` | **fast gate** `ast_scan`; `analyzer._lab`; `test_modules`, `test_cavr_targeted` | moved unchanged into `ast_scan.rule_scan` |
+| `backend/cavr/policy.py` (`verify_runtime`) | `analyzer._lab`, orchestrator `_repair` | `contract_check.judge` (PR 8) |
+| `backend/cavr/repair.py` (`rank_repairs`) and the CAVR half of `Service._repair` | orchestrator | `repair_proposal` (proposals only, Q9) |
+| `capability_contract.infer`, `use_through_local_artifacts` and helpers | `analyzer._lab`; `test_cavr_vendored_use` | `infer_capability_contract` (M1) |
+| the LOCAL-lab path of `analyzer.py` (`_lab`) | demo runs with a LOCAL lock node | a LOCAL node is UNRESOLVED `LOCAL_NOT_SUPPORTED` |
+| scenarios `cavr_canary`, `cross_module`, `scenarios/cavr_controlled/`, `apply_scenario`'s lab branch, `replace_lab` | catalog, dashboard buttons, `conftest.integration_runs` | `tests/test_cavr_m2_wheels.py` (real wheels) |
+
+Changed: `backend/cavr/ast_scan.py` (`rule_scan` at its end; imports `trigger_rules.matching`), `analyzer.py`
+(docstring, LOCAL rule), `capability_contract.py` (docstring), `backend/orchestrator/service.py` (`_repair` SATRA
+only; imports), `backend/orchestrator/scenarios.py`, `backend/commands/doctor.py` (RESOURCES), `scenarios/catalog.json`,
+`scenarios/laboratory_hashes.json` (the `cavr_sources` key and exactly the four `python_sources` hashes of the lab
+files and their one-line adapters; no remaining file has those bytes), `scripts/build_scenarios.py`,
+`scripts/ci/check_wheel.py`, `scripts/generate_defense_replays.py` (frame 06 text), `reports/ASENT_FINAL1_DEMO_RUNBOOK.md`
+(a dated "retired" note above Scenario 5; the Final-1 text kept). New: `tests/test_cavr_retired_scenarios.py`.
+
+### Design decisions
+
+- Option A (retire) over porting the lab to wheels: the repair half of `cross_module` (swap the lab for a different
+  package) is level-3/4 replacement (future work, Q3) and was applied to the candidate (Q9 forbids); porting the
+  detection half needs a LOCAL-wheel trust path in `verify_request` and Docker in demo runs. The detection story is now
+  shown by real wheels through `asent gate`.
+- `trigger_discovery.scan` moved byte-for-byte instead of being rewritten: the fast gate's sink list must not change in
+  a clean-up. Proof: the canonical JSON of `scan_wheel` for the real pypdf 6.21.4 / 6.19.0 / 5.1.0 wheels and the 13
+  demo wheels (path field left out) has the same SHA-256 before and after (`eabb11dc10ac56a4…`; 16 wheels, 16
+  triggers, 24 sinks). `analyzer_version` holds version strings only, so no cache key changes.
+- `laboratory_hashes.json` edited by hand, not regenerated: it is also SATRA's host-fallback allowlist; regenerating
+  could change SATRA's other entries.
+- A LOCAL lock node fails closed (UNRESOLVED) like any ecosystem the pipeline cannot verify.
+- Historical files keep their text (the guard test lists them with the reason): report notes, the plan's decision
+  log, `docs/satra/harness-isolation.md` (another owner's dated record), `reports/` (committed evidence and reports).
+
+### Requirements covered
+
+- Q12 (legacy removed once replaced and unused): every module in the table has no importer left
+  (`git grep` for the module names in `*.py`: only comments recording the move).
+- FR-6 (fail closed): `test_a_local_lock_node_is_unresolved_local_not_supported`.
+- NFR-2 / scope: the `cross_module` / `cavr_canary` names are gone from every file in use
+  (`test_no_file_in_use_names_a_retired_scenario`).
+
+### Ch 7 Test cases
+
+| Test ID | Purpose | Input | Expected | Result |
+|---|---|---|---|---|
+| test_no_file_in_use_names_a_retired_scenario (new) | user's addition | every tracked text file outside the historical list | no `cross_module` / `cavr_canary` | pass |
+| test_the_scenario_catalog_has_no_retired_entry (new) | catalog | `scenarios/catalog.json` | neither id | pass |
+| test_the_historical_list_names_only_paths_that_exist (new) | guard of the guard | the allowlist | every prefix tracked | pass |
+| test_a_local_lock_node_is_unresolved_local_not_supported (was test_local_lab_node_keeps_the_lab_path_labelled_demo_lab) | fail closed | safe scenario + a LOCAL `.py` lock entry | UNRESOLVED LOCAL_NOT_SUPPORTED (was REJECTED demo-lab); pypdf VERIFIED | pass |
+| test_local_wheel_in_the_lock_is_unresolved_never_verified (changed) | fail closed | LOCAL wheel | still UNRESOLVED; rule LOCAL_NOT_SUPPORTED, engine demo (was LOCAL_ARTIFACT_NOT_SUPPORTED, demo-lab) | pass |
+| test_a_vendored_adapter_that_binds_the_reader_verifies_pypdf (was test_repaired_cross_module_state_verifies_pypdf) | guard proof | the reviewed adapter written directly | pypdf VERIFIED ALL_CHECKS_PASSED (the demo-lab assertion dropped) | pass |
+| test_seccomp_profiles_are_the_repository_files (was …_and_the_flags_are_unchanged) | assets | shared and CAVR profile paths | same `docker/asent-seccomp.json`; SandboxRunner flags gone with it | pass |
+| test_every_packaged_asset_…, test_a_copy_of_the_package_outside_the_checkout_… (re-pointed) | assets | `sandbox_image.SHARED_SECCOMP_PROFILE` | same path asserted | pass |
+| test_trigger_and_runtime_normalization (trimmed), test_trigger_predicates_bounded_and_unsupported_visible, test_trigger_scanner_records_supported_if_else_file_and_unknown_helper (re-pointed) | rule scan | `ast_scan.rule_scan` | unchanged results | pass |
+| test_scanner_crash_on_one_file_is_unresolved_not_an_exception (re-pointed) | fault | patched `rule_scan` | UNRESOLVED SOURCE_NOT_PARSED | pass |
+| test_gate_run_never_calls_a_demo_scenario_function, test_every_allowlist_entry_still_matches_a_line (changed) | gate path | `replace_lab` and 3 allowlist entries gone | pass | pass |
+
+Deleted with the code they tested (86): `test_cavr_lab_pins.py` (3), `test_cavr_runtime_monitor.py` (9),
+`test_cavr_sandbox_runner.py` (33), `test_cavr_vendored_use.py` (31), 4 of 6 in `test_cavr_targeted.py`,
+`test_hash_verification_line_endings.py::test_cavr_pinned_python_source_accepts_windows_crlf_checkout` (its SATRA test
+stays), `test_cavr_sandbox_image.py::test_sandbox_runner_has_no_hardcoded_digest`,
+`test_modules.py::test_controlled_dormant_execution`, `::test_causal_graph_requires_fixture_source_and_sink_evidence`,
+`::test_repair_constraints`, `test_integration.py::test_cavr_repair_invalidates_satra_then_reverifies`
+(`conftest.integration_runs` builds three scenario runs instead of four).
+Scan output before / after the move: SHA-256 `eabb11dc10ac56a41df657aaa66a29f6f037d0862f323a7d9a0b6bd4053860e1` both.
+Run before the commit: `CAVR_DOCKER=1 pytest tests/test_cavr_*.py tests/test_orchestrator_config.py tests/test_gate_*.py
+tests/test_cli_gate.py tests/test_cli_report.py tests/test_integration.py tests/test_modules.py tests/test_cli_resources.py
+tests/test_cli_packaging.py tests/test_hash_verification_line_endings.py tests/test_scenario_validation_guard.py`: 2202
+passed, 12 skipped (live network), 0 failed, 885 s; no container left; `reports/scenario-validation.json` unchanged.
+
+### Defects found and fixed
+
+- `test_cavr_ast_scan.py::test_scanner_crash_on_one_file_is_unresolved_not_an_exception` patched the old imported name
+  `ast_scan.scan`; it now patches `ast_scan.rule_scan` (same behaviour tested).
+- `test_gate_no_hardcoded_paths.py`: `test_every_allowlist_entry_still_matches_a_line` failed because the three
+  allowlisted demo paths were deleted with the lab code (the entries were removed); the monkeypatch list no longer
+  names `replace_lab`.
+- Review: one cavr-reviewer pass over the three Phase 3b commits at the end (Step M2-19).
+
+### Known limitations / deferred
+
+- `SHA256SUMS` (POC release manifest by `scripts/package.py`, last regenerated 2026-09-30, already stale for most files,
+  checked by no test) still lists the deleted files; regenerating it is a packaging step, not part of this clean-up.
+- `backend/threat_repo/seed/sources.json` record SRC-LAB (and copies in `vscode-asent/test/fixtures/reports/`) names
+  the deleted lab file as a source reference: threat-repository data outside CAVR's scope; left for its owner.
+- `frontend/src/components/cavr/RequirementsTab.tsx` still labels a row with `sandbox_runner.py`: PR 19 rewrites the
+  module column (Phase 5).
+- The orchestrator assurance report's CAVR fields that read the lab (`discovered_triggers`, `execution_modes`,
+  `observed_security_events`, `causal_evidence`) are now always empty, as they already were for gate runs; the deep
+  evidence is in each pipeline row (`deep`); PR 18 (certificate) / Phase 5.
+- `threat_repo.source_sink_rules.correlate` lost its only CAVR user; not deleted (outside CAVR's scope).
+
+### Tool disclosure (Ch 8.7)
+
+- **Generated by Claude Code:** the deletions, the edits listed above, the guard test, these notes and the plan edits,
+  from the plan and option A approved by Maryam on 2026-11-24. **Reviewed by Maryam:** the plan and the demo choice; the
+  diff not yet. **Verified by:** the scan-output digest before and after, and the runs above.
+
+### Supervisor Q&A prep
+
+1. **Did deleting `trigger_discovery.py` change the fast gate?** No: the function moved unchanged, and the scan output
+   of 16 real wheels has the same SHA-256 before and after (`eabb11dc…`).
+2. **Why retire a working demo?** It proved its point with a hand-written lab file in a host fallback, and its repair
+   step applied a package swap that the design now leaves to a person (Q9). The same behaviour is now shown on real
+   wheels in the real sandbox, through the command a developer runs.
+3. **What happens to a project that vendors a `.py` package in its lock?** It is UNRESOLVED `LOCAL_NOT_SUPPORTED`:
+   CAVR does not claim to have verified something it cannot verify.
+
+
+## Step M2-19 — Causal capability graph from the real runs (PR 13) (2026-11-24)
+
+Plan: `docs/cavr-m2-plan.md` PR 13 as set in the Phase 3b plan approved by Maryam on 2026-11-24.
+
+### Ch 6 Implementation
+
+- `backend/cavr/causal_graph.py` (rewritten; the legacy `build` / `build_causal_graph` had no user left after Step
+  M2-18). `build(name, frontier, drives, loop, contract, verdict)`: nodes trigger, spec, run, call, event, rule,
+  verdict; edges synthesized_as, configured, observed, violates / within / unjudged, decides, caused. Algorithm:
+  (1) one trigger node per frontier entry, one call node per driven call site; (2) per run a spec and a run node; (3)
+  the run's `new_events` (counterfactual difference) get a `caused` edge from each trigger of that run, and each drive
+  step's `drive_events` one from its call; (4) every event with a capability (or not passed by the judge) outside the
+  install step becomes a node, judged alone against the contract, with an edge to its rule node (capability + grant);
+  install events the judge passed are counted; (5) ids are content hashes, nodes and edges sorted, `digest` = SHA-256
+  of the canonical JSON. `cause(graph, run, event)`: "caused by <activation>", "caused by calling <call> at
+  <file>:<line>", "in the canary-only run (no trigger needed)", or "in run N, and also without its trigger".
+  `activation_text`: env `A=1`, `clock …`, `<path> exists`, `hostname …`, `argv […]`.
+- `backend/cavr/sandbox_deep.py`: `with_graph` builds the graph after the verdict, puts `causal_graph` and `causal`
+  {version, digest, counts, cause, error} in the evidence, and appends the cause to a REJECTED reason; `VERDICT_CODE`
+  adds `causal_graph.py`, the identity `graph:cavr-causal-graph/1`.
+- `backend/cavr/activation_loop.py`: each run record keeps its spec's canary ids (never values).
+- `backend/cavr/gate_adapter.py`: `causal` and `causal_graph` in the row's deep block (so in `asent-report.json`).
+- `backend/commands/report.py` `[owner review]`: the deep line appends the cause.
+- `docs/cavr-demo.md`: section "M2 demo: real wheels" (the user's addition to option A) with the one command per
+  wheel and the recorded `asent report` line of all 13 wheels.
+- Tests: `tests/test_cavr_causal_graph.py` (new), `tests/test_cavr_m2_wheels.py` (causes), `tests/test_cavr_sandbox_deep.py`.
+
+### Design decisions
+
+- The cause is the counterfactual difference, not "the trigger of the run the event is in": an event the canary-only
+  run also has would have happened without the trigger (`test_an_event_both_runs_have_has_no_cause_edge`).
+- A call node, not in the listed node types: a driven call is the only cause of a sink inside a function, and the
+  report must be able to name it.
+- Each event is judged alone for its edge (the same `contract_check.judge` the verdict uses), so the edge says what
+  the judge says for that event; the verdict itself is unchanged by the graph.
+- Install-step events the judge passed are counted, not listed: pip's file writes are hundreds of nodes with nothing
+  to say; anything the install envelope refused is listed.
+- Deterministic by construction from the recorded evidence; two real runs differ where their traces differ (canary
+  values, containers, trace hashes), which the digest then shows.
+
+### Requirements covered
+
+- FR-5 (causal capability graph): `test_a_trigger_caused_the_event_only_its_run_has`, the eight REJECTED demo wheels
+  with their cause in the graph and the report line.
+- FR-10 (evidence): the graph's digest is in the deep evidence, hence in the verdict, the evidence chain and
+  `asent-report.json`; `test_the_graph_is_deterministic_and_its_digest_follows_every_event`.
+- NFR-6: the report line names why (`caused by CI=true`, `in the canary-only run`).
+
+### Ch 7 Test cases
+
+| Test ID | Purpose | Input | Expected | Result |
+|---|---|---|---|---|
+| test_a_trigger_caused_the_event_only_its_run_has | caused edge | CI entry; connect only under CI=true | one `caused` trigger -> event (run 2); violates denied rule; decides REJECTED; cause "caused by CI=true" | pass |
+| test_an_event_both_runs_have_has_no_cause_edge | no false cause | the same in-scope connect in both runs | no `caused` edge; two `within` edges | pass |
+| test_a_violation_of_the_canary_only_run_needs_no_trigger | canary-only cause | read of ~/.aws/credentials in run 1 | 1 run, cause "in the canary-only run (no trigger needed)" | pass |
+| test_a_canary_leak_points_at_a_rule_nothing_can_allow | rule node | CANARY_EXFIL_ATTEMPT | rule CANARY_EXFIL "never allowed …" | pass |
+| test_a_driven_call_caused_what_its_step_did_beyond_the_import | call cause | drive step connect; the same read in both steps | `caused` call -> connect only | pass |
+| test_the_real_drive_recording_gives_the_drive_as_the_cause | real trace | `loop-drive-send` | connect 198.51.100.24:443 ENETUNREACH caused by the call; install events counted, not listed | pass |
+| test_each_activation_family_is_named_in_the_cause (8 forms) | cause text | env, time, file, dir, hostname, argv, two, none | the texts as listed | pass |
+| test_the_graph_is_deterministic_and_its_digest_follows_every_event | determinism | events shuffled, outcomes reversed; one port changed; another verdict | identical graph; digest changes | pass |
+| test_a_graph_that_cannot_be_built_says_so_and_never_raises | fail closed | malformed runs | empty graph with `error`, digest; "cause not in the graph" | pass |
+| test_an_env_gated_sink_is_rejected_by_its_counterfactual_run (extended) | deep evidence | CI wheel | cause "caused by CI=true", reason ends with it, digest = graph digest | pass |
+| test_report_text_line_for_each_deep_result (extended), test_identity_changes_… (extended) | report / identity | a row with a cause; graph version | line ends "caused by CI=true"; new identity | pass |
+| test_m2_demo_wheel_through_asent_gate[13 wheels] (Docker, extended) | end to end | as in Step M2-17 | each REJECTED wheel's cause as in `docs/cavr-demo.md`; no cause and no `decides` edge otherwise; digest present | pass |
+
+9 new graph tests. Docker: `tests/test_cavr_m2_wheels.py` 13 passed (146 s); the demo command for all 13 wheels:
+150 s, output recorded in `docs/cavr-demo.md`. Run before the commit: `CAVR_DOCKER=1 pytest tests/test_cavr_*.py
+tests/test_orchestrator_config.py tests/test_gate_*.py tests/test_cli_gate.py tests/test_cli_report.py
+tests/test_integration.py tests/test_modules.py`: 2187 passed, 12 skipped (live network), 0 failed, 921 s; no container
+left; `reports/` unchanged.
+
+### Defects found and fixed
+
+- A never-allowed event (canary leak) pointed at a rule labelled "denied (default deny)"; it now points at "never
+  allowed (no capability can allow it)" (`test_a_canary_leak_points_at_a_rule_nothing_can_allow`).
+- The first expectation for the date wheel's cause was the constant `2027-01-01`; the real cause is the clock the
+  frontier synthesized, `2027-01-02T12:00:00`; the test now expects the real value.
+- Review: one cavr-reviewer pass over the three Phase 3b commits, after this commit ("End of Phase 3b" below).
+
+### Known limitations / deferred
+
+- Not in the graph yet: the dependency tree (`depends_on`), event -> package attribution by each wheel's RECORD, canary
+  `derived_from` flow, the cross-package path query of the design's §6.6 example (Phase 5 / future work).
+- A frontier entry id hashes the file, the guard lines and their shape, not the predicate text, so two different wheels
+  with a guard at the same place have the same spec id (`env_ci` and `date`); ids are unique within one package, which
+  is what the graph needs.
+- The dashboard view of the graph is Phase 5 (`CausalGraphTab.tsx` still reads the old API field).
+- The cause names the first event the verdict lists; other violating events carry their own `caused` edges in the graph.
+
+### Tool disclosure (Ch 8.7)
+
+- **Generated by Claude Code:** `causal_graph.py`, the edits to `sandbox_deep.py`, `activation_loop.py`,
+  `gate_adapter.py`, `report.py`, the tests, the `docs/cavr-demo.md` section (its output recorded from real runs),
+  these notes and the plan edits. **Reviewed by Maryam:** the plan; the code not yet. **Verified by:** the runs above.
+
+### Supervisor Q&A prep
+
+1. **What makes an edge "caused"?** The event is in the run with the trigger's environment and not in the canary-only
+   run (counted, so a second identical event still counts once more). Example: `env_ci`'s connect is caused by CI=true.
+2. **Is the graph part of the verdict?** It is evidence: built after the verdict from the same records, hashed, and
+   stored with it; the verdict rules (Step M2-17) do not read it.
+3. **Why does `canary_exfil` say "no trigger needed"?** Its import reads the fake AWS key in the canary-only run
+   already; there is no counterfactual run to compare with, and none was needed.
+
+
+## Review of Steps M2-17 to M2-19 — fixes (End of Phase 3b) (2026-11-24)
+
+One cavr-reviewer pass over `18497c2..810c01b` (the three Phase 3b commits). Review outcome: 1 pass, fix first
+(2 BLOCKER, 2 MAJOR, 12 MINOR), all fixed in this commit except MINOR 8 (threat-repository data, outside CAVR's scope,
+recorded below); 0 open MINOR in CAVR's scope. None of the findings let a package reach VERIFIED.
+
+### Ch 6 Implementation
+
+- `call_drive.holds_credential(call)`: the D2 check now runs over the whole call's source (string and bytes
+  constants, keyword names, dict keys); `looks_like_credential` also refuses a URL with a password. A refused call
+  is recorded with `call: None` and its place only; its text never reaches `not_driven`, `not_exercised`, a reason or
+  `asent-report.json` (BLOCKER 1, MAJOR 2).
+- `sandbox_deep.analyse`: the package's clock starts before the baseline, so a baseline the package records counts
+  against its 120 s, as `deep_stage.run_deep` measures (BLOCKER 2).
+- `activation_loop.explore`: an entry is explored only when every sink capability it gates is shown; otherwise its
+  outcome names what was and was not shown (MAJOR 1). `read_run` accepts a missing result (MINOR 6).
+- `causal_graph`: event nodes carry their `event_key` digest and `cause` matches on it and the trace line (MINOR 4);
+  `cause` returns None for an event it cannot find and only a real cause is appended (MINOR 3); events within the
+  contract with no cause are listed up to 500 per graph, the rest counted (MINOR 5). `sandbox_deep._key_event` gives
+  each key event the digest of the full event in its run (the judge keeps a trimmed copy).
+- Deep identity: `rules_code`, the SHA-256 of `backend/threat_repo/behavior_rules.py` (MINOR 12).
+- `call_drive` docstring: what the driver catches (resolution and call, not the module imports) (MINOR 2).
+- `scenarios/catalog.json`: the one SABLE title that had a literal "·" in the base is literal again; the file now
+  differs from the base only by the two removed entries (MINOR 9).
+- Report notes: the Step M2-17 baseline sentence corrected in place (BLOCKER 2); this section (MINOR 7).
+
+### Design decisions
+
+- Redact instead of hashing the refused call: a hash of a short password is guessable; the place and the
+  expression's name are enough for a person to find the call.
+- All sinks of an entry, not the worst one: a branch is only explored when what it would do was seen; a partly shown
+  branch stays UNRESOLVED (fail closed).
+- The graph is capped only for events with nothing to say (within the contract, no cause); everything that decides or
+  explains the verdict is always listed.
+
+### Requirements covered
+
+- NFR-5: `test_a_refused_credential_is_recorded_nowhere` (3), `test_a_refused_credential_reaches_no_verdict_field`.
+- Q8 / NFR-4 budget: `test_a_fresh_baseline_counts_against_the_package_budget`.
+- FR-4 / Q8: `test_an_entry_with_two_sinks_needs_both_shown`.
+- FR-5 / FR-10: `test_the_graph_is_deterministic_and_its_digest_follows_every_event` (rewritten),
+  `test_events_within_the_contract_without_a_cause_are_capped_and_counted`.
+
+### Ch 7 Test cases
+
+| Test ID | Purpose | Input | Expected | Result |
+|---|---|---|---|---|
+| test_a_credential_is_never_passed_into_a_run (9 cases, 2 new) | MAJOR 2 | + `'https://admin:hunter2@db.internal/x'`, `{'password': 'hunter2'}` | not driven, `call` None | pass |
+| test_a_refused_credential_is_recorded_nowhere (3) | BLOCKER 1 | token literal; `password=` next to a name; token next to an f-string | the secret not in `json.dumps(plan)` | pass |
+| test_a_refused_credential_reaches_no_verdict_field | BLOCKER 1 | project calls `demo.send('ghp_…')` | DEEP_SINK_NOT_EXERCISED; token not in the verdict JSON | pass |
+| test_a_fresh_baseline_counts_against_the_package_budget | BLOCKER 2 | 20 s baseline, 16 s runs, 8 triggers | DEEP_RUN_BUDGET_EXHAUSTED, elapsed ≤ 120 s; on the old code DEEP_BUDGET_EXCEEDED (checked) | pass |
+| test_an_entry_with_two_sinks_needs_both_shown | MAJOR 1 | read shown, connect not / both | not explored ("not NETWORK_CONNECT") / explored | pass |
+| test_a_missing_run_result_is_not_a_completed_run | MINOR 6 | `read_run(None)` | DEEP_NO_RESULT, not completed | pass |
+| test_the_graph_is_deterministic_… (rewritten) | MINOR 1 | 3 runs with events, two with one key; runs, outcomes, entries shuffled ×3 | identical graph; port / verdict change -> new digest | pass |
+| test_events_within_the_contract_without_a_cause_are_capped_and_counted | MINOR 5 | 10 granted reads + 1 violation, cap 3 | 4 event nodes, 7 counted, the violation listed | pass |
+| test_a_graph_that_cannot_be_built_… (changed) | MINOR 3 | malformed runs | `cause` None | pass |
+
+### End-of-phase checks (after the review fixes, in the same commit)
+
+- `CAVR_DOCKER=1 pytest tests/test_cavr_*.py tests/test_orchestrator_config.py tests/test_gate_*.py tests/test_cli_gate.py
+  tests/test_cli_report.py tests/test_integration.py tests/test_modules.py`: 2197 passed, 12 skipped (live network),
+  0 failed, 822 s; no container left. The 13 demo wheels give the same verdicts, causes and lines as recorded in
+  `docs/cavr-demo.md`.
+- Docker hidden (`DOCKER_HOST=unix:///nonexistent`), `tests/test_cavr_*.py tests/test_orchestrator_config.py
+  tests/test_gate_*.py tests/test_cli_gate.py tests/test_cli_report.py`: 2049 passed, 95 skipped (Docker and live),
+  0 failed, 453 s; `sandbox_deep.for_gate_run` -> no analyzer, ENGINE_UNAVAILABLE (today's verdicts).
+- Full suite `.venv/bin/python -m pytest -q`: 2916 passed, 95 skipped, 1 xfailed, 0 failed, 776 s (before Phase 3b:
+  2923 passed, 81 skipped, 1 xfailed; 86 legacy tests deleted in Step M2-18, new tests in M2-17 / M2-19 / this fix).
+- `reports/scenario-validation.json` was not modified by any run (no diff); nothing to restore.
+
+Real projects, `asent gate --head main` with a fresh data directory each (image `sha256:0e88dd461ca4…`):
+
+| Project | Before (`18497c2`) | After (`810c01b`, during the review) | After (the review fixes, quiet machine) |
+|---|---|---|---|
+| asent-target-flask (main) | ACCEPT exit 0; VERIFIED / ACCEPT / PRESERVED; 184.6 s | ACCEPT exit 0; same; 175.4 s | ACCEPT exit 0; same; 145.5 s |
+| asent-target-invoicehub (main) | ACCEPT exit 0; VERIFIED / ACCEPT / PRESERVED; 39.2 s | ACCEPT exit 0; same; 67.6 s (56.8 s re-run) | ACCEPT exit 0; same; 38.5 s |
+
+No verdict changed. Neither project reached the deep stage (Flask: no requirement changed; InvoiceHub: pypdf==6.21.4
+VERIFIED by the fast gate). The slower InvoiceHub runs during the review were SATRA (37.6 s -> 65.1 s) and SABLE, which
+this phase did not change, on a loaded machine (load average 3.4 while the reviewer ran tests); on a quiet machine it
+took 38.5 s.
+
+### Defects found and fixed
+
+- BLOCKER 1, BLOCKER 2, MAJOR 1, MAJOR 2, MINOR 1-7, 9, 10-12: as above.
+- While fixing MINOR 4: the judge's violation entries hold a trimmed event (no `access`), so the key could not be
+  computed from them (every deep test with a violation became UNRESOLVED INTERNAL_ERROR, fail closed); the key event
+  now takes the digest of the full event in its run.
+- MINOR 9 was right for one line only: the base file escapes "·" everywhere except one SABLE title.
+
+### Known limitations / deferred
+
+- MINOR 8: `backend/threat_repo/seed/sources.json` (SRC-LAB) still names the deleted lab file (Step M2-18 limitation).
+- MINOR 10: an orchestrator run in which only CAVR is REJECTED no longer creates a repair worktree or passes through
+  REPAIRING (there is nothing CAVR applies, Q9); SATRA's repair path is unchanged.
+- MINOR 11: `other_guards` in front of a medium-risk (scoped) sink do not block VERIFIED (the PR 10 rule names
+  high-risk sinks only); a guard CAVR cannot evaluate could hide an out-of-scope use of a scoped capability. Left as
+  the approved rule, to be decided with Maryam. Decided the same day: the rule now covers medium risk too (Step M2-20).
+- The credential guard stays a heuristic (D2).
+
+### Tool disclosure (Ch 8.7)
+
+- **Generated by Claude Code:** the review (cavr-reviewer agent) and the fixes, tests and notes. **Reviewed by
+  Maryam:** not yet. **Verified by:** the runs above; the budget test was checked to fail on the old code.
+
+### Supervisor Q&A prep
+
+1. **The guard detects a credential; where does it go?** Nowhere: the call is not driven and its text is not recorded,
+   only its file, line and the function's name (`test_a_refused_credential_reaches_no_verdict_field`).
+2. **From when is the 120 s measured?** From the start of the package's deep analysis, baseline included, by the
+   host's clock (`deep_stage.run_deep`); the loop plans its runs against the same start.
+3. **An entry gates a read and a connect; only the read ran?** Not explored: the verdict cannot claim what the connect
+   would have done, so it is UNRESOLVED.
+
+
+## Step M2-20 — Unevaluable guards in front of scoped sinks are unexplored (2026-11-24)
+
+Decision (Maryam, 2026-11-24, after the Phase 3b review's MINOR 11): the PR 10 `other_guards` rule covers every sink
+that is not granted with `*`, high or medium risk. A guard CAVR cannot evaluate in front of such a sink is unexplored:
+UNRESOLVED `DEEP_GUARD_UNEXPLORED`, unless a completed run showed that sink.
+
+### Ch 6 Implementation
+
+- `backend/cavr/sandbox_deep.py`: `GUARDED_RISKS = ("high", "medium")`; `unexplored_guards(found, runs)` lists every
+  `other_guards` entry of those risks for which no completed run showed every sink capability it gates (outside the
+  install step; the same all-sinks rule as frontier entries since the review's MAJOR 1), with `risk` and `not_shown`.
+  Clause 5 of the verdict and its reason say "not granted with \"*\"".
+- `backend/commands/report.py` `[owner review]`: the deep line of a DEEP_GUARD_UNEXPLORED verdict names the guard
+  ("unevaluable guard <file>:<line> `<predicate>` gates <capabilities> (<risk> risk), no run showed it").
+- `backend/cavr/trigger_frontier.py`: docstring only (the rule PR 12 adds).
+- Tests: `test_cavr_sandbox_deep.py` (2 unit tests, the report line), `test_cavr_m2_wheels.py` (Docker wheel
+  `guard_out_of_scope`). `docs/cavr-demo.md`: the new row; `docs/cavr-m2-plan.md`: the rule text and progress.
+
+### Design decisions
+
+- Medium risk counts because a scope is a promise about where a capability is used; behind a guard CAVR cannot make
+  true, no run tested that promise. Alternative (keep high only): a scoped grant would let an unevaluable branch hide
+  an out-of-scope use, as the review showed. Cost: packages with such a guard in front of a scoped sink are UNRESOLVED
+  (they were not VERIFIED before either when the sink was an escalation reason; see the test below).
+- "Showed that sink" uses every sink capability of the guard (consistent with frontier entries).
+- Low risk (granted with `*`) stays out: any use is within the contract, so the branch cannot hide a violation.
+
+### Requirements covered
+
+- FR-6 / Q8 (fail closed): `test_an_unevaluable_guard_in_front_of_a_scoped_sink_is_unexplored`,
+  `test_m2_demo_wheel_through_asent_gate[guard_out_of_scope]`.
+- NFR-6: the guard, its risk and what was not shown are in `unexplored_guards` and the report line.
+
+### Ch 7 Test cases
+
+| Test ID | Purpose | Input | Expected | Result |
+|---|---|---|---|---|
+| test_an_unevaluable_guard_in_front_of_a_scoped_sink_is_unexplored | new rule | `if hash('cavr') % 7 == 99: connect(203.0.113.9:443)`, only 198.51.100.24:443 granted, recording events-benign | UNRESOLVED DEEP_GUARD_UNEXPLORED, guard medium, not_shown NETWORK_CONNECT, 1 run; with the old rule (checked): UNRESOLVED DEEP_SINK_NOT_EXERCISED | pass |
+| test_an_unevaluable_guard_whose_sink_a_run_showed_is_not_this_rule | "unless shown" | the same guard + a module-level in-scope connect, recording events-scoped | not DEEP_GUARD_UNEXPLORED (DEEP_SINK_NOT_EXERCISED by D3: two connect sinks) | pass |
+| test_report_text_line_for_each_deep_result (extended) | report | a DEEP_GUARD_UNEXPLORED row | "- unevaluable guard g/__init__.py:3 `hash('cavr') % 7 == 99` gates NETWORK_CONNECT (medium risk), no run showed it" | pass |
+| test_m2_demo_wheel_through_asent_gate[guard_out_of_scope] (Docker, new) | end to end | the wheel above through `asent gate` | UNRESOLVED DEEP_GUARD_UNEXPLORED, REVIEW exit 2, 1 run | pass |
+| test_m2_demo_wheel_through_asent_gate[13 other wheels] (Docker) | no other change | as in Step M2-17 | unchanged | pass |
+
+Demo wheels re-run (`CAVR_DOCKER=1 pytest tests/test_cavr_m2_wheels.py`): 14 passed in 187 s. The demo script for all
+14 compared line by line with the output recorded in `docs/cavr-demo.md`: the 13 earlier `CAVR deep` lines and
+decisions are byte for byte the same; the only new line is `guard_out_of_scope` (UNRESOLVED DEEP_GUARD_UNEXPLORED,
+REVIEW exit 2). No result changed.
+Run before the commit (deep and gate tests, as Maryam asked): `CAVR_DOCKER=1 pytest tests/test_cavr_sandbox_deep.py
+tests/test_cavr_deep_stage.py tests/test_cavr_m2_wheels.py tests/test_cavr_activation_loop.py tests/test_cavr_causal_graph.py
+tests/test_cavr_call_drive.py tests/test_cavr_trigger_frontier.py tests/test_cavr_gate_adapter.py tests/test_gate_*.py
+tests/test_cli_gate.py tests/test_cli_report.py`: 397 passed, 1 skipped (live network), 0 failed, 426 s; no container
+left. No full-suite run for this step.
+
+### Defects found and fixed
+
+- None in this step.
+
+### Known limitations / deferred
+
+- The Phase 3b review limitation MINOR 11 is closed by this step.
+- Which guards are "unevaluable" is the frontier's: a guard that reads none of its families (Step M2-15). A guard that
+  reads a family but whose value CAVR cannot compute is a frontier entry (unsimulable -> UNRESOLVED), not an
+  other_guard.
+- A completed run that shows the guarded sink's capability through other code also clears the guard (strace cannot
+  name the Python line; the same limit as D3).
+
+### Tool disclosure (Ch 8.7)
+
+- **Generated by Claude Code:** the rule change, the report line, the tests, the demo wheel, these notes, the plan and
+  demo-doc edits, as Maryam asked on 2026-11-24. **Reviewed by Maryam:** the decision; the code not yet. **Verified
+  by:** the runs above; the new unit test was checked to fail with the old rule.
+
+### Supervisor Q&A prep
+
+1. **Why is a guard CAVR cannot evaluate a reason for UNRESOLVED when the sink is granted for a scope?** The scope is
+   a claim about where the package connects; behind that guard no run ever executed the connect, so the claim was not
+   tested. Example: `guard_out_of_scope` would connect to 203.0.113.9, outside the grant.
+2. **Does this make clean packages UNRESOLVED?** Only those with such a guard in front of a scoped or denied sink; the
+   13 other demo wheels kept their results byte for byte.

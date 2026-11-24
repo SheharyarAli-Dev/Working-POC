@@ -1,19 +1,21 @@
-"""PR 9 of docs/cavr-m2-plan.md: escalated packages get one observed sandbox run (`sandbox_deep`).
+"""PRs 9 and 12 of docs/cavr-m2-plan.md: escalated packages get the counterfactual activation loop (`sandbox_deep`).
 
-Unit tests run the real pipeline (`test_cavr_support.World`) and the real normaliser and contract check; only the
-container is replaced: `sandbox_deep.OBSERVE` / `RUN_HARNESS` return a real trace recorded on Docker
+Unit tests run the real pipeline (`test_cavr_support.World`), the real frontier, loop, normaliser and contract check;
+only the container is replaced: `sandbox_deep.RUN_SPEC` / `RUN_HARNESS` return a real trace recorded on Docker
 (`tests/test_cavr_data/traces/events-*.txt`) as the observed run. Docker tests (CAVR_DOCKER=1) build the demo wheels in
 `tmp_path` and run them in asent-cavr-sandbox:local, through `verify_request` and through `asent gate`.
 """
 from __future__ import annotations
 
+import copy
+import hashlib
 import json
 from pathlib import Path
 
 import pytest
 
-from backend.cavr import (contract_check, deep_stage, gate_adapter, sandbox_deep, sandbox_events, sandbox_exec, sandbox_image,
-                          sandbox_observe)
+from backend.cavr import (activation_loop, call_drive, causal_graph, contract_check, deep_stage, env_synthesis, gate_adapter, sandbox_deep,
+                          sandbox_events, sandbox_exec, sandbox_image, sandbox_observe, sandbox_spec, trigger_frontier)
 from backend.cavr.pipeline import ESCALATION, analyzer_version
 from backend.cavr.sandbox_trace import check_trace
 from backend.commands.report import cavr_deep, render
@@ -29,6 +31,11 @@ NETWORK_SINK = "import socket\n\n\ndef send(data):\n    socket.create_connection
 BENIGN = {"demo/__init__.py": "from .net import send\n\n\ndef run():\n    return 1\n", "demo/net.py": NETWORK_SINK}
 TRIGGERED = {"demo/__init__.py": "import os\nimport socket\n\nif os.getenv('CAVR_DEMO_TRIGGER'):\n"
                                  "    socket.create_connection(('198.51.100.24', 443))\n\n\ndef run():\n    return 1\n"}
+# PR 12: the same branch behind a variable the frontier can set (`CAVR_*` names are fixed by the sandbox, so the
+# trigger of TRIGGERED is unsimulable, PR 10).
+TRIGGERED_CI = {"demo/__init__.py": "import os\nimport socket\n\nif os.environ.get('CI') == 'true':\n"
+                                    "    try:\n        socket.create_connection(('198.51.100.24', 443), timeout=1)\n"
+                                    "    except OSError:\n        pass\n\n\ndef run():\n    return 1\n"}
 # Escalated only by import-time code: the module-level connect runs when the package is imported, to the one endpoint
 # the policy grants (the same code as the recording events-scoped).
 IMPORT_TIME = {"demo/__init__.py": "import socket\n\ntry:\n    socket.create_connection(('198.51.100.24', 443), timeout=1)\n"
@@ -54,27 +61,30 @@ def recorded_run(stem, rule="DEEP_NOT_JUDGED", cut=None):
 
 
 class Sandbox:
-    """Replaces the container: each observe returns `runs[i]` and advances the clock by `seconds` per run."""
+    """Replaces the container: each spec run returns `runs[i]` (the last one again once they are used up), normalised
+    as `sandbox_spec.run_spec` does it (with that run's canaries), and advances the clock by `seconds` per run."""
 
-    def __init__(self, monkeypatch, runs, seconds=5.0, baseline="events-baseline"):
+    def __init__(self, monkeypatch, runs, seconds=5.0, baseline="events-baseline", baseline_seconds=2.0):
         self.runs, self.seconds, self.now, self.calls, self.deadlines = list(runs), seconds, 1000.0, [], []
+        self.baseline_seconds = baseline_seconds
         self.baseline_runs = 0
         monkeypatch.setattr(sandbox_deep, "CLOCK", lambda: self.now)
         monkeypatch.setattr(deep_stage, "CLOCK", lambda: self.now)
-        monkeypatch.setattr(sandbox_deep, "OBSERVE", self.observe)
+        monkeypatch.setattr(sandbox_deep, "RUN_SPEC", self.run_spec)
         monkeypatch.setattr(sandbox_deep, "RUN_HARNESS", self.harness)
         self.baseline = baseline
 
-    def observe(self, nodes, modules, quarantine_dir=None, deadline=None):
-        self.calls.append({"nodes": nodes, "modules": modules})
+    def run_spec(self, nodes, modules, spec, quarantine_dir=None, deadline=None, run_id=None, n=1, drives=()):
+        self.calls.append({"nodes": nodes, "modules": modules, "spec": spec, "n": n, "drives": list(drives)})
         self.deadlines.append(deadline)
         self.now += self.seconds
         run = self.runs.pop(0) if len(self.runs) > 1 else self.runs[0]
-        return run() if callable(run) else run
+        run = copy.deepcopy(run(spec) if callable(run) else run)
+        return sandbox_spec._read(run, spec, None)
 
-    def harness(self, steps, tmpfs=(), deadline=None):
+    def harness(self, steps, tmpfs=(), deadline=None, **options):
         self.baseline_runs += 1
-        self.now += 2.0
+        self.now += self.baseline_seconds
         if isinstance(self.baseline, dict):
             return self.baseline
         return recorded_run(self.baseline)
@@ -110,7 +120,11 @@ def test_a_reachable_sink_the_import_never_ran_is_unresolved_not_exercised(world
     assert (package["status"], package["stage"], package["rule"]) == ("UNRESOLVED", "deep", "DEEP_SINK_NOT_EXERCISED")
     assert verdict["status"] == "UNRESOLVED"
     assert "demo/net.py:5 calls socket.create_connection (NETWORK_CONNECT)" in package["reason"]
-    assert "app/uses_demo.py:5 demo.run" in package["reason"] and "Phase 3" in package["reason"]
+    assert "app/uses_demo.py:5 demo.run" in package["reason"]
+    # PR 12: the project's call site demo.run() has only literals (none), so it was driven; it never reaches send().
+    assert ("the driven call site(s) demo.run() at app/uses_demo.py:5 showed no NETWORK_CONNECT event beyond their "
+            "import") in package["reason"]
+    assert [d["call"] for d in sandbox.calls[0]["drives"]] == ["demo.run()"] and sandbox.calls[0]["spec"]["id"] == "spec-canaries"
     deep = package["evidence"]["deep"]["evidence"]
     (reason,) = deep["escalation_reasons"]
     assert (reason["placement"], reason["exercised"], reason["events_of_capability"]) == ("function send", False, 0)
@@ -129,8 +143,9 @@ def test_an_import_time_sink_inside_a_scoped_contract_is_verified(world, tmp_pat
     deep = package["evidence"]["deep"]["evidence"]
     (reason,) = deep["escalation_reasons"]
     assert (reason["placement"], reason["exercised"], reason["events_of_capability"]) == ("module level", True, 1)
-    assert deep["check"]["used"] == ["NETWORK_CONNECT"] and "every escalation reason (1) ran" in package["reason"]
-    assert "call sites were not executed" in package["reason"] and deep["not_exercised"]  # NFR-6: the bounded claim
+    assert deep["check"]["used"] == ["NETWORK_CONNECT"] and "every escalation reason (1) exercised" in package["reason"]
+    assert deep["claim"] == sandbox_deep.CLAIM and [d["call"] for d in deep["drives"]["driven"]] == ["demo.run()"]  # NFR-6
+    assert [r["kind"] for r in deep["runs"]] == ["canary-only"] and deep["loop"]["stop"] == "done"
 
 
 def test_a_module_level_sink_that_shows_no_event_is_not_exercised(world, tmp_path, monkeypatch):
@@ -148,9 +163,140 @@ def test_an_escalation_without_a_reachable_sink_is_unresolved(tmp_path, monkeypa
     Sandbox(monkeypatch, [recorded_run("events-benign")])
     contract = {"result": "OK", "import_names": ["demo"], "allowed": [], "vocabulary": vocabulary(),
                 "denied": [{"capability": name} for name in vocabulary()]}
+    wheel = build_wheel(tmp_path / "quarantine", "demo", "1.0", files={"demo/__init__.py": "def run():\n    return 1\n"})
+    node = {"name": "demo", "version": "1.0", "filename": wheel.name, "path": str(wheel),
+            "sha256": hashlib.sha256(wheel.read_bytes()).hexdigest()}
     answer = analyzer(tmp_path).analyse({"name": "demo", "version": "1.0", "contract": contract, "scan": [],
-                                         "tree": {"nodes": []}, "reachability": {"sinks": []}})
+                                         "tree": {"nodes": [node]}, "reachability": {"sinks": []}})
     assert (answer["status"], answer["rule"]) == ("UNRESOLVED", "DEEP_ESCALATION_UNKNOWN")
+    # With no wheel at all the frontier has nothing to scan, which is a reason left before any other (PR 12).
+    empty = analyzer(tmp_path).analyse({"name": "demo", "version": "1.0", "contract": contract, "scan": [],
+                                        "tree": {"nodes": []}, "reachability": {"sinks": []}})
+    assert (empty["status"], empty["rule"]) == ("UNRESOLVED", "FRONTIER_INCOMPLETE")
+
+
+# --- PR 12: driving the project's call sites (recordings loop-drive-send / loop-drive-quiet) -------------------------
+
+SEND_FILES = {"demo/__init__.py": "from .net import send\n\n\ndef run():\n    return 1\n",
+              "demo/net.py": "import socket\n\n\ndef send(data):\n    try:\n        socket.create_connection("
+                             "('198.51.100.24', 443), timeout=1)\n    except OSError:\n        pass\n"}
+
+
+def driven(world, call="demo.send('x')", files=SEND_FILES):
+    world.add("demo", "1.0", files)
+    world.write("app/uses_demo.py", f"import demo\n\n\ndef go():\n    return {call}\n")
+
+
+def test_a_driven_call_that_connects_outside_the_contract_is_rejected(world, tmp_path, monkeypatch):
+    driven(world)
+    sandbox = Sandbox(monkeypatch, [recorded_run("loop-drive-send")])
+    _, package = verify(world, analyzer(tmp_path))
+    assert (package["status"], package["rule"]) == ("REJECTED", "DEEP_CONTRACT_VIOLATION"), package["reason"]
+    deep = package["evidence"]["deep"]["evidence"]
+    key = deep["key_events"][0]
+    assert (key["step"], key["capability"], key["address"]["host"]) == ("drive_1", "NETWORK_CONNECT", "198.51.100.24")
+    assert [d["call"] for d in sandbox.calls[0]["drives"]] == ["demo.send('x')"]
+
+
+def test_a_driven_call_inside_its_scope_exercises_the_sink_and_is_verified(world, tmp_path, monkeypatch):
+    world.policy.update(SCOPED_POLICY)
+    driven(world)
+    Sandbox(monkeypatch, [recorded_run("loop-drive-send")])
+    verdict, package = verify(world, analyzer(tmp_path))
+    assert (package["status"], package["rule"]) == ("VERIFIED", "DEEP_RUN_CLEAN"), package["reason"]
+    (reason,) = package["evidence"]["deep"]["evidence"]["escalation_reasons"]
+    assert (reason["placement"], reason["exercised"]) == ("function send", True)
+    assert reason["exercised_by"] == [{"run": 1, "step": "drive_1", "events": 1, "call": "demo.send('x') at app/uses_demo.py:5"}]
+    assert "1 call site(s) driven" in package["reason"] and verdict["status"] == "VERIFIED"
+
+
+def test_a_driven_call_that_never_reaches_the_sink_leaves_it_not_exercised(world, tmp_path, monkeypatch):
+    world.policy.update(SCOPED_POLICY)
+    driven(world, call="demo.run()")
+    Sandbox(monkeypatch, [recorded_run("loop-drive-quiet")])
+    _, package = verify(world, analyzer(tmp_path))
+    assert (package["status"], package["rule"]) == ("UNRESOLVED", "DEEP_SINK_NOT_EXERCISED"), package["reason"]
+    assert "demo.run() at app/uses_demo.py:5 showed no NETWORK_CONNECT event" in package["reason"]
+
+
+def test_a_call_with_a_computed_argument_is_not_driven_and_says_why(world, tmp_path, monkeypatch):
+    world.policy.update(SCOPED_POLICY)
+    driven(world, call="demo.send(data)")
+    sandbox = Sandbox(monkeypatch, [recorded_run("loop-drive-quiet")])
+    _, package = verify(world, analyzer(tmp_path))
+    assert (package["status"], package["rule"]) == ("UNRESOLVED", "DEEP_SINK_NOT_EXERCISED"), package["reason"]
+    assert "no call site could be driven (demo.send(data) at app/uses_demo.py:5: argument 1 `data` is not a literal)" \
+        in package["reason"]
+    assert sandbox.calls[0]["drives"] == []
+    deep = package["evidence"]["deep"]["evidence"]
+    assert any("argument 1 `data` is not a literal" in item for item in deep["not_exercised"])  # NFR-6
+
+
+def test_two_reachable_sinks_of_one_capability_cannot_be_told_apart_by_an_event(world, tmp_path, monkeypatch):
+    """D3 (Maryam, 2026-11-24): strace cannot say which Python line made an event."""
+    world.policy.update(SCOPED_POLICY)
+    two = {**SEND_FILES, "demo/net.py": SEND_FILES["demo/net.py"] + "\n\ndef other():\n    socket.create_connection(('198.51.100.24', 443))\n"}
+    driven(world, files=two)
+    Sandbox(monkeypatch, [recorded_run("loop-drive-send")])
+    _, package = verify(world, analyzer(tmp_path))
+    assert (package["status"], package["rule"]) == ("UNRESOLVED", "DEEP_SINK_NOT_EXERCISED"), package["reason"]
+    reasons = package["evidence"]["deep"]["evidence"]["escalation_reasons"]
+    assert len(reasons) == 2 and not any(r["exercised"] for r in reasons)
+    assert all("2 reachable sinks share NETWORK_CONNECT" in r["why"] and "(D3)" in r["why"] for r in reasons)
+
+
+def test_a_fresh_baseline_counts_against_the_package_budget(world, tmp_path, monkeypatch):
+    """Review of Phase 3b, BLOCKER 2: the baseline this package records first is inside its 120 s (deep_stage's clock)."""
+    world.policy.update(SCOPED_POLICY)
+    eight = {"demo/__init__.py": "import os, socket\n" + "".join(
+        f"if os.environ.get('DEPLOY_{i}') == 'yes':\n    socket.create_connection(('198.51.100.24', 443))\n"
+        for i in range(1, 9)) + "\n\ndef run():\n    return 1\n"}
+    escalated(world, eight)
+    sandbox = Sandbox(monkeypatch, [recorded_run("events-benign")], seconds=16.0, baseline_seconds=20.0)
+    _, package = verify(world, analyzer(tmp_path))
+    assert package["rule"] == "DEEP_RUN_BUDGET_EXHAUSTED", package["reason"]  # was DEEP_BUDGET_EXCEEDED (137 s)
+    assert package["evidence"]["deep"]["elapsed_seconds"] <= 120 and sandbox.baseline_runs == 1
+    assert sandbox.deadlines[0] == 20 and min(sandbox.deadlines) >= sandbox_deep.MIN_RUN_SECONDS
+
+
+def test_a_refused_credential_reaches_no_verdict_field(world, tmp_path, monkeypatch):
+    """Review of Phase 3b, BLOCKER 1: not in the drive plan, the reasons, not_exercised or anything else of the verdict."""
+    token = "ghp_abcdefghijklmnopqrstuvwxyz0123456789"
+    driven(world, call=f"demo.send('{token}')")
+    Sandbox(monkeypatch, [recorded_run("loop-drive-quiet")])
+    verdict, package = verify(world, analyzer(tmp_path))
+    assert package["rule"] == "DEEP_SINK_NOT_EXERCISED" and token not in json.dumps(verdict, default=str)
+
+
+# Maryam, 2026-11-24 (after the Phase 3b review): an unevaluable guard in front of a sink granted only for a scope
+# counts as unexplored. `hash('cavr') % 7 == 99` reads no family (no environment, clock, file, ...), so it is an
+# other_guard; it is never true, so no run takes the branch.
+OUT_OF_SCOPE_GUARD = {"demo/__init__.py": "import socket\n\nif hash('cavr') % 7 == 99:\n    try:\n"
+                                          "        socket.create_connection(('203.0.113.9', 443), timeout=1)\n"
+                                          "    except OSError:\n        pass\n\n\ndef run():\n    return 1\n"}
+
+
+def test_an_unevaluable_guard_in_front_of_a_scoped_sink_is_unexplored(world, tmp_path, monkeypatch):
+    world.policy.update(SCOPED_POLICY)  # only NETWORK_CONNECT:198.51.100.24:443 is granted
+    escalated(world, OUT_OF_SCOPE_GUARD)
+    sandbox = Sandbox(monkeypatch, [recorded_run("events-benign")])
+    _, package = verify(world, analyzer(tmp_path))
+    assert (package["status"], package["rule"]) == ("UNRESOLVED", "DEEP_GUARD_UNEXPLORED"), package["reason"]
+    (guard,) = package["evidence"]["deep"]["evidence"]["unexplored_guards"]
+    assert (guard["risk"], guard["capabilities"], guard["not_shown"]) == ("medium", ["NETWORK_CONNECT"], ["NETWORK_CONNECT"])
+    assert "hash('cavr')" in guard["predicate"] and len(sandbox.calls) == 1  # no frontier entry, so one run
+
+
+def test_an_unevaluable_guard_whose_sink_a_run_showed_is_not_this_rule(world, tmp_path, monkeypatch):
+    world.policy.update(SCOPED_POLICY)
+    shown = {"demo/__init__.py": IMPORT_TIME["demo/__init__.py"].replace(
+        "\n\ndef run():", "\nif hash('cavr') % 7 == 99:\n    socket.create_connection(('203.0.113.9', 443))\n\n\ndef run():")}
+    escalated(world, shown)
+    Sandbox(monkeypatch, [recorded_run("events-scoped")])  # the in-scope connect at import shows NETWORK_CONNECT
+    _, package = verify(world, analyzer(tmp_path))
+    deep = package["evidence"]["deep"]["evidence"]
+    assert package["rule"] != "DEEP_GUARD_UNEXPLORED" and deep["unexplored_guards"] == []
+    assert package["rule"] == "DEEP_SINK_NOT_EXERCISED"  # two reachable connect sinks: D3
 
 
 def test_sink_placement_reads_the_wheel(tmp_path):
@@ -228,13 +374,39 @@ def test_a_run_on_another_image_is_unresolved(world, tmp_path, monkeypatch):
     assert (package["status"], package["rule"]) == ("UNRESOLVED", "DEEP_IMAGE_CHANGED")
 
 
-def test_escalated_package_with_an_unexplored_trigger_is_unresolved_until_the_frontier_exists(world, tmp_path, monkeypatch):
-    escalated(world, TRIGGERED)
-    Sandbox(monkeypatch, [recorded_run("events-benign")])
+def test_an_env_gated_sink_is_rejected_by_its_counterfactual_run(world, tmp_path, monkeypatch):
+    """PR 12 (replaces PR 9's UNRESOLVED DEEP_TRIGGERS_UNEXPLORED): the canary-only run is clean, the run with the
+    trigger's environment shows the violation."""
+    escalated(world, TRIGGERED_CI)
+    sandbox = Sandbox(monkeypatch, [recorded_run("events-benign"), recorded_run("events-probe")])
     _, package = verify(world, analyzer(tmp_path))
-    assert (package["status"], package["rule"]) == ("UNRESOLVED", "DEEP_TRIGGERS_UNEXPLORED"), package["reason"]
-    (trigger,) = package["evidence"]["deep"]["evidence"]["unexplored_triggers"]
-    assert trigger["capabilities"] == ["NETWORK_CONNECT"] and "CAVR_DEMO_TRIGGER" in trigger["predicate"]
+    assert (package["status"], package["rule"]) == ("REJECTED", "DEEP_CONTRACT_VIOLATION"), package["reason"]
+    assert "run 2 (the counterfactual run spec-" in package["reason"]
+    assert [c["spec"]["id"] == "spec-canaries" for c in sandbox.calls] == [True, False]
+    assert sandbox.calls[1]["spec"]["env"]["CI"] == "true"
+    deep = package["evidence"]["deep"]["evidence"]
+    assert deep["decisive_run"] == 2 and deep["loop"]["stop"] == "violation" and deep["key_events"][0]["run"] == 2
+    # PR 13: the event the verdict names first is in the CI=true run and not in the canary-only run.
+    assert deep["causal"]["cause"] == "caused by CI=true" and package["reason"].endswith("; caused by CI=true")
+    assert deep["causal"]["digest"] == deep["causal_graph"]["digest"]
+
+
+def test_a_trigger_run_that_shows_nothing_leaves_the_trigger_unexplored(world, tmp_path, monkeypatch):
+    escalated(world, TRIGGERED_CI)
+    sandbox = Sandbox(monkeypatch, [recorded_run("events-benign")])  # both runs: no connect
+    _, package = verify(world, analyzer(tmp_path))
+    assert (package["status"], package["rule"]) == ("UNRESOLVED", "TRIGGER_UNEXPLORED"), package["reason"]
+    (entry,) = package["evidence"]["deep"]["evidence"]["residual"]["entries"]
+    assert "'CI'" in entry["predicate"] and entry["run"] == 2 and "sink was not shown" in entry["outcome"]
+    assert len(sandbox.calls) == 2
+
+
+def test_a_trigger_on_a_variable_the_sandbox_fixes_is_unsimulable_and_gets_no_run(world, tmp_path, monkeypatch):
+    escalated(world, TRIGGERED)  # os.getenv('CAVR_DEMO_TRIGGER'): CAVR_* is reserved (trigger_frontier.RESERVED_ENV)
+    sandbox = Sandbox(monkeypatch, [recorded_run("events-benign")])
+    _, package = verify(world, analyzer(tmp_path))
+    assert (package["status"], package["rule"]) == ("UNRESOLVED", "TRIGGER_UNSIMULABLE"), package["reason"]
+    assert len(sandbox.calls) == 1  # the canary-only run only
 
 
 def test_a_violation_wins_over_an_unexplored_trigger(world, tmp_path, monkeypatch):
@@ -242,16 +414,6 @@ def test_a_violation_wins_over_an_unexplored_trigger(world, tmp_path, monkeypatc
     Sandbox(monkeypatch, [recorded_run("events-probe")])
     _, package = verify(world, analyzer(tmp_path))
     assert package["status"] == "REJECTED"
-
-
-def test_trigger_gating_only_unrestricted_sinks_is_not_high_risk():
-    scans = [{"package": "demo", "triggers": [{"file": "demo/__init__.py", "line": 4, "predicate": "os.getenv('X')",
-                                               "reachable_sinks": [{"capability": "NETWORK_CONNECT"}]}]}]
-    star = {"allowed": [{"capability": "NETWORK_CONNECT", "scope": "*"}]}
-    scoped = {"allowed": [{"capability": "NETWORK_CONNECT", "scope": "1.2.3.4:443"}]}
-    assert sandbox_deep.high_risk_triggers(scans, star) == []
-    assert [t["capabilities"] for t in sandbox_deep.high_risk_triggers(scans, scoped)] == [["NETWORK_CONNECT"]]
-    assert sandbox_deep.high_risk_triggers(scans, {"allowed": []})[0]["line"] == 4
 
 
 # --- baseline ------------------------------------------------------------------------------------------------------------
@@ -341,9 +503,13 @@ def test_identity_changes_with_image_harness_profile_and_budget(tmp_path, monkey
     with monkeypatch.context() as patch:
         patch.setattr(sandbox_observe, "HARNESS", other)
         assert deep_stage.identity(analyzer(tmp_path)) != base
-    changes = [(sandbox_observe, "STRACE", sandbox_observe.STRACE + ["-v"]),
+    changes = [(sandbox_spec, "STRACE_SPEC", sandbox_spec.STRACE_SPEC + ["-v"]),
                (sandbox_observe, "PIP_INSTALL", sandbox_observe.PIP_INSTALL + ["--x"]),
-               (sandbox_observe, "IMPORT_ARGV", sandbox_observe.IMPORT_ARGV + ["x"]),
+               (sandbox_spec, "SPEC_IMPORT_ARGV", sandbox_spec.SPEC_IMPORT_ARGV + ["x"]),
+               (call_drive, "DRIVE_ARGV", call_drive.DRIVE_ARGV + ["x"]),
+               (trigger_frontier, "VERSION", "cavr-trigger-frontier/x"), (env_synthesis, "VERSION", "cavr-env-synthesis/x"),
+               (activation_loop, "VERSION", "cavr-activation-loop/x"), (call_drive, "VERSION", "cavr-call-drive/x"),
+               (causal_graph, "VERSION", "cavr-causal-graph/x"),
                (sandbox_observe, "SITE_TMPFS", sandbox_observe.SITE_TMPFS.replace("128m", "64m")),
                (sandbox_events, "EVENTS_VERSION", "cavr-events/x"), (contract_check, "CHECK_VERSION", "cavr-contract-check/x"),
                (sandbox_exec, "CAPABILITIES", sandbox_exec.CAPABILITIES + ("NET_RAW",))]
@@ -351,7 +517,10 @@ def test_identity_changes_with_image_harness_profile_and_budget(tmp_path, monkey
         with monkeypatch.context() as patch:
             patch.setattr(module, name, value)
             assert deep_stage.identity(analyzer(tmp_path)) != base, name
-    assert set(sandbox_deep.VERDICT_CODE) >= {"sandbox_events.py", "contract_check.py", "sandbox_deep.py"}
+    assert set(sandbox_deep.VERDICT_CODE) >= {"sandbox_events.py", "contract_check.py", "sandbox_deep.py", "trigger_frontier.py",
+                                              "env_synthesis.py", "sandbox_spec.py", "activation_loop.py", "call_drive.py",
+                                              "causal_graph.py"}
+    assert sandbox_deep.BUDGET == {"runs": 8, "run_seconds": 20, "package_seconds": 120, "gate_run_seconds": 300}
     real = sandbox_deep.deep_version(IDENTITY)
     with monkeypatch.context() as patch:
         original = sandbox_deep._sha256
@@ -455,18 +624,33 @@ def test_report_text_line_for_each_deep_result():
     report = {"modules": {"CAVR": {"evidence_id": "e1"}}, "assurance": {"evidence": [{"evidence_id": "e1", "details": {
         "pipeline": [{"file": "requirements.txt", "packages": [
             {"name": "a", "version": "1", "deep": {"status": "VERIFIED", "rule": "DEEP_RUN_CLEAN", "key_events": [],
-                                                    "reason": "a 1: clean"}},
+                                                    "reason": "a 1: clean", "runs": [{"kind": "canary-only"}, {"kind": "counterfactual"}],
+                                                    "drives": {"driven": [{"call": "a.run()"}]}}},
+            {"name": "w", "version": "5", "deep": {"status": "UNRESOLVED", "rule": "TRIGGER_UNSIMULABLE", "key_events": [],
+                                                    "residual": {"entries": [{"file": "w/__init__.py", "line": 3,
+                                                                              "predicate": "sys.platform == 'win32'",
+                                                                              "outcome": "not run: unsimulable (non-Linux platform)"}]}}},
             {"name": "b", "version": "2", "deep": {"status": "REJECTED", "rule": "DEEP_CONTRACT_VIOLATION", "key_events": [
                 {"capability": "SECRET_READ", "syscall": "openat", "path": "/tmp/home/.aws/credentials", "ok": False,
-                 "errno": "ENOENT", "address": None, "argv": None}]}},
+                 "errno": "ENOENT", "address": None, "argv": None}], "causal": {"cause": "caused by CI=true"}}},
             {"name": "d", "version": "4", "deep": {"status": "UNRESOLVED", "rule": "DEEP_SINK_NOT_EXERCISED", "key_events": [],
                                                     "escalation_reasons": [{"file": "d/net.py", "line": 5, "sink": "socket.create_connection",
                                                                             "placement": "function send", "exercised": False}]}},
+            {"name": "g", "version": "6", "deep": {"status": "UNRESOLVED", "rule": "DEEP_GUARD_UNEXPLORED", "key_events": [],
+                                                    "unexplored_guards": [{"file": "g/__init__.py", "line": 3,
+                                                                           "predicate": "hash('cavr') % 7 == 99",
+                                                                           "capabilities": ["NETWORK_CONNECT"], "risk": "medium"}]}},
             {"name": "c", "version": "3", "deep": None}]}]}}]}}
     assert cavr_deep(report) == [
-        "  CAVR deep: a==1 VERIFIED DEEP_RUN_CLEAN (install + import observed; nothing outside the contract)",
-        "  CAVR deep: b==2 REJECTED DEEP_CONTRACT_VIOLATION - SECRET_READ openat /tmp/home/.aws/credentials = ENOENT",
-        "  CAVR deep: d==4 UNRESOLVED DEEP_SINK_NOT_EXERCISED - not exercised: d/net.py:5 socket.create_connection (function send)"]
+        "  CAVR deep: a==1 VERIFIED DEEP_RUN_CLEAN (2 run(s): canary-only + 1 counterfactual, 1 call site(s) driven; "
+        "nothing outside the contract)",
+        "  CAVR deep: w==5 UNRESOLVED TRIGGER_UNSIMULABLE - w/__init__.py:3 `sys.platform == 'win32'`: not run: "
+        "unsimulable (non-Linux platform)",
+        "  CAVR deep: b==2 REJECTED DEEP_CONTRACT_VIOLATION - SECRET_READ openat /tmp/home/.aws/credentials = ENOENT "
+        "caused by CI=true",
+        "  CAVR deep: d==4 UNRESOLVED DEEP_SINK_NOT_EXERCISED - not exercised: d/net.py:5 socket.create_connection (function send)",
+        "  CAVR deep: g==6 UNRESOLVED DEEP_GUARD_UNEXPLORED - unevaluable guard g/__init__.py:3 `hash('cavr') % 7 == 99` gates "
+        "NETWORK_CONNECT (medium risk), no run showed it"]
 
 
 # --- the demo wheels on Docker -------------------------------------------------------------------------------------------
@@ -484,7 +668,8 @@ DEMOS = {
     "shell": ({**BENIGN, "demo/__init__.py": "import subprocess\nfrom .net import send\n\n"
                                             "subprocess.run(['/bin/sh', '-c', 'true'])\n\n\ndef run():\n    return 1\n"},
               "REJECTED", "DEEP_CONTRACT_VIOLATION"),
-    "env_trigger": (TRIGGERED, "UNRESOLVED", "DEEP_TRIGGERS_UNEXPLORED"),
+    "env_trigger": (TRIGGERED, "UNRESOLVED", "TRIGGER_UNSIMULABLE"),  # PR 12: CAVR_* is fixed by the sandbox (PR 10)
+    "ci_trigger": (TRIGGERED_CI, "REJECTED", "DEEP_CONTRACT_VIOLATION"),  # PR 12: the CI=true run connects
 }
 
 

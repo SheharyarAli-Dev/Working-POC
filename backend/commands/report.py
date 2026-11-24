@@ -69,7 +69,8 @@ def _cavr_packages(report: dict):
 
 
 def cavr_deep(report: dict) -> list[str]:
-    """One line per package that had a CAVR deep result (docs/cavr-m2-plan.md PR 9): verdict, rule, first key event.
+    """One line per package that had a CAVR deep result (docs/cavr-m2-plan.md PRs 9, 12, 13): verdict, rule, first key
+    event and its cause from the causal graph (e.g. "caused by CI=true").
 
     Display only, read from the CAVR evidence record; a report without deep results gives no lines.
     """
@@ -86,12 +87,26 @@ def cavr_deep(report: dict) -> list[str]:
                                          else address.get("path")) or " ".join((key.get("argv") or [])[:3])
             line += f" - {key.get('capability') or key.get('rule')} {key.get('syscall')} {target} = " \
                     f"{'ok' if key.get('ok') else key.get('errno')}"
+            cause = (deep.get("causal") or {}).get("cause")
+            if cause:
+                line += f" {cause}"
         elif deep.get("status") == "VERIFIED":
-            line += " (install + import observed; nothing outside the contract)"
+            runs = [r for r in deep.get("runs") or [] if isinstance(r, dict)]
+            counter = sum(1 for r in runs if r.get("kind") == "counterfactual")
+            driven = len((deep.get("drives") or {}).get("driven") or [])
+            line += (f" ({len(runs)} run(s): canary-only + {counter} counterfactual, {driven} call site(s) driven; "
+                     "nothing outside the contract)")
         else:
             missed = next((r for r in deep.get("escalation_reasons") or [] if isinstance(r, dict) and not r.get("exercised")), None)
+            residual = next((e for e in (deep.get("residual") or {}).get("entries") or [] if isinstance(e, dict)), None)
+            guard = next((g for g in deep.get("unexplored_guards") or [] if isinstance(g, dict)), None)
             if missed:
                 line += f" - not exercised: {missed.get('file')}:{missed.get('line')} {missed.get('sink')} ({missed.get('placement')})"
+            elif residual:
+                line += f" - {residual.get('file')}:{residual.get('line')} `{residual.get('predicate')}`: {residual.get('outcome')}"
+            elif guard:
+                line += (f" - unevaluable guard {guard.get('file')}:{guard.get('line')} `{guard.get('predicate')}` gates "
+                         f"{', '.join(guard.get('capabilities') or [])} ({guard.get('risk')} risk), no run showed it")
         lines.append(line)
     return lines
 

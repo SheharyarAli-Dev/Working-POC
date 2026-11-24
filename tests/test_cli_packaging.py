@@ -82,7 +82,7 @@ def test_every_tracked_backend_file_is_in_the_wheel(wheel):
 def test_every_asset_is_packaged_under_backend_data_byte_identical(wheel):
     expected = tracked(*ASSET_DIRS) + list(ASSET_FILES)
     for must in ("docker/sandbox.Dockerfile", "docker/satra-runner.Dockerfile", "docker/satra-runner.requirements.txt",
-                 "docker/asent-seccomp.json", "docker/asent-sandbox/Dockerfile", "scenarios/catalog.json"):
+                 "docker/asent-seccomp.json", "scenarios/catalog.json"):
         assert must in expected
     with zipfile.ZipFile(wheel) as z:
         inside = set(z.namelist())

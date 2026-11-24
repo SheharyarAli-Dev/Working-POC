@@ -2,9 +2,7 @@ from pathlib import Path
 from types import SimpleNamespace
 import pytest
 from backend.cavr.analyzer import analyze as cavr
-from backend.cavr.trigger_discovery import scan
-from backend.cavr.runtime_monitor import normalize
-from backend.cavr.repair import rank_repairs
+from backend.cavr.ast_scan import rule_scan as scan
 from backend.sable.analyzer import analyze as sable
 from backend.sable.authorization import evaluate_authorization
 from backend.sable.policy_semantics import evaluate as evaluate_policy_semantics
@@ -57,32 +55,10 @@ def test_committed_advisory_evidence_is_fresh_on_the_fixed_clock_and_stale_after
         stale=OSV().query('pypdf','6.19.0')
     assert stale['available'] is False and stale['mode']=='UNAVAILABLE',stale
 
-def test_controlled_dormant_execution(service,scenario,tmp_path):
-    r,c=scenario('cavr_canary');status,details,_=cavr(c,service.store,tmp_path/'lab',lambda *a:None)
-    node=next(n for n in details['nodes'] if n['name']=='invoice-pdf-lab')
-    assert status=='REJECTED',node.get('runtime')
-    normal,activated=node['runtime']['runs'];assert normal['exit_code']==activated['exit_code']==0
-    # sandbox.py picks the monitor from what the machine has (docker/podman, else strace, else Python audit).
-    # Any of them is acceptable, but the monitor must be the one that belongs to the execution mode.
-    monitor_for={'PINNED_INERT_LAB_PYTHON_AUDIT':'PYTHON_AUDIT','PINNED_INERT_LAB_STRACE':'strace','docker':'strace','podman':'strace'}
-    for run in (normal,activated):
-        assert run['execution_mode'] in monitor_for,run['execution_mode']
-        assert run['monitor']==monitor_for[run['execution_mode']],(run['execution_mode'],run['monitor'])
-    assert normal['facts']['functional_text']==activated['facts']['functional_text']
-    assert not normal['facts']['canary_received'] and activated['facts']['canary_received']
-    assert not any(e['type']=='SECRET_ACCESS' for e in normal['events'])
-    # The connection is observed in every monitor mode (under strace it is a non-blocking connect, -1 EINPROGRESS).
-    assert any(e['type']=='NETWORK_CONNECT' for e in activated['events']),(activated['execution_mode'],sorted({e['type'] for e in activated['events']}))
-    assert not any(e['type']=='NETWORK_CONNECT' for e in normal['events'])
-    assert any(x['causal_confirmed'] for x in node['threat_correlations']),(activated['execution_mode'],node['threat_correlations'])
-    assert all('kind' in x for x in node['causal_graph']['nodes'])
-    assert all(Path(x['trace_path']).is_file() for x in node['runtime']['runs'])
-
 def test_trigger_and_runtime_normalization():
+    # The runtime_monitor half was deleted with the LOCAL lab (CAVR Step M2-18); sandbox_events has its own tests.
     tree=scan({'x.py':"import os,socket\nif os.getenv('CAVR_CANARY_AWS_SECRET'):\n socket.create_connection(('127.0.0.1',18765))\n"})
     assert tree['triggers'][0]['supported'];assert 'TRIG-ENV' in tree['triggers'][0]['rule_ids']
-    events=normalize('123 openat(AT_FDCWD, "canary.txt", O_WRONLY|O_CREAT, 0666) = 3\n123 openat(AT_FDCWD, "canary.txt", O_RDONLY) = 3')
-    assert [e['type'] for e in events]==['FILE_WRITE','SECRET_ACCESS']
 
 def test_trigger_predicates_bounded_and_unsupported_visible():
     tree=scan({'x.py':"""import os, socket
@@ -99,17 +75,6 @@ if custom_gate():
     assert any(t['trigger_status']=='unsupported/unresolved' for t in tree['triggers'])
     assert all(t['reachable_sinks'] and t['file']=='x.py' and t['line'] for t in tree['triggers'])
 
-def test_causal_graph_requires_fixture_source_and_sink_evidence():
-    from backend.cavr.causal_graph import build
-    trigger=[{'predicate':'flag','file':'p.py','line':2}]
-    assert not any(e.get('relation')=='fixture-linked source-to-sink' for e in build('p',trigger,[],[])['edges'])
-    events=[{'type':'SECRET_ACCESS','resource':'canary.txt','source':'PYTHON_AUDIT'}, {'type':'NETWORK_CONNECT','resource':'127.0.0.1:18765','source':'PYTHON_AUDIT'}]
-    graph=build('p',trigger,events,['CAVR_FAKE_SECRET_NOT_A_CREDENTIAL'])
-    edge=next(e for e in graph['edges'] if e.get('relation')=='fixture-linked source-to-sink')
-    assert 'receiver exact fake-marker equality'==edge['provenance']
-    mismatched=build('p',trigger,events,['CAVR_FAKE_SECRET_NOT_A_CREDENTIAL-extra'])
-    assert not any(e.get('relation')=='fixture-linked source-to-sink' for e in mismatched['edges'])
-
 def test_context_dependency_use_attribution_and_non_attribution(tmp_path):
     project=tmp_path/'p';baseline=tmp_path/'base';(project/'app').mkdir(parents=True);baseline.mkdir()
     (project/'dependencies.lock.json').write_text('{"packages":[{"name":"pypdf","version":"1.0"}]}')
@@ -118,14 +83,6 @@ def test_context_dependency_use_attribution_and_non_attribution(tmp_path):
     (project/'app/other.py').write_text('import unrelated\nunrelated.call()\n')
     ctx=ContextService(project,baseline);attrs=ctx.dependency_context()['dependency_attributions']
     assert len(attrs)==1 and attrs[0]['package']=='pypdf' and attrs[0]['call_site']['expression']=='PdfReader'
-
-def test_repair_constraints():
-    current={'name':'x','version':'1.0.0'}
-    choices=[{'name':'y','version':'1.0.0','artifact_verified':True,'level':3,'api_slice':'extract(bytes)','candidate_id':'y'},{'name':'x','version':'1.0.1','artifact_verified':True,'candidate_id':'x1'},{'name':'x','version':'1.0.2','artifact_verified':False,'candidate_id':'x2'}]
-    ranked=rank_repairs(current,choices,'>=1,<2',verified_candidate_ids=['x1']);assert ranked[0]['version']=='1.0.1';assert len(ranked)==1
-    assert not rank_repairs(current,[{'name':'y','version':'1','artifact_verified':True}])
-    ranked=rank_repairs(current,[{'name':'safe','version':'1.0.0','level':3,'artifact_verified':True,'functional_verified':True,'security_verified':True,'candidate_id':'safe','api_slice':'extract(bytes)','files_changed':2},{'name':'unsafe','version':'1.0.0','level':3,'artifact_verified':True,'functional_verified':False,'security_verified':False,'candidate_id':'unsafe','api_slice':'extract(bytes)','files_changed':1}],verified_candidate_ids=['safe'])
-    assert [x['name'] for x in ranked]==['safe'] and ranked[0]['score']['security_credit']==0
 
 @pytest.mark.parametrize('case,wanted',[('safe','PRESERVED'),('sable_preserved','PRESERVED'),('sable_regressed','REGRESSED'),('sable_unknown','UNKNOWN'),('sable_widened','REGRESSED')])
 def test_sable_real_hcl(scenario,case,wanted):

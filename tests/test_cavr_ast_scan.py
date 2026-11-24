@@ -236,14 +236,14 @@ def test_zip_bomb_is_not_decompressed(tmp_path):
 
 
 def test_scanner_crash_on_one_file_is_unresolved_not_an_exception(tmp_path, monkeypatch):
-    real = ast_scan.scan
+    real = ast_scan.rule_scan
 
     def flaky(sources, knowledge=None):
         if "demo/bad.py" in sources:
             raise RuntimeError("rule engine failure")
         return real(sources, knowledge)
 
-    monkeypatch.setattr(ast_scan, "scan", flaky)
+    monkeypatch.setattr(ast_scan, "rule_scan", flaky)
     result = scan_wheel(wheel(tmp_path, {"demo/__init__.py": ENV_GATED_SOCKET, "demo/bad.py": "x = 1\n"}))
     assert outcome(result) == ("UNRESOLVED", "SOURCE_NOT_PARSED")
     assert result["parse_errors"] == [{"file": "demo/bad.py", "error": "scanner failed: RuntimeError: rule engine failure"}]

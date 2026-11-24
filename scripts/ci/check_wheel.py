@@ -14,7 +14,7 @@ REQUIRED = [
     "backend/cli.py", "backend/config.py",
     "backend/_data/docker/sandbox.Dockerfile", "backend/_data/docker/satra-runner.Dockerfile",
     "backend/_data/docker/satra-runner.requirements.txt", "backend/_data/docker/asent-seccomp.json",
-    "backend/_data/docker/asent-sandbox/Dockerfile", "backend/_data/requirements.lock.txt",
+    "backend/_data/requirements.lock.txt",
     "backend/_data/scenarios/catalog.json", "backend/_data/demo_project/InvoiceHub/pytest.ini",
     "backend/cavr/project_policy.json", "backend/cavr/osv_snapshot.json", "backend/sable/sable_config.json",
     "backend/satra/trusted/policy.json",

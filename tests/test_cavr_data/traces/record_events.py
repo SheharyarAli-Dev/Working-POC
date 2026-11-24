@@ -1,4 +1,4 @@
-"""Record the real sandbox traces that tests/test_cavr_sandbox_events.py reads (PR 7 of docs/cavr-m2-plan.md).
+"""Record the real sandbox traces the CAVR tests read (PRs 7, 11 and 12 of docs/cavr-m2-plan.md).
 
     CAVR_DOCKER=1 .venv/bin/python tests/test_cavr_data/traces/record_events.py [stem ...]
 
@@ -152,6 +152,31 @@ def record_spec(stem, name, code, what):
     (HERE / f"{stem}.json").write_text(json.dumps(meta, indent=2) + "\n", encoding="utf-8")
 
 
+# PR 12: spec runs with a drive step (call_drive): the project's call demo.run() (nothing happens) and demo.send('x')
+# (send connects to 198.51.100.24:443 inside the function, so only the drive step shows the connect).
+SEND_FILES = {"demo/__init__.py": "from .net import send\n\n\ndef run():\n    return 1\n",
+              "demo/net.py": "import socket\n\n\ndef send(data):\n    try:\n        socket.create_connection("
+                             "('198.51.100.24', 443), timeout=1)\n    except OSError:\n        pass\n"}
+
+
+def record_drive(stem, call, what):
+    from backend.cavr import env_synthesis, sandbox_spec
+    quarantine = Path(tempfile.mkdtemp(prefix="cavr-record-"))
+    wheel = build_wheel(quarantine, "demo", "1.0", files=SEND_FILES)
+    node = {"name": "demo", "version": "1.0", "filename": wheel.name, "path": str(wheel),
+            "sha256": hashlib.sha256(wheel.read_bytes()).hexdigest()}
+    symbol, args = call
+    drive = {"step": "drive_1", "symbol": symbol, "args": args, "kwargs": {}}
+    spec = env_synthesis.canary_spec()
+    result = sandbox_spec.run_spec([node], ["demo"], spec, quarantine_dir=quarantine, drives=[drive])
+    save(stem, result, result["evidence"]["job_steps"], f"sandbox_spec.run_spec with drive {symbol}({', '.join(args)}): "
+         f"wheel demo 1.0 {what}", [node])
+    meta = json.loads((HERE / f"{stem}.json").read_text())
+    meta.update(spec=spec, drives=[drive])
+    meta["note"] += "; the canaries are the run's own (fake, random) values"
+    (HERE / f"{stem}.json").write_text(json.dumps(meta, indent=2) + "\n", encoding="utf-8")
+
+
 RECORDINGS = {
     "events-probe": lambda: record_wheel("events-probe", "probe", PROBE, "whose import does PROBE"),
     "events-benign": lambda: record_wheel("events-benign", "benign", BENIGN, "(def run(): return 1)"),
@@ -159,6 +184,9 @@ RECORDINGS = {
     "events-scoped": lambda: record_wheel("events-scoped", "demo", SCOPED, "whose import connects to 198.51.100.24:443"),
     "spec-canary": lambda: record_spec("spec-canary", "leak", LEAK, "under canary_spec(), whose import leaks canaries"),
     "spec-clean": lambda: record_spec("spec-clean", "benign", BENIGN, "under canary_spec() (def run(): return 1)"),
+    "loop-drive-quiet": lambda: record_drive("loop-drive-quiet", ("demo.run", []), "under canary_spec() (run returns 1)"),
+    "loop-drive-send": lambda: record_drive("loop-drive-send", ("demo.send", ["'x'"]),
+                                            "under canary_spec() (send connects to 198.51.100.24:443)"),
 }
 
 

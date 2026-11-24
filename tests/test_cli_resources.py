@@ -13,7 +13,7 @@ import sys
 from pathlib import Path
 
 from backend import config
-from backend.cavr import sandbox_runner
+from backend.cavr import sandbox_image
 
 REPO = Path(__file__).resolve().parents[1]
 
@@ -55,14 +55,10 @@ def test_this_checkout_keeps_every_path_unchanged():
     assert config.DEMO == REPO / "demo_project/InvoiceHub"
 
 
-def test_seccomp_profile_is_the_repository_file_and_the_flags_are_unchanged(tmp_path):
-    assert sandbox_runner.SECCOMP_PROFILE == REPO / "docker/asent-seccomp.json"
-    cmd = sandbox_runner.SandboxRunner().get_docker_command(tmp_path, "r1")
-    assert cmd[:cmd.index("-v")] == [
-        "docker", "run", "--rm", "--network", "none", "--read-only", "--tmpfs", "/scratch:rw,noexec,nosuid,size=64m",
-        "--user", "10001:10001", "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
-        "--security-opt", f"seccomp={REPO / 'docker/asent-seccomp.json'}", "--pids-limit", "64", "--memory", "256m",
-        "--cpus", "0.5"]
+def test_seccomp_profiles_are_the_repository_files():
+    # The legacy SandboxRunner (and its docker flags) was deleted in CAVR Step M2-18; the shared profile stays (SATRA).
+    assert sandbox_image.SHARED_SECCOMP_PROFILE == REPO / "docker/asent-seccomp.json"
+    assert sandbox_image.SECCOMP_PROFILE == REPO / "docker/cavr-sandbox/cavr-seccomp.json"
 
 
 # Repository-root paths to non-Python assets or writable folders must go through config.ASSETS /
@@ -85,8 +81,8 @@ def test_no_module_builds_asset_or_state_paths_from_the_repository_root():
 
 def test_every_packaged_asset_the_code_reads_exists_in_the_checkout():
     from backend.satra import project_image
-    for path in (sandbox_runner.SECCOMP_PROFILE, project_image.RUNNER_REQUIREMENTS, config.DEMO / "pytest.ini",
-                 config.ASSETS / "scenarios/catalog.json", config.ASSETS / "docker/sandbox.Dockerfile",
+    for path in (sandbox_image.SHARED_SECCOMP_PROFILE, sandbox_image.SECCOMP_PROFILE, project_image.RUNNER_REQUIREMENTS,
+                 config.DEMO / "pytest.ini", config.ASSETS / "scenarios/catalog.json", config.ASSETS / "docker/sandbox.Dockerfile",
                  config.ASSETS / "docker/satra-runner.Dockerfile", config.ASSETS / "requirements.lock.txt"):
         assert path.is_file(), path
 
@@ -95,12 +91,12 @@ INSTALLED_PROBE = """
 import json, sys
 sys.path.insert(0, sys.argv[1])
 from backend import config
-from backend.cavr import sandbox_runner
+from backend.cavr import sandbox_image
 from backend.satra import project_image, settings
 from backend.integrations import osv_adapter
 print(json.dumps({"root": str(config.ROOT), "assets": str(config.ASSETS), "state": str(config.STATE),
                   "installed": config.INSTALLED, "data": str(config.DATA), "advisories": str(config.ADVISORIES),
-                  "seccomp": str(sandbox_runner.SECCOMP_PROFILE), "runner": str(project_image.RUNNER_REQUIREMENTS),
+                  "seccomp": str(sandbox_image.SHARED_SECCOMP_PROFILE), "runner": str(project_image.RUNNER_REQUIREMENTS),
                   "workspace": str(settings.load_settings().workspace), "osv_cache": str(osv_adapter.OSV().cache),
                   "backend": config.__file__}))
 """

@@ -93,8 +93,8 @@ def integration_runs(tmp_path_factory):
     artifact_before=artifact.read_bytes() if artifact.is_file() else None
     svc=Service(tmp_path_factory.mktemp('integration')/'runtime');runs={}
     with fixed_advisory_clock():
-        for name in ('safe','satra_weak','satra_bypass','cross_module'):
-            run=svc.create(name);svc.analyze(run.run_id,auto_repair=name=='cross_module');runs[name]=svc.store.run(run.run_id)
+        for name in ('safe','satra_weak','satra_bypass'):
+            run=svc.create(name);svc.analyze(run.run_id);runs[name]=svc.store.run(run.run_id)
     yield svc,runs
     report={'note':'Actual executions from pytest; historical validation only, never dashboard seed data.','runs':{name:svc.report(run.run_id) for name,run in runs.items()}}
     # Write the executed-run report to the pytest session temp directory: ordinary

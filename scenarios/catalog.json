@@ -88,30 +88,5 @@
       "SABLE": "REGRESSED"
     },
     "ground_truth": "privilege widening"
-  },
-  {
-    "id": "cavr_canary",
-    "title": "Dormant capability violation",
-    "subtitle": "A pinned inert laboratory package reaches a loopback canary only after activation.",
-    "source": "CONTROLLED REPRODUCTION",
-    "group": "Dependency trust",
-    "expected": {
-      "CAVR": "REJECTED"
-    },
-    "ground_truth": "unexpected canary/network behavior"
-  },
-  {
-    "id": "cross_module",
-    "title": "Repair invalidates earlier evidence",
-    "subtitle": "Replace the lab adapter; observe SATRA become stale and run again.",
-    "source": "CONTROLLED REPRODUCTION",
-    "group": "Integrated assurance",
-    "expected": {
-      "CAVR": "VERIFIED",
-      "SATRA": "ACCEPT",
-      "SABLE": "PRESERVED"
-    },
-    "ground_truth": "verified replacement with rerouting",
-    "auto_repair": true
   }
 ]

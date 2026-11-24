@@ -136,6 +136,9 @@ Click on **RUN WORKFLOW** in the top navigation.
 ---
 
 ### Scenario 5: Cross-Module Invalidation & Auto-Repair (`cross_module`)
+
+> **Retired (2026-11-24, CAVR report notes Step M2-18).** This scenario used the LOCAL demo lab, which was deleted with the legacy CAVR sandbox (Q12); it is no longer in the catalog. The CAVR behaviour it showed is now shown on real wheels in the CAVR sandbox: `docs/cavr-demo.md`, "M2 demo: real wheels". The text below is the Final-1 record and is kept as it was.
+
 - **What is tested**: Candidate code introduces an unverified local lab dependency (`invoice_pdf_lab.py`) with sensitive triggers. Auto-repair is enabled.
 - **How to demonstrate**:
   1. Select `cross_module` (or trigger via API with `auto_repair=True`).
