@@ -248,10 +248,12 @@ def test_the_overview_of_a_run_without_a_download_names_the_rule_and_no_hash(das
 def test_the_requirements_tab_prints_what_a_stage_returned_and_no_pass_of_its_own(dashboard, tmp_path):
     blocked = run_data(dashboard, "not_on_allowlist")
     (table,) = render(tmp_path, {"view": "requirements", **blocked})
-    returned = lambda requirement: table[table.index(requirement):][5]     # id, name, description, module, event, returned
+    # id, name, description, module, tests, event, returned (PR 19 added the tests column)
+    returned = lambda requirement: table[table.index(requirement):][6]
     assert returned("FR-2") == "BLOCK (NOT_ON_ALLOWLIST)" and returned("FR-6") == "BLOCK (gate / NOT_ON_ALLOWLIST)"
     assert returned("FR-1") == "captured (" + blocked["proof"]["cavr_verdict"]["request"]["source"] + ")"
     assert [returned(requirement) for requirement in ("FR-3", "FR-4", "FR-5", "FR-7", "FR-8", "FR-9", "NFR-1", "NFR-2")] == [DASH] * 8
+    assert [returned(requirement) for requirement in ("FR-11", "FR-12", "FR-13", "FR-14", "FR-15", "NFR-3", "NFR-5")] == [DASH] * 7
     assert returned("FR-10") == blocked["proof"]["certificate_id"]
     assert "PASS" not in table and "FAIL" not in table and "NOT RUN" not in table
 
@@ -639,3 +641,91 @@ def test_hostile_text_in_the_graph_is_escaped_and_cut(dashboard, tmp_path, monke
     check_hostile_markup(markup, data["proof"]["run_id"])
     svg = markup[markup.index("<svg class=\"causal-svg\""):markup.index("</svg>", markup.index("<svg class=\"causal-svg\""))]
     assert LONG[:200] not in svg                     # SVG labels and titles are cut
+
+
+
+# --- PR 19: the requirements matrix ------------------------------------------------------------------------------------
+
+REQUIREMENT_IDS = [f"FR-{n}" for n in range(1, 16)] + [f"NFR-{n}" for n in range(1, 7)]
+
+
+def matrix_rows(table) -> dict:
+    """id -> [name, description, module, tests, event, returned] of each row."""
+    return {requirement: table[table.index(requirement) + 1:table.index(requirement) + 7] for requirement in REQUIREMENT_IDS}
+
+
+def test_the_matrix_has_every_fr_and_nfr_once_with_real_modules_and_tests(dashboard, tmp_path):
+    (table,) = render(tmp_path, {"view": "requirements", **run_data(dashboard, "not_on_allowlist")})
+    assert [piece for piece in table if re.fullmatch(r"N?FR-\d+", piece)] == REQUIREMENT_IDS
+    not_built = {"FR-9": "not implemented (PR 17, future work)", "FR-14": "not implemented (PR 14; enforcement is future work)"}
+    for requirement, (name, _, modules, tests, _, _) in matrix_rows(table).items():
+        if requirement in not_built:
+            assert modules == tests == not_built[requirement], requirement
+            continue
+        for module in modules.split(" / "):
+            path = REPO / module if "/" in module else REPO / "backend" / "cavr" / module
+            assert path.exists(), (requirement, module)
+        if requirement in ("NFR-2", "NFR-3"):
+            assert tests == "no test yet (PR 20)"
+            continue
+        for test in tests.split(", "):
+            assert (REPO / "tests" / test).is_file(), (requirement, test)
+    assert matrix_rows(table)["NFR-1"][0] == "Package code never runs as root; isolated sandbox"
+
+
+DEAD_MODULES = ("sandbox_runner.py", "counterfactual.py", "inspector.py", "triggers.py", "reconstructor.py", "normalizer.py",
+                "runtime_monitor.py", "harness.py", "lab_harness.py", "policy.py", "repair.py", "resolver.py", "reverifier.py",
+                "repair_engine.py", "trigger_discovery.py", "sandbox.py", "test_cavr_vendored_use.py", "test_cavr_runtime_monitor.py",
+                "test_cavr_sandbox_runner.py")
+
+
+def test_the_matrix_names_no_deleted_or_stub_module():
+    source = (FRONTEND / "src" / "components" / "cavr" / "RequirementsTab.tsx").read_text(encoding="utf-8")
+    named = set(re.findall(r"'([\w./-]+\.py)'", source))
+    assert named and not named & set(DEAD_MODULES)
+    assert not [name for name in DEAD_MODULES if re.search(rf"\b{re.escape(name)}\b", source)]
+
+
+def test_the_design_name_is_used_and_the_old_expansion_is_gone():
+    sources = {path.name: path.read_text(encoding="utf-8") for path in (FRONTEND / "src").rglob("*.ts*")}
+    assert [name for name, text in sources.items() if re.search(r"continuous artifact", text, re.I)] == []
+    assert "export const CAVR_NAME = 'Counterfactual Activation, Verified Repair & Recovery';" in sources["RequirementsTab.tsx"]
+    assert "CAVR module · {CAVR_NAME}" in sources["CavrModule.tsx"] and "<h4>{CAVR_NAME}: verification pipeline</h4>" in sources["CavrModule.tsx"]
+
+
+def test_the_page_header_shows_the_design_name(tmp_path):
+    (page,) = render(tmp_path, {"view": "page"})
+    # In the design document's own case: "VERIFIED" is a status word, and no status is printed before a run.
+    assert "CAVR module · Counterfactual Activation, Verified Repair & Recovery" in page
+    assert "Counterfactual Activation, Verified Repair & Recovery: verification pipeline" in page
+
+
+def test_the_scope_box_uses_the_design_name_and_marks_future_work_as_not_done(dashboard, tmp_path):
+    (table,) = render(tmp_path, {"view": "requirements", **run_data(dashboard, "verified")})
+    assert "CAVR: Counterfactual Activation, Verified Repair & Recovery" in table and "Not done (future work):" in table
+    assert "npm, eBPF observation, Tree-sitter parsing, Sigstore provenance" in table
+    assert "Supply chain typosquatting & homoglyphs" not in table
+
+
+def test_the_matrix_of_recorded_deep_runs_shows_their_values(dashboard, tmp_path):
+    rejected, verified, unresolved = (render(tmp_path, {"view": "requirements", **recorded_data(dashboard, name)})[0]
+                                      for name in ("env_ci", "benign_triggered", "budget"))
+    row = lambda table, requirement: matrix_rows(table)[requirement][5]
+    evidence = deep_evidence(RECORDED_FILE["runs"], "env_ci")
+    assert row(rejected, "FR-4") == "2 run(s), stop: violation"
+    assert row(rejected, "FR-5") == (f"{evidence['causal']['counts']['nodes']} nodes, {evidence['causal']['counts']['edges']} edges; "
+                                     "caused by CI=true")
+    assert row(rejected, "FR-6") == "REJECTED (deep / DEEP_CONTRACT_VIOLATION)"
+    assert row(rejected, "FR-7") == "NOT_ATTEMPTED"
+    assert row(rejected, "FR-11") == "HASH_MATCH / TREE_BUILT / NO_KNOWN_VULNERABILITY"
+    assert row(rejected, "FR-12") == "FRONTIER_COMPLETE: 1 trigger(s)"
+    assert row(rejected, "FR-13") == "run 1 OK, run 2 VIOLATION"
+    assert row(rejected, "FR-15") == "asent gate BLOCK (exit 1), recorded"
+    assert row(rejected, "NFR-1") == f"image {RECORDED_FILE['image_id'][:19]}…; 2 run(s), HOME removed after each: true"
+    assert row(rejected, "NFR-5") == "9, 9 canary id(s) per run"
+    # The request-level verdict of an all-VERIFIED request is ALL_CHECKS_PASSED; the deep rule is the package's.
+    assert row(verified, "FR-6") == "VERIFIED (verdict / ALL_CHECKS_PASSED)" and row(verified, "FR-4") == "2 run(s), stop: done" and row(verified, "FR-15") == "asent gate ACCEPT (exit 0), recorded"
+    assert row(unresolved, "FR-4") == "8 run(s), stop: runs" and row(unresolved, "FR-15") == "asent gate REVIEW (exit 2), recorded"
+    for table in (rejected, verified, unresolved):
+        assert [row(table, requirement) for requirement in ("FR-9", "FR-14", "NFR-2", "NFR-3")] == [DASH] * 4
+    assert "PASS" not in rejected and "FAIL" not in rejected

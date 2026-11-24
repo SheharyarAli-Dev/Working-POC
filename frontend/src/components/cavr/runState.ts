@@ -18,7 +18,6 @@ export const EMPTY_RUN: CavrRunState = {
   resolution: null,
   cacheResult: null,
   actionData: null,
-  counterfactualResults: null,
   causalGraph: null,
   violatingPaths: null,
   repair: null,
@@ -64,8 +63,6 @@ export const applyEvent = (prev: CavrRunState, ev: any): CavrRunState => {
     updated.actionData = payload;
   } else if (type === 'deep_completed') {
     updated.deepPackages = payload.packages || null;
-  } else if (type === 'counterfactual_completed') {
-    updated.counterfactualResults = payload.counterfactual_results;
   } else if (type === 'verdict_computed') {
     updated.verdict = payload.verdict;
     updated.policyState = payload.policy_state;

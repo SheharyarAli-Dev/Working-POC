@@ -11,7 +11,7 @@ import { Timeline } from './cavr/Timeline';
 import { ProofDrawer } from './cavr/ProofDrawer';
 import { StageDetailPanel } from './cavr/StageDetailPanel';
 import { OverviewTab } from './cavr/OverviewTab';
-import { RequirementsTab } from './cavr/RequirementsTab';
+import { RequirementsTab, CAVR_NAME } from './cavr/RequirementsTab';
 import { CapabilityContractTab } from './cavr/CapabilityContractTab';
 import { TriggersTab } from './cavr/TriggersTab';
 import { DeepAnalysisTab, packageViews } from './cavr/DeepAnalysisTab';
@@ -301,13 +301,13 @@ export const CavrModule: React.FC = () => {
       <div className="cavr-header-row">
         <div>
           <div className="cavr-eyebrow">
-            <span className="module-pulse-dot" /> CAVR MODULE · CONTINUOUS ARTIFACT VERIFICATION &amp; RUNTIME
+            <span className="module-pulse-dot" /> CAVR module · {CAVR_NAME}
           </div>
           <h2 className="cavr-title">CAVR</h2>
           <p className="cavr-subtitle">
-            Research-grade package assurance gate. Intercepts agent dependencies,
-            derives deterministic capability contracts, adaptively triggers dormant paths via
-            counterfactual synthesis, and proves trust with cryptographic evidence chains.
+            Package assurance gate for AI coding agents. Intercepts each dependency request,
+            checks the exact artifact and the project's capability contract, runs an escalated package
+            under counterfactual conditions in the CAVR sandbox, and hash-chains the evidence of every step.
           </p>
         </div>
 
@@ -419,7 +419,7 @@ export const CavrModule: React.FC = () => {
               <span className={`status-dot ${isRunning ? 'pulsing' : ''}`} />
               {isRunning ? 'RUN IN PROGRESS' : 'FAST GATE'}
             </span>
-            <h4>Continuous Artifact Verification &amp; Runtime Pipeline</h4>
+            <h4>{CAVR_NAME}: verification pipeline</h4>
             <p>
               {explainSimply
                 ? 'Each request below is really checked. The six steps show what the check returned; a step that did not run shows a dash.'

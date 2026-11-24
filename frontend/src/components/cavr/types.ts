@@ -21,7 +21,6 @@ export interface CavrRunState {
   resolution: any | null;
   cacheResult: any | null;
   actionData: any | null;
-  counterfactualResults: any | null;
   causalGraph: any | null;
   violatingPaths: any[] | null;
   repair: RepairBlock | null;
