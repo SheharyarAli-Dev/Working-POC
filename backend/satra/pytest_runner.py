@@ -38,10 +38,64 @@ def container_user_args(engine):
         return ['--user', f'{os.getuid()}:{os.getgid()}']
     return []
 
-# Trusted gate runs (docs/satra/harness-isolation.md): the base tests and ini are mounted read-only at
+# [owner review: SATRA] Trusted gate runs (docs/satra/harness-isolation.md): the base tests and ini are mounted read-only at
 # /trusted, the head at /work, and pytest starts from /trusted with every head config source switched off.
 TRUSTED_PLUGIN='asent_satra_trusted_run'
 TRUSTED_PYTHON=['python','-P','-s','-m','pytest']
+
+# [owner review: SATRA] SATRA-specific seccomp profile with runc, pytest, and asyncio syscalls; shared profile preserved for CAVR
+SECCOMP_PROFILE = (ASSETS / "docker" / "satra-seccomp.json").resolve()
+SHARED_SECCOMP_PROFILE = (ASSETS / "docker" / "asent-seccomp.json").resolve()
+
+
+def validate_seccomp_profile(profile_path):
+    """Validate that the seccomp profile exists, is readable, and is a valid JSON object with required fields.
+
+    Returns (Path, None) on success; (None, error_str) on failure.
+    """
+    if profile_path is None:
+        return None, None
+    try:
+        path = Path(profile_path).resolve()
+    except Exception as exc:
+        return None, f"invalid profile path: {exc}"
+    if not path.is_file():
+        return None, f"seccomp profile not found at {path}"
+    if not os.access(path, os.R_OK):
+        return None, f"seccomp profile not readable at {path}"
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            return None, f"seccomp profile must be a JSON object: {path}"
+        if "defaultAction" not in data or "syscalls" not in data:
+            return None, f"seccomp profile missing defaultAction or syscalls: {path}"
+    except Exception as exc:
+        return None, f"invalid seccomp profile JSON at {path}: {exc}"
+    return path, None
+
+
+def get_seccomp_docker_args(profile_path=None):
+    """Resolve seccomp requirement into Docker arguments, failing closed on missing/invalid profiles.
+
+    Returns (args_list, error_str).
+    """
+    req = profile_path
+    if req is None:
+        env_val = os.environ.get("SATRA_SECCOMP", "").strip().lower()
+        if env_val in ("1", "true", "yes", "require", "required"):
+            req = True
+        elif os.environ.get("ASENT_SECCOMP_PROFILE"):
+            req = os.environ["ASENT_SECCOMP_PROFILE"]
+
+    if not req:
+        return [], None
+
+    target = SECCOMP_PROFILE if req is True else req
+    path, err = validate_seccomp_profile(target)
+    if err is not None:
+        return [], err
+    return ["--security-opt", f"seccomp={path}"], None
+
 
 
 def _trusted_layout(base,trusted_tests_dir,pytest_ini,trusted_data=None):
@@ -114,7 +168,7 @@ def _load_results(xml,exit_code):
     return tests,None,data
 
 
-def run_pytest(root,output,selected='all',trusted=False,trusted_tests_dir=None,external=False,targets=None,pytest_ini=None,image='asent-sandbox:local',timeout=40,memory='512m',trusted_data=None):
+def run_pytest(root,output,selected='all',trusted=False,trusted_tests_dir=None,external=False,targets=None,pytest_ini=None,image='asent-sandbox:local',timeout=40,memory='512m',trusted_data=None,seccomp=None):
     # Gate runs pass external=True (never on the host, whatever the files), trusted_tests_dir (the
     # base .asent/ tests), targets (explicit project test paths), pytest_ini (the trusted ini), and
     # image/timeout/memory from backend.satra.project_image (the per-project image and base limits).
@@ -125,6 +179,9 @@ def run_pytest(root,output,selected='all',trusted=False,trusted_tests_dir=None,e
     start=time.perf_counter();output=Path(output);output.mkdir(parents=True,exist_ok=True)
     caps=availability();engine=next((e for e in ('docker','podman') if caps[e]['available']),None)
     if not engine and (external or not permitted_builtin(root)):return {'available':False,'exit_code':None,'reason':'External/modified code requires Docker/Podman; host execution is limited to hash-pinned bundled sources','tests':[]}
+    seccomp_args, seccomp_err = get_seccomp_docker_args(seccomp) if engine else ([], None)
+    if seccomp_err:
+        return {'available': False, 'exit_code': None, 'reason': f'Seccomp security check failed: {seccomp_err}', 'tests': []}
     shm,location=_results_parent()
     with tempfile.TemporaryDirectory(prefix='asent-pytest-') as d,tempfile.TemporaryDirectory(prefix='asent-results-',dir=shm,ignore_cleanup_errors=True) as fresh:
         work=copy_tree(root,Path(d)/'project');results=Path(fresh)
@@ -158,12 +215,12 @@ def run_pytest(root,output,selected='all',trusted=False,trusted_tests_dir=None,e
             # appends the head to the end of sys.path (backend/satra/trusted_run_plugin.py).
             args=['-q','-o','addopts=','-c','/trusted/pytest.ini','--rootdir=/trusted','--confcutdir=/trusted','-p','no:cacheprovider','-p',TRUSTED_PLUGIN,
                   '--junitxml=/results/results.xml',*['/trusted/'+t for t in targets]]
-            cmd=[engine,'run','--rm',*container_user_args(engine),'--network','none','--read-only','--cap-drop','ALL','--security-opt','no-new-privileges','--memory',memory,'--cpus','1','--pids-limit','64','--tmpfs','/tmp:rw,nosuid,size=64m',
+            cmd=[engine,'run','--rm',*container_user_args(engine),'--network','none','--read-only','--cap-drop','ALL','--security-opt','no-new-privileges',*seccomp_args,'--memory',memory,'--cpus','1','--pids-limit','64','--tmpfs','/tmp:rw,nosuid,size=64m',
                  '-v',str(work)+':/work:rw','-v',str(suite)+':/trusted:ro','-v',str(plugin)+':/asent:ro','-v',str(results)+':/results:rw','-w','/work',
                  '-e','PYTEST_DISABLE_PLUGIN_AUTOLOAD=1','-e','PYTHONPATH=/asent','-e','ASENT_SATRA_TRUSTED=/trusted','-e','ASENT_SATRA_HEAD=/work',image,*TRUSTED_PYTHON,*args]
         elif engine:
             args=['-q','-o','addopts=',*(['-c','/work/'+ini] if ini else []),'--junitxml=/results/results.xml',*targets]
-            cmd=[engine,'run','--rm',*container_user_args(engine),'--network','none','--read-only','--cap-drop','ALL','--security-opt','no-new-privileges','--memory',memory,'--cpus','1','--pids-limit','64','--tmpfs','/tmp:rw,nosuid,size=64m','-v',str(work)+':/work:rw','-v',str(results)+':/results:rw','-w','/work','-e','PYTEST_DISABLE_PLUGIN_AUTOLOAD=1',image,'python','-m','pytest',*args]
+            cmd=[engine,'run','--rm',*container_user_args(engine),'--network','none','--read-only','--cap-drop','ALL','--security-opt','no-new-privileges',*seccomp_args,'--memory',memory,'--cpus','1','--pids-limit','64','--tmpfs','/tmp:rw,nosuid,size=64m','-v',str(work)+':/work:rw','-v',str(results)+':/results:rw','-w','/work','-e','PYTEST_DISABLE_PLUGIN_AUTOLOAD=1',image,'python','-m','pytest',*args]
         else:
             cmd=[sys.executable,'-I',str(ROOT/'backend/satra/runner_entry.py'),str(work),*args]
         env={'PATH':os.environ.get('PATH','/usr/bin:/bin'),'HOME':str(work),'LANG':'C.UTF-8','PYTEST_DISABLE_PLUGIN_AUTOLOAD':'1','PYTHONDONTWRITEBYTECODE':'1'}
@@ -177,8 +234,9 @@ def run_pytest(root,output,selected='all',trusted=False,trusted_tests_dir=None,e
             (output/'stdout.log').write_text(result.stdout);(output/'stderr.log').write_text(result.stderr)
             tests,problem,data=_load_results(results/'results.xml',result.returncode)
             backend=engine or 'HASH_PINNED_BUILTIN_SUBPROCESS'
-            evidence={'backend':backend,'command':list(cmd),'results_location':location,'removed_results_files':removed,'stdout':result.stdout[-10000:],'stderr':result.stderr[-2000:]}
+            evidence={'backend':backend,'command':list(cmd),'results_location':location,'removed_results_files':removed,'seccomp_args':list(seccomp_args),'stdout':result.stdout[-10000:],'stderr':result.stderr[-2000:]}
             if problem:return {'available':False,'exit_code':None,'pytest_exit_code':result.returncode,'reason':problem,'tests':[],**evidence}
             (output/'junit.xml').write_bytes(data)
-            return {'available':True,'exit_code':result.returncode,'tests':tests,'passed':sum(t['status']=='PASS' for t in tests),'failed':sum(t['status']=='FAIL' for t in tests),'errors':sum(t['status']=='ERROR' for t in tests),'skipped':sum(t['status']=='SKIP' for t in tests),'duration_ms':round((time.perf_counter()-start)*1000,2),'isolation':'container with network none' if engine else 'Known bundled sources only; isolated temp workspace, sanitized environment, resource limits and network/process audit restrictions; not an arbitrary-code sandbox','junit_path':str(output/'junit.xml'),'junit_sha256':digest(data),**evidence}
+            isolation=('container with network none and seccomp' if seccomp_args else 'container with network none') if engine else 'Known bundled sources only; isolated temp workspace, sanitized environment, resource limits and network/process audit restrictions; not an arbitrary-code sandbox'
+            return {'available':True,'exit_code':result.returncode,'tests':tests,'passed':sum(t['status']=='PASS' for t in tests),'failed':sum(t['status']=='FAIL' for t in tests),'errors':sum(t['status']=='ERROR' for t in tests),'skipped':sum(t['status']=='SKIP' for t in tests),'duration_ms':round((time.perf_counter()-start)*1000,2),'isolation':isolation,'junit_path':str(output/'junit.xml'),'junit_sha256':digest(data),**evidence}
         except Exception as e:return {'available':False,'exit_code':None,'reason':str(e),'tests':[]}

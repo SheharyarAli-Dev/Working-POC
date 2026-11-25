@@ -32,7 +32,7 @@ RUNNER_REQUIREMENTS = ASSETS / "docker/satra-runner.requirements.txt"
 PROJECT_REPOSITORY = "asent-satra-project"
 # Bump when the generated Dockerfile or requirements format changes: images built by older code
 # then get a different key and are never reused.
-BUILDER_VERSION = "1"
+BUILDER_VERSION = "2"
 LABEL_PREFIX = "org.asent.satra."
 LABEL_KEY = LABEL_PREFIX + "key"
 BUILD_TIMEOUT = 900
@@ -40,7 +40,7 @@ BUILD_TIMEOUT = 900
 # off unless this is exactly "1" (local development). Shipped workflows never set it.
 REUSE_ENV = "ASENT_SATRA_REUSE_IMAGES"
 PROBE_TIMEOUT = 60
-PIP_FLAGS = "--no-cache-dir --disable-pip-version-check --require-hashes --no-deps --only-binary :all:"
+PIP_FLAGS = "--no-cache-dir --disable-pip-version-check --retries 3 --require-hashes --no-deps --only-binary :all:"
 PROBE = ("import json, platform; from packaging import tags; "
          "print(json.dumps({'python': platform.python_version(), 'tags': [str(t) for t in tags.sys_tags()]}))")
 
@@ -288,6 +288,67 @@ def _dockerfile(requirements_text):
     return "\n".join(lines) + "\n"
 
 
+def classify_build_failure(tail: str, returncode: int) -> tuple[str, str]:
+    """Classify a pip image build failure from its log tail and returncode.
+
+    Returns (classification, reason) where classification is one of:
+      - 'hash_mismatch': package hash did not match lockfile
+      - 'network_failure': transient network drop, timeout, or DNS resolution failure
+      - 'incompatible_wheel': wheel not compatible with interpreter/platform tags
+      - 'build_failed': other failure (e.g., missing package or pip syntax error)
+
+    The reason string always begins with 'gate image build failed (exit <returncode>); '
+    for consistent error handling and test verification.
+    """
+    upper = tail.upper()
+    lower = tail.lower()
+
+    if "DO NOT MATCH THE HASHES" in upper or "HASH MISMATCH" in upper:
+        return (
+            "hash_mismatch",
+            f"gate image build failed (exit {returncode}); package hashes do not match the lockfile hashes",
+        )
+
+    network_indicators = (
+        "connectionerror",
+        "maxretryerror",
+        "newconnectionerror",
+        "readtimeout",
+        "connecttimeout",
+        "temporary failure in name resolution",
+        "name or service not known",
+        "network is unreachable",
+        "network unreachable",
+        "failed to establish a new connection",
+        "connection reset by peer",
+        "remote disconnected",
+        "connection refused",
+    )
+    if any(ind in lower for ind in network_indicators) or "timed out" in lower or "timedout" in lower:
+        return (
+            "network_failure",
+            f"gate image build failed (exit {returncode}); pip lost network connection while fetching "
+            "wheels from PyPI (e.g. network drop, DNS failure, or connection timeout)",
+        )
+
+    wheel_indicators = (
+        "is not a supported wheel on this platform",
+        "none of the wheel's tags match",
+        "not a supported wheel",
+    )
+    if any(ind in lower for ind in wheel_indicators):
+        return (
+            "incompatible_wheel",
+            f"gate image build failed (exit {returncode}); wheel is not compatible with the runner Python/platform tags",
+        )
+
+    return (
+        "build_failed",
+        f"gate image build failed (exit {returncode}); pip refuses wheels that are missing, "
+        "do not fit this Python/platform, or do not match the lockfile hashes",
+    )
+
+
 def prepare(base_dir, config, engine) -> dict:
     """The gate image for this base commit, built FROM the runner with the install plan's requirements.
     Every build passes --no-cache, so no layer comes from the engine's build cache. Only when
@@ -343,9 +404,10 @@ def prepare(base_dir, config, engine) -> dict:
                     "reason": f"gate image build could not start: {exc}", "build_log_tail": ""}
     tail = ((done.stdout or "") + (done.stderr or ""))[-4000:]
     if done.returncode != 0:
+        classification, failure_reason = classify_build_failure(tail, done.returncode)
         return {**evidence, "status": "INCONCLUSIVE", "requirements_text": None, "reused": False, "build_log_tail": tail,
-                "reason": f"gate image build failed (exit {done.returncode}); pip refuses wheels that are missing, "
-                          "do not fit this Python/platform, or do not match the lockfile hashes"}
+                "build_failure_classification": classification,
+                "reason": failure_reason}
     if not built_right(_inspect(engine, tag)):
         return {**evidence, "status": "INCONCLUSIVE", "requirements_text": None, "reused": False, "build_log_tail": tail,
                 "reason": "built gate image does not carry the expected labels on top of the SATRA runner layers"}
