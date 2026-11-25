@@ -498,3 +498,38 @@ def test_run_report_and_check_end_to_end_offline(tmp_path):
 def test_run_refuses_an_unknown_item_id(tmp_path):
     with pytest.raises(SystemExit, match="unknown item"):
         ev.run(tmp_path, only={"no-such-item"}, allow_dirty=True, sandbox=False)
+
+
+# --- defects found by the first live attempt (Step M2-22) -----------------------------------------------------------
+
+def test_expectations_are_compared_with_the_package_rule_not_the_request_rule():
+    """Defect 1: an all-VERIFIED request's rule is always ALL_CHECKS_PASSED; the wheels' tested rule is the package's."""
+    item = wheel_item("driven_verify")
+    deep = {"status": "VERIFIED", "rule": "DEEP_RUN_CLEAN", "runs": 1, "frontier": 0, "explored": 0, "from_cache": False}
+    got = result("VERIFIED", "ALL_CHECKS_PASSED", deep=deep) | {"package_stage": "deep", "package_rule": "DEEP_RUN_CLEAN"}
+    assert ev.compare(item, got, got | {"run": 2}) == []
+    assert ev.decided(got) == ("deep", "DEEP_RUN_CLEAN") and ev._verdict(got) == "VERIFIED DEEP_RUN_CLEAN"
+    wrong = got | {"package_rule": "DEEP_SINK_NOT_EXERCISED"}
+    assert ev.compare(item, wrong) == ["rule DEEP_SINK_NOT_EXERCISED != expected DEEP_RUN_CLEAN"]
+    assert ev.decided(result()) == ("verdict", "ALL_CHECKS_PASSED")  # an older row without package fields
+
+
+def test_a_real_item_records_osv_answers_from_the_directory_the_gate_writes(tmp_path):
+    """Defect 2: the live world's snapshot directory is the advisory cache directory the gate and repair are given."""
+    world = ev.live_world(real_item(), tmp_path)
+    assert world["advisory_cache_dir"] == world["osv_dir"] and world["live_advisories"] is True
+
+
+def test_an_osv_answer_used_but_not_recorded_is_reported(tmp_path):
+    item = real_item(id="tiny-1.0", requirement="tiny==1.0", app="import tiny\n\n\ndef go():\n    return tiny.run()\n")
+    index = FakeIndex()
+    index.add("tiny", "1.0", build_wheel(tmp_path / "wheels", "tiny", "1.0", files={"tiny/__init__.py": "def run():\n    return 1\n"}))
+    osv = tmp_path / "osv"
+    write_osv_cache(osv, "tiny", "1.0", [])
+    world = offline_world(index, osv)
+    first = ev.gate_once(item, ev.make_repo(item, tmp_path / "w"), tmp_path / "w", world, 1)
+    assert first["package_rule"] == "ALL_CHECKS_PASSED" and first["advisories"][0]["response_sha256"]
+    assert ev.unrecorded_answers(first, ev.osv_snapshot(world["osv_dir"])) == []
+    (problem,) = ev.unrecorded_answers(first, {})
+    assert "tiny 1.0" in problem and "not recorded" in problem
+    assert ev.unrecorded_answers({"run": 1, "error": "boom"}, {}) == []

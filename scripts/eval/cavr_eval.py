@@ -16,7 +16,8 @@ stage times come from wrappers put around the pipeline's stage functions for the
 `backend/` is edited); calls made by repair's own re-verification count as repair, not as fast-gate stages. It
 refuses to run with uncommitted changes to tracked files, so the recorded commit is the code (and the expectations)
 that ran. Every result is compared with the expectation written in the corpus before the run; a mismatch is
-recorded and printed, never adjusted, and makes the exit code 3.
+recorded and printed, never adjusted, and makes the exit code 3; an OSV answer that was used but not
+recorded makes it 4.
 
 What is saved so the numbers can be checked later (docs/evaluation/recordings/):
 
@@ -317,8 +318,11 @@ def live_world(item: dict, workdir: Path) -> dict:
         write_osv_cache(osv, "pypdf", PIN_VERSION, RECORDED_6_21_4)
         return {"transport": RecordingTransport(index), "advisory_cache_dir": osv, "live_advisories": False,
                 "deep": "sandbox", "osv_dir": osv}
-    return {"transport": RecordingTransport(), "advisory_cache_dir": None, "live_advisories": True, "deep": "sandbox",
-            "osv_dir": workdir / "data" / "cavr" / "advisories"}
+    # An explicit advisory cache directory: the gate and repair write OSV's answers exactly where they are recorded
+    # from (the first live attempt read a directory the gate does not use, and saved no answer; findings, Step M2-22).
+    osv = workdir / "osv-live"
+    return {"transport": RecordingTransport(), "advisory_cache_dir": osv, "live_advisories": True, "deep": "sandbox",
+            "osv_dir": osv}
 
 
 def make_repo(item: dict, workdir: Path):
@@ -392,6 +396,9 @@ def extract(verdict: dict, row, report: dict, code, gate_ms, stage_ms: dict, dee
     tree = evidence.get("tree") or {}
     return {
         "run": run_number, "status": verdict.get("status"), "stage": verdict.get("stage"), "rule": verdict.get("rule"),
+        # The requested package's own stage and rule. The request-level rule of an all-VERIFIED request is always
+        # ALL_CHECKS_PASSED; the package's is the rule that decided it (DEEP_RUN_CLEAN after the deep stage).
+        "package_stage": package.get("stage"), "package_rule": package.get("rule"),
         "reason": verdict.get("reason"), "decision": report.get("decision"), "exit_code": code,
         "package": package.get("package"), "version": package.get("version"),
         "cache_hit": bool(package.get("cache_hit")), "cache": package.get("cache"),
@@ -407,7 +414,11 @@ def extract(verdict: dict, row, report: dict, code, gate_ms, stage_ms: dict, dee
         "deep_stage": deep_stage,
         "repair": None if not isinstance(repair, dict) else {
             "result": repair.get("result"), "rule": repair.get("rule"), "reason": repair.get("reason"), "pin": repair.get("pin"),
-            "candidates_tried": len(repair.get("candidates_tried") or [])},
+            "candidates_tried": len(repair.get("candidates_tried") or []),
+            # Why each newer release was left out (rule, advisory ids), and the package-wide OSV answer it was judged on.
+            "excluded": repair.get("excluded") or [], "advisory_screen": repair.get("advisory_screen"),
+            "tried": [{key: c.get(key) for key in ("version", "outcome", "status", "stage", "rule")}
+                      for c in repair.get("candidates_tried") or [] if isinstance(c, dict)]},
         "artifact": {key: (evidence.get("artifact") or {}).get(key) for key in ("filename", "sha256", "registry_sha256", "rule")},
         "tree": {"result": tree.get("result"), "rule": tree.get("rule"),
                  "nodes": [{key: node.get(key) for key in ("name", "version", "sha256")} for node in tree.get("nodes") or []]},
@@ -479,10 +490,10 @@ def compare(item: dict, first: dict, second: dict | None = None) -> list[str]:
         return [f"run 1 failed: {first['error']}"]
     if first["status"] != expected["status"]:
         problems.append(f"status {first['status']} != expected {expected['status']}")
-    if expected["rule"] is not None and first["rule"] != expected["rule"]:
-        problems.append(f"rule {first['rule']} != expected {expected['rule']}")
-    if expected.get("stage") is not None and first["stage"] != expected["stage"]:
-        problems.append(f"stage {first['stage']} != expected {expected['stage']}")
+    if expected["rule"] is not None and decided(first)[1] != expected["rule"]:
+        problems.append(f"rule {decided(first)[1]} != expected {expected['rule']}")
+    if expected.get("stage") is not None and decided(first)[0] != expected["stage"]:
+        problems.append(f"stage {decided(first)[0]} != expected {expected['stage']}")
     if bool(first["deep"]) != bool(expected["deep"]):
         problems.append(f"deep stage ran: {bool(first['deep'])} != expected {bool(expected['deep'])}")
     got_repair = (first["repair"] or {}).get("result")
@@ -494,9 +505,23 @@ def compare(item: dict, first: dict, second: dict | None = None) -> list[str]:
     if second is not None:
         if "error" in second:
             problems.append(f"run 2 failed: {second['error']}")
-        elif (second["status"], second["rule"]) != (first["status"], first["rule"]):
-            problems.append(f"run 2 gave {second['status']} {second['rule']}, run 1 {first['status']} {first['rule']}")
+        elif (second["status"], decided(second)[1]) != (first["status"], decided(first)[1]):
+            problems.append(f"run 2 gave {second['status']} {decided(second)[1]}, run 1 {first['status']} {decided(first)[1]}")
     return problems
+
+
+def decided(result: dict) -> tuple:
+    """(stage, rule) of the requested package: what the expectations name. Falls back to the request level."""
+    return (result.get("package_stage") or result.get("stage"), result.get("package_rule") or result.get("rule"))
+
+
+def unrecorded_answers(result: dict, snapshot: dict) -> list[str]:
+    """Every OSV answer the run used (it has a response_sha256) that the recorded snapshot does not hold."""
+    if "error" in result:
+        return []
+    held = {value.get("response_sha256") for value in snapshot.values() if isinstance(value, dict)}
+    return [f"run {result['run']}: the OSV answer for {a['name']} {a['version']} ({a.get('mode')}) was not recorded"
+            for a in result.get("advisories") or [] if a.get("response_sha256") and a["response_sha256"] not in held]
 
 
 def run(out: Path, only=None, allow_dirty=False, world_for=live_world, sandbox=True) -> int:
@@ -532,15 +557,22 @@ def run(out: Path, only=None, allow_dirty=False, world_for=live_world, sandbox=T
         first, second = results
         baseline = osv_only(tree_nodes(first, item), snapshots[0]) if "error" not in first else None
         mismatches = compare(item, first, second)
+        unrecorded = [p for result, snapshot in zip(results, snapshots) for p in unrecorded_answers(result, snapshot)]
         rows.append({"id": item["id"], "set": item["set"], "group": group_of(item), "kind": item["kind"],
                      "requirement": item.get("requirement") or "demo==1.0", "reason": item["reason"],
-                     "expected": item["expected"], "runs": results, "osv_only": baseline, "mismatches": mismatches})
-        print(f"{item['id']}: {first.get('status')} {first.get('rule')} (exit {first.get('exit_code')})"
-              + (f"  MISMATCH: {'; '.join(mismatches)}" if mismatches else ""), file=sys.stderr)
+                     "expected": item["expected"], "runs": results, "osv_only": baseline, "mismatches": mismatches,
+                     "recording_problems": unrecorded})
+        print(f"{item['id']}: {first.get('status')} {decided(first)[1]} (exit {first.get('exit_code')})"
+              + (f"  MISMATCH: {'; '.join(mismatches)}" if mismatches else "")
+              + (f"  NOT RECORDED: {'; '.join(unrecorded)}" if unrecorded else ""), file=sys.stderr)
     header = environment(identity, started, corpus, only, allow_dirty)
     raw = {"schema": RAW_SCHEMA, **header, "items": rows}
     out.mkdir(parents=True, exist_ok=True)
     (out / RAW_NAME).write_text(json.dumps(raw, indent=1, sort_keys=True) + "\n", encoding="utf-8")
+    unrecorded = [row["id"] for row in rows if row["recording_problems"]]
+    if unrecorded:  # a used answer that cannot be checked later: the run does not meet its own requirement
+        print(f"{len(unrecorded)} item(s) have OSV answers that were not recorded: {', '.join(unrecorded)}", file=sys.stderr)
+        return 4
     mismatched = [row["id"] for row in rows if row["mismatches"]]
     if mismatched:
         print(f"{len(mismatched)} item(s) differ from their expectation: {', '.join(mismatched)}", file=sys.stderr)
@@ -592,7 +624,7 @@ def summarise(raw: dict) -> dict:
         found = {name: 0 for name, _ in UNRESOLVED_REASONS} | {OTHER_REASON: 0}
         for row in rows:
             if first[row["id"]]["status"] == "UNRESOLVED":
-                found[unresolved_reason(first[row["id"]]["rule"])] += 1
+                found[unresolved_reason(decided(first[row["id"]])[1])] += 1
         return found
 
     timing = {}
@@ -663,7 +695,7 @@ def csv_rows(raw: dict) -> list[dict]:
         deep, repair = one.get("deep") or {}, one.get("repair") or {}
         rows.append({
             "id": row["id"], "set": row["set"], "group": row["group"], "kind": row["kind"], "requirement": row["requirement"],
-            "status": one.get("status"), "stage": one.get("stage"), "rule": one.get("rule"), "decision": one.get("decision"),
+            "status": one.get("status"), "stage": decided(one)[0], "rule": decided(one)[1], "decision": one.get("decision"),
             "exit_code": one.get("exit_code"), "expected_status": row["expected"]["status"],
             "expected_rule": row["expected"]["rule"] or "(not predicted)", "matches_expectation": not row["mismatches"],
             "fast_status": (one.get("fast") or {}).get("status"), "fast_rule": (one.get("fast") or {}).get("rule"),
@@ -709,7 +741,7 @@ def _ms(value) -> str:
 
 
 def _verdict(run_result) -> str:
-    return f"{run_result.get('status')} {run_result.get('rule')}"
+    return f"{run_result.get('status')} {decided(run_result)[1]}"
 
 
 def md_environment(raw: dict) -> str:
