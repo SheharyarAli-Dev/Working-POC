@@ -299,7 +299,7 @@ def test_build_context_holds_only_the_dockerfile_and_the_hashed_requirements(tmp
     dockerfile = context["Dockerfile"]
     assert dockerfile.splitlines()[0] == "FROM " + project_image.RUNNER_IMAGE
     install = " ".join(dockerfile.split("RUN", 1)[1].split())
-    for flag in ("--require-hashes", "--no-deps", "--only-binary :all:", "-r /opt/asent/project-requirements.txt"):
+    for flag in ("--require-hashes", "--no-deps", "--only-binary :all:", "--retries 3", "-r /opt/asent/project-requirements.txt"):
         assert flag in install
     assert "pip install ." not in dockerfile and " -e " not in dockerfile and dockerfile.count("COPY") == 1
     [build] = fake.builds()
@@ -400,6 +400,79 @@ def test_build_failure_is_inconclusive_with_the_end_of_the_log(tmp_path, engine)
     result = prepare(tmp_path)
     inconclusive(result, "build failed")
     assert "DO NOT MATCH THE HASHES" in result["build_log_tail"]
+    assert result["build_failure_classification"] == "hash_mismatch"
+
+
+def test_dockerfile_uses_pip_retries():
+    dockerfile = project_image._dockerfile("six==1.17.0\n")
+    assert "--retries 3" in dockerfile
+    assert "--require-hashes" in dockerfile
+    assert "--no-deps" in dockerfile
+    assert "--only-binary :all:" in dockerfile
+
+
+def test_classify_build_failure_hash_mismatch():
+    tail = "ERROR: THESE PACKAGES DO NOT MATCH THE HASHES FROM THE REQUIREMENTS FILE."
+    kind, reason = project_image.classify_build_failure(tail, 1)
+    assert kind == "hash_mismatch"
+    assert "build failed" in reason
+    assert "hashes do not match" in reason
+
+
+def test_classify_build_failure_network_drop():
+    tail = (
+        "WARNING: Retrying (Retry(total=2, connect=None, read=None, redirect=None, status=None)) "
+        "after connection broken by 'NewConnectionError': Failed to establish a new connection: "
+        "[Errno -3] Temporary failure in name resolution\n"
+        "ERROR: Could not find a version that satisfies the requirement six"
+    )
+    kind, reason = project_image.classify_build_failure(tail, 1)
+    assert kind == "network_failure"
+    assert "build failed" in reason
+    assert "network connection" in reason
+
+
+def test_classify_build_failure_ambiguous_resolution_is_build_failed():
+    tail = (
+        "ERROR: Could not find a version that satisfies the requirement missingpkg==9.9.9 (from versions: none)\n"
+        "ERROR: No matching distribution found for missingpkg==9.9.9"
+    )
+    kind, reason = project_image.classify_build_failure(tail, 1)
+    assert kind == "build_failed"
+    assert "build failed" in reason
+    assert "pip refuses wheels" in reason
+
+
+def test_classify_build_failure_incompatible_wheel():
+    tail = "ERROR: six-1.17.0-cp314-cp314-manylinux.whl is not a supported wheel on this platform."
+    kind, reason = project_image.classify_build_failure(tail, 1)
+    assert kind == "incompatible_wheel"
+    assert "build failed" in reason
+    assert "not compatible" in reason
+
+
+def test_build_failure_network_drop_reported_in_prepare(tmp_path, engine):
+    engine(
+        build_code=1,
+        build_stderr="pip._vendor.urllib3.exceptions.MaxRetryError: HTTPSConnectionPool: "
+                     "Failed to establish a new connection: [Errno -3] Temporary failure in name resolution",
+    )
+    result = prepare(tmp_path)
+    inconclusive(result, "build failed")
+    assert result["build_failure_classification"] == "network_failure"
+    assert "network connection" in result["reason"]
+
+
+def test_build_failure_ambiguous_resolution_reported_as_build_failed(tmp_path, engine):
+    engine(
+        build_code=1,
+        build_stderr="ERROR: Could not find a version that satisfies the requirement badpkg==1.0\n"
+                     "ERROR: No matching distribution found for badpkg==1.0",
+    )
+    result = prepare(tmp_path)
+    inconclusive(result, "build failed")
+    assert result["build_failure_classification"] == "build_failed"
+    assert "pip refuses wheels" in result["reason"]
 
 
 def test_build_timeout_is_inconclusive(tmp_path, engine):
