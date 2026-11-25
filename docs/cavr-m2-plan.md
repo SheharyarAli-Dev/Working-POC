@@ -498,6 +498,13 @@ the evaluation script writes the metrics table for the report from real runs.
   ablations (no contract, no counterfactual, no graph, naive repair); a script that writes the metrics table for the
   report. No live malware (§16.2).
 - Docker: yes.
+- As planned for Phase 5b (Maryam, 2026-11-25), the reduced evaluation: `scripts/eval/cavr_eval.py` (run / report /
+  check) on the pinned corpus `scripts/eval/cavr_eval_corpus.json`: 13 real PyPI releases (8 clean: pure, native,
+  import-time; 5 known-vulnerable, confirmed on OSV on 2026-11-25) and the 14 synthetic M2 demo wheels (11 attacks,
+  3 benign controls). Each item twice through `asent gate` (deep "sandbox", repair on; run 2 = cache), stage times
+  from runtime wrappers, PyPI and OSV answers recorded, an OSV-only column from the same answers. Expectations are
+  written in the corpus and committed before the live run; a differing result is recorded as a mismatch, never
+  re-labelled. Outputs under `docs/evaluation/`. Baselines other than OSV-only, and the ablations, stay future work.
 
 ## Future work (out of M2, Q3)
 
