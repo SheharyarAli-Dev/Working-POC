@@ -645,15 +645,17 @@ def test_committed_results_regenerate_byte_for_byte_and_their_recordings_check(t
     assert ev.check(EVALUATION) == []
 
 
-def ancestry_unavailable(*commits):
-    """Why `git merge-base --is-ancestor` cannot answer here (a shallow checkout, as on CI, or a commit object not in
-    this clone), or None when it can."""
-    shallow = subprocess.run(["git", "-C", str(REPO), "rev-parse", "--is-shallow-repository"], capture_output=True, text=True)
+def assert_expectations_committed_before_run(repo, expectations_commit, commit):
+    """`expectations_commit` must be an ancestor of (or equal to) `commit`. Skipped only in a shallow checkout (CI),
+    where older history is absent by design. In a full clone a missing or made-up commit fails."""
+    shallow = subprocess.run(["git", "-C", str(repo), "rev-parse", "--is-shallow-repository"], capture_output=True, text=True)
     if shallow.stdout.strip() == "true":
-        return "shallow checkout (git rev-parse --is-shallow-repository = true)"
-    missing = [c for c in commits if subprocess.run(["git", "-C", str(REPO), "cat-file", "-e", f"{c}^{{commit}}"],
-                                                    capture_output=True).returncode != 0]
-    return f"commit object(s) not in this clone: {', '.join(missing)}" if missing else None
+        pytest.skip("expectations-before-run ancestry check not possible: shallow checkout "
+                    "(git rev-parse --is-shallow-repository = true); every other assertion ran")
+    ancestor = subprocess.run(["git", "-C", str(repo), "merge-base", "--is-ancestor", expectations_commit, commit],
+                              capture_output=True, text=True)
+    assert ancestor.returncode == 0, ("the expectations must be committed before (or in) the commit that ran: "
+                                      f"exit {ancestor.returncode} {ancestor.stderr.strip()}")
 
 
 @pytest.mark.skipif(not (EVALUATION / ev.RAW_NAME).is_file(), reason="no recorded evaluation committed")
@@ -665,11 +667,38 @@ def test_committed_results_name_the_expectations_commit_and_a_clean_tree():
     corpus = {item["id"]: item["expected"] for item in ev.load_corpus()["items"]}
     assert {row["id"]: row["expected"] for row in raw["items"]} == corpus
     assert raw["corpus_sha256"] == __import__("hashlib").sha256(ev.CORPUS.read_bytes()).hexdigest()
-    why = ancestry_unavailable(raw["expectations_commit"], raw["commit"])
-    if why:
-        pytest.skip(f"expectations-before-run ancestry check not possible: {why} (every other assertion ran)")
-    ancestor = subprocess.run(["git", "-C", str(REPO), "merge-base", "--is-ancestor", raw["expectations_commit"], raw["commit"]])
-    assert ancestor.returncode == 0, "the expectations must be committed before (or in) the commit that ran"
+    assert_expectations_committed_before_run(REPO, raw["expectations_commit"], raw["commit"])
+
+
+def two_commit_repo(tmp_path):
+    """A full (non-shallow) repo with two commits; returns (repo, first, second)."""
+    repo = tmp_path / "full"
+    git = ["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@example.invalid"]
+    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    for n in (1, 2):
+        (repo / "f.txt").write_text(str(n))
+        subprocess.run([*git, "add", "f.txt"], check=True)
+        subprocess.run([*git, "commit", "-q", "-m", str(n)], check=True)
+    first, second = (subprocess.run([*git, "rev-parse", ref], capture_output=True, text=True, check=True).stdout.strip()
+                     for ref in ("HEAD~1", "HEAD"))
+    return repo, first, second
+
+
+def test_ancestry_check_fails_on_a_made_up_commit_in_a_full_clone(tmp_path):
+    repo, first, second = two_commit_repo(tmp_path)
+    assert_expectations_committed_before_run(repo, first, second)  # a real ancestor passes
+    with pytest.raises(AssertionError, match="must be committed before"):
+        assert_expectations_committed_before_run(repo, second, first)  # wrong order fails
+    with pytest.raises(AssertionError, match="must be committed before"):
+        assert_expectations_committed_before_run(repo, "5936f33" + "0" * 33, second)  # made-up hash: fails, no skip
+
+
+def test_ancestry_check_skips_only_in_a_shallow_clone(tmp_path):
+    repo, _, second = two_commit_repo(tmp_path)
+    shallow = tmp_path / "shallow"
+    subprocess.run(["git", "clone", "-q", "--depth", "1", f"file://{repo}", str(shallow)], check=True)
+    with pytest.raises(pytest.skip.Exception, match="shallow checkout"):
+        assert_expectations_committed_before_run(shallow, "0" * 40, second)
 
 
 @pytest.mark.skipif(not (EVALUATION / ev.RAW_NAME).is_file(), reason="no recorded evaluation committed")

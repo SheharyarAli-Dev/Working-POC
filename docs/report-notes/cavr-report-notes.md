@@ -6683,6 +6683,15 @@ diagnosed without fixing CAVR. Branch `cavr-m2-eval`. Expectations were committe
   `34fd45c` with tests, then run again. Compared on 2026-11-25, the two attempts gave the same results; the discarded
   raw file was in a scratch directory that has since been cleared, so that comparison cannot be re-checked.
 - The time chart's first tick printed "0.0 ms" for 0.01 ms: `_tick`.
+- CI (2026-11-28), two failures in `tests/test_cavr_eval.py`. (1) `environment()` raised `FileNotFoundError` on a
+  runner with no `docker` program. `docker_output()` now catches it, and the run header records
+  `docker_version` as `"not available: <reason>"` and `containers_left` as `None`. Tests: docker absent from PATH,
+  and a docker that exits 1. (2) The ancestry check in
+  `test_committed_results_name_the_expectations_commit_and_a_clean_tree` failed because CI's shallow checkout does
+  not contain `5936f33`. `assert_expectations_committed_before_run` now skips only when
+  `git rev-parse --is-shallow-repository` is `true`; in a full clone a missing or made-up commit fails. Tests: a
+  made-up hash in a full clone fails, a shallow clone skips. `b8dc10b` and the follow-up commit; 72 passed in a
+  full clone and 72 with docker hidden from PATH.
 - Review (cavr-reviewer): 1 pass (stopped by the usage limit, resumed), fix first: 1 BLOCKER (four text facts) / 0 MAJOR / 11 MINOR; BLOCKER and 10 MINORs fixed, MINOR 9 resolved by rewording (discarded data lost); 0 open.
 
 ### Found, not fixed (reported to Maryam)
