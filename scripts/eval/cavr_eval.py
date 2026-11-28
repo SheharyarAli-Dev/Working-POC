@@ -4,6 +4,8 @@
     CAVR_DOCKER=1 .venv/bin/python scripts/eval/cavr_eval.py run       live: PyPI, OSV and the CAVR sandbox (Docker)
     .venv/bin/python scripts/eval/cavr_eval.py report                  offline: CSV, tables, SVG charts from the raw JSON
     .venv/bin/python scripts/eval/cavr_eval.py check                   offline: the recordings against the raw JSON
+    .venv/bin/python scripts/eval/cavr_eval.py repair-screen <item>    offline: repair's advisory screen against the
+                                                                       OSV specification, from the recordings
 
 The corpus is `cavr_eval_corpus.json` next to this file: real PyPI releases, each in a small project of its own
 (an app file that calls it with literal arguments, a policy, a lockfile that pins every child), and the 14 synthetic
@@ -17,7 +19,7 @@ stage times come from wrappers put around the pipeline's stage functions for the
 refuses to run with uncommitted changes to tracked files, so the recorded commit is the code (and the expectations)
 that ran. Every result is compared with the expectation written in the corpus before the run; a mismatch is
 recorded and printed, never adjusted, and makes the exit code 3; an OSV answer that was used but not
-recorded makes it 4.
+recorded makes it 4, and a HEAD that moved during the run makes it 5.
 
 What is saved so the numbers can be checked later (docs/evaluation/recordings/):
 
@@ -281,12 +283,20 @@ def git(*args) -> str:
     return subprocess.run(["git", "-C", str(REPO), *args], capture_output=True, text=True).stdout.strip()
 
 
+CODE_DIRECTORIES = ("backend", "scripts", "tests", "docker")
+
+
 def require_clean_tree(repo=REPO):
-    """Refuse to run when tracked files have uncommitted changes: the recorded commit must be the code that ran."""
+    """Refuse to run when tracked files have uncommitted changes, or untracked files sit where code is imported from:
+    the recorded commit must be the code that ran."""
     dirty = subprocess.run(["git", "-C", str(repo), "status", "--porcelain", "--untracked-files=no"],
                            capture_output=True, text=True).stdout.strip()
     if dirty:
         raise SystemExit(f"run needs a clean working tree (tracked changes):\n{dirty}")
+    untracked = subprocess.run(["git", "-C", str(repo), "status", "--porcelain", "--untracked-files=all", "--",
+                                *CODE_DIRECTORIES], capture_output=True, text=True).stdout.strip()
+    if untracked:
+        raise SystemExit(f"run needs a clean working tree (untracked files where code is imported from):\n{untracked}")
 
 
 def project_files(item: dict) -> tuple[dict, dict]:
@@ -534,6 +544,7 @@ def run(out: Path, only=None, allow_dirty=False, world_for=live_world, sandbox=T
     items = [item for item in corpus["items"] if not only or item["id"] in only]
     if only and len(items) != len(only):
         raise SystemExit(f"unknown item id(s): {', '.join(sorted(set(only) - {item['id'] for item in items}))}")
+    commit = git("rev-parse", "HEAD")  # the code that runs; checked again at the end
     identity = None
     if sandbox:
         from test_cavr_support import sandbox_identity
@@ -566,6 +577,9 @@ def run(out: Path, only=None, allow_dirty=False, world_for=live_world, sandbox=T
               + (f"  MISMATCH: {'; '.join(mismatches)}" if mismatches else "")
               + (f"  NOT RECORDED: {'; '.join(unrecorded)}" if unrecorded else ""), file=sys.stderr)
     header = environment(identity, started, corpus, only, allow_dirty)
+    if header["commit"] != commit:  # HEAD moved during the run: the header could name code that did not run
+        header["commit_problem"] = f"HEAD was {commit} at the start and {header['commit']} at the end"
+        header["commit"] = commit
     raw = {"schema": RAW_SCHEMA, **header, "items": rows}
     out.mkdir(parents=True, exist_ok=True)
     (out / RAW_NAME).write_text(json.dumps(raw, indent=1, sort_keys=True) + "\n", encoding="utf-8")
@@ -573,6 +587,9 @@ def run(out: Path, only=None, allow_dirty=False, world_for=live_world, sandbox=T
     if unrecorded:  # a used answer that cannot be checked later: the run does not meet its own requirement
         print(f"{len(unrecorded)} item(s) have OSV answers that were not recorded: {', '.join(unrecorded)}", file=sys.stderr)
         return 4
+    if header.get("commit_problem"):
+        print(header["commit_problem"], file=sys.stderr)
+        return 5
     mismatched = [row["id"] for row in rows if row["mismatches"]]
     if mismatched:
         print(f"{len(mismatched)} item(s) differ from their expectation: {', '.join(mismatched)}", file=sys.stderr)
@@ -618,6 +635,8 @@ def summarise(raw: dict) -> dict:
         return sum(1 for row in rows if first[row["id"]]["status"] == status)
 
     counts = {group: {status: count(rows, status) for status in STATUSES} | {"total": len(rows)} for group, rows in by_group.items()}
+    for group in GROUPS:  # an item whose run 1 failed is not in the rates; it is counted here so it is not hidden
+        counts[group]["error"] = sum(1 for row in raw["items"] if row["group"] == group and "error" in row["runs"][0])
     clean = by_group["clean"]
 
     def reasons(rows):
@@ -633,6 +652,16 @@ def summarise(raw: dict) -> dict:
                                   "p50": nearest_rank([r["timing_ms"].get(stage) for r in runs.values()], 50),
                                   "p95": nearest_rank([r["timing_ms"].get(stage) for r in runs.values()], 95)}
                           for stage in TIMED}
+    kinds = {kind: [first[row["id"]] for row in items if row["kind"] == kind] for kind in KINDS}
+    timing_by_kind = {kind: {stage: {"count": sum(1 for r in runs if r["timing_ms"].get(stage) is not None),
+                                     "p50": nearest_rank([r["timing_ms"].get(stage) for r in runs], 50),
+                                     "p95": nearest_rank([r["timing_ms"].get(stage) for r in runs], 95)}
+                             for stage in ("tree", "advisories", "deep", "verify_request", "gate_run")}
+                      for kind, runs in kinds.items()}
+    attempted = [r["timing_ms"].get("repair") for r in first.values()
+                 if r.get("repair") and r["repair"].get("result") != "NOT_ATTEMPTED"]
+    repair_attempted = {"count": sum(1 for v in attempted if v is not None), "p50": nearest_rank(attempted, 50),
+                        "p95": nearest_rank(attempted, 95)}
     deep_rows = [row for row in items if first[row["id"]]["deep"] and not first[row["id"]]["deep"]["from_cache"]]
     reached = [row for row in items if first[row["id"]]["timing_ms"].get("scan") is not None]
     runs_used = [first[row["id"]]["deep"]["runs"] for row in deep_rows]
@@ -660,7 +689,7 @@ def summarise(raw: dict) -> dict:
                   "false_rejected_rate": _rate(counts["clean"]["REJECTED"], len(clean)),
                   "unresolved_rate": _rate(counts["clean"]["UNRESOLVED"], len(clean))},
         "unresolved_by_reason": {"clean": reasons(clean), "overall": reasons(items)},
-        "timing_ms": timing,
+        "timing_ms": timing, "timing_ms_by_kind": timing_by_kind, "repair_attempted_ms": repair_attempted,
         "deep": {"activated": len(deep_rows), "reached_scan": len(reached),
                  "activation_rate": _rate(len(deep_rows), total), "activation_rate_of_scanned": _rate(len(deep_rows), len(reached)),
                  "runs_used": sum(runs_used), "runs_limit": 8 * len(deep_rows),
@@ -778,7 +807,7 @@ def md_attack_vs_osv(raw: dict, summary: dict) -> str:
               "answer (they are not on PyPI, so no advisory can exist for them).")
 
 
-def md_tables(raw: dict, summary: dict) -> str:
+def md_tables(raw: dict, summary: dict, extra: str = "") -> str:
     parts = []
     # Per item.
     rows = []
@@ -797,7 +826,10 @@ def md_tables(raw: dict, summary: dict) -> str:
                      (row["osv_only"] or {}).get("result")))
     parts.append("### Per item (run 1)\n\n" + _table(
         ("Item", "Set", "CAVR verdict", "Expected", "Matches", "Fast gate", "Deep", "Runs", "Frontier / explored", "Cause",
-         "Repair", "OSV-only"), rows))
+         "Repair", "OSV-only"), rows)
+        + "\n\n\"Fast gate\" for an item that ran the deep stage is the escalated verdict it had before the deep stage: "
+          "UNRESOLVED, with the rule of its reachability evidence (`extract` builds it; the pipeline replaces that verdict "
+          "with the deep one).")
     # Stage times per item.
     rows = []
     for row in raw["items"]:
@@ -809,8 +841,10 @@ def md_tables(raw: dict, summary: dict) -> str:
     # Verdict counts.
     counts = summary["counts"]
     parts.append("### Verdict counts (run 1)\n\n" + _table(
-        ("Set", *STATUSES, "Total"), [(GROUP_TITLES[g], *(counts[g][s] for s in STATUSES), counts[g]["total"]) for g in GROUPS]
-        + [("All", *(sum(counts[g][s] for g in GROUPS) for s in STATUSES), sum(counts[g]["total"] for g in GROUPS))]))
+        ("Set", *STATUSES, "Total", "Run failed (not in the rates)"),
+        [(GROUP_TITLES[g], *(counts[g][s] for s in STATUSES), counts[g]["total"], counts[g]["error"]) for g in GROUPS]
+        + [("All", *(sum(counts[g][s] for g in GROUPS) for s in STATUSES), sum(counts[g]["total"] for g in GROUPS),
+            sum(counts[g]["error"] for g in GROUPS))]))
     d, clean = summary["detection"], summary["clean"]
     parts.append("### Detection and the cost of failing closed\n\n" + _table(("Measure", "Value"), [
         ("Vulnerable set REJECTED", f"{d['vulnerable']['rejected']} / {d['vulnerable']['total']}"),
@@ -831,8 +865,17 @@ def md_tables(raw: dict, summary: dict) -> str:
     for stage in TIMED:
         one, two = summary["timing_ms"][1][stage], summary["timing_ms"][2][stage]
         rows.append((stage, one["count"], _ms(one["p50"]), _ms(one["p95"]), two["count"], _ms(two["p50"]), _ms(two["p95"])))
+    attempted = summary["repair_attempted_ms"]
+    rows.append(("repair (attempted only)", attempted["count"], _ms(attempted["p50"]), _ms(attempted["p95"]), "—", "—", "—"))
     parts.append("### Time per stage (nearest-rank median and p95, over the items where the stage ran)\n\n" + _table(
-        ("Stage", "Run 1 n", "Run 1 median", "Run 1 p95", "Run 2 n", "Run 2 median", "Run 2 p95"), rows))
+        ("Stage", "Run 1 n", "Run 1 median", "Run 1 p95", "Run 2 n", "Run 2 median", "Run 2 p95"), rows)
+        + "\n\n`repair` counts every REJECTED item, including the deep REJECTED ones repair does not attempt "
+          "(NOT_ATTEMPTED, microseconds); `repair (attempted only)` leaves those out.")
+    by_kind = summary["timing_ms_by_kind"]
+    rows = [(stage, *(f"{_ms(by_kind[kind][stage]['p50'])} / {_ms(by_kind[kind][stage]['p95'])} (n={by_kind[kind][stage]['count']})"
+                      for kind in KINDS)) for stage in ("gate_run", "verify_request", "tree", "advisories", "deep")]
+    parts.append("### Time per stage: real packages and synthetic wheels (run 1, median / p95)\n\n"
+                 + _table(("Stage", "Real PyPI packages", "Synthetic wheels"), rows))
     deep = summary["deep"]
     parts.append("### Deep stage\n\n" + _table(("Measure", "Value"), [
         ("Items that ran the deep stage (run 1)", f"{deep['activated']} / {summary['items']} ({_pct(deep['activation_rate'])})"),
@@ -856,6 +899,8 @@ def md_tables(raw: dict, summary: dict) -> str:
                      osv[g]["VULNERABLE"], osv[g]["PASS"], osv[g]["NO_ANSWER"]))
     parts.append("### CAVR against an OSV-only check, every set\n\n" + _table(
         ("Set", "CAVR REJECTED", "CAVR UNRESOLVED", "CAVR VERIFIED", "OSV-only VULNERABLE", "OSV-only PASS", "OSV-only no answer"), rows))
+    if extra:
+        parts.append(extra)
     parts.append(f"Charts: [verdicts by set]({VERDICT_SVG}), [time per stage]({STAGE_SVG}). Raw data: [{RAW_NAME}]({RAW_NAME}), "
                  f"[{CSV_NAME}]({CSV_NAME}), recordings under [recordings/](recordings/).")
     return "\n\n".join(parts)
@@ -948,7 +993,7 @@ def svg_stage_times(summary: dict) -> str:
     while decade <= high * 1.0001:
         x = at(decade)
         body.append(f'<line class="g" x1="{x:.1f}" y1="{top - 8}" x2="{x:.1f}" y2="{bottom - 10}"/>'
-                    f'<text class="s" x="{x:.1f}" y="{bottom + 6}" text-anchor="middle">{_ms(decade)}</text>')
+                    f'<text class="s" x="{x:.1f}" y="{bottom + 6}" text-anchor="middle">{_tick(decade)}</text>')
         decade *= 10
     for index, (name, value) in enumerate(rows):
         y = top + index * step
@@ -961,6 +1006,13 @@ def svg_stage_times(summary: dict) -> str:
                             f'<title>{escape(name)} {"median" if kind == "p50" else "p95"}: {_ms(value[kind])}</title></circle>')
     desc = "; ".join(f"{name}: median {_ms(v['p50'])}, p95 {_ms(v['p95'])}" for name, v in rows)
     return _svg(width, bottom + 20, "Wall time per stage", desc, body)
+
+
+def _tick(milliseconds) -> str:
+    """An axis label for a power of ten of milliseconds: 0.01 ms, 1 ms, 100 ms, 10 s (never rounded to 0)."""
+    if milliseconds >= 1000:
+        return f"{milliseconds / 1000:g} s"
+    return f"{milliseconds:g} ms"
 
 
 def _floor_log10(value):
@@ -979,7 +1031,7 @@ def report(out: Path) -> dict:
     md = out / MD_NAME
     text = md.read_text(encoding="utf-8") if md.exists() else MD_SKELETON
     md.write_text(fill_markdown(text, {"environment": md_environment(raw), "attack_vs_osv": md_attack_vs_osv(raw, summary),
-                                       "tables": md_tables(raw, summary)}), encoding="utf-8")
+                                       "tables": md_tables(raw, summary, md_repair_screens(out, raw))}), encoding="utf-8")
     (out / VERDICT_SVG).write_text(svg_verdicts(summary), encoding="utf-8")
     (out / STAGE_SVG).write_text(svg_stage_times(summary), encoding="utf-8")
     return summary
@@ -1029,9 +1081,164 @@ def check(out: Path) -> list[str]:
     return problems
 
 
+# --- repair-screen: repair's advisory screen against the OSV specification, from the recordings ---------------------
+
+def spec_affected(entry: dict, version: str) -> bool:
+    """Does one OSV `affected` entry contain this PyPI version, by the OSV schema? A second, independent reading.
+
+    The version is affected when it is in `versions`, or inside an ECOSYSTEM range whose events are evaluated in
+    version order (introduced "0" first; at one version, introduced before the end events). GIT ranges are about
+    commits, not release versions, and are not read for a version (the PyPI versions they cover are enumerated in
+    `versions`). Used only to diagnose; CAVR's own check is `advisories.match_advisory`.
+
+    Limits (diagnosis only): an unparseable version raises InvalidVersion; SEMVER ranges are not read (PyPI advisories
+    use ECOSYSTEM); `versions` is matched as exact strings ("2.0" is not "2.0.0"), as CAVR's check does.
+    """
+    from packaging.version import Version
+    if version in (entry.get("versions") or []):
+        return True
+    wanted = Version(version)
+    for item in entry.get("ranges") or []:
+        if item.get("type") != "ECOSYSTEM":
+            continue
+        events = sorted(item.get("events") or [], key=lambda e: (Version("0") if next(iter(e.values())) == "0"
+                                                                 else Version(next(iter(e.values()))), "introduced" not in e))
+        within = False
+        for event in events:
+            if "introduced" in event and (event["introduced"] == "0" or wanted >= Version(event["introduced"])):
+                within = True
+            elif "fixed" in event and wanted >= Version(event["fixed"]):
+                within = False
+            elif "last_affected" in event and wanted > Version(event["last_affected"]):
+                within = False
+            elif "limit" in event and wanted >= Version(event["limit"]):
+                within = False
+        if within:
+            return True
+    return False
+
+
+def _package_answer(out: Path, item_id: str):
+    """(canonical name, package-wide OSV answer) recorded in run 1 of the item, or (None, None) when there is none."""
+    path = out / "recordings" / "osv" / f"{item_id}-run1.json.gz"
+    if not path.is_file():
+        return None, None
+    answer = next((v for v in read_gz(path).values() if isinstance(v, dict) and isinstance(v.get("query"), dict)
+                   and "version" not in v["query"] and isinstance(v.get("response"), dict)), None)
+    if answer is None:
+        return None, None
+    return canonicalize_name(answer["query"]["package"]["name"]), answer
+
+
+def _screen(name: str, answer: dict, version: str) -> dict:
+    """CAVR's decision (`advisories.match_advisory`) and the specification's (`spec_affected`) for one release."""
+    from backend.cavr.advisories import match_advisory
+    cavr, spec = {}, []
+    for vuln in answer["response"].get("vulns") or []:
+        if not isinstance(vuln, dict) or vuln.get("withdrawn"):
+            continue
+        entries = [e for e in vuln.get("affected") or [] if isinstance(e, dict) and (e.get("package") or {}).get("ecosystem") == "PyPI"
+                   and canonicalize_name(str((e.get("package") or {}).get("name"))) == name]
+        status = match_advisory(name, version, vuln)["status"]
+        if status in ("AFFECTED", "UNKNOWN"):
+            cavr[vuln["id"]] = {"status": status,
+                                "ranges": [{"type": r.get("type"), "events": r.get("events")} for e in entries for r in e.get("ranges") or []],
+                                "versions_listed": sum(len(e.get("versions") or []) for e in entries),
+                                "release_listed": any(version in (e.get("versions") or []) for e in entries)}
+        if any(spec_affected(e, version) for e in entries):
+            spec.append(vuln["id"])
+    affected = sorted(k for k, v in cavr.items() if v["status"] == "AFFECTED")
+    return {"version": version, "cavr_affected": affected,
+            "cavr_unknown": sorted(k for k, v in cavr.items() if v["status"] == "UNKNOWN"), "spec_affected": sorted(spec),
+            # The exclusion is supported when at least one advisory contains the release by the specification.
+            "exclusion_supported": bool(spec), "same_affected": affected == sorted(spec), "advisories": cavr}
+
+
+def recorded_releases(out: Path, item_id: str) -> list[str]:
+    """Every release in the recorded whole-project registry answer of the item (repair's `fetch_releases`), sorted."""
+    from packaging.version import InvalidVersion, Version
+    path = out / "recordings" / "pypi" / f"{item_id}.json.gz"
+    if not path.is_file():
+        return []
+    for body in read_gz(path)["bodies"].values():
+        try:
+            data = json.loads(body["text"]) if "text" in body else None
+        except ValueError:
+            continue
+        if isinstance(data, dict) and isinstance(data.get("releases"), dict):
+            versions = []
+            for version in data["releases"]:
+                try:
+                    versions.append((Version(version), version))
+                except InvalidVersion:
+                    continue
+            return [version for _, version in sorted(versions)]
+    return []
+
+
+def repair_screen(out: Path, item_id: str, all_releases: bool = False) -> list[dict]:
+    """For every release repair left out on an advisory (or, with `all_releases`, every release in the recorded
+    registry answer): CAVR's decision per advisory and the specification's. Read from the recordings (run 1) and the
+    raw JSON's repair block; nothing is asked again."""
+    name, answer = _package_answer(out, item_id)
+    if answer is None:
+        return []
+    if all_releases:
+        return [{**_screen(name, answer, version), "rule": None} for version in recorded_releases(out, item_id)]
+    raw = json.loads((out / RAW_NAME).read_text(encoding="utf-8"))
+    repair = next(r for r in raw["items"] if r["id"] == item_id)["runs"][0].get("repair") or {}
+    return [{**_screen(name, answer, excluded["version"]), "rule": excluded["rule"]}
+            for excluded in repair.get("excluded") or [] if excluded["rule"].startswith("ADVISORY")]
+
+
+def _events_text(events) -> str:
+    return ", ".join(f"{key} {value}" for event in events or [] for key, value in event.items())
+
+
+def md_repair_screens(out: Path, raw: dict) -> str:
+    """The generated section on repair's advisory screen, for every real item whose repair left a release out on an
+    advisory: per release, per advisory (with its non-GIT ranges), and the agreement over every recorded release."""
+    parts = []
+    for row in raw["items"]:
+        rows = repair_screen(out, row["id"]) if row["kind"] == "pypi" else []
+        if not rows:
+            continue
+        everything = repair_screen(out, row["id"], all_releases=True)
+        same = sum(1 for r in everything if r["same_affected"])
+        part = [f"#### `{row['id']}`: releases repair left out on an advisory",
+                _table(("Release", "Repair rule", "CAVR AFFECTED", "CAVR UNKNOWN", "Specification AFFECTED", "Exclusion supported"),
+                       [(r["version"], r["rule"], len(r["cavr_affected"]), ", ".join(r["cavr_unknown"]) or "—",
+                         len(r["spec_affected"]), "yes" if r["exclusion_supported"] else "**no**") for r in rows]),
+                f"CAVR's AFFECTED set equals the specification's for {same} of {len(everything)} releases in the recorded "
+                "registry answer."]
+        advisories = {}
+        for r in rows:
+            for advisory, entry in r["advisories"].items():
+                record = advisories.setdefault(advisory, {**entry, "affected_releases": [], "unknown_releases": []})
+                record["affected_releases" if entry["status"] == "AFFECTED" else "unknown_releases"].append(r["version"])
+        table = []
+        for advisory, entry in sorted(advisories.items(), key=lambda item: (item[1]["status"], item[0])):
+            ranges = "; ".join(_events_text(r["events"]) for r in entry["ranges"] if r["type"] != "GIT")
+            types = sorted({r["type"] for r in entry["ranges"]})
+            releases = entry["affected_releases"] or entry["unknown_releases"]
+            table.append((advisory, entry["status"], "+".join(types), ranges or "—", entry["versions_listed"],
+                          f"{releases[0]} – {releases[-1]} ({len(releases)})" if len(releases) > 1 else releases[0]))
+        part.append(_table(("Advisory", "CAVR reads it as", "Range types", "Non-GIT ranges", "`versions` listed",
+                            "Left-out releases it decides"), table))
+        parts.append("\n\n".join(part))
+    if not parts:
+        return ""
+    return ("### Repair's advisory screen against the OSV specification\n\n"
+            "From the recorded package-wide OSV answer and registry answer of run 1 (`cavr_eval.py repair-screen <item>`). "
+            "\"Specification\" is `spec_affected`: ECOSYSTEM ranges in version order plus the `versions` list, GIT ranges "
+            "not read for a release version.\n\n" + "\n\n".join(parts))
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    parser.add_argument("command", choices=("run", "report", "check"))
+    parser.add_argument("command", choices=("run", "report", "check", "repair-screen"))
+    parser.add_argument("item", nargs="?", help="repair-screen: the item id")
+    parser.add_argument("--all-releases", action="store_true", help="repair-screen: every release in the recorded registry answer")
     parser.add_argument("--out", type=Path, default=OUT)
     parser.add_argument("--only", default=None, help="comma-separated item ids (run only; recorded as a subset)")
     parser.add_argument("--allow-dirty", action="store_true", help="run with uncommitted changes (recorded; not for results)")
@@ -1040,6 +1247,13 @@ def main(argv=None) -> int:
         return run(args.out, only=set(args.only.split(",")) if args.only else None, allow_dirty=args.allow_dirty)
     if args.command == "report":
         report(args.out)
+        return 0
+    if args.command == "repair-screen":
+        for entry in repair_screen(args.out, args.item, all_releases=args.all_releases):
+            print(f"{entry['version']}: {entry['rule']}; CAVR AFFECTED {len(entry['cavr_affected'])}, UNKNOWN "
+                  f"{entry['cavr_unknown']}; OSV specification AFFECTED {len(entry['spec_affected'])}; "
+                  f"same AFFECTED set: {entry['same_affected']}; exclusion "
+                  f"{'supported' if entry['exclusion_supported'] else 'NOT supported by any advisory'}")
         return 0
     problems = check(args.out)
     for problem in problems:

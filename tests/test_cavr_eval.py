@@ -272,7 +272,7 @@ def fixture_raw():
 
 def test_summary_counts_detection_and_the_clean_set_cost():
     summary = ev.summarise(fixture_raw())
-    assert summary["counts"]["clean"] == {"VERIFIED": 1, "REJECTED": 0, "UNRESOLVED": 3, "BLOCK": 0, "total": 4}
+    assert summary["counts"]["clean"] == {"VERIFIED": 1, "REJECTED": 0, "UNRESOLVED": 3, "BLOCK": 0, "total": 4, "error": 0}
     assert summary["detection"]["vulnerable"] == {"rejected": 1, "total": 1}
     assert summary["detection"]["attack"] == {"rejected": 1, "unresolved": 1, "passed": 0, "total": 2}
     assert summary["detection"]["benign_control"] == {"verified": 1, "total": 2}
@@ -304,6 +304,8 @@ def test_summary_leaves_out_items_whose_first_run_failed():
                          "mismatches": ["run 1 failed: boom"]})
     summary = ev.summarise(raw)
     assert summary["counts"]["clean"]["total"] == 4 and summary["mismatches"] == {"broken": ["run 1 failed: boom"]}
+    assert summary["counts"]["clean"]["error"] == 1  # left out of the rates, but counted where the table shows it
+    assert "| Clean | 1 | 0 | 3 | 0 | 4 | 1 |" in ev.md_tables(raw, summary)
 
 
 @pytest.mark.parametrize("values, p50, p95", [([], None, None), ([7.0], 7.0, 7.0), ([1, 2, 3, 4], 2, 4),
@@ -533,3 +535,169 @@ def test_an_osv_answer_used_but_not_recorded_is_reported(tmp_path):
     (problem,) = ev.unrecorded_answers(first, {})
     assert "tiny 1.0" in problem and "not recorded" in problem
     assert ev.unrecorded_answers({"run": 1, "error": "boom"}, {}) == []
+
+
+# --- repair-screen: the diagnosis of the urllib3 repair result (Step M2-22) -----------------------------------------
+
+PYSEC_LIKE = {"id": "PYSEC-TEST", "affected": [{"package": {"name": "urllib3", "ecosystem": "PyPI"},
+              "ranges": [{"type": "GIT", "events": [{"introduced": "0"}, {"fixed": "644124ec"}]},
+                         {"type": "ECOSYSTEM", "events": [{"introduced": "2.0.0"}, {"fixed": "2.0.6"},
+                                                          {"introduced": "0"}, {"fixed": "1.26.17"}]}],
+              "versions": ["1.26.16", "2.0.5"]}]}
+
+
+@pytest.mark.parametrize("version, inside", [("2.0.5", True), ("2.0.3", True), ("1.26.0", True), ("2.0.6", False),
+                                             ("1.26.17", False), ("2.8.0", False), ("1.26.16", True)])
+def test_spec_affected_reads_ecosystem_ranges_in_version_order_and_ignores_git(version, inside):
+    assert ev.spec_affected(PYSEC_LIKE["affected"][0], version) is inside
+
+
+def test_spec_affected_last_affected_limit_and_unsorted_events():
+    entry = lambda events: {"ranges": [{"type": "ECOSYSTEM", "events": events}]}
+    assert ev.spec_affected(entry([{"introduced": "1.0"}, {"last_affected": "1.5"}]), "1.5") is True
+    assert ev.spec_affected(entry([{"introduced": "1.0"}, {"last_affected": "1.5"}]), "1.6") is False
+    assert ev.spec_affected(entry([{"introduced": "1.0"}, {"limit": "2.0"}]), "2.0") is False
+    # Listed out of order: sorting puts introduced 0 first, so 2.0 is outside [0, 1.26.17).
+    assert ev.spec_affected(entry([{"fixed": "1.26.17"}, {"introduced": "0"}]), "2.0") is False
+    assert ev.spec_affected({"ranges": [{"type": "GIT", "events": [{"introduced": "0"}]}]}, "1.0") is False
+
+
+def test_cavr_reads_a_git_plus_ecosystem_entry_as_unknown_for_every_version():
+    """What the live run found (found defect D-1 in docs/evaluation/cavr-m2-evaluation.md): a GIT range next to an
+    ECOSYSTEM range makes CAVR's range check UNKNOWN, also for a version the ECOSYSTEM range and `versions` exclude.
+    This test records today's behaviour of `advisories.match_advisory`; it is not fixed in this branch."""
+    from backend.cavr.advisories import match_advisory
+    assert match_advisory("urllib3", "2.8.0", PYSEC_LIKE)["status"] == "UNKNOWN"
+    assert ev.spec_affected(PYSEC_LIKE["affected"][0], "2.8.0") is False
+    assert match_advisory("urllib3", "2.0.5", PYSEC_LIKE)["status"] == "AFFECTED"  # an affected version is still found
+
+
+def test_repair_screen_from_recordings(tmp_path):
+    vuln_in = {"id": "GHSA-IN", "affected": [{"package": {"name": "urllib3", "ecosystem": "PyPI"},
+                                              "ranges": [{"type": "ECOSYSTEM", "events": [{"introduced": "0"}, {"fixed": "2.8.0"}]}]}]}
+    body = {"vulns": [vuln_in, PYSEC_LIKE], "pages": []}
+    package_answer = {"query": {"package": {"name": "urllib3", "ecosystem": "PyPI"}}, "response": body,
+                      "response_sha256": ev.digest(body)}
+    ev.write_gz(tmp_path / "recordings" / "osv" / "u-run1.json.gz", {"package-x.json": package_answer})
+    repair = {"result": "NO_REPAIR_FOUND", "excluded": [{"version": "2.7.0", "rule": "ADVISORY_AFFECTED"},
+                                                        {"version": "2.8.0", "rule": "ADVISORY_RANGE_UNKNOWN"},
+                                                        {"version": "3.0rc1", "rule": "PRE_RELEASE"}]}
+    raw = fixture_raw()
+    raw["items"] = [{**row("u", "vulnerable", result("REJECTED", "KNOWN_VULNERABILITY", repair=repair))}]
+    (tmp_path / ev.RAW_NAME).write_text(json.dumps(raw))
+    seven, eight = ev.repair_screen(tmp_path, "u")
+    assert (seven["version"], seven["cavr_affected"], seven["spec_affected"], seven["exclusion_supported"]) == (
+        "2.7.0", ["GHSA-IN"], ["GHSA-IN"], True)
+    assert seven["cavr_unknown"] == ["PYSEC-TEST"] and seven["same_affected"] is True
+    assert (eight["cavr_affected"], eight["cavr_unknown"], eight["exclusion_supported"]) == ([], ["PYSEC-TEST"], False)
+    assert eight["advisories"]["PYSEC-TEST"]["versions_listed"] == 2
+
+
+# --- the committed results (docs/evaluation/) -----------------------------------------------------------------------
+
+EVALUATION = REPO / "docs" / "evaluation"
+
+
+@pytest.mark.skipif(not (EVALUATION / ev.RAW_NAME).is_file(), reason="no recorded evaluation committed")
+def test_committed_results_regenerate_byte_for_byte_and_their_recordings_check(tmp_path):
+    """`report` on the committed raw JSON writes exactly the committed CSV, tables and charts; `check` finds nothing."""
+    import shutil
+    for name in (ev.RAW_NAME, ev.MD_NAME):
+        shutil.copy(EVALUATION / name, tmp_path / name)
+    shutil.copytree(EVALUATION / "recordings", tmp_path / "recordings")
+    ev.report(tmp_path)
+    for name in (ev.CSV_NAME, ev.MD_NAME, ev.VERDICT_SVG, ev.STAGE_SVG):
+        assert (tmp_path / name).read_bytes() == (EVALUATION / name).read_bytes(), name
+    assert ev.check(EVALUATION) == []
+
+
+@pytest.mark.skipif(not (EVALUATION / ev.RAW_NAME).is_file(), reason="no recorded evaluation committed")
+def test_committed_results_name_the_expectations_commit_and_a_clean_tree():
+    raw = json.loads((EVALUATION / ev.RAW_NAME).read_text())
+    assert raw["working_tree"] == "clean (tracked files)" and raw["subset"] is None
+    assert raw["expectations_commit"] and raw["commit"] and raw["image_id"].startswith("sha256:")
+    # The expectations in the raw file are the corpus's as committed: never edited after the run.
+    corpus = {item["id"]: item["expected"] for item in ev.load_corpus()["items"]}
+    assert {row["id"]: row["expected"] for row in raw["items"]} == corpus
+    assert raw["corpus_sha256"] == __import__("hashlib").sha256(ev.CORPUS.read_bytes()).hexdigest()
+    ancestor = subprocess.run(["git", "-C", str(REPO), "merge-base", "--is-ancestor", raw["expectations_commit"], raw["commit"]])
+    assert ancestor.returncode == 0, "the expectations must be committed before (or in) the commit that ran"
+
+
+@pytest.mark.skipif(not (EVALUATION / ev.RAW_NAME).is_file(), reason="no recorded evaluation committed")
+def test_every_recorded_child_of_a_real_item_is_pinned_in_its_lockfile():
+    raw = json.loads((EVALUATION / ev.RAW_NAME).read_text())
+    corpus = {item["id"]: item for item in ev.load_corpus()["items"]}
+    for row in raw["items"]:
+        if row["kind"] != "pypi":
+            continue
+        item = corpus[row["id"]]
+        root, version = ev.pinned(item)
+        children = {(n["name"], n["version"]) for n in row["runs"][0]["tree"]["nodes"]} - {(root, version)}
+        pins = {(ev.canonicalize_name(name), pin) for name, pin in item["lock"].items()}
+        assert children <= pins, (row["id"], children - pins)
+
+
+@pytest.mark.parametrize("value, label", [(0.01, "0.01 ms"), (0.1, "0.1 ms"), (1, "1 ms"), (100, "100 ms"),
+                                          (1000, "1 s"), (100000, "100 s")])
+def test_axis_ticks_are_never_rounded_to_zero(value, label):
+    assert ev._tick(value) == label
+
+
+# --- review of Step M2-22 -------------------------------------------------------------------------------------------
+
+def test_summary_times_real_and_synthetic_items_apart_and_repair_attempts_alone():
+    summary = ev.summarise(fixture_raw())
+    by_kind = summary["timing_ms_by_kind"]
+    assert by_kind["wheel"]["deep"] == {"count": 3, "p50": 9000.0, "p95": 40000.0}   # a-1, a-2, b-1 (b-2 has no deep)
+    assert by_kind["pypi"]["deep"]["count"] == 1 and by_kind["pypi"]["gate_run"]["count"] == 5
+    # Only v-1's repair was attempted (PROPOSED); a NOT_ATTEMPTED repair would not count.
+    assert summary["repair_attempted_ms"] == {"count": 1, "p50": 2000.0, "p95": 2000.0}
+    tables = ev.md_tables(fixture_raw(), summary)
+    assert "repair (attempted only)" in tables and "real packages and synthetic wheels" in tables
+
+
+def test_run_refuses_untracked_code(tmp_path):
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    (tmp_path / "notes.txt").write_text("not code")
+    ev.require_clean_tree(tmp_path)  # untracked files outside the code directories do not matter
+    (tmp_path / "backend").mkdir()
+    (tmp_path / "backend" / "planted.py").write_text("X = 1\n")
+    with pytest.raises(SystemExit, match="untracked files where code is imported from"):
+        ev.require_clean_tree(tmp_path)
+
+
+def screen_fixture(tmp_path):
+    vuln_in = {"id": "GHSA-IN", "affected": [{"package": {"name": "urllib3", "ecosystem": "PyPI"},
+                                              "ranges": [{"type": "ECOSYSTEM", "events": [{"introduced": "0"}, {"fixed": "2.8.0"}]}]}]}
+    body = {"vulns": [vuln_in, PYSEC_LIKE], "pages": []}
+    answer = {"query": {"package": {"name": "urllib3", "ecosystem": "PyPI"}}, "response": body, "response_sha256": ev.digest(body)}
+    ev.write_gz(tmp_path / "recordings" / "osv" / "u-run1.json.gz", {"package-x.json": answer})
+    registry = json.dumps({"info": {"name": "urllib3"}, "releases": {"2.8.0": [], "2.7.0": [], "not-a-version": [], "2.0.5": []}})
+    ev.write_gz(tmp_path / "recordings" / "pypi" / "u.json.gz",
+                {"fetches": [], "bodies": {"x": {"text": registry}, "y": {"text": "{not json"}}})
+    repair = {"result": "NO_REPAIR_FOUND", "excluded": [{"version": "2.7.0", "rule": "ADVISORY_AFFECTED"},
+                                                        {"version": "2.8.0", "rule": "ADVISORY_RANGE_UNKNOWN"}]}
+    raw = fixture_raw()
+    raw["items"] = [row("u", "vulnerable", result("REJECTED", "KNOWN_VULNERABILITY", repair=repair))]
+    (tmp_path / ev.RAW_NAME).write_text(json.dumps(raw))
+    return raw
+
+
+def test_repair_screen_over_every_recorded_release(tmp_path):
+    screen_fixture(tmp_path)
+    assert ev.recorded_releases(tmp_path, "u") == ["2.0.5", "2.7.0", "2.8.0"]   # sorted; the invalid version left out
+    every = {r["version"]: r for r in ev.repair_screen(tmp_path, "u", all_releases=True)}
+    assert every["2.0.5"]["cavr_affected"] == ["GHSA-IN", "PYSEC-TEST"] and every["2.0.5"]["same_affected"] is True
+    assert every["2.8.0"]["cavr_unknown"] == ["PYSEC-TEST"] and every["2.8.0"]["rule"] is None
+    assert ev.repair_screen(tmp_path, "missing", all_releases=True) == []
+
+
+def test_the_report_generates_the_repair_screen_tables(tmp_path):
+    raw = screen_fixture(tmp_path)
+    text = ev.md_repair_screens(tmp_path, raw)
+    assert "#### `u`: releases repair left out on an advisory" in text
+    assert "| 2.8.0 | ADVISORY_RANGE_UNKNOWN | 0 | PYSEC-TEST | 0 | **no** |" in text
+    assert "equals the specification's for 3 of 3 releases" in text
+    assert "| PYSEC-TEST | UNKNOWN | ECOSYSTEM+GIT | introduced 2.0.0, fixed 2.0.6, introduced 0, fixed 1.26.17 | 2 |" in text
+    assert ev.md_repair_screens(tmp_path, {"items": []}) == ""
