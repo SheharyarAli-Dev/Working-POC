@@ -242,7 +242,8 @@ def test_git_only_range_is_unresolved(tmp_path):
 def test_git_range_next_to_a_matching_ecosystem_range_is_affected():
     vuln = synthetic("SYNTH-7", GIT_ONLY["affected"][0]["ranges"][0], ecosystem({"introduced": "0"}, {"fixed": "2.0"}))
     assert match_advisory("demo", "1.0", vuln)["status"] == "AFFECTED"
-    assert match_advisory("demo", "2.0", vuln)["status"] == "UNKNOWN"
+    # D-1: the ECOSYSTEM range decides release versions; the GIT range next to it is left out (was UNKNOWN).
+    assert match_advisory("demo", "2.0", vuln)["status"] == "NOT_AFFECTED"
 
 
 @pytest.mark.parametrize("vuln", [
@@ -268,6 +269,200 @@ def test_explicit_versions_list():
     vuln = synthetic("SYNTH-14", versions=["1.0", "1.1"])
     assert match_advisory("demo", "1.1", vuln)["status"] == "AFFECTED"
     assert match_advisory("demo", "1.2", vuln)["status"] == "NOT_AFFECTED"
+
+
+# --- D-1: GIT ranges next to an ECOSYSTEM range or a `versions` list ------------------------------------
+# docs/evaluation/cavr-m2-evaluation.md, "Found defect D-1". A GIT range describes commits; for a PyPI release the
+# ECOSYSTEM range or the enumerated `versions` list decides. RECORDED: the package-wide urllib3 answer of the
+# evaluation (2026-11-25, response_sha256 3c505122...). Everything else here is SYNTHETIC (ids SYNTH-D1-*).
+
+EVALUATION_OSV = Path(__file__).parent.parent / "docs" / "evaluation" / "recordings" / "osv"
+
+
+def recorded_package_advisory(item, advisory_id):
+    """One advisory of the package-wide OSV answer recorded in run 1 of an evaluation item."""
+    import gzip
+    recording = json.loads(gzip.decompress((EVALUATION_OSV / f"{item}-run1.json.gz").read_bytes()))
+    answer = next(value for key, value in recording.items() if key.startswith("package-"))
+    return next(vuln for vuln in answer["response"]["vulns"] if vuln["id"] == advisory_id)
+
+
+GIT_CLOSED = {"type": "GIT", "repo": "https://example.invalid/demo.git", "events": [{"introduced": "0"}, {"fixed": "8d2f1c0"}]}
+GIT_OPEN = {"type": "GIT", "repo": "https://example.invalid/demo.git", "events": [{"introduced": "3a9e7b1"}]}
+
+
+@pytest.mark.skipif(not (EVALUATION_OSV / "urllib3-2.2.1-run1.json.gz").is_file(), reason="no evaluation recording")
+@pytest.mark.parametrize("version, status", [("2.8.0", "NOT_AFFECTED"), ("2.0.5", "AFFECTED"), ("1.26.16", "AFFECTED"),
+                                             ("2.0.6", "NOT_AFFECTED"), ("1.26.17", "NOT_AFFECTED")])
+def test_recorded_pysec_2023_192_is_read_from_its_ecosystem_range_and_versions(version, status):
+    vuln = recorded_package_advisory("urllib3-2.2.1", "PYSEC-2023-192")   # GIT (2 fixes) + ECOSYSTEM + 85 versions
+    assert {r["type"] for e in vuln["affected"] for r in e["ranges"]} == {"GIT", "ECOSYSTEM"}
+    assert match_advisory("urllib3", version, vuln)["status"] == status
+
+
+def test_open_git_range_with_versions_is_unknown_for_every_unlisted_version():
+    vuln = synthetic("SYNTH-D1-1", GIT_OPEN, versions=["1.0", "1.1"])
+    assert match_advisory("demo", "1.1", vuln)["status"] == "AFFECTED"     # listed
+    # Open: a release published after OSV enumerated `versions` could contain the commit. Cannot tell.
+    assert match_advisory("demo", "1.2", vuln)["status"] == "UNKNOWN"
+    assert match_advisory("demo", "9.0", vuln)["status"] == "UNKNOWN"
+    # Not listed and below the highest listed: still UNKNOWN. An open GIT range with no ECOSYSTEM range is never
+    # left out (fix rule 1), so only a listed version is decided.
+    assert match_advisory("demo", "0.9", vuln)["status"] == "UNKNOWN"
+
+
+@pytest.mark.parametrize("ranges", [[GIT_CLOSED], [GIT_OPEN], [GIT_CLOSED, GIT_OPEN]])
+@pytest.mark.parametrize("versions", [None, []])
+def test_git_only_entry_without_versions_stays_unknown(ranges, versions):
+    vuln = synthetic("SYNTH-D1-2", *ranges, versions=versions)
+    for version in ("0.1", "1.0", "9.0"):
+        assert match_advisory("demo", version, vuln)["status"] == "UNKNOWN"
+
+
+def test_closed_git_only_entry_is_read_from_its_versions_list():
+    vuln = synthetic("SYNTH-D1-3", GIT_CLOSED, versions=["1.0", "1.1"])
+    assert match_advisory("demo", "1.0", vuln)["status"] == "AFFECTED"
+    assert match_advisory("demo", "1.1", vuln)["status"] == "AFFECTED"
+    assert match_advisory("demo", "1.2", vuln)["status"] == "NOT_AFFECTED"
+    assert match_advisory("demo", "0.9", vuln)["status"] == "NOT_AFFECTED"
+
+
+def test_closed_and_open_git_ranges_together_stay_unknown_for_an_unlisted_version():
+    vuln = synthetic("SYNTH-D1-4", GIT_CLOSED, GIT_OPEN, versions=["1.0"])
+    assert match_advisory("demo", "1.0", vuln)["status"] == "AFFECTED"
+    assert match_advisory("demo", "2.0", vuln)["status"] == "UNKNOWN"     # the open one is not left out
+
+
+@pytest.mark.parametrize("closing", [{"fixed": "8d2f1c0"}, {"limit": "8d2f1c0"}])
+def test_git_closing_events_are_fixed_and_limit(closing):
+    git = {"type": "GIT", "events": [{"introduced": "0"}, closing]}
+    assert match_advisory("demo", "2.0", synthetic("SYNTH-D1-5", git, versions=["1.0"]))["status"] == "NOT_AFFECTED"
+    last = {"type": "GIT", "events": [{"introduced": "0"}, {"last_affected": "8d2f1c0"}]}  # not a closing event in the fix
+    assert match_advisory("demo", "2.0", synthetic("SYNTH-D1-6", last, versions=["1.0"]))["status"] == "UNKNOWN"
+
+
+def test_open_git_range_next_to_an_ecosystem_range_is_read_from_the_ecosystem_range():
+    vuln = synthetic("SYNTH-D1-7", GIT_OPEN, ecosystem({"introduced": "1.0"}))
+    assert match_advisory("demo", "1.5", vuln)["status"] == "AFFECTED"
+    assert match_advisory("demo", "0.9", vuln)["status"] == "NOT_AFFECTED"
+
+
+@pytest.mark.parametrize("version, listed", [("2.0.0", "2.0"), ("2.0", "2.0.0"), ("1.0.0", "v1.0"), ("1.0.post0", "1.0.post0")])
+def test_versions_list_is_compared_as_versions_not_strings(version, listed):
+    vuln = synthetic("SYNTH-D1-8", GIT_CLOSED, versions=["0.5", listed])
+    assert match_advisory("demo", version, vuln)["status"] == "AFFECTED"
+    assert match_advisory("demo", version, synthetic("SYNTH-D1-9", versions=[listed]))["status"] == "AFFECTED"
+
+
+@pytest.mark.parametrize("junk", ["not a version", 7, None])
+def test_a_versions_list_with_an_item_that_is_not_a_version_is_not_an_enumeration(junk):
+    """Review MINOR 1: such a list cannot be trusted to enumerate the releases, so the closed GIT range stays in."""
+    vuln = synthetic("SYNTH-D1-10", GIT_CLOSED, versions=[junk, "1.0"])
+    assert match_advisory("demo", "1.0", vuln)["status"] == "AFFECTED"      # a listed version is still found
+    assert match_advisory("demo", "2.0", vuln)["status"] == "UNKNOWN"       # an unlisted one cannot be told
+    if isinstance(junk, str):
+        assert match_advisory("demo", junk, vuln)["status"] == "AFFECTED"  # exact string, as before
+
+
+@pytest.mark.parametrize("degenerate", [ecosystem(), ecosystem({"fixed": "1.5"}), ecosystem({"limit": "1.5"}),
+                                        ecosystem({"last_affected": "1.5"})])
+def test_an_ecosystem_range_without_introduced_does_not_replace_the_git_range(degenerate):
+    """Review MINOR 2: an ECOSYSTEM range that opens nothing says nothing about releases; the GIT range stays in."""
+    vuln = synthetic("SYNTH-D1-15", GIT_CLOSED, degenerate)
+    for version in ("1.0", "2.0"):
+        assert match_advisory("demo", version, vuln)["status"] == "UNKNOWN"
+    with_introduced = synthetic("SYNTH-D1-16", GIT_CLOSED, degenerate, ecosystem({"introduced": "3.0"}))
+    assert match_advisory("demo", "2.0", with_introduced)["status"] == "NOT_AFFECTED"   # a real range decides
+
+
+@pytest.mark.parametrize("vuln", [
+    synthetic("SYNTH-D1-11", GIT_CLOSED, ecosystem({"introduced": "0"}, {"fixed": "not-a-version"})),
+    synthetic("SYNTH-D1-12", GIT_CLOSED, {"type": "MADE_UP", "events": [{"introduced": "0"}]}, versions=["1.0"]),
+    synthetic("SYNTH-D1-13", GIT_CLOSED, ecosystem({"introduced": "0"}, {"until": "0.5"}), versions=["0.1"]),
+])
+def test_leaving_a_git_range_out_never_hides_another_range_that_cannot_be_evaluated(vuln):
+    status = match_advisory("demo", "2.0", vuln)["status"]
+    assert status in ("UNKNOWN", "AFFECTED")       # never NOT_AFFECTED: the other range still decides
+
+
+def test_unparseable_release_version_keeps_the_git_range_unknown():
+    vuln = synthetic("SYNTH-D1-14", GIT_CLOSED, versions=["1.0"])
+    assert match_advisory("demo", "nope", vuln)["status"] == "UNKNOWN"
+
+
+# --- D-1 and the fast gate: the verdict for a requested version does not move toward VERIFIED ----------------
+
+@pytest.mark.parametrize("vuln, rule", [
+    # OSV returned these for 2.0 but CAVR cannot evaluate them for 2.0: cannot tell -> UNRESOLVED.
+    (synthetic("SYNTH-D1-20", GIT_OPEN, versions=["1.0"]), "RANGE_UNSUPPORTED"),
+    (synthetic("SYNTH-D1-21", GIT_CLOSED), "RANGE_UNSUPPORTED"),
+    (synthetic("SYNTH-D1-22", GIT_OPEN), "RANGE_UNSUPPORTED"),
+    (synthetic("SYNTH-D1-23", GIT_CLOSED, versions=[]), "RANGE_UNSUPPORTED"),
+    # OSV returned these for 2.0 but their ECOSYSTEM range / versions do not contain 2.0: the two readings disagree
+    # -> UNRESOLVED (before the fix the same answers were UNRESOLVED RANGE_UNSUPPORTED).
+    (synthetic("SYNTH-D1-24", GIT_CLOSED, ecosystem({"introduced": "0"}, {"fixed": "1.5"})), "RANGE_DISAGREEMENT"),
+    (synthetic("SYNTH-D1-25", GIT_CLOSED, versions=["1.0"]), "RANGE_DISAGREEMENT"),
+])
+def test_an_advisory_osv_returns_that_cavr_does_not_read_as_affected_is_unresolved_never_ok(tmp_path, vuln, rule):
+    result = check(tmp_path, "demo", "2.0", [vuln])
+    assert outcome(result) == ("UNRESOLVED", rule)
+    assert result["result"] != "OK"
+
+
+def test_an_affected_advisory_next_to_an_open_git_one_still_rejects(tmp_path):
+    affected = synthetic("SYNTH-D1-26", GIT_CLOSED, versions=["2.0"])
+    result = check(tmp_path, "demo", "2.0", [synthetic("SYNTH-D1-27", GIT_OPEN), affected])
+    assert outcome(result) == ("REJECTED", "KNOWN_VULNERABILITY")
+
+
+def recorded_version_answers():
+    """(label, judged entry, OSV answer) for every per-version advisory result in the raw JSON (`runs[].advisories`),
+    matched to its recorded answer by (item, run, package name, version) from the recording's `query`. Each judged
+    entry must have exactly one recorded answer, with the same response_sha256."""
+    import gzip
+    from packaging.utils import canonicalize_name
+    raw_path = EVALUATION_OSV.parent.parent / "cavr-m2-eval-raw.json"
+    if not raw_path.is_file():
+        return []
+    recorded = {}
+    for path in sorted(EVALUATION_OSV.glob("*-run*.json.gz")):
+        item, run = path.name[:-len(".json.gz")].rsplit("-run", 1)
+        for key, answer in json.loads(gzip.decompress(path.read_bytes())).items():
+            query = answer.get("query", {})
+            if key.startswith("package-") or "version" not in query:
+                continue
+            index = (item, int(run), canonicalize_name(query["package"]["name"]), query["version"])
+            assert index not in recorded, index
+            recorded[index] = answer
+    cases = []
+    for item in json.loads(raw_path.read_text())["items"]:
+        for run in item["runs"]:
+            for judged in run.get("advisories") or []:
+                index = (item["id"], run["run"], canonicalize_name(judged["name"]), judged["version"])
+                answer = recorded[index]                                    # a KeyError fails the collection
+                assert answer["response_sha256"] == judged["response_sha256"], index
+                cases.append(("{}-run{} {} {}".format(*index), judged, answer))
+    return cases
+
+
+RECORDED_VERSION_ANSWERS = recorded_version_answers()
+
+
+@pytest.mark.skipif(not RECORDED_VERSION_ANSWERS, reason="no evaluation recording")
+def test_every_recorded_per_version_answer_is_judged_as_it_was_in_the_evaluation_run():
+    """A REGRESSION GUARD ONLY: the fast gate's advisory decision on the per-version answers of the 2026-11-25 run is
+    unchanged. None of these answers holds a GIT range, so this does not test the D-1 change itself; the GIT
+    evidence on real data is `test_cavr_eval.py::test_on_the_recorded_package_wide_answers_...`."""
+    assert len(RECORDED_VERSION_ANSWERS) == 74                     # every entry of `runs[].advisories` in the raw JSON
+    assert len({(label.split()[0], r["response_sha256"]) for label, r, _ in RECORDED_VERSION_ANSWERS}) == 58
+    with_advisories = [label for label, _, answer in RECORDED_VERSION_ANSWERS if answer["response"]["vulns"]]
+    assert len(with_advisories) == 10                              # 5 REJECTED packages x 2 runs; the rest are empty
+    assert not [label for label, _, answer in RECORDED_VERSION_ANSWERS for vuln in answer["response"]["vulns"]
+                for entry in vuln.get("affected") or [] for item in entry.get("ranges") or [] if item.get("type") == "GIT"]
+    for label, recorded, answer in RECORDED_VERSION_ANSWERS:
+        vulns = answer["response"]["vulns"]
+        result = check_advisories(recorded["name"], recorded["version"], None, osv=StubOSV(live_answer(vulns)))
+        assert (result["result"], result["rule"]) == (recorded["result"], recorded["rule"]), label
 
 
 def test_advisory_for_another_package_or_ecosystem():

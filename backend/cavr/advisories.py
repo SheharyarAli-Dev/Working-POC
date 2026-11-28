@@ -13,7 +13,8 @@ query, or its dated and digest-checked cache) and judges every advisory in the a
     ADVISORIES_INVALID       the answer is not a list of advisories with ids         -> UNRESOLVED
     KNOWN_VULNERABILITY      at least one advisory's range contains the version      -> REJECTED
     RANGE_UNSUPPORTED        an advisory has only ranges that cannot be evaluated
-                             (GIT, unknown type, unparseable version)                -> UNRESOLVED
+                             (an open GIT range or a GIT-only entry without
+                             `versions`, unknown type, unparseable version)          -> UNRESOLVED
     RANGE_DISAGREEMENT       OSV returned an advisory for this version, but its
                              ranges do not contain the version                       -> UNRESOLVED
     NO_KNOWN_VULNERABILITY   none of the above                                       -> OK
@@ -36,6 +37,7 @@ from pathlib import Path
 
 import httpx
 from packaging.utils import canonicalize_name
+from packaging.version import InvalidVersion, Version
 
 from backend.cavr.pypi_client import request_problem
 from backend.integrations.osv_adapter import OSV
@@ -298,15 +300,51 @@ def _ranges(entry: dict):
     return [{**item, "events": item.get("events", [])} for item in ranges] if well_formed else None
 
 
+GIT_CLOSING_EVENTS = ("fixed", "limit")
+
+
 def _entry_affects(version: str, entry: dict):
-    """True / False / None (cannot tell) for one `affected` entry of an advisory."""
+    """True / False / None (cannot tell) for one `affected` entry of an advisory.
+
+    A GIT range is about commits, not release versions; OSV enumerates the PyPI releases it covers in `versions`.
+    For a release version (one `Version` can parse) a GIT range is therefore left out of the evaluation when the
+    entry also has an ECOSYSTEM range with an `introduced` event, or when the GIT range is closed (a `fixed` or
+    `limit` event) and `versions` is an enumeration: not empty, and every item a string `Version` can parse. Any
+    other GIT range stays in, and `package_records.affected` reads it as "cannot tell": an open GIT range with no
+    ECOSYSTEM range (a later release could contain the commit), a GIT-only entry without `versions` or with a
+    `versions` item that is not a version, or a GIT range next to an ECOSYSTEM range that opens nothing (no
+    `introduced`). `versions` is compared as versions ("2.0" is 2.0.0) as well as exact strings (found defect D-1).
+    """
     ranges, versions = _ranges(entry), entry.get("versions", [])
     if ranges is None or not isinstance(versions, list):
         return None
     try:
+        release = Version(version)
+    except (InvalidVersion, TypeError):
+        release = None
+    if release is not None:
+        if any(_same_version(listed, release) for listed in versions):
+            return True
+        has_ecosystem = any(item.get("type") == "ECOSYSTEM" and any("introduced" in event for event in item["events"])
+                            for item in ranges)
+        enumerated = bool(versions) and all(_is_version(listed) for listed in versions)
+        ranges = [item for item in ranges if not (item.get("type") == "GIT" and (has_ecosystem or (
+            enumerated and any(key in event for event in item["events"] for key in GIT_CLOSING_EVENTS))))]
+    try:
         return affected(version, {"versions": versions, "ranges": ranges, "ecosystem": "PyPI"})
     except Exception:  # a shape `affected` does not expect: cannot tell
         return None
+
+
+def _same_version(listed, release: Version) -> bool:
+    return _is_version(listed) and Version(listed) == release
+
+
+def _is_version(listed) -> bool:
+    try:
+        return isinstance(listed, str) and Version(listed) is not None
+    except InvalidVersion:
+        return False
 
 
 def _age_days(retrieved_at):

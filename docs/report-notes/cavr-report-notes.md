@@ -6727,3 +6727,163 @@ diagnosed without fixing CAVR. Branch `cavr-m2-eval`. Expectations were committe
 3. **How do we know the numbers were not tuned?** The expectations were committed in `5936f33` before the run, and the
    mismatches (six, urllib3) are reported, not re-labelled. The PyPI and OSV answers are saved, and
    `cavr_eval.py check` re-verifies them.
+
+## Step D-1 fix — Repair's advisory screen reads GIT ranges as the OSV schema does (2026-11-28)
+
+### Ch 6 Implementation
+
+- `backend/cavr/advisories.py::_entry_affects`: for a release version that `Version` can parse, it first compares
+  `versions` as versions (`_same_version`: "2.0" equals 2.0.0, "v1.0" equals 1.0) as well as exact strings. It then
+  leaves a GIT range out when the entry has an ECOSYSTEM range with an `introduced` event, or when the GIT range has
+  a `fixed`/`limit` event (`GIT_CLOSING_EVENTS`) and `versions` is an enumeration: not empty, and every item a string
+  `Version` can parse (`_is_version`). What is left goes to `package_records.affected` (unchanged). These GIT ranges
+  stay in, so they are still "cannot tell":
+  - an open GIT range with no ECOSYSTEM range;
+  - a GIT-only entry without a usable `versions` list;
+  - a GIT range next to an ECOSYSTEM range with no `introduced`.
+
+  An unparseable version takes the old path unchanged.
+- `backend/cavr/repair_proposal.py::_search_pins`: when any release was left out as `ADVISORY_RANGE_UNKNOWN`, the
+  `NO_SAFE_CANDIDATE` reason adds "or with a range CAVR cannot evaluate".
+- `scripts/eval/cavr_eval.py` (owner-approved): `AS_RUN_LABEL` = "as run on 2026-11-25, before the D-1 fix", and
+  `as_run_status`, a labelled frozen copy of the pre-fix reading. `repair_screen(..., as_run=)` and `--as-run` on
+  the CLI. `md_repair_screens` uses the frozen reading and prints the label above the tables. The `as_run_status`
+  docstring says that it is frozen in logic, not in code (it imports today's `_ranges` and `affected`; the
+  byte-for-byte test catches drift) and that its entry filter is slightly looser than `_is_for`. The `spec_affected`
+  docstring is corrected: CAVR no longer compares `versions` as exact strings.
+- `docs/evaluation/cavr-m2-evaluation.md`: the label sentence in the generated section (the only regenerated
+  change), plus a new hand-written section "After D-1 fix (2026-11-28)".
+
+### Design decisions
+
+- **The fix is in `_entry_affects`, not in `package_records.affected`.** `affected` is in `backend/threat_repo/`
+  (another module, also used by `vulnerabilities`). Its input is filtered instead.
+- **An open GIT range without ECOSYSTEM is UNKNOWN for every unlisted version**, not only for versions above the
+  highest listed one. This is fix rule 1 read literally, and it is the fail-closed choice: only a listed version
+  is decided.
+- **`last_affected` is not a GIT closing event.** The proposal names `fixed` and `limit` only.
+- **A `versions` list with any item that is not a version string is not an enumeration** (review MINOR 1). The
+  alternative was to skip the bad items and trust the rest, but a list with junk in it may also be incomplete.
+  Such an entry stays UNKNOWN for unlisted releases; a listed release is still AFFECTED.
+- **Only an ECOSYSTEM range with an `introduced` event replaces the GIT range** (review MINOR 2). A range with no
+  events, or only `fixed`/`limit`/`last_affected`, opens nothing, so `affected` would read it as False and hide the
+  GIT range.
+- **The tables are frozen by code, not by text.** The alternative was to leave the generated section out of the
+  byte-for-byte test. With the frozen copy, the regenerated CSV, tables and SVGs stay byte-identical, and the test
+  still guards them.
+- **`spec_affected` is not changed** (still exact strings). It is the independent reading of the original
+  diagnosis. The difference this causes on requests (56 old releases) is reported, not hidden.
+
+### Requirements covered
+
+- FR-CAVR-03 (C3 OSV with correct version-range checks): GIT ranges are read per the OSV schema for release
+  versions. Check: CAVR's AFFECTED set equals the specification's on 109/109 urllib3, 52/52 jinja2 and 131/131
+  pypdf recorded releases.
+- FR-7 (repair proposal): releases no advisory affects reach the re-check. Check:
+  `test_urllib3_repair_rerun_from_the_recording_reaches_the_recheck_of_2_8_0`.
+- NFR fail closed: an advisory CAVR cannot evaluate for the requested version is still UNRESOLVED, never VERIFIED.
+
+### Ch 7 Test cases
+
+| Test ID | Purpose | Input | Expected | Result |
+|---|---|---|---|---|
+| `test_recorded_pysec_2023_192_is_read_from_its_ecosystem_range_and_versions` (5) | real GIT+ECOSYSTEM entry | recorded PYSEC-2023-192; 2.8.0, 2.0.5, 1.26.16, 2.0.6, 1.26.17 | NOT_AFFECTED / AFFECTED / AFFECTED / NOT / NOT | pass |
+| `test_open_git_range_with_versions_is_unknown_for_every_unlisted_version` | open GIT stays cannot-tell | open GIT, versions [1.0, 1.1] | 1.1 AFFECTED; 1.2, 9.0, 0.9 UNKNOWN | pass |
+| `test_git_only_entry_without_versions_stays_unknown` (6) | GIT-only, no or empty versions | closed / open / both | UNKNOWN for 0.1, 1.0, 9.0 | pass |
+| `test_closed_git_only_entry_is_read_from_its_versions_list` | GIT-only with versions | closed GIT, [1.0, 1.1] | listed AFFECTED, others NOT_AFFECTED | pass |
+| `test_closed_and_open_git_ranges_together_stay_unknown_for_an_unlisted_version` | an open range is never dropped | closed + open GIT | 2.0 UNKNOWN | pass |
+| `test_git_closing_events_are_fixed_and_limit` (2) | which events close a GIT range | fixed / limit / last_affected | NOT_AFFECTED / NOT_AFFECTED / UNKNOWN | pass |
+| `test_open_git_range_next_to_an_ecosystem_range_is_read_from_the_ecosystem_range` | rule 1, ECOSYSTEM case | open GIT + ECOSYSTEM ≥1.0 | 1.5 AFFECTED, 0.9 NOT | pass |
+| `test_versions_list_is_compared_as_versions_not_strings` (4) | rule 4 | "2.0" vs 2.0.0, "v1.0" vs 1.0.0, … | AFFECTED | pass |
+| `test_a_versions_list_with_an_item_that_is_not_a_version_is_not_an_enumeration` (3) | review MINOR 1 | closed GIT, versions [junk, "1.0"] for junk "not a version" / 7 / None | 1.0 AFFECTED; 2.0 UNKNOWN; exact string kept | pass |
+| `test_an_ecosystem_range_without_introduced_does_not_replace_the_git_range` (4) | review MINOR 2 | closed GIT + ECOSYSTEM with no events / fixed / limit / last_affected only | UNKNOWN for 1.0, 2.0; NOT_AFFECTED once a real `introduced 3.0` range is added | pass |
+| `test_leaving_a_git_range_out_never_hides_another_range_that_cannot_be_evaluated` (3) | other ranges still decide | GIT + bad ECOSYSTEM / MADE_UP / unknown event | never NOT_AFFECTED | pass |
+| `test_unparseable_release_version_keeps_the_git_range_unknown` | edge | version "nope" | UNKNOWN | pass |
+| `test_an_advisory_osv_returns_that_cavr_does_not_read_as_affected_is_unresolved_never_ok` (6) | gate stays fail-closed | 6 shapes for demo 2.0 | UNRESOLVED (RANGE_UNSUPPORTED / RANGE_DISAGREEMENT) | pass |
+| `test_an_affected_advisory_next_to_an_open_git_one_still_rejects` | AFFECTED wins | listed + open GIT | REJECTED | pass |
+| `test_every_recorded_per_version_answer_is_judged_as_it_was_in_the_evaluation_run` | regression guard only (no GIT range in these answers) | the raw JSON's 74 judged per-version answers, matched by (item, run, package, version): 58 distinct inputs, 10 with advisories, 0 GIT ranges | same result and rule as in the run; exact counts asserted | pass |
+| `test_on_the_recorded_package_wide_answers_the_fix_never_loses_affected_and_moves_only_the_expected_pairs` (3) | D-1 on real GIT ranges | recorded package-wide answers: urllib3 44 × 109, jinja2 20 × 52, requests 16 × 163 (advisory × release) | AFFECTED never lost; UNKNOWN → NOT_AFFECTED exactly on GIT entries the spec excludes (461 / 62 / 221); UNKNOWN → AFFECTED only for requests' PYSEC-2015-17 `v` tags (56) | pass |
+| `test_an_advisory_cavr_cannot_read_as_affected_keeps_the_requested_version_unresolved` (5) | full `verify_request`, also on a cache hit | VERIFIED control, then each shape | UNRESOLVED stage advisories | pass |
+| `test_an_advisory_whose_versions_list_names_the_requested_version_rejects_it` | rule 4 in the gate | versions ["1.0.0"], request 1.0 | REJECTED | pass |
+| `test_no_safe_candidate_reason_names_ranges_cavr_cannot_evaluate` | rule 5 | open GIT-only package advisory | reason names "cannot evaluate" | pass |
+| `test_no_safe_version_gives_no_repair_found` (extended) | rule 5, other branch | only AFFECTED exclusions | reason unchanged | pass |
+| `test_urllib3_repair_rerun_from_the_recording_reaches_the_recheck_of_2_8_0` | the defect itself | recorded registry + OSV answers | 2.8.0 first candidate; re-check fails closed (artifact) | pass |
+| `test_on_the_recordings_the_frozen_reading_excludes_urllib3_2_8_0_and_today_s_cavr_includes_it` | frozen vs today | urllib3 recordings | as run: 7 PYSEC UNKNOWN, passes none; today: passes [2.8.0] | pass |
+| `test_the_frozen_reading_matches_the_pre_fix_reading_and_differs_from_today_only_on_git_ranges` | frozen copy is faithful | PYSEC_LIKE | as run UNKNOWN at 2.8.0, today NOT_AFFECTED | pass |
+| `test_committed_results_regenerate_byte_for_byte_and_their_recordings_check` | original tables unchanged | committed raw + recordings | byte-identical CSV, MD, SVGs | pass |
+
+Updated to the fixed behaviour: `test_git_range_next_to_a_matching_ecosystem_range_is_affected` (2.0 UNKNOWN →
+NOT_AFFECTED), `test_cavr_reads_a_git_plus_ecosystem_entry_as_the_specification_does` (was `..._as_unknown_for_every_version`),
+`test_repair_screen_from_recordings`, `test_repair_screen_over_every_recorded_release`,
+`test_the_report_generates_the_repair_screen_tables` (now also checks the label). Runs after the review fixes:
+advisories 127, repair 31 and eval 83 passed; with pipeline, 333 passed. `cavr_eval.py report` on a copy of
+`docs/evaluation` is byte-identical (`diff -r`). Full suite: 3236 passed, 97 skipped, 1 xfailed.
+
+### Defects found and fixed
+
+- D-1 (from the evaluation): fixed as above. The tests written first failed before the fix (22 failures), and the
+  urllib3 re-run reproduced the exclusion of 2.8.0 as `ADVISORY_RANGE_UNKNOWN` from the recording.
+- Found during the fix: regenerating the report with the fixed code changed the committed repair-screen tables and
+  failed the byte-for-byte test. Fixed by the labelled frozen reading (Maryam's choice).
+- Review findings, all fixed:
+  - B1: the gate evidence cited "76" answers, and the test matched them by sha. Now it says 74, matches by
+    (item, run, package, version) with exact counts, and is called a regression guard.
+  - M1: stale pointers in the original D-1 prose. Explained in "After D-1 fix", with the prose kept.
+  - MINOR 1 and 2: junk `versions` and degenerate ECOSYSTEM ranges keep the GIT range.
+  - MINOR 3: test rename.
+  - MINOR 4: the rule 1 / rule 2 line.
+  - MINOR 5: the frozen copy's docstring.
+  - MINOR 7: "verdict unchanged" holds on the recordings only.
+  - Added: real-data GIT evidence on the package-wide answers.
+- Review (cavr-reviewer): 1 pass, CHANGES REQUIRED (1 BLOCKER / 1 MAJOR / 7 MINOR); all fixed after the pass, not re-reviewed; 0 open MINOR.
+
+### Known limitations / deferred
+
+- Whether urllib3 2.8.0, jinja2 3.1.6 and requests 2.33.0–2.34.2 pass the re-check is not known. It needs a live run
+  (the registry answers and wheels were not recorded).
+- requests: CAVR's AFFECTED set differs from `spec_affected` on 56 old releases (0.2.0–2.0.1). The cause is
+  `v`-prefixed tags in PYSEC-2015-17's `versions`, and the difference is in the fail-closed direction.
+- For the requested version, an advisory with a GIT range that OSV returned but CAVR now reads as not containing the
+  version changes rule from `RANGE_UNSUPPORTED` to `RANGE_DISAGREEMENT`. Both are UNRESOLVED. Fix rule 4 can turn
+  an UNRESOLVED into a REJECTED (fail-closed). "Verdict unchanged" is shown on the recordings only.
+- The per-version answers recorded for the requested versions hold no GIT range. The real GIT evidence comes from
+  the package-wide answers (repair's screen), and the gate's GIT cases are covered by synthetic tests only.
+
+### Tool disclosure (Ch 8.7)
+
+- **Generated by Claude Code:** the tests, the fix, the frozen reading, the report section and these notes.
+  **Reviewed/decided by Maryam:** the fix as proposed in the evaluation, the safety requirements, the choice of a
+  frozen reading over a narrower byte test, the "as run" label, and the list of review findings to fix. **Reviewed
+  by the cavr-reviewer agent** (1 pass). **Verified by:** the tests above, run before the fix (failing) and after
+  it, the offline `repair-screen` in both readings, byte-identical regeneration, and the full suite. The counts 74 /
+  58 / 10 / 0 were recomputed from the raw JSON and the recordings; the requested figure "58 answers" counts
+  distinct (item, run, response) inputs, not answers.
+
+### Supervisor Q&A prep
+
+1. **Could the fix let a vulnerable version through the gate?** No. For the requested version, OSV only returns
+   advisories it considers to affect that version. If CAVR does not read such an advisory as AFFECTED, the result
+   is UNRESOLVED (`RANGE_UNSUPPORTED` or `RANGE_DISAGREEMENT`), never OK. All 74 per-version answers the run judged
+   get the same result and rule as in the run. That is a regression guard only, since none of them holds a GIT range.
+2. **Why ignore GIT ranges at all?** They name commits, not releases. OSV lists the releases they cover in
+   `versions`, and the ECOSYSTEM range states the same thing in version space. An open GIT range with no ECOSYSTEM
+   range is not ignored: a release published later could contain the commit.
+3. **Why keep the old, wrong reading in the script?** The committed tables are results of the 2026-11-25 run. The
+   frozen copy, labelled "as run on 2026-11-25, before the D-1 fix", keeps them reproducible byte for byte, and the
+   new section reports today's reading next to them.
+4. **Your real-data check never contains a GIT range. What evidence shows the fix is safe on real advisories, beyond
+   synthetic ones?** The package-wide answers recorded on 2026-11-25 hold 12 real PYSEC entries with GIT + ECOSYSTEM
+   ranges: 7 for urllib3, 2 for jinja2 and 3 for requests. `test_on_the_recorded_package_wide_answers_...` compares
+   today's reading with the as-run reading for every advisory × every recorded release.
+   - AFFECTED is never lost.
+   - 461 / 62 / 221 pairs move UNKNOWN → NOT_AFFECTED, each one a GIT entry whose ECOSYSTEM range and `versions`
+     do not contain the release.
+   - The only other move is 56 old requests releases becoming AFFECTED, the fail-closed direction.
+5. **Why is an entry whose `versions` list contains junk treated as a complete list of affected releases?** It no
+   longer is, since the review. If any `versions` item is not a version string, the list is not trusted as an
+   enumeration and the GIT range stays in. An unlisted release is then UNKNOWN, while a listed one is still AFFECTED
+   (`test_a_versions_list_with_an_item_that_is_not_a_version_is_not_an_enumeration`).
+6. **Rule 4 can turn an UNRESOLVED into a REJECTED. Is "verdict unchanged" still the right claim?** Only on the
+   recordings, and the report now says so. In general rule 4 can move a requested version from UNRESOLVED to
+   REJECTED, when `versions` names it in another spelling ("2.0" for 2.0.0, "v1.0" for 1.0). That is the
+   fail-closed direction. No change can move a result to OK or VERIFIED.
