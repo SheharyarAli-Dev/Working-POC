@@ -497,6 +497,40 @@ def test_run_report_and_check_end_to_end_offline(tmp_path):
     assert any("response_sha256 does not match" in p for p in problems)
 
 
+def path_with_git_only(tmp_path):
+    """A PATH directory holding only `git` (the header still asks git for the commit), so `docker` cannot be found."""
+    import shutil
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    (bin_dir / "git").symlink_to(shutil.which("git"))
+    return bin_dir
+
+
+def header(tmp_path):
+    from datetime import datetime, timezone
+    return ev.environment(None, datetime.now(timezone.utc), {"items": []}, None, True)
+
+
+def test_run_header_records_docker_not_available_when_the_program_is_absent(tmp_path, monkeypatch):
+    """CI runner without Docker: the header says why, instead of `environment()` raising FileNotFoundError."""
+    monkeypatch.setenv("PATH", str(path_with_git_only(tmp_path)))
+    raw = header(tmp_path)
+    assert raw["docker_version"].startswith("not available: FileNotFoundError")
+    assert raw["containers_left"] is None  # unknown, not "none left"
+    assert raw["commit"] == ev.git("rev-parse", "HEAD") != ""  # the rest of the header is still recorded
+
+
+def test_run_header_records_docker_not_available_when_the_program_fails(tmp_path, monkeypatch):
+    bin_dir = path_with_git_only(tmp_path)
+    fake = bin_dir / "docker"
+    fake.write_text("#!/bin/sh\necho 'Cannot connect to the Docker daemon' >&2\nexit 1\n")
+    fake.chmod(0o755)
+    monkeypatch.setenv("PATH", str(bin_dir))
+    raw = header(tmp_path)
+    assert raw["docker_version"] == "not available: exit code 1: Cannot connect to the Docker daemon"
+    assert raw["containers_left"] is None
+
+
 def test_run_refuses_an_unknown_item_id(tmp_path):
     with pytest.raises(SystemExit, match="unknown item"):
         ev.run(tmp_path, only={"no-such-item"}, allow_dirty=True, sandbox=False)
@@ -611,6 +645,17 @@ def test_committed_results_regenerate_byte_for_byte_and_their_recordings_check(t
     assert ev.check(EVALUATION) == []
 
 
+def ancestry_unavailable(*commits):
+    """Why `git merge-base --is-ancestor` cannot answer here (a shallow checkout, as on CI, or a commit object not in
+    this clone), or None when it can."""
+    shallow = subprocess.run(["git", "-C", str(REPO), "rev-parse", "--is-shallow-repository"], capture_output=True, text=True)
+    if shallow.stdout.strip() == "true":
+        return "shallow checkout (git rev-parse --is-shallow-repository = true)"
+    missing = [c for c in commits if subprocess.run(["git", "-C", str(REPO), "cat-file", "-e", f"{c}^{{commit}}"],
+                                                    capture_output=True).returncode != 0]
+    return f"commit object(s) not in this clone: {', '.join(missing)}" if missing else None
+
+
 @pytest.mark.skipif(not (EVALUATION / ev.RAW_NAME).is_file(), reason="no recorded evaluation committed")
 def test_committed_results_name_the_expectations_commit_and_a_clean_tree():
     raw = json.loads((EVALUATION / ev.RAW_NAME).read_text())
@@ -620,6 +665,9 @@ def test_committed_results_name_the_expectations_commit_and_a_clean_tree():
     corpus = {item["id"]: item["expected"] for item in ev.load_corpus()["items"]}
     assert {row["id"]: row["expected"] for row in raw["items"]} == corpus
     assert raw["corpus_sha256"] == __import__("hashlib").sha256(ev.CORPUS.read_bytes()).hexdigest()
+    why = ancestry_unavailable(raw["expectations_commit"], raw["commit"])
+    if why:
+        pytest.skip(f"expectations-before-run ancestry check not possible: {why} (every other assertion ran)")
     ancestor = subprocess.run(["git", "-C", str(REPO), "merge-base", "--is-ancestor", raw["expectations_commit"], raw["commit"]])
     assert ancestor.returncode == 0, "the expectations must be committed before (or in) the commit that ran"
 

@@ -597,17 +597,28 @@ def run(out: Path, only=None, allow_dirty=False, world_for=live_world, sandbox=T
     return 0
 
 
+def docker_output(*args):
+    """(stdout, None) from `docker <args>`, or (None, reason) when the program is missing, cannot start, or fails."""
+    try:
+        done = subprocess.run(["docker", *args], capture_output=True, text=True)
+    except OSError as error:  # FileNotFoundError: not on PATH; PermissionError: not executable
+        return None, f"{type(error).__name__}: {error.strerror or error}"
+    if done.returncode != 0:
+        last = (done.stderr.strip().splitlines() or [""])[-1].strip()
+        return None, f"exit code {done.returncode}" + (f": {last}" if last else "")
+    return done.stdout, None
+
+
 def environment(identity, started, corpus, only, allow_dirty) -> dict:
-    docker = subprocess.run(["docker", "version", "--format", "{{.Server.Version}}"], capture_output=True, text=True)
-    left = subprocess.run(["docker", "ps", "-a", "--filter", "name=^cavr-", "--format", "{{.Names}}"],
-                          capture_output=True, text=True)
+    version, why = docker_output("version", "--format", "{{.Server.Version}}")
+    left, _ = docker_output("ps", "-a", "--filter", "name=^cavr-", "--format", "{{.Names}}")
     return {"recorded_at": started.isoformat(timespec="seconds"),
             "finished_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
             "commit": git("rev-parse", "HEAD"), "working_tree": "not checked (--allow-dirty)" if allow_dirty else "clean (tracked files)",
             "expectations_commit": git("log", "-1", "--format=%H", "--", str(CORPUS.relative_to(REPO))) or None,
             "corpus_sha256": hashlib.sha256(CORPUS.read_bytes()).hexdigest(),
-            "image_id": (identity or {}).get("image_id"), "docker_version": docker.stdout.strip() or None,
-            "containers_left": [name for name in left.stdout.split() if name.startswith("cavr-")] if left.returncode == 0 else None,
+            "image_id": (identity or {}).get("image_id"), "docker_version": f"not available: {why}" if why else (version.strip() or None),
+            "containers_left": [name for name in left.split() if name.startswith("cavr-")] if left is not None else None,
             "platform": platform.platform(), "python": platform.python_version(),
             "command": "CAVR_DOCKER=1 .venv/bin/python scripts/eval/cavr_eval.py run",
             "subset": sorted(only) if only else None, "corpus_items": len(corpus["items"])}
