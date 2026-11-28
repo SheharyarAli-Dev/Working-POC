@@ -213,6 +213,45 @@ def test_vulnerable_dependency_rejects_the_request(world):
     assert verdict["cache_hit"] is True
 
 
+GIT_CLOSED = {"type": "GIT", "repo": "https://example.invalid/demo.git", "events": [{"introduced": "0"}, {"fixed": "8d2f1c0"}]}
+GIT_OPEN = {"type": "GIT", "repo": "https://example.invalid/demo.git", "events": [{"introduced": "3a9e7b1"}]}
+
+
+def git_advisory(advisory_id, *ranges, versions=None):
+    entry = {"package": {"name": "demo", "ecosystem": "PyPI"}, "ranges": list(ranges)}
+    if versions is not None:
+        entry["versions"] = versions
+    return {"id": advisory_id, "summary": "synthetic test advisory", "affected": [entry]}
+
+
+@pytest.mark.parametrize("vuln, rule", [
+    (git_advisory("SYNTH-D1-30", GIT_OPEN, versions=["0.9"]), "RANGE_UNSUPPORTED"),     # open GIT, 1.0 above the list
+    (git_advisory("SYNTH-D1-31", GIT_CLOSED), "RANGE_UNSUPPORTED"),                      # GIT only, no versions
+    (git_advisory("SYNTH-D1-32", GIT_OPEN), "RANGE_UNSUPPORTED"),
+    (git_advisory("SYNTH-D1-33", GIT_CLOSED, {"type": "ECOSYSTEM", "events": [{"introduced": "0"}, {"fixed": "0.5"}]}),
+     "RANGE_DISAGREEMENT"),                                                              # D-1: was RANGE_UNSUPPORTED
+    (git_advisory("SYNTH-D1-34", GIT_CLOSED, versions=["0.9"]), "RANGE_DISAGREEMENT"),   # D-1: was RANGE_UNSUPPORTED
+])
+def test_an_advisory_cavr_cannot_read_as_affected_keeps_the_requested_version_unresolved(world, vuln, rule):
+    """D-1 (docs/evaluation/cavr-m2-evaluation.md): the fix only changes how GIT ranges are read. For the requested
+    version, an advisory OSV returned that CAVR cannot evaluate, or does not read as containing the version, is
+    UNRESOLVED, never VERIFIED, also on a cache hit of an earlier VERIFIED verdict."""
+    world.add("demo", "1.0", CLEAN_DEMO)
+    world.write("app/uses_demo.py", USES_DEMO)
+    assert outcome(world.verify("pip install demo==1.0")) == ("VERIFIED", "verdict", "ALL_CHECKS_PASSED")   # control
+    world.advisories("demo", "1.0", [vuln])
+    verdict = world.verify("pip install demo==1.0")
+    assert outcome(verdict) == ("UNRESOLVED", "advisories", rule) and verdict["cache_hit"] is True
+    assert vuln["id"] in verdict["reason"]
+
+
+def test_an_advisory_whose_versions_list_names_the_requested_version_rejects_it(world):
+    world.add("demo", "1.0", CLEAN_DEMO)
+    world.write("app/uses_demo.py", USES_DEMO)
+    world.advisories("demo", "1.0", [git_advisory("SYNTH-D1-35", GIT_OPEN, versions=["1.0.0"])])   # "1.0.0" == 1.0
+    assert outcome(world.verify("pip install demo==1.0")) == ("REJECTED", "advisories", "KNOWN_VULNERABILITY")
+
+
 # --- UNRESOLVED on network loss ----------------------------------------------------------------------------------
 
 def test_registry_unreachable_is_unresolved(world):

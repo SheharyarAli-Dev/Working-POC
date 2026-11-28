@@ -1103,7 +1103,8 @@ def spec_affected(entry: dict, version: str) -> bool:
     `versions`). Used only to diagnose; CAVR's own check is `advisories.match_advisory`.
 
     Limits (diagnosis only): an unparseable version raises InvalidVersion; SEMVER ranges are not read (PyPI advisories
-    use ECOSYSTEM); `versions` is matched as exact strings ("2.0" is not "2.0.0"), as CAVR's check does.
+    use ECOSYSTEM); `versions` is matched as exact strings ("2.0" is not "2.0.0", "v1.0" is not "1.0"). CAVR's check
+    did the same until the D-1 fix; it now also compares them as versions, so the two differ on such entries.
     """
     from packaging.version import Version
     if version in (entry.get("versions") or []):
@@ -1141,8 +1142,43 @@ def _package_answer(out: Path, item_id: str):
     return canonicalize_name(answer["query"]["package"]["name"]), answer
 
 
-def _screen(name: str, answer: dict, version: str) -> dict:
-    """CAVR's decision (`advisories.match_advisory`) and the specification's (`spec_affected`) for one release."""
+AS_RUN_LABEL = "as run on 2026-11-25, before the D-1 fix"
+
+
+def as_run_status(version: str, entries: list) -> str:
+    """FROZEN COPY, as run on 2026-11-25, before the D-1 fix: CAVR's decision for one advisory as the evaluation run
+    made it.
+
+    Not CAVR's current reading (that is `advisories.match_advisory`). Do not "fix" this function: it exists so that
+    the committed tables of that run stay reproducible after found defect D-1 was fixed in `advisories._entry_affects`.
+
+    The run's `advisories._entry_affects` passed each entry whole to `package_records.affected` (unchanged since),
+    so a GIT range made every version it did not contain "cannot tell". Used only to regenerate the committed
+    tables of that run byte for byte; `entries` are the advisory's PyPI entries for the package (not withdrawn).
+
+    Frozen in logic, not in code: it still imports today's `advisories._ranges` and `package_records.affected`, so a
+    later change to either would change it too. `test_committed_results_regenerate_byte_for_byte_and_their_recordings_
+    check` catches that. `_screen` selects `entries` with `canonicalize_name(str(name))`, slightly looser than
+    `advisories._is_for` (a non-string name is not refused); this makes no difference on the recorded answers.
+    """
+    from backend.cavr.advisories import _ranges
+    from backend.threat_repo.package_records import affected
+    answers = []
+    for entry in entries:
+        ranges, versions = _ranges(entry), entry.get("versions", [])
+        if ranges is None or not isinstance(versions, list):
+            answers.append(None)
+            continue
+        try:
+            answers.append(affected(version, {"versions": versions, "ranges": ranges, "ecosystem": "PyPI"}))
+        except Exception:
+            answers.append(None)
+    return "AFFECTED" if True in answers else "UNKNOWN" if None in answers else "NOT_AFFECTED" if entries else "OTHER_PACKAGE"
+
+
+def _screen(name: str, answer: dict, version: str, as_run: bool = False) -> dict:
+    """CAVR's decision (`advisories.match_advisory`, or with `as_run` the decision of the evaluation run,
+    `as_run_status`) and the specification's (`spec_affected`) for one release."""
     from backend.cavr.advisories import match_advisory
     cavr, spec = {}, []
     for vuln in answer["response"].get("vulns") or []:
@@ -1150,7 +1186,7 @@ def _screen(name: str, answer: dict, version: str) -> dict:
             continue
         entries = [e for e in vuln.get("affected") or [] if isinstance(e, dict) and (e.get("package") or {}).get("ecosystem") == "PyPI"
                    and canonicalize_name(str((e.get("package") or {}).get("name"))) == name]
-        status = match_advisory(name, version, vuln)["status"]
+        status = as_run_status(version, entries) if as_run else match_advisory(name, version, vuln)["status"]
         if status in ("AFFECTED", "UNKNOWN"):
             cavr[vuln["id"]] = {"status": status,
                                 "ranges": [{"type": r.get("type"), "events": r.get("events")} for e in entries for r in e.get("ranges") or []],
@@ -1187,18 +1223,19 @@ def recorded_releases(out: Path, item_id: str) -> list[str]:
     return []
 
 
-def repair_screen(out: Path, item_id: str, all_releases: bool = False) -> list[dict]:
+def repair_screen(out: Path, item_id: str, all_releases: bool = False, as_run: bool = False) -> list[dict]:
     """For every release repair left out on an advisory (or, with `all_releases`, every release in the recorded
     registry answer): CAVR's decision per advisory and the specification's. Read from the recordings (run 1) and the
-    raw JSON's repair block; nothing is asked again."""
+    raw JSON's repair block; nothing is asked again. CAVR's decision is today's code, or with `as_run` the run's
+    (before the D-1 fix). `rule` is always the one the run recorded."""
     name, answer = _package_answer(out, item_id)
     if answer is None:
         return []
     if all_releases:
-        return [{**_screen(name, answer, version), "rule": None} for version in recorded_releases(out, item_id)]
+        return [{**_screen(name, answer, version, as_run), "rule": None} for version in recorded_releases(out, item_id)]
     raw = json.loads((out / RAW_NAME).read_text(encoding="utf-8"))
     repair = next(r for r in raw["items"] if r["id"] == item_id)["runs"][0].get("repair") or {}
-    return [{**_screen(name, answer, excluded["version"]), "rule": excluded["rule"]}
+    return [{**_screen(name, answer, excluded["version"], as_run), "rule": excluded["rule"]}
             for excluded in repair.get("excluded") or [] if excluded["rule"].startswith("ADVISORY")]
 
 
@@ -1208,13 +1245,14 @@ def _events_text(events) -> str:
 
 def md_repair_screens(out: Path, raw: dict) -> str:
     """The generated section on repair's advisory screen, for every real item whose repair left a release out on an
-    advisory: per release, per advisory (with its non-GIT ranges), and the agreement over every recorded release."""
+    advisory: per release, per advisory (with its non-GIT ranges), and the agreement over every recorded release.
+    These are results of the run, so CAVR's decision is the run's (`as_run_status`, AS_RUN_LABEL), not today's code."""
     parts = []
     for row in raw["items"]:
-        rows = repair_screen(out, row["id"]) if row["kind"] == "pypi" else []
+        rows = repair_screen(out, row["id"], as_run=True) if row["kind"] == "pypi" else []
         if not rows:
             continue
-        everything = repair_screen(out, row["id"], all_releases=True)
+        everything = repair_screen(out, row["id"], all_releases=True, as_run=True)
         same = sum(1 for r in everything if r["same_affected"])
         part = [f"#### `{row['id']}`: releases repair left out on an advisory",
                 _table(("Release", "Repair rule", "CAVR AFFECTED", "CAVR UNKNOWN", "Specification AFFECTED", "Exclusion supported"),
@@ -1240,6 +1278,8 @@ def md_repair_screens(out: Path, raw: dict) -> str:
     if not parts:
         return ""
     return ("### Repair's advisory screen against the OSV specification\n\n"
+            f"CAVR's decision in these tables is {AS_RUN_LABEL} (`cavr_eval.py repair-screen <item> --as-run`); for "
+            "today's reading see \"After D-1 fix\" under Findings. "
             "From the recorded package-wide OSV answer and registry answer of run 1 (`cavr_eval.py repair-screen <item>`). "
             "\"Specification\" is `spec_affected`: ECOSYSTEM ranges in version order plus the `versions` list, GIT ranges "
             "not read for a release version.\n\n" + "\n\n".join(parts))
@@ -1250,6 +1290,8 @@ def main(argv=None) -> int:
     parser.add_argument("command", choices=("run", "report", "check", "repair-screen"))
     parser.add_argument("item", nargs="?", help="repair-screen: the item id")
     parser.add_argument("--all-releases", action="store_true", help="repair-screen: every release in the recorded registry answer")
+    parser.add_argument("--as-run", action="store_true",
+                        help="repair-screen: CAVR's decision " + AS_RUN_LABEL)
     parser.add_argument("--out", type=Path, default=OUT)
     parser.add_argument("--only", default=None, help="comma-separated item ids (run only; recorded as a subset)")
     parser.add_argument("--allow-dirty", action="store_true", help="run with uncommitted changes (recorded; not for results)")
@@ -1260,7 +1302,8 @@ def main(argv=None) -> int:
         report(args.out)
         return 0
     if args.command == "repair-screen":
-        for entry in repair_screen(args.out, args.item, all_releases=args.all_releases):
+        print(f"CAVR's decision: {AS_RUN_LABEL if args.as_run else 'current code (advisories.match_advisory)'}")
+        for entry in repair_screen(args.out, args.item, all_releases=args.all_releases, as_run=args.as_run):
             print(f"{entry['version']}: {entry['rule']}; CAVR AFFECTED {len(entry['cavr_affected'])}, UNKNOWN "
                   f"{entry['cavr_unknown']}; OSV specification AFFECTED {len(entry['spec_affected'])}; "
                   f"same AFFECTED set: {entry['same_affected']}; exclusion "

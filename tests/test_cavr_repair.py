@@ -235,6 +235,70 @@ def test_no_safe_version_gives_no_repair_found(tmp_path):
     assert block["pin"] is None and block["removal"] is None and block["candidates_tried"] == []
     assert {e["version"] for e in block["excluded"]} == {"1.1", "1.2"}
     assert package["status"] == "REJECTED"          # the package stays as judged
+    assert block["reason"] == "every newer release of demo with a wheel is affected by a known advisory"
+
+
+def test_no_safe_candidate_reason_names_ranges_cavr_cannot_evaluate(tmp_path):
+    """D-1 fix rule 5: when a release was left out as ADVISORY_RANGE_UNKNOWN the reason does not say "affected"."""
+    world = demo_world(tmp_path)
+    rejecting = synthetic_advisory("SYNTH-REPAIR-1", "demo", introduced="0", fixed="1.1")
+    open_git = {"id": "SYNTH-D1-40", "affected": [{"package": {"name": "demo", "ecosystem": "PyPI"}, "versions": ["1.0"],
+                                                   "ranges": [{"type": "GIT", "events": [{"introduced": "3a9e7b1"}]}]}]}
+    write_package_osv_cache(world.osv_dir, "demo", [rejecting, open_git])
+    verdict, package = judged(world)
+    block = repair(world, verdict, package)
+    assert (block["result"], block["rule"]) == ("NO_REPAIR_FOUND", "NO_SAFE_CANDIDATE")
+    assert {e["version"]: e["rule"] for e in block["excluded"]} == {"1.1": "ADVISORY_RANGE_UNKNOWN", "1.2": "ADVISORY_RANGE_UNKNOWN"}
+    assert block["reason"] == ("every newer release of demo with a wheel is affected by a known advisory or with a "
+                               "range CAVR cannot evaluate")
+    assert block["candidates_tried"] == [] and package["status"] == "REJECTED"
+
+
+EVALUATION = Path(__file__).parent.parent / "docs" / "evaluation" / "recordings"
+
+
+def recorded(kind, item):
+    import gzip
+    return json.loads(gzip.decompress((EVALUATION / kind / f"{item}.json.gz").read_bytes()))
+
+
+@pytest.mark.skipif(not (EVALUATION / "osv" / "urllib3-2.2.1-run1.json.gz").is_file(), reason="no evaluation recording")
+def test_urllib3_repair_rerun_from_the_recording_reaches_the_recheck_of_2_8_0(tmp_path):
+    """D-1: the evaluation's urllib3 2.2.1 repair, re-run offline from what was recorded on 2026-11-25.
+
+    RECORDED: the registry's whole-project answer for urllib3 (every release), OSV's per-version answer for 2.2.1 and
+    OSV's package-wide answer (44 advisories). Only their age is refreshed: the cache refuses old answers.
+    SYNTHETIC: the urllib3 2.2.1 wheel (`build_wheel`): its only role is to get the request to the advisory stage;
+    the real wheel was not recorded. 2.8.0's own registry answer was not recorded either, so its re-check cannot
+    download anything and must fail closed; the test checks that repair now *reaches* it, not that it passes.
+    """
+    osv = recorded("osv", "urllib3-2.2.1-run1")
+    per_version = next(v for k, v in osv.items() if not k.startswith("package-") and v["query"].get("version") == "2.2.1")
+    package_wide = next(v for k, v in osv.items() if k.startswith("package-"))
+    assert package_wide["response_sha256"].startswith("3c505122")
+    registry = next(json.loads(body["text"]) for body in recorded("pypi", "urllib3-2.2.1")["bodies"].values()
+                    if "releases" in json.loads(body["text"]))
+
+    world = World(tmp_path)
+    wheel = world.add("urllib3", "2.2.1", files={"urllib3/__init__.py": "def get():\n    return 1\n"}, lock=False)
+    world.advisories("urllib3", "2.2.1", per_version["response"]["vulns"])
+    write_package_osv_cache(world.osv_dir, "urllib3", package_wide["response"]["vulns"])
+    world.index.add_project("urllib3", registry)
+    world.write("app/uses_urllib3.py", "import urllib3\n\n\ndef go():\n    return urllib3.get()\n")
+    set_pin(world, "urllib3", "2.2.1", hashlib.sha256(wheel.read_bytes()).hexdigest())
+    world.policy["approved_requirements"].append("urllib3>=2,<3")
+    verdict, package = judged(world)
+    assert (package["status"], package["stage"], package["rule"]) == ("REJECTED", "advisories", "KNOWN_VULNERABILITY")
+
+    block = repair(world, verdict, package)
+    excluded = {e["version"]: e["rule"] for e in block["excluded"]}
+    assert "ADVISORY_RANGE_UNKNOWN" not in excluded.values()          # before the fix: 2.8.0 was left out this way
+    assert "2.8.0" not in excluded and excluded["2.7.0"] == excluded["2.2.2"] == "ADVISORY_AFFECTED"
+    first = block["candidates_tried"][0]
+    assert first["version"] == "2.8.0"                                 # the re-check of 2.8.0 is reached
+    assert (first["outcome"], first["status"], first["stage"]) == ("SKIPPED", "UNRESOLVED", "artifact")   # fails closed
+    assert block["pin"] is None and (block["result"], block["rule"]) == ("NO_REPAIR_FOUND", "NO_SAFE_CANDIDATE")
+    assert package["status"] == "REJECTED" and block["gate_decision_changed"] is False
 
 
 # --- removal -----------------------------------------------------------------------------------------------------

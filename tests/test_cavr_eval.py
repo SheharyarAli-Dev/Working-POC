@@ -596,14 +596,14 @@ def test_spec_affected_last_affected_limit_and_unsorted_events():
     assert ev.spec_affected({"ranges": [{"type": "GIT", "events": [{"introduced": "0"}]}]}, "1.0") is False
 
 
-def test_cavr_reads_a_git_plus_ecosystem_entry_as_unknown_for_every_version():
-    """What the live run found (found defect D-1 in docs/evaluation/cavr-m2-evaluation.md): a GIT range next to an
-    ECOSYSTEM range makes CAVR's range check UNKNOWN, also for a version the ECOSYSTEM range and `versions` exclude.
-    This test records today's behaviour of `advisories.match_advisory`; it is not fixed in this branch."""
+@pytest.mark.parametrize("version", ["2.0.5", "2.0.3", "1.26.0", "2.0.6", "1.26.17", "2.8.0", "1.26.16"])
+def test_cavr_reads_a_git_plus_ecosystem_entry_as_the_specification_does(version):
+    """Found defect D-1 in docs/evaluation/cavr-m2-evaluation.md, fixed: a GIT range next to an ECOSYSTEM range made
+    CAVR's range check UNKNOWN for every version the ECOSYSTEM range and `versions` exclude (2.8.0 here). The GIT
+    range is now left out for a release version, so CAVR and `spec_affected` agree on every version."""
     from backend.cavr.advisories import match_advisory
-    assert match_advisory("urllib3", "2.8.0", PYSEC_LIKE)["status"] == "UNKNOWN"
-    assert ev.spec_affected(PYSEC_LIKE["affected"][0], "2.8.0") is False
-    assert match_advisory("urllib3", "2.0.5", PYSEC_LIKE)["status"] == "AFFECTED"  # an affected version is still found
+    status = match_advisory("urllib3", version, PYSEC_LIKE)["status"]
+    assert status == ("AFFECTED" if ev.spec_affected(PYSEC_LIKE["affected"][0], version) else "NOT_AFFECTED")
 
 
 def test_repair_screen_from_recordings(tmp_path):
@@ -622,9 +622,11 @@ def test_repair_screen_from_recordings(tmp_path):
     seven, eight = ev.repair_screen(tmp_path, "u")
     assert (seven["version"], seven["cavr_affected"], seven["spec_affected"], seven["exclusion_supported"]) == (
         "2.7.0", ["GHSA-IN"], ["GHSA-IN"], True)
-    assert seven["cavr_unknown"] == ["PYSEC-TEST"] and seven["same_affected"] is True
-    assert (eight["cavr_affected"], eight["cavr_unknown"], eight["exclusion_supported"]) == ([], ["PYSEC-TEST"], False)
-    assert eight["advisories"]["PYSEC-TEST"]["versions_listed"] == 2
+    assert seven["cavr_unknown"] == [] and seven["same_affected"] is True      # D-1 fixed: was ["PYSEC-TEST"]
+    # The rule is the recorded one (the run was before the fix); CAVR's reading today finds nothing for 2.8.0.
+    assert (eight["rule"], eight["cavr_affected"], eight["cavr_unknown"], eight["exclusion_supported"]) == (
+        "ADVISORY_RANGE_UNKNOWN", [], [], False)
+    assert "PYSEC-TEST" not in eight["advisories"]
 
 
 # --- the committed results (docs/evaluation/) -----------------------------------------------------------------------
@@ -766,15 +768,130 @@ def test_repair_screen_over_every_recorded_release(tmp_path):
     assert ev.recorded_releases(tmp_path, "u") == ["2.0.5", "2.7.0", "2.8.0"]   # sorted; the invalid version left out
     every = {r["version"]: r for r in ev.repair_screen(tmp_path, "u", all_releases=True)}
     assert every["2.0.5"]["cavr_affected"] == ["GHSA-IN", "PYSEC-TEST"] and every["2.0.5"]["same_affected"] is True
-    assert every["2.8.0"]["cavr_unknown"] == ["PYSEC-TEST"] and every["2.8.0"]["rule"] is None
+    assert every["2.8.0"]["cavr_unknown"] == [] and every["2.8.0"]["rule"] is None   # D-1 fixed: was ["PYSEC-TEST"]
+    assert every["2.0.5"]["advisories"]["PYSEC-TEST"]["versions_listed"] == 2
     assert ev.repair_screen(tmp_path, "missing", all_releases=True) == []
 
 
 def test_the_report_generates_the_repair_screen_tables(tmp_path):
+    """The report's tables are results of the run: CAVR's decision in them is the frozen one, labelled as such."""
     raw = screen_fixture(tmp_path)
     text = ev.md_repair_screens(tmp_path, raw)
+    assert ev.AS_RUN_LABEL == "as run on 2026-11-25, before the D-1 fix"
+    assert f"CAVR's decision in these tables is {ev.AS_RUN_LABEL}" in text
     assert "#### `u`: releases repair left out on an advisory" in text
     assert "| 2.8.0 | ADVISORY_RANGE_UNKNOWN | 0 | PYSEC-TEST | 0 | **no** |" in text
     assert "equals the specification's for 3 of 3 releases" in text
     assert "| PYSEC-TEST | UNKNOWN | ECOSYSTEM+GIT | introduced 2.0.0, fixed 2.0.6, introduced 0, fixed 1.26.17 | 2 |" in text
     assert ev.md_repair_screens(tmp_path, {"items": []}) == ""
+
+
+def test_the_frozen_reading_matches_the_pre_fix_reading_and_differs_from_today_only_on_git_ranges():
+    vuln = PYSEC_LIKE
+    entries = vuln["affected"]
+    from backend.cavr.advisories import match_advisory
+    assert ev.as_run_status("2.8.0", entries) == "UNKNOWN" and match_advisory("urllib3", "2.8.0", vuln)["status"] == "NOT_AFFECTED"
+    assert ev.as_run_status("2.0.5", entries) == match_advisory("urllib3", "2.0.5", vuln)["status"] == "AFFECTED"
+    ecosystem_only = [{**entries[0], "ranges": [r for r in entries[0]["ranges"] if r["type"] != "GIT"]}]
+    assert ev.as_run_status("2.8.0", ecosystem_only) == "NOT_AFFECTED"
+    assert ev.as_run_status("1.0", []) == "OTHER_PACKAGE"
+
+
+GIT_EVIDENCE = {   # item: (recorded releases, advisories, the advisories with a GIT range,
+                   #        (release, advisory) pairs UNKNOWN -> NOT_AFFECTED, UNKNOWN -> AFFECTED)
+    "urllib3-2.2.1": (109, 44, {"PYSEC-2020-148", "PYSEC-2020-149", "PYSEC-2021-108", "PYSEC-2021-59", "PYSEC-2023-192",
+                                "PYSEC-2023-207", "PYSEC-2023-212"}, 461, 0),
+    "jinja2-3.1.4": (52, 20, {"PYSEC-2014-82", "PYSEC-2019-220"}, 62, 0),
+    "requests-2.31.0": (163, 16, {"PYSEC-2015-17", "PYSEC-2018-28", "PYSEC-2023-74"}, 221, 56),
+}
+
+
+@pytest.mark.skipif(not (EVALUATION / "recordings" / "osv" / "urllib3-2.2.1-run1.json.gz").is_file(),
+                    reason="no recorded evaluation committed")
+@pytest.mark.parametrize("item", sorted(GIT_EVIDENCE))
+def test_on_the_recorded_package_wide_answers_the_fix_never_loses_affected_and_moves_only_the_expected_pairs(item):
+    """D-1 on real GIT ranges: the recorded package-wide OSV answers hold the real PYSEC entries with GIT + ECOSYSTEM
+    ranges. For every advisory and every recorded release, today's reading is compared with the reading as run on
+    2026-11-25, before the D-1 fix (`ev.as_run_status`):
+    - AFFECTED is never lost, and nothing becomes UNKNOWN;
+    - UNKNOWN -> NOT_AFFECTED happens exactly where the advisory has a GIT range and neither its ECOSYSTEM ranges
+      nor its `versions` contain the release (`spec_affected`, with `versions` read as versions);
+    - UNKNOWN -> AFFECTED happens exactly where a `versions` item equals the release as a version but not as a string
+      (fix rule 4; requests' PYSEC-2015-17 lists git tags such as "v0.10.0"); every other pair is unchanged."""
+    from packaging.version import InvalidVersion, Version
+    from backend.cavr.advisories import match_advisory
+    releases_count, advisories_count, git_ids, to_not_affected, to_affected = GIT_EVIDENCE[item]
+    name, answer = ev._package_answer(EVALUATION, item)
+    releases = ev.recorded_releases(EVALUATION, item)
+    vulns = [v for v in answer["response"]["vulns"] if not v.get("withdrawn")]
+    assert (len(releases), len(vulns)) == (releases_count, advisories_count)
+
+    def listed_as_version_only(entry, version):
+        def same(listed):
+            try:
+                return isinstance(listed, str) and Version(listed) == Version(version)
+            except InvalidVersion:
+                return False
+        return version not in (entry.get("versions") or []) and any(same(listed) for listed in entry.get("versions") or [])
+
+    moves = {("UNKNOWN", "NOT_AFFECTED"): set(), ("UNKNOWN", "AFFECTED"): set()}
+    for vuln in vulns:
+        entries = [e for e in vuln.get("affected") or [] if (e.get("package") or {}).get("ecosystem") == "PyPI"
+                   and ev.canonicalize_name(str(e["package"]["name"])) == name]
+        has_git = any(r.get("type") == "GIT" for e in entries for r in e.get("ranges") or [])
+        assert has_git == (vuln["id"] in git_ids)
+        for version in releases:
+            before, after = ev.as_run_status(version, entries), match_advisory(name, version, vuln)["status"]
+            by_version = any(listed_as_version_only(e, version) for e in entries)
+            by_spec = any(ev.spec_affected(e, version) for e in entries)
+            if before == "AFFECTED":
+                assert after == "AFFECTED", (vuln["id"], version)                    # never lost
+            elif before == after:
+                assert not (has_git and before == "UNKNOWN"), (vuln["id"], version)  # every GIT UNKNOWN is resolved
+            else:
+                assert (before, after) in moves, (vuln["id"], version, before, after)
+                moves[(before, after)].add((version, vuln["id"]))
+                if after == "NOT_AFFECTED":
+                    assert has_git and not by_spec and not by_version, (vuln["id"], version)
+                else:
+                    assert has_git and by_version and not by_spec, (vuln["id"], version)
+    assert len(moves[("UNKNOWN", "NOT_AFFECTED")]) == to_not_affected
+    assert len(moves[("UNKNOWN", "AFFECTED")]) == to_affected
+    assert {advisory for _, advisory in moves[("UNKNOWN", "NOT_AFFECTED")]} == git_ids
+    if to_affected:
+        assert {advisory for _, advisory in moves[("UNKNOWN", "AFFECTED")]} == {"PYSEC-2015-17"}
+        assert max(Version(v) for v, _ in moves[("UNKNOWN", "AFFECTED")]) < Version(item.rsplit("-", 1)[1])
+
+
+def passing_screen(rows, rejected):
+    """The releases newer than `rejected` (not pre-releases) that repair's advisory screen lets through to a re-check:
+    no advisory read as AFFECTED and none as UNKNOWN (`repair_proposal._search_pins`)."""
+    from packaging.version import Version
+    return [r["version"] for r in rows if Version(r["version"]) > Version(rejected) and not Version(r["version"]).is_prerelease
+            and not r["cavr_affected"] and not r["cavr_unknown"]]
+
+
+@pytest.mark.skipif(not (EVALUATION / "recordings" / "osv" / "urllib3-2.2.1-run1.json.gz").is_file(),
+                    reason="no recorded evaluation committed")
+def test_on_the_recordings_the_frozen_reading_excludes_urllib3_2_8_0_and_today_s_cavr_includes_it():
+    """Found defect D-1, offline on the 2026-11-25 recordings (package-wide OSV answer 3c505122..., 109 releases)."""
+    frozen = ev.repair_screen(EVALUATION, "urllib3-2.2.1", all_releases=True, as_run=True)
+    today = ev.repair_screen(EVALUATION, "urllib3-2.2.1", all_releases=True)
+    eight_frozen = next(r for r in frozen if r["version"] == "2.8.0")
+    eight_today = next(r for r in today if r["version"] == "2.8.0")
+    # As run: 2.8.0 is left out as "cannot evaluate" by the 7 GIT+ECOSYSTEM PYSEC entries named in the report.
+    assert eight_frozen["cavr_affected"] == [] and eight_frozen["cavr_unknown"] == [
+        "PYSEC-2020-148", "PYSEC-2020-149", "PYSEC-2021-108", "PYSEC-2021-59", "PYSEC-2023-192", "PYSEC-2023-207",
+        "PYSEC-2023-212"]
+    assert passing_screen(frozen, "2.2.1") == []
+    # Today: no advisory affects 2.8.0 or is unreadable for it, so it is the one release the screen lets through.
+    assert eight_today["cavr_affected"] == eight_today["cavr_unknown"] == [] and eight_today["spec_affected"] == []
+    assert passing_screen(today, "2.2.1") == ["2.8.0"]
+    # Only "cannot evaluate" changed: every urllib3 release keeps the AFFECTED set the run gave it (its `versions`
+    # lists hold no "v1.0"-style tags, so fix rule 4 changes nothing here).
+    assert [(r["version"], r["cavr_affected"]) for r in today] == [(r["version"], r["cavr_affected"]) for r in frozen]
+    # The run's own repair block recorded that exclusion (raw data, not recomputed).
+    raw = json.loads((EVALUATION / ev.RAW_NAME).read_text())
+    repair = next(r for r in raw["items"] if r["id"] == "urllib3-2.2.1")["runs"][0]["repair"]
+    assert {e["version"]: e["rule"] for e in repair["excluded"]}["2.8.0"] == "ADVISORY_RANGE_UNKNOWN"
+

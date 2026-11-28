@@ -192,7 +192,9 @@ def _search_pins(block, package, name, version, files, work, run):
             candidates.append(release)
     candidates.sort(key=lambda release: (release["parsed"].major != rejected.major, release["parsed"]))
     if not candidates:
-        return "NO_SAFE_CANDIDATE", f"every newer release of {name} with a wheel is affected by a known advisory"
+        cannot_evaluate = any(entry["rule"] == "ADVISORY_RANGE_UNKNOWN" for entry in block["excluded"])
+        return "NO_SAFE_CANDIDATE", (f"every newer release of {name} with a wheel is affected by a known advisory"
+                                     + (" or with a range CAVR cannot evaluate" if cannot_evaluate else ""))
 
     budget = block["budget"]
     budget.update(max_candidates=run.max_candidates, seconds=run.budget_seconds)
