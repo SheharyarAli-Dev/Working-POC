@@ -559,4 +559,4 @@ Stated as limitations in the report and on the dashboard, not implemented in M2:
 ### Phase 5 — Dashboard and evaluation
 - [x] PR 19 dashboard (branch `cavr-m2-dashboard`, 2026-11-25; report notes Step M2-21): requirements matrix FR-1..15 / NFR-1..6, deep view per package, causal graph, recorded M2 runs without Docker, FR-10 hash v2, orchestrator assurance fields
 - [ ] PR 20 NFR guards + legacy removal check
-- [ ] PR 21 evaluation corpus
+- [x] PR 21 reduced evaluation (branch `cavr-m2-eval`, 2026-11-25; report notes Step M2-22): `scripts/eval/cavr_eval.py`, 27 items live (expectations committed before the run, `5936f33`; results from `34fd45c`), 25 / 27 as expected, `docs/evaluation/cavr-m2-evaluation.md`; found defect D-1 (repair's advisory screen reads GIT ranges as unknown) reported, not fixed; other baselines and the ablations remain future work
