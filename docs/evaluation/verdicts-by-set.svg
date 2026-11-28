@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="720" height="240" viewBox="0 0 720 240" role="img" aria-labelledby="title desc">
+<title id="title">CAVR verdicts by set</title>
+<desc id="desc">Clean: 2 VERIFIED, 0 REJECTED, 6 UNRESOLVED, 0 BLOCK; Vulnerable: 0 VERIFIED, 5 REJECTED, 0 UNRESOLVED, 0 BLOCK; Attack: 0 VERIFIED, 8 REJECTED, 3 UNRESOLVED, 0 BLOCK; Benign control: 2 VERIFIED, 0 REJECTED, 1 UNRESOLVED, 0 BLOCK</desc>
+<style>
+.t{fill:#191919;font:13px system-ui,sans-serif}.s{fill:#666666;font:12px system-ui,sans-serif}.g{stroke:#e7e7e7}
+.bg{fill:#ffffff}.m{fill:#257de0}.h{fill:#ffffff;stroke:#257de0;stroke-width:2}.l{stroke:#257de0;stroke-width:2}
+.VERIFIED{fill:#0aac23}.REJECTED{fill:#dc3c3d}.UNRESOLVED{fill:#fbb315}.BLOCK{fill:#f18a59}
+.in{fill:#ffffff;font:600 12px system-ui,sans-serif}.in.UNRESOLVED-t{fill:#0b0b0b}
+@media (prefers-color-scheme:dark){.t{fill:#efefef}.s{fill:#9c9c9c}.g{stroke:#303030}.bg{fill:#191919}
+.m{fill:#338ced}.h{fill:#191919;stroke:#338ced}.l{stroke:#338ced}}
+</style>
+<rect class="bg" width="720" height="240"/>
+<text class="t" x="16" y="24" font-weight="600">CAVR verdicts by set (run 1)</text>
+<rect class="VERIFIED" x="130" y="34" width="10" height="10" rx="2"/><text class="s" x="144" y="43">VERIFIED</text>
+<rect class="REJECTED" x="234" y="34" width="10" height="10" rx="2"/><text class="s" x="248" y="43">REJECTED</text>
+<rect class="UNRESOLVED" x="338" y="34" width="10" height="10" rx="2"/><text class="s" x="352" y="43">UNRESOLVED</text>
+<rect class="BLOCK" x="460" y="34" width="10" height="10" rx="2"/><text class="s" x="474" y="43">BLOCK</text>
+<text class="t" x="120" y="73.0" text-anchor="end">Clean</text>
+<rect class="VERIFIED" x="130.0" y="56" width="98.0" height="26" rx="4"><title>Clean: 2 VERIFIED</title></rect>
+<text class="in VERIFIED-t" x="179.0" y="73.0" text-anchor="middle">2</text>
+<rect class="UNRESOLVED" x="230.0" y="56" width="298.0" height="26" rx="4"><title>Clean: 6 UNRESOLVED</title></rect>
+<text class="in UNRESOLVED-t" x="379.0" y="73.0" text-anchor="middle">6</text>
+<text class="s" x="536.0" y="73.0">8</text>
+<text class="t" x="120" y="117.0" text-anchor="end">Vulnerable</text>
+<rect class="REJECTED" x="130.0" y="100" width="248.0" height="26" rx="4"><title>Vulnerable: 5 REJECTED</title></rect>
+<text class="in REJECTED-t" x="254.0" y="117.0" text-anchor="middle">5</text>
+<text class="s" x="386.0" y="117.0">5</text>
+<text class="t" x="120" y="161.0" text-anchor="end">Attack</text>
+<rect class="REJECTED" x="130.0" y="144" width="398.0" height="26" rx="4"><title>Attack: 8 REJECTED</title></rect>
+<text class="in REJECTED-t" x="329.0" y="161.0" text-anchor="middle">8</text>
+<rect class="UNRESOLVED" x="530.0" y="144" width="148.0" height="26" rx="4"><title>Attack: 3 UNRESOLVED</title></rect>
+<text class="in UNRESOLVED-t" x="604.0" y="161.0" text-anchor="middle">3</text>
+<text class="s" x="686.0" y="161.0">11</text>
+<text class="t" x="120" y="205.0" text-anchor="end">Benign control</text>
+<rect class="VERIFIED" x="130.0" y="188" width="98.0" height="26" rx="4"><title>Benign control: 2 VERIFIED</title></rect>
+<text class="in VERIFIED-t" x="179.0" y="205.0" text-anchor="middle">2</text>
+<rect class="UNRESOLVED" x="230.0" y="188" width="48.0" height="26" rx="4"><title>Benign control: 1 UNRESOLVED</title></rect>
+<text class="in UNRESOLVED-t" x="254.0" y="205.0" text-anchor="middle">1</text>
+<text class="s" x="286.0" y="205.0">3</text>
+</svg>

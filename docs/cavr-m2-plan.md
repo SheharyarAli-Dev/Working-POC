@@ -498,6 +498,13 @@ the evaluation script writes the metrics table for the report from real runs.
   ablations (no contract, no counterfactual, no graph, naive repair); a script that writes the metrics table for the
   report. No live malware (§16.2).
 - Docker: yes.
+- As planned for Phase 5b (Maryam, 2026-11-25), the reduced evaluation: `scripts/eval/cavr_eval.py` (run / report /
+  check) on the pinned corpus `scripts/eval/cavr_eval_corpus.json`: 13 real PyPI releases (8 clean: pure, native,
+  import-time; 5 known-vulnerable, confirmed on OSV on 2026-11-25) and the 14 synthetic M2 demo wheels (11 attacks,
+  3 benign controls). Each item twice through `asent gate` (deep "sandbox", repair on; run 2 = cache), stage times
+  from runtime wrappers, PyPI and OSV answers recorded, an OSV-only column from the same answers. Expectations are
+  written in the corpus and committed before the live run; a differing result is recorded as a mismatch, never
+  re-labelled. Outputs under `docs/evaluation/`. Baselines other than OSV-only, and the ablations, stay future work.
 
 ## Future work (out of M2, Q3)
 
@@ -552,4 +559,4 @@ Stated as limitations in the report and on the dashboard, not implemented in M2:
 ### Phase 5 — Dashboard and evaluation
 - [x] PR 19 dashboard (branch `cavr-m2-dashboard`, 2026-11-25; report notes Step M2-21): requirements matrix FR-1..15 / NFR-1..6, deep view per package, causal graph, recorded M2 runs without Docker, FR-10 hash v2, orchestrator assurance fields
 - [ ] PR 20 NFR guards + legacy removal check
-- [ ] PR 21 evaluation corpus
+- [x] PR 21 reduced evaluation (branch `cavr-m2-eval`, 2026-11-25; report notes Step M2-22): `scripts/eval/cavr_eval.py`, 27 items live (expectations committed before the run, `5936f33`; results from `34fd45c`), 25 / 27 as expected, `docs/evaluation/cavr-m2-evaluation.md`; found defect D-1 (repair's advisory screen reads GIT ranges as unknown) reported, not fixed; other baselines and the ablations remain future work

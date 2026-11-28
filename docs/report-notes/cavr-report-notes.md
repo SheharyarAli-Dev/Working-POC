@@ -6582,3 +6582,148 @@ component and one render test) got the per-commit checks only: 297 passed.
 3. **Can event text attack the dashboard?** It is only printed as React text, cut with a "show more"; no event value
    goes into an attribute or link. `test_hostile_event_text_is_printed_as_escaped_text_only` uses `<script>`,
    `javascript:` and 20000-character values.
+
+## Step M2-22 — Reduced evaluation: pinned corpus, live run, OSV-only comparison (PR 21, Phase 5b) (2026-11-25)
+
+Plan agreed with Maryam on 2026-11-25. Her additions: the attack set's detection is stated as by construction; an
+UNRESOLVED-by-reason table; the attack-set table goes first in the findings; expectations are committed before the run.
+After the first live attempt, Maryam approved a second live run and asked for the urllib3 repair result to be
+diagnosed without fixing CAVR. Branch `cavr-m2-eval`. Expectations were committed in `5936f33`; the results come from
+`34fd45c`. Results: `docs/evaluation/cavr-m2-evaluation.md`.
+
+### Ch 6 Implementation
+
+- `scripts/eval/cavr_eval_corpus.json`: 13 real PyPI releases and the 14 synthetic M2 wheels.
+  - Real releases: 8 clean (pure, native, import-time) and 5 vulnerable, confirmed on OSV on 2026-11-25. Each has a
+    pinned requirement, a lockfile pin per child, a policy, an app file with a literal call, a reason and the
+    expected status, rule, deep, repair, decision and exit code.
+  - Wheels: an `attack` or `benign_control` label; the expected values must equal `WHEELS` in
+    `tests/test_cavr_m2_wheels.py`.
+- `scripts/eval/cavr_eval.py`:
+  - `load_corpus`: refuses ambiguous items.
+  - `make_repo` / `gate_once`: each item through `asent gate` (in-process; deep "sandbox", repair on), twice on one
+    data directory.
+  - `StageTimer`: wraps the pipeline's stage functions for the run; calls inside repair count only as repair.
+  - `RecordingTransport`: passes bytes through; keeps registry JSON bodies and the wheels' SHA-256 and size.
+  - `osv_snapshot` / `osv_only`: the pip-audit-like column, from recorded OSV answers for every tree node.
+  - `compare` / `decided`: the expectation against the package's stage and rule.
+  - `unrecorded_answers`: a used OSV answer missing from the recording gives exit 4.
+  - `summarise`: counts, detection, clean-set rates, UNRESOLVED by reason, nearest-rank median and p95 per stage
+    (`pipeline._nearest_rank`), deep use, cache speed-up.
+  - `report`: CSV, the generated markdown blocks between markers, two stdlib SVG charts.
+  - `check`: recordings against the raw JSON.
+  - `repair-screen` (`--all-releases`): CAVR's per-advisory decision against `spec_affected`, an independent reading
+    of the OSV schema; `report` generates its tables (`md_repair_screens`) and the real-vs-synthetic timing table.
+  - Run guards: untracked files under backend/, scripts/, tests/, docker/ refuse the run; HEAD moving during the
+    run gives exit 5.
+- `docs/evaluation/`: raw JSON, CSV, the report, `verdicts-by-set.svg`, `time-per-stage.svg`,
+  `recordings/{pypi,osv}/` (gzip, mtime 0).
+
+### Design decisions
+
+- **Same path as production** (`asent gate` with the real image), not a direct `verify_request` call, so decision and
+  exit code are measured too. The cost is a git repository per item.
+- **Expectations committed before the run, never edited.** A difference is a mismatch row. A test checks that the
+  raw file's expectations equal the corpus's. The alternative, labelling after the run, would let results define the
+  expectations.
+- **Runtime wrappers for stage times** instead of timing fields in `pipeline.py`: no CAVR code changes for the
+  evaluation. The cost is an overhead of microseconds per call.
+- **OSV-only computed from the recorded answers, not by running pip-audit**: no extra runs, and the same data as
+  CAVR. The cost is that pip-audit's resolver and other databases are not represented (stated as a limitation).
+- **Wheels recorded as hashes only**: they stay on PyPI. The recordings total 1.0 MB (OSV 505 KB, PyPI 495 KB).
+
+### Requirements covered
+
+- §10 evaluation (row 33, reduced): `cavr_eval.py run` writes the metrics table from a real run. Check:
+  `test_committed_results_regenerate_byte_for_byte_and_their_recordings_check`.
+- NFR-4 efficiency: median and p95 per stage, deep runs used out of the budget, cache speed-up. Check: report tables
+  "Time per stage" and "Second run".
+- FR-6 fail closed, measured: 0 / 8 false REJECTED and 6 / 8 UNRESOLVED on the clean set. Check: the
+  "UNRESOLVED by reason" table.
+- NFR-1: no CAVR container left after 54 gate runs (`containers_left: []` in the raw header).
+
+### Ch 7 Test cases
+
+| Test ID | Purpose | Input | Expected | Result |
+|---|---|---|---|---|
+| test_shipped_corpus_loads_and_has_the_planned_shape | corpus as planned | the corpus file | 13 real (8 clean, 5 vulnerable), 14 wheels | pass |
+| test_loader_refuses_an_ambiguous_real_item (11 cases) | refusals | `>=`, `==3.*`, attack set, no reason, no task, … | ValueError | pass |
+| test_loader_refuses_duplicates_unknown_wheels_and_changed_wheel_expectations | wheel expectations tied to the test | changed status | ValueError | pass |
+| test_recording_transport_* (3) | bytes unchanged; errors; early stop; non-UTF-8 | fake inner transport | body kept / hash only / error recorded | pass |
+| test_stage_timer_* (2) | repair-nested calls; functions restored | wrapped lambdas | repair only; originals back | pass |
+| test_osv_only_from_recorded_answers | baseline | child vuln, withdrawn, missing | VULNERABLE / PASS / NO_ANSWER | pass |
+| test_compare_reports_every_difference_and_accepts_an_unpredicted_rule | mismatch logic | wrong status, rule, repair, deep | each listed | pass |
+| test_summary_* (3), test_nearest_rank (4) | summary numbers | hand-made fixture raw file | exact counts, rates, p50/p95 | pass |
+| test_csv_*, test_markdown_* (2), test_svg_* (3), test_report_writes_every_output_and_keeps_hand_written_text | outputs | fixture | round trip; markers; valid, self-contained, deterministic SVG | pass |
+| test_run_refuses_a_dirty_tree, test_run_refuses_an_unknown_item_id | run guards | dirty repo; bad id | SystemExit | pass |
+| test_a_real_item_through_the_scripts_gate_path_offline | real-item path | local index, seeded OSV, vulnerable child | REJECTED advisories; OSV-only VULNERABLE via child | pass |
+| test_a_verified_item_hits_the_cache_on_the_second_run | cache | clean tiny wheel | run 2 hit, no scan | pass |
+| test_a_synthetic_wheel_through_the_scripts_gate_path_without_docker | wheel path | env_ci, no deep | escalated UNRESOLVED, 5 mismatches listed | pass |
+| test_run_report_and_check_end_to_end_offline | run→report→check | file_kube, no Docker | exit 3; check clean; edited recording found | pass |
+| test_expectations_are_compared_with_the_package_rule_not_the_request_rule | defect 1 | driven_verify shape | no mismatch | pass |
+| test_a_real_item_records_osv_answers_from_the_directory_the_gate_writes, test_an_osv_answer_used_but_not_recorded_is_reported | defect 2 | live world; empty snapshot | same directory; problem listed | pass |
+| test_spec_affected_* (8 cases) | independent OSV reading | unsorted events, GIT, last_affected, limit | as the schema says | pass |
+| test_cavr_reads_a_git_plus_ecosystem_entry_as_unknown_for_every_version | records D-1 | PYSEC-like entry, 2.8.0 | UNKNOWN (CAVR) vs not affected (schema) | pass |
+| test_repair_screen_from_recordings | diagnosis | recorded package answer | supported / not supported per release | pass |
+| test_axis_ticks_are_never_rounded_to_zero (6 cases) | chart labels | 0.01 ms … 100 s | exact labels | pass |
+| test_committed_results_* (2) | consistency of the committed results | docs/evaluation | byte-identical regeneration; check clean; expectations unchanged | pass |
+| Live run (54 gate runs) | evaluation | 27 items × 2 | 25 / 27 match expectations | 2 mismatches (six, urllib3), recorded |
+
+| test_summary_times_real_and_synthetic_items_apart_and_repair_attempts_alone | review MINOR 6, BLOCKER 1c | fixture | per-kind medians; NOT_ATTEMPTED repairs left out | pass |
+| test_run_refuses_untracked_code | review MINOR 4 | untracked backend/planted.py | SystemExit | pass |
+| test_repair_screen_over_every_recorded_release, test_the_report_generates_the_repair_screen_tables | review BLOCKER 1b/1c | recorded registry + package answer | every release compared; tables generated | pass |
+| test_every_recorded_child_of_a_real_item_is_pinned_in_its_lockfile | review MINOR 7 | committed raw + corpus | every child pinned | pass |
+
+`tests/test_cavr_eval.py`: 68 passed.
+
+### Defects found and fixed
+
+- First live attempt (`5936f33`, discarded): the script compared the request-level rule (always `ALL_CHECKS_PASSED`
+  when everything is VERIFIED) and saved the real items' OSV answers from a directory the gate does not use. Fixed in
+  `34fd45c` with tests, then run again. Compared on 2026-11-25, the two attempts gave the same results; the discarded
+  raw file was in a scratch directory that has since been cleared, so that comparison cannot be re-checked.
+- The time chart's first tick printed "0.0 ms" for 0.01 ms: `_tick`.
+- CI (2026-11-28), two failures in `tests/test_cavr_eval.py`. (1) `environment()` raised `FileNotFoundError` on a
+  runner with no `docker` program. `docker_output()` now catches it, and the run header records
+  `docker_version` as `"not available: <reason>"` and `containers_left` as `None`. Tests: docker absent from PATH,
+  and a docker that exits 1. (2) The ancestry check in
+  `test_committed_results_name_the_expectations_commit_and_a_clean_tree` failed because CI's shallow checkout does
+  not contain `5936f33`. `assert_expectations_committed_before_run` now skips only when
+  `git rev-parse --is-shallow-repository` is `true`; in a full clone a missing or made-up commit fails. Tests: a
+  made-up hash in a full clone fails, a shallow clone skips. `b8dc10b` and the follow-up commit; 72 passed in a
+  full clone and 72 with docker hidden from PATH.
+- Review (cavr-reviewer): 1 pass (stopped by the usage limit, resumed), fix first: 1 BLOCKER (four text facts) / 0 MAJOR / 11 MINOR; BLOCKER and 10 MINORs fixed, MINOR 9 resolved by rewording (discarded data lost); 0 open.
+
+### Found, not fixed (reported to Maryam)
+
+- **D-1, repair advisory screen.** An OSV entry with a GIT range beside an ECOSYSTEM range is UNKNOWN for every
+  version (`package_records.affected` marks GIT as uncertain). Repair therefore excludes releases that no advisory
+  affects: urllib3 2.8.0 (7 PYSEC entries), jinja2 3.1.6, requests 2.33.0–2.34.2. The proposed fix is in
+  `advisories._entry_affects` (ignore GIT ranges when ECOSYSTEM ranges or `versions` exist); see
+  `docs/evaluation/cavr-m2-evaluation.md`. The fix must keep open GIT ranges UNKNOWN above the highest listed
+  version and compare `versions` with `Version()` equality (review MINOR 1).
+
+### Known limitations / deferred
+
+- Small corpus. Synthetic attacks (detection by construction). Our own projects and policies. Label scopes not
+  checked. Linux / Python 3.14 / x86_64 only. One day of OSV data.
+- Baselines other than OSV-only and the ablations of §10: future work.
+
+### Tool disclosure (Ch 8.7)
+
+- **Generated by Claude Code:** the corpus, the expectations, the script, the tests, both live runs, the diagnosis,
+  the report text and these notes. **Reviewed by Maryam:** the plan, the corpus list and the decision to run again;
+  the code and the report not yet. **Verified by:** 68 offline tests, `check` (recordings against the raw JSON),
+  byte-identical regeneration, the independent OSV-schema reading for D-1 (generated table: CAVR's AFFECTED sets
+  agree on all 109 recorded urllib3 releases), the cavr-reviewer pass and the full suite.
+
+### Supervisor Q&A prep
+
+1. **Is 8 / 11 attack detection a result?** It shows that the mechanisms work end to end on the real sandbox. We
+   wrote the wheels and tested them before, so it is not a detection rate; the report says so first.
+2. **Why is 75 % of the clean set UNRESOLVED?** Fail closed: compiled code (2), a `.pth` file (1) and deep runs that
+   could not show the escalated sink (3). None was falsely REJECTED. An OSV-only check passes all of them, and also
+   all 11 attacks.
+3. **How do we know the numbers were not tuned?** The expectations were committed in `5936f33` before the run, and the
+   mismatches (six, urllib3) are reported, not re-labelled. The PyPI and OSV answers are saved, and
+   `cavr_eval.py check` re-verifies them.
